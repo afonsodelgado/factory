@@ -159,17 +159,20 @@ func TestRebuildPutsTheSlotBackAboveThePanelWhenTheSessionPaneCloses(t *testing.
 
 func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 	e, l := hubFixture(t)
-	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(repo), "eng-2-y"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, session := range []string{"eng-2-y", "notes"} {
-		if _, err := e.TM.NewSession(session, "main", 80, 24, "exec sleep 600"); err != nil {
+	repo, sameSlugElsewhere := t.TempDir(), t.TempDir()
+	for _, r := range []string{repo, sameSlugElsewhere} {
+		if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(r), "eng-2-y"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	if _, err := e.TM.Run("new-session", "-d", "-s", "eng-2-y", "-c", filepath.Join(factory.WorktreesDir(repo), "eng-2-y"), "exec sleep 600"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.TM.NewSession("notes", "main", 80, 24, "exec sleep 600"); err != nil {
+		t.Fatal(err)
+	}
 
-	adopted, err := e.Adopt(l, []string{repo})
+	adopted, err := e.Adopt(l, []string{sameSlugElsewhere, repo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +191,7 @@ func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 	}
 	p, ok := FactoryPane(panes, repo, "eng-2-y")
 	if !ok || p.WindowName != ParkName("eng-2-y") || p.Session != "factory" {
-		t.Errorf("adopted pane = %+v, want it tagged in its parking window", p)
+		t.Errorf("adopted pane = %+v, want it tagged to %s, whose worktree it runs in, and parked: the first repo with the slug would get a second claude on wake", p, repo)
 	}
 }
 

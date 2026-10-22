@@ -2,6 +2,7 @@ package hub
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -92,15 +93,19 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 	}
 	var adopted []string
 	for _, session := range sessions {
-		repo, legacy := worktrees[session]
+		candidates, legacy := worktrees[session]
 		if !legacy || session == e.Session {
-			continue
-		}
-		if _, tagged := FactoryPane(panes, repo, session); tagged {
 			continue
 		}
 		pane, ok := firstPane(panes, session)
 		if !ok {
+			continue
+		}
+		repo, known := repoOfPane(candidates, pane)
+		if !known {
+			continue
+		}
+		if _, tagged := FactoryPane(panes, repo, session); tagged {
 			continue
 		}
 		if err := e.Tag(pane.ID, repo, session, ""); err != nil {
@@ -117,20 +122,40 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 	return adopted, nil
 }
 
-func worktreeRepos(repos []string) map[string]string {
-	byName := map[string]string{}
+func worktreeRepos(repos []string) map[string][]string {
+	byName := map[string][]string{}
 	for _, repo := range repos {
 		entries, err := os.ReadDir(factory.WorktreesDir(repo))
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
-			if _, taken := byName[entry.Name()]; entry.IsDir() && !taken {
-				byName[entry.Name()] = repo
+			if entry.IsDir() {
+				byName[entry.Name()] = append(byName[entry.Name()], repo)
 			}
 		}
 	}
 	return byName
+}
+
+func repoOfPane(candidates []string, p tmux.Pane) (string, bool) {
+	if len(candidates) == 1 {
+		return candidates[0], true
+	}
+	cwd := resolved(p.Path)
+	for _, repo := range candidates {
+		if within(cwd, resolved(repo)) {
+			return repo, true
+		}
+	}
+	return "", false
+}
+
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }
 
 func firstPane(panes []tmux.Pane, session string) (tmux.Pane, bool) {
