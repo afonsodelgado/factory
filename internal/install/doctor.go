@@ -250,7 +250,7 @@ func hooksCheck(o Options) Check {
 	settings := tilde(filepath.Join(o.ClaudeDir, "settings.json"))
 	var moved []string
 	for _, command := range plan.Stale {
-		binary := strings.Fields(strings.ReplaceAll(command, "'", ""))[0]
+		binary, _ := hookBinary(command)
 		if _, err := os.Stat(binary); err != nil {
 			moved = append(moved, binary+" no longer exists")
 		} else {

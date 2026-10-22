@@ -115,3 +115,42 @@ func TestBootstrapBacksUpKeepsExistingHooksAndIsIdempotent(t *testing.T) {
 		t.Errorf("second bootstrap wrote %v and backed up %v", result.Written, result.Backups)
 	}
 }
+
+func TestHooksFromASpacedBinaryPathAreReplacedAndRemovedWithoutTouchingSharedGroups(t *testing.T) {
+	dir := t.TempDir()
+	settings := `{"model": "opus", "hooks": {"SessionStart": [{"hooks": [
+		{"type": "command", "command": "bash ~/.claude/hooks/vault-session-start.sh"},
+		{"type": "command", "command": "'/Old Apps/factory-tui' hook"}
+	]}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := HookCommand("/My Apps/factory-tui")
+	for range 2 {
+		if _, _, err := MergeHooks(dir, command, "20261022T180000"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for event, commands := range hookCommands(t, dir) {
+		ours := 0
+		for _, c := range commands {
+			if strings.Contains(c, "factory-tui") {
+				ours++
+			}
+		}
+		if ours != 1 {
+			t.Errorf("%s has %d factory-tui hooks after two installs, want 1: %v", event, ours, commands)
+		}
+	}
+
+	if _, _, err := RemoveHooks(dir, "20261022T190000"); err != nil {
+		t.Fatal(err)
+	}
+	commands := hookCommands(t, dir)
+	if strings.Contains(strings.Join(commands["SessionStart"], " "), "factory-tui") {
+		t.Errorf("install-hooks --remove left a factory-tui hook: %v", commands["SessionStart"])
+	}
+	if len(commands) != 1 || len(commands["SessionStart"]) != 1 {
+		t.Errorf("removal took the vault hook that shared a group with ours: %v", commands)
+	}
+}

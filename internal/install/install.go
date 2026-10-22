@@ -168,8 +168,24 @@ type group struct {
 }
 
 func ours(command string) bool {
-	fields := strings.Fields(strings.ReplaceAll(command, "'", ""))
-	return len(fields) == 2 && filepath.Base(fields[0]) == "factory-tui" && fields[1] == "hook"
+	binary, ok := hookBinary(command)
+	return ok && filepath.Base(binary) == "factory-tui"
+}
+
+func hookBinary(command string) (string, bool) {
+	rest, ok := strings.CutSuffix(strings.TrimSpace(command), " hook")
+	if !ok {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest)
+	quoted := len(rest) >= 2 && rest[0] == '\'' && rest[len(rest)-1] == '\''
+	if quoted {
+		return strings.ReplaceAll(rest[1:len(rest)-1], `'\''`, "'"), true
+	}
+	if rest == "" || strings.ContainsAny(rest, " \t'\"") {
+		return "", false
+	}
+	return rest, true
 }
 
 func bundledHooks(command string) (*object, error) {
@@ -259,7 +275,7 @@ func MergeHooks(claudeDir, command, stamp string) (string, string, error) {
 			if err != nil {
 				return err
 			}
-			groups = withoutOurs(groups)
+			groups, _ = withoutOurs(groups)
 			var add []json.RawMessage
 			if err := json.Unmarshal(want.values[event], &add); err != nil {
 				return err
@@ -277,8 +293,8 @@ func RemoveHooks(claudeDir, stamp string) (string, string, error) {
 			if err != nil {
 				return err
 			}
-			kept := withoutOurs(groups)
-			if len(kept) == len(groups) {
+			kept, changed := withoutOurs(groups)
+			if !changed {
 				continue
 			}
 			if len(kept) == 0 {
@@ -291,20 +307,47 @@ func RemoveHooks(claudeDir, stamp string) (string, string, error) {
 	})
 }
 
-func withoutOurs(groups []json.RawMessage) []json.RawMessage {
+func withoutOurs(groups []json.RawMessage) ([]json.RawMessage, bool) {
 	var kept []json.RawMessage
+	changed := false
 	for _, g := range groups {
-		mine := false
-		for _, c := range commandsIn(g) {
-			if ours(c) {
-				mine = true
-			}
-		}
-		if !mine {
-			kept = append(kept, g)
+		trimmed, removed := withoutOurHooks(g)
+		changed = changed || removed
+		if trimmed != nil {
+			kept = append(kept, trimmed)
 		}
 	}
-	return kept
+	return kept, changed
+}
+
+func withoutOurHooks(raw json.RawMessage) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	var hooks []json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || json.Unmarshal(fields["hooks"], &hooks) != nil {
+		return raw, false
+	}
+	var kept []json.RawMessage
+	for _, h := range hooks {
+		var hook struct {
+			Command string `json:"command"`
+		}
+		json.Unmarshal(h, &hook)
+		if !ours(hook.Command) {
+			kept = append(kept, h)
+		}
+	}
+	switch {
+	case len(kept) == len(hooks):
+		return raw, false
+	case len(kept) == 0:
+		return nil, true
+	}
+	fields["hooks"], _ = json.Marshal(kept)
+	trimmed, err := json.Marshal(fields)
+	if err != nil {
+		return raw, false
+	}
+	return trimmed, true
 }
 
 func rewriteHooks(claudeDir, stamp string, change func(*object) error) (string, string, error) {
