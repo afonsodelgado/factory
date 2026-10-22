@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -35,10 +36,12 @@ type Model struct {
 	GitHub *GitHub
 	Typist Typist
 	Open   func(url string)
-	Bell   io.Writer
-	Notify func(text string)
-	Now    func() time.Time
-	Icons  theme.Icons
+
+	DialogCommand func(kind string) string
+	Bell          io.Writer
+	Notify        func(text string)
+	Now           func() time.Time
+	Icons         theme.Icons
 
 	snap         Snapshot
 	selected     string
@@ -56,6 +59,10 @@ type Model struct {
 	pending      []tea.Cmd
 	panel        panelState
 	statuses     map[string]factory.Status
+	dialogs      map[string]json.RawMessage
+	dialog       string
+	notice       string
+	wakes        map[string]Wake
 }
 
 type snapshotMsg Snapshot
@@ -72,6 +79,7 @@ func NewModel(m Model) *Model {
 	model.sent = map[string]string{}
 	model.share = PanelShare
 	model.panel = newPanelState()
+	model.dialogs = map[string]json.RawMessage{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -175,6 +183,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case ghPollMsg:
 		cmd = tea.Batch(m.refreshPRs(false), m.ghPoll())
+	case dialogClosedMsg:
+		m.dialogClosed(msg)
 	case focusPollMsg:
 		cmd = tea.Batch(m.activePane(), m.focusPoll())
 	case activeMsg:
@@ -183,6 +193,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(m.handleEvent(Event(msg)), m.waitEvent())
 	case tea.KeyPressMsg:
 		m.focus = footer.Factories
+		m.notice = ""
 		cmd = m.selectorKey(msg.String())
 	}
 	m.arrange()
@@ -207,6 +218,7 @@ func (m *Model) apply(s Snapshot) {
 	for _, it := range s.Items {
 		m.statuses[it.Factory.Key()] = it.Status
 	}
+	m.planWakes()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		m.selected = ""
@@ -240,6 +252,21 @@ func (m *Model) ensureSlot() {
 	if layout, err := m.Engine.Build(m.Layout.Selector, m.shape(width, height)); err == nil {
 		m.Layout = layout
 		m.arranged = Shape{}
+	}
+}
+
+func (m *Model) planWakes() {
+	m.wakes = map[string]Wake{}
+	var hooks []*state.HookFile
+	if m.Config.StateDir != "" {
+		hooks, _ = state.ReadHookFiles(m.Config.StateDir)
+	}
+	for _, it := range m.snap.Items {
+		if !it.Status.Asleep() {
+			continue
+		}
+		profile, _ := state.ReadProfile(it.Factory.Repo)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks)
 	}
 }
 
@@ -374,6 +401,20 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		m.share = max(m.share-1.0/6, 1.0/6)
 	case "o":
 		return m.openRow(m.panelView())
+	case "n":
+		return m.openDialog("new", m.newContext())
+	case "/":
+		return m.openDialog("switch", m.switchContext())
+	case "?":
+		return m.openDialog("keys", nil)
+	case "x":
+		return m.askKill()
+	case "a":
+		return m.askArchive()
+	case "w":
+		m.report(m.wake(m.selected))
+	case "W":
+		m.report(m.wakeAll())
 	case "q", "ctrl+c":
 		return m.quit()
 	}
@@ -383,6 +424,10 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 func (m *Model) handleEvent(e Event) tea.Cmd {
 	switch e.T {
 	case "hello", "resize":
+		if strings.HasPrefix(e.Pane, "dialog:") {
+			m.dialogHello(e)
+			return nil
+		}
 		m.sizes[e.Pane] = [2]int{e.W, e.H}
 		if e.T == "hello" {
 			delete(m.sent, e.Pane)
@@ -392,6 +437,10 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		delete(m.sent, e.Pane)
 	case "key":
 		return m.viewerKey(e.Pane, e.K, e.Text)
+	case "result":
+		return m.dialogResult(e)
+	case "open":
+		return m.openRequest(e)
 	case "paste":
 		if e.Pane == "panel" {
 			m.paste(e.Text)
@@ -401,11 +450,54 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 }
 
 func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
-	if pane == "panel" {
+	m.notice = ""
+	switch {
+	case pane == "panel" && key == "w" && m.asleepItemShown():
+		m.report(m.wake(m.selected))
+	case pane == "panel":
 		m.focus = footer.Panel
 		return m.panelKey(key, text)
+	case pane == "slot" && key == "n":
+		return m.openDialog("new", m.newContext())
+	case pane == "slot" && key == "w":
+		m.report(m.wake(m.selected))
 	}
 	return nil
+}
+
+func (m *Model) asleepItemShown() bool {
+	_, item, ok := m.currentAttention()
+	return ok && item.Kind == "asleep" && m.panel.tab == panel.Attention
+}
+
+func (m *Model) report(err error) {
+	if err != nil {
+		m.notice = err.Error()
+	}
+}
+
+func (m *Model) askKill() tea.Cmd {
+	it, ok := m.selectedItem()
+	switch {
+	case !ok:
+		return nil
+	case it.Pane == nil:
+		m.notice = it.Factory.Label() + " has no pane to kill."
+		return nil
+	}
+	return m.openDialog("kill", m.killContext(it))
+}
+
+func (m *Model) askArchive() tea.Cmd {
+	it, ok := m.selectedItem()
+	switch {
+	case !ok:
+		return nil
+	case !archivable(it):
+		m.notice = "Only done, gone or exited factories can be archived. Kill " + it.Factory.Label() + " first."
+		return nil
+	}
+	return m.openDialog("archive", m.archiveContext(it))
 }
 
 func (m *Model) move(delta int) {
@@ -552,6 +644,7 @@ func (m *Model) data() selector.Data {
 		Focused:      m.focus == footer.Factories,
 		Icons:        m.Icons,
 		ConfigFile:   tilde(filepath.Join(m.Config.ConfigDir, "config.yml")),
+		Dim:          m.focus == footer.Dialog,
 	}
 }
 
@@ -680,6 +773,9 @@ func (m *Model) FooterView(width, _ int) string {
 	if it, ok := m.snap.Find(m.selected); ok {
 		context = it.Factory.Label()
 	}
+	if m.focus == footer.Dialog {
+		context = strings.ReplaceAll(m.dialog, "new", "new factory")
+	}
 	if m.focus == footer.Panel && m.panel.tab == panel.Attention {
 		if _, item, ok := m.currentAttention(); ok && item.ID != "" {
 			context += " · " + item.ID
@@ -697,22 +793,48 @@ func hints(pairs ...string) []footer.Hint {
 }
 
 func (m *Model) hints() []footer.Hint {
+	var notice []footer.Hint
+	if m.notice != "" {
+		notice = hints("!", m.notice)
+	}
 	switch m.focus {
 	case footer.Session:
-		return hints(m.Config.Hub.ReturnKey, "back to factories")
+		return append(notice, hints(m.Config.Hub.ReturnKey, "back to factories")...)
 	case footer.Panel:
-		return m.panelHints()
+		return append(notice, m.panelHints()...)
+	case footer.Dialog:
+		return dialogHints(m.dialog)
 	}
+	return append(notice, m.selectorHints()...)
+}
+
+func dialogHints(kind string) []footer.Hint {
+	switch kind {
+	case "new":
+		return hints("⏎", "next", "↑↓", "repo", "esc", "cancel")
+	case "switch":
+		return hints("⏎", "select", "ctrl+j/k", "move", "ctrl+g", "next needing you", "esc", "close")
+	case "kill":
+		return hints("y", "kill", "n", "cancel", "esc", "cancel")
+	case "archive":
+		return hints("a", "archive", "r", "archive and remove the worktree", "esc", "cancel")
+	}
+	return hints("esc", "close")
+}
+
+func (m *Model) selectorHints() []footer.Hint {
 	it, ok := m.selectedItem()
 	switch {
 	case !ok:
-		return hints("q", "quit the UI")
+		return hints("n", "new factory", "?", "all keys", "q", "quit the UI")
 	case factory.PermissionPrompt(it.Hook):
-		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "i", "panel", "tab", "next tab")
+		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "x", "kill")
+	case it.Status.Asleep():
+		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "x", "kill", "a", "archive")
 	case it.Status == factory.Done:
-		return hints("H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "g", "next needing you")
+		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "1-9", "jump", "tab", "next tab", "o", "open", "z", "fold", "H", "archived")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "x", "kill", "a", "archive")
 }
 
 func (m *Model) panelHints() []footer.Hint {
@@ -794,11 +916,39 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 		c.Put(x, y, line, theme.Text)
 		y++
 	}
-	if it.Factory.Worktree != "" {
-		y++
-		c.Put(x, y, "worktree  ", theme.Quiet)
-		c.PutMax(x+10, y, tilde(it.Factory.Worktree), theme.Text, c.W-x-12)
+	wake, asleep := m.wakes[it.Factory.Key()]
+	if !asleep || wake.Kind != WakeNewPane {
+		if it.Factory.Worktree != "" {
+			y++
+			c.Put(x, y, "worktree  ", theme.Quiet)
+			c.PutMax(x+10, y, tilde(it.Factory.Worktree), theme.Text, c.W-x-12)
+		}
+		return
 	}
+	y++
+	c.Put(x, y, "Wake recreates the pane in the worktree and resumes the same conversation:", theme.Text)
+	y += 2
+	c.PutMax(x+2, y, "$ cd "+tilde(it.Factory.Worktree), theme.Bright, c.W-x-4)
+	y++
+	for i, l := range theme.Wrap(wake.Command, c.W-x-6) {
+		lead := "$ "
+		if i > 0 {
+			lead = "    "
+		}
+		c.Put(x+2, y, lead+l, theme.Bright)
+		y++
+	}
+	y++
+	source := "No session id was recorded, so wake falls back to --continue."
+	if wake.Source != NoSession {
+		source = "The session id comes from " + string(wake.Source) + "."
+	}
+	c.Put(x, y, source, theme.Muted)
+	y += 2
+	x = c.Put(x, y, "w", theme.Key)
+	x = c.Put(x+1, y, "wake "+it.Factory.Label()+"   ", theme.Text)
+	x = c.Put(x, y, "W", theme.Key)
+	c.Put(x+1, y, "wake all asleep", theme.Text)
 }
 
 func noPaneReason(it Item) string {

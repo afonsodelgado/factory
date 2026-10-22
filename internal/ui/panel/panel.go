@@ -46,6 +46,7 @@ func look(it Item) (string, theme.Ink, string) {
 
 func Render(v View, ic theme.Icons, w, h int) string {
 	c := theme.NewCanvas(w, h)
+	c.Dim = v.Dim
 	if w < 10 || h < 1 {
 		return c.Render()
 	}

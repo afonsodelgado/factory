@@ -15,6 +15,7 @@ type cell struct {
 
 type Canvas struct {
 	W, H     int
+	Dim      bool
 	cells    [][]cell
 	clipTop  int
 	clipDown int
@@ -166,7 +167,11 @@ func (c *Canvas) Render() string {
 			if run.Len() == 0 {
 				return
 			}
-			b.WriteString(runInk.Style().Render(run.String()))
+			style := runInk.Style()
+			if c.Dim {
+				style = style.Faint(true)
+			}
+			b.WriteString(style.Render(run.String()))
 			run.Reset()
 		}
 		for x, cl := range row {

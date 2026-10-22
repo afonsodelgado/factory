@@ -133,6 +133,7 @@ type View struct {
 	Tab       Tab
 	Focused   bool
 	Collapsed bool
+	Dim       bool
 	Now       time.Time
 
 	Items  []Item

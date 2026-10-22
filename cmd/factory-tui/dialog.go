@@ -1,0 +1,99 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net"
+	"os"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/ui/dialog"
+)
+
+func runDialog(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: factory-tui dialog <new|switch|kill|archive|keys> [--socket path]")
+		return 2
+	}
+	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)
+	socket := flags.String("socket", state.StateDir()+"/hub.sock", "hub socket")
+	if err := flags.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if err := dialogMain(args[0], *socket); err != nil {
+		fmt.Fprintln(os.Stderr, "factory-tui dialog:", err)
+		time.Sleep(2 * time.Second)
+		return 1
+	}
+	return 0
+}
+
+func dialogMain(kind, socket string) error {
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return fmt.Errorf("the hub is not running: %w", err)
+	}
+	defer conn.Close()
+	pane := "dialog:" + kind
+	enc := json.NewEncoder(conn)
+	replies := bufio.NewScanner(conn)
+	replies.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	if err := enc.Encode(hub.Message{T: "hello", Pane: pane}); err != nil {
+		return err
+	}
+	context, err := reply(conn, replies, 3*time.Second)
+	if err != nil {
+		return err
+	}
+	if context.T == "error" {
+		return fmt.Errorf("%s", context.Error)
+	}
+	d, ok := dialog.New(kind, context.Data, 0, 0)
+	if !ok {
+		return fmt.Errorf("no dialog called %q", kind)
+	}
+	final, err := tea.NewProgram(d).Run()
+	if err != nil {
+		return err
+	}
+	result, ok := final.(dialog.Dialog).Result()
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	if err := enc.Encode(hub.Message{T: "result", Pane: pane, Data: data}); err != nil {
+		return err
+	}
+	done, err := reply(conn, replies, 15*time.Second)
+	if err != nil {
+		return err
+	}
+	if done.T == "error" {
+		return fmt.Errorf("%s", done.Error)
+	}
+	return nil
+}
+
+func reply(conn net.Conn, scanner *bufio.Scanner, wait time.Duration) (hub.Message, error) {
+	conn.SetReadDeadline(time.Now().Add(wait))
+	defer conn.SetReadDeadline(time.Time{})
+	for scanner.Scan() {
+		var m hub.Message
+		if json.Unmarshal(scanner.Bytes(), &m) == nil && m.T != "frame" {
+			return m, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return hub.Message{}, err
+	}
+	return hub.Message{}, fmt.Errorf("the hub closed the connection")
+}

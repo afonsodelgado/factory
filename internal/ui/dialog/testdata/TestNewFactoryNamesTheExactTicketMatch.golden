@@ -1,0 +1,22 @@
+ [1;38;2;192;202;245mRepo[m                                                                        [38;2;86;95;137m1 of 2[m 
+ [1;38;2;122;162;247m❯[m [38;2;192;202;245m● cowork[m   [38;2;86;95;137m~/dev/cowork[m                  [38;2;115;122;162mbrowser QA · CodeRabbit on[m              
+   [38;2;169;177;214m○ factory[m  [38;2;86;95;137m~/dev/factory[m                 [38;2;115;122;162mterminal QA · CodeRabbit off[m            
+                                                                                    
+ [1;38;2;192;202;245mTicket or feature[m                                                                  
+ [38;2;122;162;247m╭────────────────────────────────────────────────────────────────────────────────╮[m 
+ [38;2;122;162;247m│ [m[38;2;192;202;245mENG-745█[m                                                                       [38;2;122;162;247m│[m 
+ [38;2;122;162;247m╰────────────────────────────────────────────────────────────────────────────────╯[m 
+ [38;2;86;95;137mENG-745 is a new ticket. eng-7450-ssrf-guard belongs to ENG-7450 and won't be[m      
+ [38;2;86;95;137mreused: tickets match exactly.[m                                                     
+                                                                                    
+ [38;2;115;122;162mWill run, from ~/dev/cowork[m                                                        
+   [38;2;169;177;214mclaude --worktree eng-745 --session-id <uuid> --chrome --remote-control[m          
+   [38;2;169;177;214meng-745 '/factory ENG-745'[m                                                       
+ [38;2;86;95;137m--chrome because the cowork profile uses browser QA.[m                               
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+ [38;2;169;177;214m⏎ start factory   ↑↓ repo   esc cancel[m                                             

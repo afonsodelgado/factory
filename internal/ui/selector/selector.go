@@ -41,6 +41,7 @@ type Data struct {
 	Focused      bool
 	Icons        theme.Icons
 	ConfigFile   string
+	Dim          bool
 }
 
 func Arrange(groups []Group) []Group {
@@ -92,6 +93,7 @@ func Counts(d Data) (active, done int) {
 
 func Render(d Data, w, h int) string {
 	c := theme.NewCanvas(w, h)
+	c.Dim = d.Dim
 	if w < NarrowWidth {
 		renderNarrow(c, d)
 		return c.Render()

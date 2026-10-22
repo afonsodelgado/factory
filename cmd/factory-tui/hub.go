@@ -96,6 +96,9 @@ func hubMain() error {
 		Bell:   os.Stderr,
 		Notify: notify,
 		Icons:  theme.IconsFor(cfg.Icons),
+		DialogCommand: func(kind string) string {
+			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
+		},
 	})
 	_, err = tea.NewProgram(model).Run()
 	return err

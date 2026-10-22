@@ -17,8 +17,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		usage(os.Stderr)
-		return 2
+		return runOpen(nil)
 	}
 	switch args[0] {
 	case "--version", "version":
@@ -33,6 +32,10 @@ func run(args []string) int {
 		return runHub(args[1:])
 	case "view":
 		return runView(args[1:])
+	case "dialog":
+		return runDialog(args[1:])
+	case "open":
+		return runOpen(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "factory-tui: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -51,8 +54,11 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: factory-tui <command> [arguments]
 
 commands:
+  open [<ticket|slug>] [--repo path]
+              create or select a factory, then attach to the hub
   hub         run the hub in the factory tmux session
   view        run a viewer pane of the hub (started by the hub)
+  dialog      run a dialog popup of the hub (started by the hub)
   hook        record a Claude Code hook event (run by Claude Code)
   --version   print the version
 `)

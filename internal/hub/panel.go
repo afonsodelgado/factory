@@ -300,7 +300,7 @@ func (m *Model) answering() bool {
 }
 
 func (m *Model) panelView() panel.View {
-	v := panel.View{Tab: m.panel.tab, Focused: m.focus == footer.Panel, Collapsed: m.collapsed, Now: m.Now(), Row: m.panel.row, All: m.panel.all}
+	v := panel.View{Tab: m.panel.tab, Focused: m.focus == footer.Panel, Collapsed: m.collapsed, Dim: m.focus == footer.Dialog, Now: m.Now(), Row: m.panel.row, All: m.panel.all}
 	it, ok := m.selectedItem()
 	if !ok {
 		return v

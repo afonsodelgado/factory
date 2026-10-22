@@ -10,7 +10,9 @@ require (
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261018003744-cb897cb4ed72
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/goccy/go-yaml v1.19.2
+	github.com/google/uuid v1.6.0
 	github.com/rivo/uniseg v0.4.7
+	github.com/sahilm/fuzzy v0.1.3
 )
 
 require (
