@@ -66,7 +66,7 @@ func (s Shape) PanelHeight() int {
 	return max(int(math.Round(float64(above)*share)), 3)
 }
 
-const borderFormat = `#{?#{@factory_title},#{?pane_active,#[fg=#7aa2f7 bold],#[fg=#737aa2 bold]} ✻ #{@factory_title}#[default] #[align=right]#[fg=#565f89]#{pane_current_path} ,}`
+const borderFormat = `#{?#{@factory_title},#{?pane_active,#[fg=#7aa2f7 bold],#[fg=#737aa2 bold]} ✻ #{@factory_title}#[default] #[align=right]#[fg=#565f89]#{?#{@factory_path},#{@factory_path},#{pane_current_path}} ,}`
 
 func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 	panes, err := e.TM.Panes()
@@ -106,7 +106,7 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		}
 	}
 	if l.Slot == "" {
-		if l.Slot, err = e.slotPane(panes, self, shape); err != nil {
+		if l.Slot, err = e.slotPane(panes, self, l.Panel, shape); err != nil {
 			return l, err
 		}
 	}
@@ -127,13 +127,17 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 	return l, e.styleWindow(l.Window)
 }
 
-func (e *Engine) slotPane(panes []tmux.Pane, self string, shape Shape) (string, error) {
+func (e *Engine) slotPane(panes []tmux.Pane, self, panel string, shape Shape) (string, error) {
+	place := tmux.Split{Target: self, Horizontal: true, Size: shape.RightWidth()}
+	if panel != "" {
+		place = tmux.Split{Target: panel, Before: true, Size: max(shape.Height-4-shape.PanelHeight(), 1)}
+	}
 	for _, p := range panes {
 		if p.UI == "slot" && p.Session == e.Session {
-			return p.ID, e.TM.Join(p.ID, self, fmt.Sprint(shape.RightWidth()))
+			return p.ID, e.TM.Join(p.ID, place)
 		}
 	}
-	return e.uiPane("slot", tmux.Split{Target: self, Horizontal: true, Size: shape.RightWidth()})
+	return e.uiPane("slot", place)
 }
 
 func (e *Engine) ensureSlotViewer() error {
@@ -178,9 +182,13 @@ func (e *Engine) styleSession() error {
 }
 
 func (e *Engine) styleWindow(window string) error {
+	if e.TM.SetWindowOption(window, "pane-border-lines", "spaces") != nil {
+		if err := e.TM.SetWindowOption(window, "pane-border-lines", "single"); err != nil {
+			return err
+		}
+	}
 	options := [][2]string{
 		{"pane-border-status", "top"},
-		{"pane-border-lines", "spaces"},
 		{"pane-border-format", borderFormat},
 		{"window-status-format", ""},
 		{"window-status-current-format", ""},

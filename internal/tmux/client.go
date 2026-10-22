@@ -201,10 +201,18 @@ func (c Client) Break(pane, session, window string) error {
 	return err
 }
 
-func (c Client) Join(pane, target string, size string) error {
-	args := []string{"join-pane", "-d", "-h", "-s", pane, "-t", target}
-	if size != "" {
-		args = append(args, "-l", size)
+func (c Client) Join(pane string, place Split) error {
+	args := []string{"join-pane", "-d", "-s", pane, "-t", place.Target}
+	if place.Horizontal {
+		args = append(args, "-h")
+	} else {
+		args = append(args, "-v")
+	}
+	if place.Before {
+		args = append(args, "-b")
+	}
+	if place.Size > 0 {
+		args = append(args, "-l", strconv.Itoa(place.Size))
 	}
 	_, err := c.Run(args...)
 	return err

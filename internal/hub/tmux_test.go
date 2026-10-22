@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
+
+var servers atomic.Int32
 
 func scratchServer(t *testing.T) tmux.Client {
 	t.Helper()
@@ -25,8 +28,7 @@ func scratchServer(t *testing.T) tmux.Client {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("SHELL", "/bin/sh")
 	t.Setenv("TMUX", "")
-	name := strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
-	tm := tmux.Client{Socket: fmt.Sprintf("factory-test-%d-%s", os.Getpid(), name), ConfigFile: "/dev/null"}
+	tm := tmux.Client{Socket: fmt.Sprintf("factory-test-%d-%d", os.Getpid(), servers.Add(1)), ConfigFile: "/dev/null"}
 	t.Cleanup(func() {
 		socket, _ := tm.Run("display-message", "-p", "#{socket_path}")
 		tm.Run("kill-server")
@@ -115,6 +117,44 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 		t.Errorf("deselected factory pane is in %q, want its own parking window", name)
 	}
 	sized("parked again", created)
+}
+
+func TestRebuildPutsTheSlotBackAboveThePanelWhenTheSessionPaneCloses(t *testing.T) {
+	e, l := hubFixture(t)
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "eng-1-x", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Select(&l, created); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.TM.KillPane(created); err != nil {
+		t.Fatal(err)
+	}
+	width, height, err := e.TM.WindowSize(l.Selector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := e.Build(l.Selector, Shape{Width: width, Height: height})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot, panel := pane(t, e.TM, rebuilt.Slot), pane(t, e.TM, rebuilt.Panel)
+	if slot.UI != "slot" || slot.WindowName != HubWindow {
+		t.Fatalf("slot = %+v, want the empty-slot viewer back in the hub window", slot)
+	}
+	top := func(id string) int {
+		out, err := e.TM.Display(id, "#{pane_top} #{pane_left}")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var y, x int
+		fmt.Sscan(out, &y, &x)
+		return y*1000 + x
+	}
+	if top(slot.ID) >= top(panel.ID) || slot.Width != panel.Width {
+		t.Errorf("slot at %d (%dx%d), panel at %d (%dx%d): the slot must sit above the panel in the right column", top(slot.ID), slot.Width, slot.Height, top(panel.ID), panel.Width, panel.Height)
+	}
 }
 
 func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
