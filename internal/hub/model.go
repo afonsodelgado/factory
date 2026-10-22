@@ -188,9 +188,29 @@ func (m *Model) apply(s Snapshot) {
 		}
 	}
 	m.syncTitles()
+	m.ensureSlot()
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
+}
+
+func (m *Model) ensureSlot() {
+	if m.Engine == nil || len(m.snap.Panes) == 0 {
+		return
+	}
+	for _, p := range m.snap.Panes {
+		if p.ID == m.Layout.Slot && p.WindowID == m.Layout.Window {
+			return
+		}
+	}
+	width, height, err := m.Engine.TM.WindowSize(m.Layout.Selector)
+	if err != nil {
+		return
+	}
+	if layout, err := m.Engine.Build(m.Layout.Selector, m.shape(width, height)); err == nil {
+		m.Layout = layout
+		m.arranged = Shape{}
+	}
 }
 
 func containsKey(rows []selector.Row, key string) bool {
@@ -238,15 +258,16 @@ func (m *Model) showSelected() {
 	}
 	it, ok := m.snap.Find(m.selected)
 	viewer := m.slotViewer()
-	target, title := viewer, ""
+	target, title, path := viewer, "", ""
 	switch {
 	case ok && it.Pane != nil && !it.Pane.Dead:
 		target = it.Pane.ID
 	case ok:
-		title = paneTitle(it.Factory)
+		title, path = paneTitle(it.Factory), tilde(it.Factory.Worktree)
 	}
 	if viewer != "" {
 		m.Engine.TM.SetPaneOption(viewer, "@factory_title", title)
+		m.Engine.TM.SetPaneOption(viewer, "@factory_path", path)
 	}
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
