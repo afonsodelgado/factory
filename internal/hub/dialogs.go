@@ -160,9 +160,9 @@ func (m *Model) switchContext() dialog.SwitchContext {
 		if it.Factory.Archived() {
 			continue
 		}
-		stage := "no state yet"
-		if it.Factory.State != nil {
-			stage = it.Factory.State.Stage
+		stage := stageOf(it.Factory)
+		if stage == "" {
+			stage = "no state yet"
 		}
 		c.Rows = append(c.Rows, dialog.SwitchRow{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), Repo: it.Factory.RepoName(), Stage: stage, Status: it.Status.String(), Needs: it.Status == factory.NeedsYou})
 	}

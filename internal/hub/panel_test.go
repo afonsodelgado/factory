@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -136,6 +138,27 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	opened = append(opened, model.panel.tab)
 	if want := []panel.Tab{panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) {
 		t.Errorf("tabs on start, then choosing the asking and the quiet factory = %v, want %v: a factory with PRs and nothing open opens on PRs (A1)", opened, want)
+	}
+}
+
+func TestUnreadableStateIsSaidNotHidden(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(factory.WorktreesDir(repo), "eng-5-x", ".claude", "factory", "ENG-5")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := `{"ticket":"ENG-5","attention":[{"id":"q-5-1","kind":"question","options":"zz"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	loader := &Loader{Config: cfg, Registry: &state.Registry{}, Now: time.Now}
+	model := NewModel(Model{Config: cfg, Now: time.Now, Icons: theme.Nerd})
+	model.SetSnapshot(loader.Load())
+
+	view := escapes.ReplaceAllString(model.PanelView(109, 20), "")
+	if !strings.Contains(view, "state.json cannot be read") {
+		t.Errorf("panel:\n%s\nwant it to say the state cannot be read: its open question is otherwise invisible", view)
 	}
 }
 

@@ -42,6 +42,9 @@ func newPanelState() panelState {
 func attentionItems(it Item, now time.Time) []panel.Item {
 	var items []panel.Item
 	f := it.Factory
+	if f.StateErr != nil {
+		items = append(items, unreadableItem(f))
+	}
 	if f.State != nil {
 		for _, a := range f.State.OpenAttention() {
 			items = append(items, fromAttention(f.State, a))
@@ -97,6 +100,29 @@ func artifactRow(a state.Artifact) panel.ArtifactRow {
 
 func path(url string) string {
 	return url[strings.LastIndex(url, "/")+1:]
+}
+
+func unreadableItem(f factory.Factory) panel.Item {
+	file := filepath.Join(f.Dir, "state.json")
+	if rel, err := filepath.Rel(f.Repo, file); err == nil && !strings.HasPrefix(rel, "..") {
+		file = rel
+	}
+	return panel.Item{
+		Kind:  "unreadable",
+		Title: "state.json cannot be read",
+		Body:  fmt.Sprintf("%s does not parse, so its stage, PRs and open items stay hidden until the supervisor writes it again. %s.", file, f.StateErr),
+		Since: f.StateMod,
+	}
+}
+
+func stageOf(f factory.Factory) string {
+	switch {
+	case f.State != nil:
+		return f.State.Stage
+	case f.StateErr != nil:
+		return "unreadable"
+	}
+	return ""
 }
 
 func asleepItem(it Item, now time.Time) panel.Item {

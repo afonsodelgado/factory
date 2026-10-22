@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +23,7 @@ type Factory struct {
 	Dir       string
 	Worktree  string
 	State     *state.State
+	StateErr  error
 	StateMod  time.Time
 	Heartbeat time.Time
 	Entry     *state.Entry
@@ -175,13 +177,21 @@ func load(repo, path, real string) Factory {
 	if info, err := os.Stat(filepath.Join(dir, ".heartbeat")); err == nil {
 		f.Heartbeat = info.ModTime()
 	}
-	f.State, _ = state.ReadState(path)
+	f.State, f.StateErr = readState(path)
 	f.Worktree = worktreeOf(repo, path, real, f)
 	f.Slug = strings.ToLower(f.ID)
 	if f.Worktree != "" {
 		f.Slug = filepath.Base(f.Worktree)
 	}
 	return f
+}
+
+func readState(path string) (*state.State, error) {
+	data, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	return state.ParseState(data)
 }
 
 func worktreeOf(repo, path, real string, f Factory) string {

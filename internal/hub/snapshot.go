@@ -98,8 +98,8 @@ func (l *Loader) keepLastGood(f factory.Factory) factory.Factory {
 		l.lastGood[f.Key()] = f.State
 		return f
 	}
-	if f.Dir != "" {
-		f.State = l.lastGood[f.Key()]
+	if last, ok := l.lastGood[f.Key()]; ok && f.Dir != "" {
+		f.State, f.StateErr = last, nil
 	}
 	return f
 }

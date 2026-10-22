@@ -666,9 +666,9 @@ func (m *Model) row(it Item) selector.Row {
 		Repo:   f.RepoName(),
 		Status: it.Status,
 		Track:  factory.Track(f.State),
+		Stage:  stageOf(f),
 	}
 	if f.State != nil {
-		row.Stage = f.State.Stage
 		row.Items = len(f.State.OpenAttention())
 	}
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
