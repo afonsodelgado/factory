@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -47,7 +48,8 @@ func LoadConfig() (*Config, error) {
 		ConfigDir: ConfigDir(),
 		StateDir:  StateDir(),
 	}
-	data, err := os.ReadFile(filepath.Join(cfg.ConfigDir, "config.yml"))
+	path := filepath.Join(cfg.ConfigDir, "config.yml")
+	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
@@ -55,6 +57,9 @@ func LoadConfig() (*Config, error) {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, err
 		}
+	}
+	if cfg.StalledAfter != "" && !positiveDuration(cfg.StalledAfter) {
+		return nil, fmt.Errorf("%s: stalled_after %q is not a duration; write it with a unit, such as 30m", path, cfg.StalledAfter)
 	}
 	cfg.applyDefaults()
 	return cfg, nil
@@ -81,11 +86,17 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+func positiveDuration(s string) bool {
+	d, err := time.ParseDuration(s)
+	return err == nil && d > 0
+}
+
 func (c *Config) Stalled() time.Duration {
-	if d, err := time.ParseDuration(c.StalledAfter); err == nil && d > 0 {
-		return d
+	if !positiveDuration(c.StalledAfter) {
+		return 20 * time.Minute
 	}
-	return 20 * time.Minute
+	d, _ := time.ParseDuration(c.StalledAfter)
+	return d
 }
 
 func (c *Config) RemoteControl() bool {
