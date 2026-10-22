@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -41,5 +42,13 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), state.Profile{}, false, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
+	}
+}
+
+func TestOpenRefusesARepoTheRunningHubDoesNotList(t *testing.T) {
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}})
+	err := model.open(OpenRequest{Name: "ENG-1", Repo: "/r/added-later"})
+	if err == nil || !strings.Contains(err.Error(), "does not list /r/added-later") {
+		t.Errorf("open in a repo the hub never discovers = %v; the factory would get no row", err)
 	}
 }
