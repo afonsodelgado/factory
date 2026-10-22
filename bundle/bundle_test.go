@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type frontmatter struct {
@@ -55,6 +57,23 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 				t.Errorf("%s preloads %q, but %s is named %q", agent, skill, path, name)
 			}
 		}
+	}
+}
+
+func TestStateTemplateReadsAsTheNewFormat(t *testing.T) {
+	data, err := fs.ReadFile(Files, "skills/factory/templates/state.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.ParseState(data)
+	if err != nil {
+		t.Fatalf("the template does not parse into state.State: %v", err)
+	}
+	if !st.HasAttentionField() {
+		t.Error("a factory started from the template would be read as the old format and fall back to the idle heuristic")
+	}
+	if len(st.Stages) != len(state.StageKeys) {
+		t.Errorf("template has %d stages, the app tracks %d", len(st.Stages), len(state.StageKeys))
 	}
 }
 
