@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -88,6 +90,11 @@ func hubMain() error {
 		Loader: &hub.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now},
 		Events: events,
 		Watch:  watch,
+		GitHub: &hub.GitHub{Run: hub.RunGH},
+		Typist: engine,
+		Open:   openURL,
+		Bell:   os.Stderr,
+		Notify: notify,
 		Icons:  theme.IconsFor(cfg.Icons),
 	})
 	_, err = tea.NewProgram(model).Run()
@@ -122,6 +129,22 @@ func runView(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func openURL(url string) {
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	exec.Command(opener, url).Run()
+}
+
+func notify(text string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	script := fmt.Sprintf("display notification %q with title %q", text, "factory-tui")
+	exec.Command("osascript", "-e", script).Run()
 }
 
 func shellQuote(s string) string {

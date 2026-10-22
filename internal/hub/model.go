@@ -2,6 +2,7 @@ package hub
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
+	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/selector"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
@@ -30,6 +32,11 @@ type Model struct {
 	Loader *Loader
 	Events chan Event
 	Watch  *Watcher
+	GitHub *GitHub
+	Typist Typist
+	Open   func(url string)
+	Bell   io.Writer
+	Notify func(text string)
 	Now    func() time.Time
 	Icons  theme.Icons
 
@@ -45,6 +52,10 @@ type Model struct {
 	share        float64
 	collapsed    bool
 	arranged     Shape
+	window       [2]int
+	pending      []tea.Cmd
+	panel        panelState
+	statuses     map[string]factory.Status
 }
 
 type snapshotMsg Snapshot
@@ -60,6 +71,7 @@ func NewModel(m Model) *Model {
 	model.sizes = map[string][2]int{}
 	model.sent = map[string]string{}
 	model.share = PanelShare
+	model.panel = newPanelState()
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -71,7 +83,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -148,13 +160,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.arrange()
+		m.measureWindow()
 	case snapshotMsg:
 		m.apply(Snapshot(msg))
+		cmd = tea.Batch(m.pending...)
+		m.pending = nil
 	case pollMsg:
 		cmd = tea.Batch(m.load(), m.poll())
 	case changedMsg:
 		cmd = tea.Batch(m.load(), m.waitChange())
+	case prsMsg:
+		for key, prs := range msg.statuses {
+			m.panel.prs[key] = prs
+		}
+	case ghPollMsg:
+		cmd = tea.Batch(m.refreshPRs(false), m.ghPoll())
 	case focusPollMsg:
 		cmd = tea.Batch(m.activePane(), m.focusPoll())
 	case activeMsg:
@@ -165,6 +185,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focus = footer.Factories
 		cmd = m.selectorKey(msg.String())
 	}
+	m.arrange()
 	m.publish()
 	return m, cmd
 }
@@ -179,7 +200,13 @@ func (m *Model) apply(s Snapshot) {
 	if s.At.Before(m.snap.At) {
 		return
 	}
+	first := len(m.snap.Items) == 0 && m.GitHub != nil
 	m.snap = s
+	m.alert(m.statuses)
+	m.statuses = map[string]factory.Status{}
+	for _, it := range s.Items {
+		m.statuses[it.Factory.Key()] = it.Status
+	}
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		m.selected = ""
@@ -192,6 +219,9 @@ func (m *Model) apply(s Snapshot) {
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
+	if first {
+		m.pending = append(m.pending, m.refreshPRs(false))
+	}
 }
 
 func (m *Model) ensureSlot() {
@@ -274,15 +304,21 @@ func (m *Model) showSelected() {
 	}
 }
 
-func (m *Model) arrange() {
+func (m *Model) measureWindow() {
 	if m.Engine == nil {
 		return
 	}
-	width, height, err := m.Engine.TM.WindowSize(m.Layout.Selector)
-	if err != nil {
+	if width, height, err := m.Engine.TM.WindowSize(m.Layout.Selector); err == nil {
+		m.window = [2]int{width, height}
+	}
+	m.arrange()
+}
+
+func (m *Model) arrange() {
+	if m.Engine == nil || m.window[0] == 0 {
 		return
 	}
-	shape := m.shape(width, height)
+	shape := m.shape(m.window[0], m.window[1])
 	if shape == m.arranged {
 		return
 	}
@@ -291,7 +327,11 @@ func (m *Model) arrange() {
 }
 
 func (m *Model) shape(width, height int) Shape {
-	return Shape{Width: width, Height: height, Share: m.share, Collapsed: m.collapsed || len(m.snap.Items) == 0}
+	share := m.share
+	if m.answering() {
+		share = max(share, AnsweringShare)
+	}
+	return Shape{Width: width, Height: height, Share: share, Collapsed: m.collapsed || len(m.snap.Items) == 0}
 }
 
 func (m *Model) focusFromPane(id string) {
@@ -322,6 +362,18 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		m.focusPanel()
 	case "H":
 		m.showArchived = !m.showArchived
+	case "tab":
+		m.switchTab(1)
+	case "shift+tab":
+		m.switchTab(-1)
+	case "z":
+		m.collapsed = !m.collapsed
+	case "+", "=":
+		m.share = min(m.share+1.0/6, 5.0/6)
+	case "-":
+		m.share = max(m.share-1.0/6, 1.0/6)
+	case "o":
+		return m.openRow(m.panelView())
 	case "q", "ctrl+c":
 		return m.quit()
 	}
@@ -340,6 +392,10 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		delete(m.sent, e.Pane)
 	case "key":
 		return m.viewerKey(e.Pane, e.K, e.Text)
+	case "paste":
+		if e.Pane == "panel" {
+			m.paste(e.Text)
+		}
 	}
 	return nil
 }
@@ -347,9 +403,7 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
 	if pane == "panel" {
 		m.focus = footer.Panel
-		if key == "esc" {
-			m.focusSelector()
-		}
+		return m.panelKey(key, text)
 	}
 	return nil
 }
@@ -385,7 +439,12 @@ func (m *Model) choose(key string) {
 	if key == m.selected {
 		return
 	}
+	m.saveDraft()
 	m.selected = key
+	m.panel.item, m.panel.row = 0, 0
+	if it, ok := m.snap.Find(key); ok && len(attentionItems(it, m.snap.At)) > 0 {
+		m.panel.tab = panel.Attention
+	}
 	m.showSelected()
 }
 
@@ -455,6 +514,7 @@ func (m *Model) focusSelector() {
 }
 
 func (m *Model) quit() tea.Cmd {
+	m.saveDraft()
 	if m.Server != nil {
 		m.Server.Broadcast(Message{T: "quit"})
 	}
@@ -531,9 +591,9 @@ func tilde(path string) string {
 
 func (m *Model) publish() {
 	if m.Server != nil {
-		m.send("footer", m.FooterView(m.size("footer")))
-		m.send("panel", m.PanelView(m.size("panel")))
-		m.send("slot", m.SlotView(m.size("slot")))
+		m.push("footer", m.FooterView(m.size("footer")))
+		m.push("panel", m.PanelView(m.size("panel")))
+		m.push("slot", m.SlotView(m.size("slot")))
 	}
 	m.updateHeader()
 }
@@ -543,7 +603,7 @@ func (m *Model) size(pane string) (int, int) {
 	return s[0], s[1]
 }
 
-func (m *Model) send(pane, frame string) {
+func (m *Model) push(pane, frame string) {
 	if _, connected := m.sizes[pane]; !connected || m.sent[pane] == frame {
 		return
 	}
@@ -601,51 +661,91 @@ func (m *Model) Header() (string, string) {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, "#[fg=#3b4261]#H "
+	return left, m.ghLabel() + "#[fg=#3b4261]#H "
+}
+
+func (m *Model) ghLabel() string {
+	if m.GitHub == nil {
+		return ""
+	}
+	checked := m.GitHub.Checked()
+	if checked.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("#[fg=#565f89]%sgh %s ago  ", m.Icons.Icon("gh"), theme.Age(m.Now().Sub(checked)))
 }
 
 func (m *Model) FooterView(width, _ int) string {
-	mode := m.focus
 	context := ""
 	if it, ok := m.snap.Find(m.selected); ok {
 		context = it.Factory.Label()
 	}
-	return footer.Render(mode, context, m.hints(), width)
+	if m.focus == footer.Panel && m.panel.tab == panel.Attention {
+		if _, item, ok := m.currentAttention(); ok && item.ID != "" {
+			context += " · " + item.ID
+		}
+	}
+	return footer.Render(m.focus, context, m.hints(), width)
+}
+
+func hints(pairs ...string) []footer.Hint {
+	var h []footer.Hint
+	for i := 0; i+1 < len(pairs); i += 2 {
+		h = append(h, footer.Hint{Key: pairs[i], Does: pairs[i+1]})
+	}
+	return h
 }
 
 func (m *Model) hints() []footer.Hint {
 	switch m.focus {
 	case footer.Session:
-		return []footer.Hint{{Key: m.Config.Hub.ReturnKey, Does: "back to factories"}}
+		return hints(m.Config.Hub.ReturnKey, "back to factories")
 	case footer.Panel:
-		return []footer.Hint{{Key: "esc", Does: "back to factories"}}
+		return m.panelHints()
 	}
-	if len(m.snap.Items) == 0 {
-		return []footer.Hint{{Key: "q", Does: "quit the UI"}}
+	it, ok := m.selectedItem()
+	switch {
+	case !ok:
+		return hints("q", "quit the UI")
+	case factory.PermissionPrompt(it.Hook):
+		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "i", "panel", "tab", "next tab")
+	case it.Status == factory.Done:
+		return hints("H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "g", "next needing you")
 	}
-	return []footer.Hint{
-		{Key: "j/k", Does: "move"},
-		{Key: "⏎", Does: "session"},
-		{Key: "i", Does: "panel"},
-		{Key: "g", Does: "next needing you"},
-		{Key: "1-9", Does: "jump"},
-		{Key: "H", Does: "archived"},
-		{Key: "q", Does: "quit the UI"},
-	}
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "1-9", "jump", "tab", "next tab", "o", "open", "z", "fold", "H", "archived")
 }
 
-func (m *Model) PanelView(width, height int) string {
-	c := theme.NewCanvas(width, height)
-	it, ok := m.snap.Find(m.selected)
-	if !ok || height < 3 {
-		return c.Render()
+func (m *Model) panelHints() []footer.Hint {
+	switch m.panel.tab {
+	case panel.PRs:
+		return hints("j/k", "move", "o", "open in browser", "r", "refresh now", "tab", "next tab", "esc", "back")
+	case panel.Artifacts:
+		return hints("j/k", "move", "o", "open in browser", "tab", "next tab", "esc", "back")
+	case panel.Activity:
+		return hints("j/k", "scroll", "t", "all factories", "⏎", "jump to factory", "tab", "next tab", "esc", "back")
 	}
-	border := theme.Line
-	if m.focus == footer.Panel {
-		border = theme.Focused
+	it, item, ok := m.currentAttention()
+	if !ok {
+		return hints("tab", "next tab", "esc", "back to factories")
 	}
-	c.Box(0, 0, width, height, theme.Box{Ink: border, TitleRight: []theme.Span{{Text: " " + it.Factory.Label() + " ", Ink: theme.Muted}}})
-	return c.Render()
+	if item.ID != "" && m.draft(it.Factory, item).Editing {
+		return hints("ctrl+s", "send", "esc", "stop typing", "ctrl+u", "clear")
+	}
+	switch item.Kind {
+	case "question":
+		return hints("↑↓", "question", "←→", "option", "e", "type", "r", "use recommended", "R", "all recommended", "ctrl+s", "send", "esc", "back, keep draft")
+	case "gate":
+		return hints("a", "approve", "c", "changes", "e", "notes", "↑↓", "pick", "o", "open", "[ ]", "item", "esc", "back")
+	case "comment":
+		return hints("e", "reply", "ctrl+s", "send", "o", "open thread", "[ ]", "item", "esc", "back, keep draft")
+	case "cap":
+		return hints("c", "one more round", "s", "skip", "e", "type", "[ ]", "item", "esc", "back")
+	case "failure":
+		return hints("r", "retry", "s", "skip", "e", "type", "[ ]", "item", "esc", "back")
+	case "permission":
+		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
+	}
+	return hints("[ ]", "item", "tab", "next tab", "esc", "back")
 }
 
 func (m *Model) SlotView(width, height int) string {
