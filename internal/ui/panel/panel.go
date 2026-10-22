@@ -254,13 +254,13 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), gateHints(it, v)), 0
+		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 0
 	case it.Kind == "comment":
-		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), commentHints(it, v)), 0
+		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else")), 0
+		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else"))), 0
 	case it.Kind == "failure":
-		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead")), 0
+		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead"))), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -360,6 +360,13 @@ func textBox(title string, d Draft, w int) []line {
 func padTo(s string, w int) string {
 	s = theme.Truncate(s, w)
 	return s + strings.Repeat(" ", max(w-theme.Width(s), 0))
+}
+
+func unlessSent(v View, lines []line) []line {
+	if !v.Send.SentAt.IsZero() {
+		return nil
+	}
+	return lines
 }
 
 func withStatus(v View, w int, blocks ...[]line) []line {

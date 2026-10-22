@@ -212,7 +212,9 @@ func (m *Model) apply(s Snapshot) {
 		return
 	}
 	first := len(m.snap.Items) == 0 && m.GitHub != nil
+	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
+	m.forgetClosedItems()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {
@@ -221,11 +223,13 @@ func (m *Model) apply(s Snapshot) {
 	m.planWakes()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
-		first := ""
+		topRow := ""
 		if len(rows) > 0 {
-			first = rows[0].Key
+			topRow = rows[0].Key
 		}
-		m.choose(first)
+		m.choose(topRow)
+	} else if m.itemArrived(m.selected, shownBefore) {
+		m.panel.tab = panel.Attention
 	}
 	m.syncTitles()
 	m.ensureSlot()
@@ -235,6 +239,25 @@ func (m *Model) apply(s Snapshot) {
 	if first {
 		m.pending = append(m.pending, m.refreshPRs(false))
 	}
+}
+
+func (m *Model) itemsOf(key string) map[string]bool {
+	items := map[string]bool{}
+	if it, ok := m.snap.Find(key); ok {
+		for _, item := range attentionItems(it, m.snap.At) {
+			items[item.Kind+"|"+item.ID] = true
+		}
+	}
+	return items
+}
+
+func (m *Model) itemArrived(key string, shownBefore map[string]bool) bool {
+	for item := range m.itemsOf(key) {
+		if !shownBefore[item] {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) ensureSlot() {
@@ -874,6 +897,9 @@ func (m *Model) panelHints() []footer.Hint {
 	it, item, ok := m.currentAttention()
 	if !ok {
 		return hints("tab", "next tab", "esc", "back to factories")
+	}
+	if item.ID != "" && m.isSent(it.Factory, item) {
+		return hints("d", "clear and answer again", "[ ]", "item", "esc", "back")
 	}
 	if item.ID != "" && m.draft(it.Factory, item).Editing {
 		return hints("ctrl+s", "send", "esc", "stop typing", "ctrl+u", "clear")

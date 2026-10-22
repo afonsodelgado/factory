@@ -95,11 +95,13 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		keys  []string
 		typed int
 		shows string
+		hides string
 	}{
-		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"a"}, 0, "Not sent."},
-		{"gate approve pressed twice sends once", &gate, "Stop", []string{"a", "a"}, 1, "Sent at"},
-		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, 1, "Sent at"},
-		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, 0, "Question 1 has no recommended answer"},
+		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"a"}, 0, "Not sent.", ""},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"a", "a"}, 1, "Sent at", ""},
+		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, 1, "Sent at", ""},
+		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "e", "x", "x", "x", "esc", "ctrl+s"}, 1, "Sent at", "xxx"},
+		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, 0, "Question 1 has no recommended answer", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,10 +119,37 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 			}
 			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
 			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
-			if len(typist.typed) != c.typed || !strings.Contains(view, c.shows) {
-				t.Errorf("typed %q, panel:\n%s\nwant %d message(s) and %q shown", typist.typed, view, c.typed, c.shows)
+			hidden := c.hides == "" || !strings.Contains(view, c.hides)
+			if len(typist.typed) != c.typed || !strings.Contains(view, c.shows) || !hidden {
+				t.Errorf("typed %q, panel:\n%s\nwant %d message(s), %q shown and %q not shown", typist.typed, view, c.typed, c.shows, c.hides)
 			}
 		})
+	}
+}
+
+func TestAReRaisedItemStartsUnsent(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	withCap := func(created time.Time, at time.Time) Snapshot {
+		snap := questionFactory("Stop", at)
+		snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa_fixes", Kind: "cap", Title: "QA rounds 3 of 3", CreatedAt: state.Time{Time: created}}}
+		return snap
+	}
+	resolved := questionFactory("Stop", now.Add(time.Second))
+	resolved.Items[0].Factory.State.Attention = []state.Attention{}
+	typist := &fakeTypist{}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	model.SetSnapshot(withCap(now.Add(-time.Hour), now))
+	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+	panelKeys(tm, "c")
+	tm.Send(snapshotMsg(resolved))
+	tm.Send(snapshotMsg(withCap(now.Add(2*time.Second), now.Add(2*time.Second))))
+	panelKeys(tm, "c")
+	if err := tm.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
+	if len(typist.typed) != 2 {
+		t.Errorf("typed %q; the cap tripped again under the same id, so continue must send a second time", typist.typed)
 	}
 }
 
@@ -136,8 +165,17 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	opened = append(opened, model.panel.tab)
 	model.choose(quiet.Factory.Key())
 	opened = append(opened, model.panel.tab)
-	if want := []panel.Tab{panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) {
-		t.Errorf("tabs on start, then choosing the asking and the quiet factory = %v, want %v: a factory with PRs and nothing open opens on PRs (A1)", opened, want)
+
+	nowAsking := quiet
+	nowAsking.Factory.State = &state.State{Ticket: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
+	model.SetSnapshot(Snapshot{At: now.Add(time.Second), Items: []Item{nowAsking, asking}})
+	opened = append(opened, model.panel.tab)
+	model.switchTab(1)
+	model.SetSnapshot(Snapshot{At: now.Add(2 * time.Second), Items: []Item{nowAsking, asking}})
+	opened = append(opened, model.panel.tab)
+
+	if want := []panel.Tab{panel.PRs, panel.Attention, panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) {
+		t.Errorf("tabs on start, choosing the asking and the quiet factory, a question arriving, then the next poll after tab = %v, want %v: nothing open opens on PRs (A1), an arriving item opens Attention once (R24)", opened, want)
 	}
 }
 

@@ -26,15 +26,47 @@ type panelState struct {
 	shown   string
 	drafts  map[string]*panel.Draft
 	refused map[string]string
-	sent    map[string]time.Time
+	sent    map[string]sentMark
 	prs     map[string][]panel.PR
+}
+
+type sentMark struct {
+	at        time.Time
+	itemSince time.Time
+}
+
+func (m *Model) forgetClosedItems() {
+	open := map[string]time.Time{}
+	for _, it := range m.snap.Items {
+		for _, item := range attentionItems(it, m.snap.At) {
+			if item.ID != "" {
+				open[draftKey(it.Factory, item.ID)] = item.Since
+			}
+		}
+	}
+	for key, mark := range m.panel.sent {
+		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.itemSince) {
+			delete(m.panel.sent, key)
+			delete(m.panel.drafts, key)
+		}
+	}
+	for key := range m.panel.refused {
+		if _, stillOpen := open[key]; !stillOpen {
+			delete(m.panel.refused, key)
+		}
+	}
+}
+
+func (m *Model) isSent(f factory.Factory, item panel.Item) bool {
+	_, sent := m.panel.sent[draftKey(f, item.ID)]
+	return sent
 }
 
 func newPanelState() panelState {
 	return panelState{
 		drafts:  map[string]*panel.Draft{},
 		refused: map[string]string{},
-		sent:    map[string]time.Time{},
+		sent:    map[string]sentMark{},
 		prs:     map[string][]panel.PR{},
 	}
 }
@@ -216,7 +248,7 @@ func (m *Model) saveDraft() {
 	if !ok || item.ID == "" || m.Config.StateDir == "" {
 		return
 	}
-	if _, sent := m.panel.sent[draftKey(it.Factory, item.ID)]; sent {
+	if m.isSent(it.Factory, item) {
 		return
 	}
 	d := m.draft(it.Factory, item)
@@ -298,7 +330,7 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	key := draftKey(it.Factory, item.ID)
-	if _, alreadySent := m.panel.sent[key]; alreadySent || m.Typist == nil {
+	if m.isSent(it.Factory, item) || m.Typist == nil {
 		return
 	}
 	d := m.draft(it.Factory, item)
@@ -315,7 +347,7 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	delete(m.panel.refused, key)
-	m.panel.sent[key] = m.Now()
+	m.panel.sent[key] = sentMark{at: m.Now(), itemSince: item.Since}
 	os.Remove(m.draftPath(it.Factory, item.ID))
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
@@ -377,7 +409,7 @@ func (m *Model) panelView() panel.View {
 
 func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	key := draftKey(it.Factory, item.ID)
-	s := panel.Send{Refused: m.panel.refused[key], SentAt: m.panel.sent[key]}
+	s := panel.Send{Refused: m.panel.refused[key], SentAt: m.panel.sent[key].at}
 	if missing := unanswered(item, d); missing != "" {
 		s.Reason = missing
 		return s
@@ -478,7 +510,8 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 		m.focusSession()
 		return nil
 	}
-	if d == nil {
+	lockedAfterSend := m.isSent(it.Factory, item) && key != "d" && key != "o"
+	if d == nil || lockedAfterSend {
 		return nil
 	}
 	return m.formKey(item, d, key)
