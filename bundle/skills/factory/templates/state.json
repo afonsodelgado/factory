@@ -1,6 +1,8 @@
 {
   "ticket": "",
   "title": "",
+  "repo": "",
+  "session_id": "",
   "authorized": true,
   "needs_design": false,
   "worktree": "",
@@ -9,6 +11,7 @@
   "stage": "requirements",
   "waiting_on": null,
   "waiting_reason": null,
+  "updated_at": "",
   "limits": { "coderabbit_rounds": 2, "qa_rounds": 3, "stage_retries": 1 },
   "stages": {
     "requirements": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
@@ -22,6 +25,7 @@
     "test_gaps": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
     "handoff": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" }
   },
+  "attention": [],
   "prs": [],
   "history": []
 }

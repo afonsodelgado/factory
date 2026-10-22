@@ -22,7 +22,7 @@ Read the QA report the prompt names. For each confirmed, open finding:
 1. Reproduce it first from the report's repro.
 2. Fix the cause, not the symptom. Where the finding names a likely cause at file:line, check it before trusting it.
 3. Add one test that fails without the fix, and watch it fail. Use the level the report suggests, or the one closest to the user.
-4. Run the focused checks, then commit with `commit-and-pr` conventions.
+4. Run the focused checks from the repo's profile, `.claude/factory.yml` (`commands.build`, `commands.lint`, `commands.test`, and `commands.migrate` when a fix adds a migration), then commit with `commit-and-pr` conventions.
 
 Treat suspected findings as leads: fix them only if you can reproduce them. If a fix needs a decision the plan did not make, return `blocked` with the question. Push the layer when done.
 

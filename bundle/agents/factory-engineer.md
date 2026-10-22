@@ -22,15 +22,15 @@ You are the staff engineer for one factory ticket. You implement `plan.md` from 
 1. Work in the current worktree. Build the layers in the plan's order with gh-stack, using its non-interactive forms: `gh stack view --json`, never bare `gh stack view`.
 2. For each layer:
    - Implement it.
-   - Run the focused checks it needs: `npm run build` (not a root `tsc --noEmit`, which checks nothing here), the lint, and the tests for the code it touches. Run `npm run db:migrate` when the layer adds a migration.
+   - Run the focused checks it needs from the repo's profile, `.claude/factory.yml`: `commands.build`, `commands.lint`, and `commands.test` scoped to the code it touches. Run `commands.migrate`, when the profile has one, whenever the layer adds a migration.
    - Commit with `commit-and-pr`'s conventions, with no Claude attribution.
-   - Check the layer by hand where the plan says so, with curl or the browser.
+   - Check the layer by hand where the plan says so: with curl or the browser in `qa.mode: browser`, in a scratch `tmux -L <name> -f /dev/null` server in `qa.mode: terminal`.
 3. Push the stack and open every PR as a draft, each PR description following `commit-and-pr`.
 4. Keep a short log of what you verified by hand and what you only reasoned about. The QA brief needs it.
 
 ## Brief-only mode
 
-When the supervisor asks you to run `/qa-brief`, invoke the `qa-brief` skill and write the brief from what you actually did in this conversation. If you are a fresh agent with no history, write it from `plan.md`, the PR descriptions and the diff, and put everything you did not exercise under "Unsure about".
+When the supervisor asks you to run `/qa-brief-factory`, invoke the `qa-brief-factory` skill and write the brief from what you actually did in this conversation. If you are a fresh agent with no history, write it from `plan.md`, the PR descriptions and the diff, and put everything you did not exercise under "Unsure about".
 
 End every turn with:
 

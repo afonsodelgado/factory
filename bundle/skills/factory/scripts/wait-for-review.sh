@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+dir=""
+if [ "${1:-}" = "--dir" ]; then
+  dir="${2:-}"
+  shift 2
+fi
+
 if [ "$#" -eq 0 ]; then
-  echo "usage: wait-for-review.sh <pr-number>..." >&2
+  echo "usage: wait-for-review.sh [--dir <factory dir>] <pr-number>..." >&2
   exit 64
 fi
 
 poll_seconds="${FACTORY_POLL_SECONDS:-60}"
+sleep_seconds="${FACTORY_SLEEP_SECONDS:-$poll_seconds}"
 timeout_minutes="${FACTORY_TIMEOUT_MINUTES:-120}"
 no_checks_minutes="${FACTORY_NO_CHECKS_MINUTES:-15}"
 
 finished=" "
-started=$(date +%s)
+polls=0
 
 is_finished() {
   case "$finished" in
     *" $1 "*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+heartbeat() {
+  if [ -n "$dir" ]; then
+    touch "$dir/.heartbeat"
+  fi
 }
 
 pr_report() {
@@ -36,7 +49,8 @@ pr_report() {
 }
 
 while :; do
-  elapsed_min=$(( ( $(date +%s) - started ) / 60 ))
+  heartbeat
+  elapsed_min=$(( polls * poll_seconds / 60 ))
   pending=""
   for pr in "$@"; do
     is_finished "$pr" && continue
@@ -66,5 +80,6 @@ while :; do
     echo "timeout after ${elapsed_min}m, still pending:$pending"
     exit 3
   fi
-  sleep "$poll_seconds"
+  sleep "$sleep_seconds"
+  polls=$(( polls + 1 ))
 done

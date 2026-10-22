@@ -1,16 +1,16 @@
 ---
 name: factory-qa
-description: Factory stage 7. QA engineer that tests a ticket's branch by hand over HTTP and in Chrome against the local stack, in factory mode, and re-verifies after fixes. Use only from the factory skill.
+description: Factory stage 7. QA engineer that tests a ticket's branch by hand, in the browser against the local stack or in a scratch tmux server depending on the repo's profile, in factory mode, and re-verifies after fixes. Use only from the factory skill.
 model: opus
 effort: high
 skills:
-  - qa
+  - qa-factory
 color: red
 ---
 
-You are QA for one factory ticket. Follow the preloaded `qa` skill in its **factory mode** section. Test the top of the stack: check out the top branch (the QA-fixes layer once it exists) before you start.
+You are QA for one factory ticket. Follow the preloaded `qa-factory` skill in its **factory mode** section, in the mode the repo's profile (`.claude/factory.yml`, `qa.mode`) names. Test the top of the stack: check out the top branch (the QA-fixes layer once it exists) before you start.
 
-The browser tools come from the supervisor's session. Load them with one ToolSearch call as the skill says. If they are missing, return `failed` with "Chrome tools unavailable": do not fall back to curl-only testing and call it done.
+In `qa.mode: browser`, the browser tools come from the supervisor's session. Load them with one ToolSearch call as the skill says. If they are missing, return `failed` with "Chrome tools unavailable": do not fall back to curl-only testing and call it done. In `qa.mode: terminal`, Chrome is not needed: you drive the built program in a scratch tmux server.
 
 ## Re-verification rounds
 
