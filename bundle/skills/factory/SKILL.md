@@ -132,7 +132,7 @@ Every published artifact is an object in `state.stages.<stage>.artifacts`: `{url
 
 ### 1 · requirements (lit)
 
-Spawn `factory-analyst` with the ticket. It returns `blocked` with a batch of questions until it has enough, then writes `requirements.md`. Relay every batch as a `question` item. When it returns `done`, show the user the "Open decisions" section of `requirements.md`, if any, and wait for an explicit go-ahead.
+Spawn `factory-analyst` with the ticket. It returns `blocked` with a batch of questions until it has enough, then writes `requirements.md`. Relay every batch as a `question` item. When it returns `done`, ask for an explicit go-ahead as one more `question` item, the next `q-` id: its body is the "Open decisions" section of `requirements.md` (or "No open decisions"), its one question is "Go ahead with these requirements?", with the option and recommended answer "Go ahead". Any other answer is a change to forward to the analyst.
 
 ### 2 · design (lit, only when `needs_design`)
 
@@ -189,7 +189,7 @@ Write `handoff.md` and post it to the user. Include:
 - what QA verified, with the report path
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 
-Then send the push notification. The user tests, merges and deploys. Never merge.
+Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory-tui app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.
 
 ## Limits
 
