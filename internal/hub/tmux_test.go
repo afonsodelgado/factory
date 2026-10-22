@@ -42,11 +42,11 @@ func scratchServer(t *testing.T) tmux.Client {
 func hubFixture(t *testing.T) (*Engine, Layout) {
 	t.Helper()
 	tm := scratchServer(t)
-	self, err := tm.NewSession("factory", HubWindow, 144, 46, "sleep 600")
+	self, err := tm.NewSession("factory", HubWindow, 144, 46, "exec sleep 600")
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &Engine{TM: tm, Session: "factory", ViewCommand: func(string) string { return "sleep 600" }}
+	e := &Engine{TM: tm, Session: "factory", ViewCommand: func(string) string { return "exec sleep 600" }}
 	width, height, err := tm.WindowSize(self)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range []string{"eng-2-y", "notes"} {
-		if _, err := e.TM.NewSession(session, "main", 80, 24, "sleep 600"); err != nil {
+		if _, err := e.TM.NewSession(session, "main", 80, 24, "exec sleep 600"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -262,7 +262,7 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 	if _, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "exited", Dir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
-	running, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("running"), Command: "sleep 600"})
+	running, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("running"), Command: "exec sleep 600"})
 	if err != nil {
 		t.Fatal(err)
 	}
