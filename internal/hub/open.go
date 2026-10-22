@@ -39,7 +39,7 @@ func (m *Model) open(r OpenRequest) error {
 	ticket, feature := factory.ParseName(r.Name)
 	slug := factory.SlugFor(ticket, feature)
 	if slug == "" {
-		return fmt.Errorf("%q has no letters or digits to name a factory by. Type a ticket id, such as ENG-1234, or a feature name", r.Name)
+		return fmt.Errorf("%q has none of the letters a–z or digits 0–9 a factory name is made of. Type a ticket id, such as ENG-1234, or a feature name", r.Name)
 	}
 	repos := m.Config.Repos
 	if r.Repo != "" {
