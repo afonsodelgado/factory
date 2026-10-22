@@ -542,8 +542,14 @@ func (m *Model) choose(key string) {
 }
 
 func (m *Model) openingTab(it Item) panel.Tab {
-	nothingOpen := len(attentionItems(it, m.snap.At)) == 0
-	if nothingOpen && len(m.prsFor(it.Factory)) > 0 {
+	somethingOpen := len(attentionItems(it, m.snap.At)) > 0
+	userPickedAnotherTab := m.panel.tab == panel.Artifacts || m.panel.tab == panel.Activity
+	switch {
+	case somethingOpen:
+		return panel.Attention
+	case userPickedAnotherTab:
+		return m.panel.tab
+	case len(m.prsFor(it.Factory)) > 0:
 		return panel.PRs
 	}
 	return panel.Attention
