@@ -1,0 +1,10 @@
+commands:
+  build: go build ./...
+  lint: go vet ./...
+  test: go test ./...
+design:
+  source: terminal
+  files: [internal/ui/theme/palette.go, CLAUDE.md]
+qa:
+  mode: terminal
+coderabbit: false
