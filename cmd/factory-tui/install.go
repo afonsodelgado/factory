@@ -25,12 +25,15 @@ func binaryPath() string {
 
 func doctorOptions() install.Options {
 	home, _ := os.UserHomeDir()
-	o := install.Options{ClaudeDir: install.ClaudeDir(), Binary: binaryPath(), Home: home}
-	if cfg, err := state.LoadConfig(); err == nil {
-		for _, repo := range cfg.Repos {
-			if profile, err := state.ReadProfile(repo); err == nil && profile.BrowserQA() {
-				o.Browser = append(o.Browser, filepath.Base(repo))
-			}
+	o := install.Options{ClaudeDir: install.ClaudeDir(), Binary: binaryPath(), Home: home, ConfigFile: filepath.Join(state.ConfigDir(), "config.yml")}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		o.ConfigErr = err
+		return o
+	}
+	for _, repo := range cfg.Repos {
+		if profile, err := state.ReadProfile(repo); err == nil && profile.BrowserQA() {
+			o.Browser = append(o.Browser, filepath.Base(repo))
 		}
 	}
 	return o

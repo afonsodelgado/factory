@@ -33,10 +33,12 @@ type Check struct {
 }
 
 type Options struct {
-	ClaudeDir string
-	Binary    string
-	Browser   []string
-	Home      string
+	ClaudeDir  string
+	Binary     string
+	Browser    []string
+	Home       string
+	ConfigFile string
+	ConfigErr  error
 }
 
 func run(name string, args ...string) (string, error) {
@@ -81,7 +83,7 @@ func installCommand(pkg string) string {
 }
 
 func Doctor(o Options) []Check {
-	return []Check{
+	checks := []Check{
 		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
 		tool("git", "", "git", []string{"--version"}, installCommand("git")),
 		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
@@ -94,6 +96,10 @@ func Doctor(o Options) []Check {
 		bundleCheck(o),
 		hooksCheck(o),
 	}
+	if o.ConfigErr != nil {
+		checks = append(checks, Check{Name: "config", Mark: Fail, Detail: "factory-tui hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
+	}
+	return checks
 }
 
 func tool(name, minimum, command string, args []string, fix string) Check {
