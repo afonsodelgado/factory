@@ -310,6 +310,9 @@ func (m *Model) wake(key string) error {
 			return err
 		}
 	case WakeShell:
+		if now := m.freshTarget(it).Pane; now == nil || !factory.IsShell(now.Command) {
+			return fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
+		}
 		if err := m.Engine.Type(it.Pane.ID, plan.Command); err != nil {
 			return err
 		}

@@ -237,6 +237,30 @@ func TestDeliverTypesIntoAnIdlePaneAndRefusesCopyMode(t *testing.T) {
 	}
 }
 
+func TestWakeTypesNothingIntoAPaneThatLeftItsShell(t *testing.T) {
+	e, l := hubFixture(t)
+	out := filepath.Join(t.TempDir(), "typed")
+	id, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("eng-3-z"), Command: "exec cat > " + out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Tag(id, "/repo", "eng-3-z", ""); err != nil {
+		t.Fatal(err)
+	}
+	waitForCommand(t, e.TM, id, "cat")
+	polledAtTheShell := pane(t, e.TM, id)
+	polledAtTheShell.Command = "zsh"
+	exited := Item{Status: factory.Exited, Pane: &polledAtTheShell, Factory: factory.Factory{Repo: "/repo", Slug: "eng-3-z", Worktree: t.TempDir(), Entry: &state.Entry{SessionID: "s3"}}}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l})
+	model.snap = Snapshot{At: time.Now(), Items: []Item{exited}}
+
+	err = model.wake(exited.Factory.Key())
+	time.Sleep(300 * time.Millisecond)
+	if typed, _ := os.ReadFile(out); err == nil || len(typed) != 0 {
+		t.Errorf("wake returned %v and typed %q; the user restarted claude since the last poll, so the resume command would land in its prompt", err, typed)
+	}
+}
+
 func waitForCommand(t *testing.T, tm tmux.Client, id, command string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
