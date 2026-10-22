@@ -47,7 +47,7 @@ func TestStatusOf(t *testing.T) {
 		{"no pane", Factory{State: v2("agent")}, Live{Pane{}, nil}, Gone},
 		{"done", Factory{State: &state.State{Stages: map[string]state.Stage{"handoff": {Status: "done"}}}}, Live{Pane{}, nil}, Done},
 		{"created a minute ago", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{alive, nil}, Starting},
-		{"no state five minutes after creation", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{alive, nil}, FailedToStart},
+		{"no state five minutes after creation, claude never started", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{Pane{Found: true, Shell: true}, nil}, FailedToStart},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

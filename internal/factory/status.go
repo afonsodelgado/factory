@@ -66,10 +66,10 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Done
 	case !live.Pane.Found:
 		return Gone
-	case live.Pane.Shell:
-		return Exited
 	case f.State == nil && live.Hook == nil:
 		return startingStatus(f, now)
+	case live.Pane.Shell:
+		return Exited
 	case needsYou(f, live.Hook):
 		return NeedsYou
 	case stalled(f, live.Hook, now, stalledAfter):
