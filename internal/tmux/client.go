@@ -255,16 +255,6 @@ func (c Client) SetSessionOption(session, name, value string) error {
 	return err
 }
 
-func (c Client) Bind(key string, command ...string) error {
-	_, err := c.Run(append([]string{"bind-key", "-n", key}, command...)...)
-	return err
-}
-
-func (c Client) Unbind(key string) error {
-	_, err := c.Run("unbind-key", "-n", key)
-	return err
-}
-
 type Popup struct {
 	Title   string
 	Width   string
@@ -322,11 +312,6 @@ func (c Client) KillPane(pane string) error {
 
 func (c Client) KillWindow(window string) error {
 	_, err := c.Run("kill-window", "-t", window)
-	return err
-}
-
-func (c Client) KillSession(name string) error {
-	_, err := c.Run("kill-session", "-t", "="+name)
 	return err
 }
 
