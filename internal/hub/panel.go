@@ -233,7 +233,7 @@ func (m *Model) freshTarget(it Item) Target {
 
 func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	switch {
-	case item.Kind == "question":
+	case item.Kind == "question" && len(item.Questions) > 0:
 		answers := make([]string, len(item.Questions))
 		for i, q := range item.Questions {
 			answers[i] = d.Answer(q, i)
@@ -445,7 +445,22 @@ func (m *Model) switchTab(delta int) {
 }
 
 func (m *Model) formKey(item panel.Item, d *panel.Draft, key string) tea.Cmd {
-	switch item.Kind {
+	kind := item.Kind
+	if kind == "question" && len(item.Questions) == 0 {
+		kind = "open question"
+	}
+	switch kind {
+	case "open question":
+		switch key {
+		case "e", "enter":
+			d.Editing = true
+		case "ctrl+s":
+			if strings.TrimSpace(d.Text) != "" {
+				m.deliver("")
+			}
+		case "d":
+			m.discardDraft()
+		}
 	case "question":
 		q := item.Questions[d.Question]
 		switch key {
@@ -540,7 +555,7 @@ func gateURL(item panel.Item, d *panel.Draft) string {
 
 func (m *Model) edit(item panel.Item, d *panel.Draft, key, text string) {
 	field := &d.Text
-	if item.Kind == "question" {
+	if item.Kind == "question" && len(item.Questions) > 0 {
 		field = &d.Typed[d.Question]
 	}
 	switch key {

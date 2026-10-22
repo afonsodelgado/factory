@@ -238,17 +238,23 @@ func wrapped(s string, w int, ink theme.Ink) []line {
 func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int) {
 	top := []line{header(it, ic, v)}
 	top = append(top, wrapped(it.Body, w, theme.Text)...)
-	switch it.Kind {
-	case "question":
+	switch {
+	case it.Kind == "question" && len(it.Questions) == 0:
+		middle := freeText(v, w)
+		if middle == nil {
+			middle = []line{blank(), hints("e", "type an answer")}
+		}
+		return top, middle, sendFooter(v, w, "ctrl+s", "send"), 0
+	case it.Kind == "question":
 		middle, focus := questionForm(v, it, w)
 		return top, middle, sendFooter(v, w, "ctrl+s", "send"), focus
-	case "gate":
+	case it.Kind == "gate":
 		return top, gateForm(v, it, ic, w), append(textBox("notes", v.Draft, w), gateHints(it, v)...), 0
-	case "comment":
+	case it.Kind == "comment":
 		return top, nil, append(textBox("reply", v.Draft, w), commentHints(it, v)...), 0
-	case "cap":
+	case it.Kind == "cap":
 		return top, freeText(v, w), choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else"), 0
-	case "failure":
+	case it.Kind == "failure":
 		return top, freeText(v, w), choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead"), 0
 	}
 	var middle []line

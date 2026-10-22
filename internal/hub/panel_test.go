@@ -55,6 +55,26 @@ func typeText(tm *teatest.TestModel, s string) {
 	}
 }
 
+func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	snap := questionFactory("Stop", now)
+	snap.Items[0].Factory.State.Attention[0].Questions = nil
+	typist := &fakeTypist{}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	model.SetSnapshot(snap)
+	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+	panelKeys(tm, "right", "left", "e")
+	typeText(tm, "yes")
+	panelKeys(tm, "ctrl+s")
+	if err := tm.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
+	if len(typist.typed) != 1 || typist.typed[0] != "%9: q-7452-1 yes" {
+		t.Errorf("typed %q, want the answer as text for the item: a question item without its questions list must not crash the hub", typist.typed)
+	}
+}
+
 func TestQuestionBatchPanel(t *testing.T) {
 	local := time.Local
 	time.Local = time.UTC

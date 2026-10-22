@@ -731,6 +731,9 @@ func (m *Model) panelHints() []footer.Hint {
 	if item.ID != "" && m.draft(it.Factory, item).Editing {
 		return hints("ctrl+s", "send", "esc", "stop typing", "ctrl+u", "clear")
 	}
+	if item.Kind == "question" && len(item.Questions) == 0 {
+		return hints("e", "type an answer", "ctrl+s", "send", "esc", "back, keep draft")
+	}
 	switch item.Kind {
 	case "question":
 		return hints("↑↓", "question", "←→", "option", "e", "type", "r", "use recommended", "R", "all recommended", "ctrl+s", "send", "esc", "back, keep draft")
