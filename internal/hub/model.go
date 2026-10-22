@@ -221,10 +221,11 @@ func (m *Model) apply(s Snapshot) {
 	m.planWakes()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
-		m.selected = ""
+		first := ""
 		if len(rows) > 0 {
-			m.selected = rows[0].Key
+			first = rows[0].Key
 		}
+		m.choose(first)
 	}
 	m.syncTitles()
 	m.ensureSlot()
@@ -534,10 +535,18 @@ func (m *Model) choose(key string) {
 	m.saveDraft()
 	m.selected = key
 	m.panel.item, m.panel.row = 0, 0
-	if it, ok := m.snap.Find(key); ok && len(attentionItems(it, m.snap.At)) > 0 {
-		m.panel.tab = panel.Attention
+	if it, ok := m.snap.Find(key); ok {
+		m.panel.tab = m.openingTab(it)
 	}
 	m.showSelected()
+}
+
+func (m *Model) openingTab(it Item) panel.Tab {
+	nothingOpen := len(attentionItems(it, m.snap.At)) == 0
+	if nothingOpen && len(m.prsFor(it.Factory)) > 0 {
+		return panel.PRs
+	}
+	return panel.Attention
 }
 
 func (m *Model) nextNeedingYou() {

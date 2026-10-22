@@ -2,6 +2,7 @@ package hub
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
@@ -117,6 +119,23 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 				t.Errorf("typed %q, panel:\n%s\nwant %d message(s) and %q shown", typist.typed, view, c.typed, c.shows)
 			}
 		})
+	}
+}
+
+func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	asking := questionFactory("Stop", now).Items[0]
+	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{Ticket: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	model.SetSnapshot(Snapshot{At: now, Items: []Item{quiet, asking}})
+
+	opened := []panel.Tab{model.panel.tab}
+	model.choose(asking.Factory.Key())
+	opened = append(opened, model.panel.tab)
+	model.choose(quiet.Factory.Key())
+	opened = append(opened, model.panel.tab)
+	if want := []panel.Tab{panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) {
+		t.Errorf("tabs on start, then choosing the asking and the quiet factory = %v, want %v: a factory with PRs and nothing open opens on PRs (A1)", opened, want)
 	}
 }
 
