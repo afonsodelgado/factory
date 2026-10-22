@@ -31,7 +31,7 @@ type Pane struct {
 	UI         string
 }
 
-const sep = "\x1f"
+const sep = "<|>"
 
 var paneFields = []string{
 	"#{pane_id}", "#{session_name}", "#{window_id}", "#{window_name}", "#{pane_current_command}",
