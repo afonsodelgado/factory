@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -144,7 +145,7 @@ func (m *Model) newContext() dialog.NewContext {
 			if it.Factory.State != nil {
 				stage = it.Factory.State.Stage
 			}
-			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage, Archived: it.Factory.Archived()})
+			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage, Archived: it.Factory.Archived(), Retired: retired(it.Factory)})
 		}
 		if repo == selectedRepo {
 			c.Repo = i
@@ -247,15 +248,24 @@ func (m *Model) create(r dialog.NewResult) error {
 	if existing, ok := m.existingFactory(r.Repo, r.Ticket, r.Slug); ok {
 		return m.selectExisting(existing)
 	}
-	if m.Engine == nil || m.Loader == nil {
+	if m.Loader == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
+	earlier := m.retiredFactories(r.Repo, r.Ticket, r.Slug)
+	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)
 	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Ticket: r.Ticket, Brief: r.Brief, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
 	title := firstLine(r.Brief)
 	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Ticket: r.Ticket, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
-	if err := m.Loader.UpdateRegistry(func(reg *state.Registry) { reg.Upsert(entry) }); err != nil {
+	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
+		pinDirs(reg, earlier)
+		reg.Upsert(entry)
+	})
+	if err != nil {
 		return err
+	}
+	if m.Engine == nil {
+		return errors.New("the hub is not attached to tmux")
 	}
 	label := r.Ticket
 	if label == "" {
@@ -285,13 +295,57 @@ func firstLine(s string) string {
 	return line
 }
 
+func retired(f factory.Factory) bool {
+	finished := f.Done() || f.Archived()
+	return finished && !dirExists(f.Worktree)
+}
+
+func named(f factory.Factory, ticket, slug string) bool {
+	return (ticket != "" && factory.MatchTicket(f.Slug, ticket)) || f.Slug == slug
+}
+
+func (m *Model) retiredMatch(repos []string, ticket, slug string) (string, bool) {
+	for _, it := range m.snap.Items {
+		f := it.Factory
+		if retired(f) && slices.Contains(repos, f.Repo) && named(f, ticket, slug) {
+			return f.Repo, true
+		}
+	}
+	return "", false
+}
+
+func (m *Model) retiredFactories(repo, ticket, slug string) []factory.Factory {
+	var earlier []factory.Factory
+	for _, it := range m.snap.Items {
+		f := it.Factory
+		if f.Repo == repo && f.Dir != "" && retired(f) && named(f, ticket, slug) {
+			earlier = append(earlier, f)
+		}
+	}
+	return earlier
+}
+
+func pinDirs(reg *state.Registry, factories []factory.Factory) {
+	for _, f := range factories {
+		entry := reg.Find(f.Repo, f.Slug)
+		if entry == nil {
+			entry = reg.Upsert(state.Entry{Repo: f.Repo, Slug: f.Slug, CreatedAt: f.CreatedAt()})
+		}
+		entry.Dir = resolved(f.Dir)
+	}
+}
+
+func (m *Model) slugTaken(repo string) func(string) bool {
+	return func(slug string) bool {
+		_, known := m.snap.Find(state.Key(repo, slug))
+		return known || m.Loader.Known(repo, slug) || dirExists(filepath.Join(factory.WorktreesDir(repo), slug))
+	}
+}
+
 func (m *Model) existingFactory(repo, ticket, slug string) (string, bool) {
 	for _, it := range m.snap.Items {
 		f := it.Factory
-		if f.Repo != repo {
-			continue
-		}
-		if (ticket != "" && factory.MatchTicket(f.Slug, ticket)) || f.Slug == slug {
+		if f.Repo == repo && !retired(f) && named(f, ticket, slug) {
 			return f.Key(), true
 		}
 	}
@@ -346,6 +400,14 @@ func (m *Model) wake(key string) error {
 		m.Loader.Note(it.Factory, plan.Note())
 	}
 	return nil
+}
+
+func (m *Model) wakeSelected() {
+	if it, ok := m.selectedItem(); ok && it.Status == factory.Done {
+		m.notice = it.Factory.Label() + " is done, so there is nothing to wake."
+		return
+	}
+	m.report(m.wake(m.selected))
 }
 
 func (m *Model) wakeAll() error {

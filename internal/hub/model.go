@@ -436,7 +436,7 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 	case "a":
 		return m.askArchive()
 	case "w":
-		m.report(m.wake(m.selected))
+		m.wakeSelected()
 	case "W":
 		m.report(m.wakeAll())
 	case "q", "ctrl+c":
@@ -477,14 +477,14 @@ func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
 	m.notice = ""
 	switch {
 	case pane == "panel" && key == "w" && m.asleepItemShown():
-		m.report(m.wake(m.selected))
+		m.wakeSelected()
 	case pane == "panel":
 		m.focus = footer.Panel
 		return m.panelKey(key, text)
 	case pane == "slot" && key == "n":
 		return m.openDialog("new", m.newContext())
 	case pane == "slot" && key == "w":
-		m.report(m.wake(m.selected))
+		m.wakeSelected()
 	}
 	return nil
 }
@@ -978,7 +978,10 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 		if it.Factory.Worktree != "" {
 			y++
 			c.Put(x, y, "worktree  ", theme.Quiet)
-			c.PutMax(x+10, y, tilde(it.Factory.Worktree), theme.Text, c.W-x-12)
+			end := c.PutMax(x+10, y, tilde(it.Factory.Worktree), theme.Text, c.W-x-22)
+			if !dirExists(it.Factory.Worktree) {
+				c.Put(end+2, y, "removed", theme.FgInk(theme.Red))
+			}
 		}
 		return
 	}
@@ -1009,7 +1012,10 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 }
 
 func noPaneReason(it Item) string {
-	if it.Status == factory.Done {
+	switch {
+	case it.Status == factory.Done && retired(it.Factory):
+		return "This factory is done and its worktree was removed. n or factory-tui open with the same ticket starts a new factory; this row stays as history."
+	case it.Status == factory.Done:
 		return "This factory is done and its tmux pane is closed. Archive it to hide the row."
 	}
 	if it.Hook != nil {

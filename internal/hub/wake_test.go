@@ -2,12 +2,18 @@ package hub
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
+
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
 func TestWakeResumesTheRecordedConversation(t *testing.T) {
@@ -48,7 +54,8 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 
 func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.MkdirAll(factory.WorktreesDir(repo), 0o755); err != nil {
+	worktree := filepath.Join(factory.WorktreesDir(repo), "eng-9-clean")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
@@ -57,12 +64,12 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true})
-	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", State: &state.State{Ticket: "ENG-9"}, Entry: entry}}
+	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{Ticket: "ENG-9"}, Entry: entry}}
 	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
-	for _, name := range []string{"!!!", "ENG-9"} {
-		if err := model.open(OpenRequest{Name: name}); err == nil {
-			t.Errorf("open %q succeeded with nothing created or selected; want the reason", name)
+	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived"} {
+		if err := model.open(OpenRequest{Name: name}); err == nil || !strings.Contains(err.Error(), reason) {
+			t.Errorf("open %q = %v; want it refused, naming %q", name, err, reason)
 		}
 	}
 
@@ -71,6 +78,45 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	model.selectorKey("a")
 	if registry.Find(repo, "eng-9-clean").Archived {
 		t.Error("a on the archived ENG-9 row left it archived; the ticket could never get its factory back")
+	}
+}
+
+func TestATicketWhoseFactoryIsDoneAndRemovedGetsANewOne(t *testing.T) {
+	repo := t.TempDir()
+	legacy := filepath.Join(repo, ".claude", "factory", "ENG-9")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "state.json"), []byte(`{"ticket":"ENG-9","worktree":"","stages":{"handoff":{"status":"done"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
+	model := NewModel(Model{Config: cfg, Loader: loader})
+	model.SetSnapshot(loader.Load())
+
+	tm := teatest.NewTestModel(t, dialog.NewFactory(model.newContext()), teatest.WithInitialTermSize(84, 22))
+	tm.Type("ENG-9")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	result, _ := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*dialog.NewFactoryModel).Result()
+	if r, _ := result.(dialog.NewResult); r.Select != "" || r.Slug != "eng-9-2" {
+		t.Errorf("n ENG-9 gave %+v; want a new factory under a slug the old row does not hold", result)
+	}
+
+	model.open(OpenRequest{Name: "ENG-9"})
+	if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(repo), "eng-9-2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, it := range loader.Load().Items {
+		keys = append(keys, it.Factory.Slug)
+	}
+	if !slices.Equal(keys, []string{"eng-9", "eng-9-2"}) {
+		t.Errorf("after open ENG-9 and claude creating its worktree, the rows are %v; want the done eng-9 kept as history and the new eng-9-2", keys)
 	}
 }
 

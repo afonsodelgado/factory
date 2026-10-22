@@ -56,5 +56,9 @@ func (m *Model) open(r OpenRequest) error {
 	if len(repos) == 0 {
 		return errors.New("no repos configured")
 	}
-	return m.create(dialog.NewResult{Repo: repos[0], Ticket: ticket, Feature: feature, Slug: slug})
+	repo := repos[0]
+	if earlier, ok := m.retiredMatch(repos, ticket, slug); ok {
+		repo = earlier
+	}
+	return m.create(dialog.NewResult{Repo: repo, Ticket: ticket, Feature: feature, Slug: slug})
 }

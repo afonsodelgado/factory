@@ -48,17 +48,43 @@ func (m *NewFactoryModel) parsed() (ticket, feature, slug string) {
 	return ticket, feature, factory.SlugFor(ticket, feature)
 }
 
-func (m *NewFactoryModel) existing() (Existing, bool) {
+func (m *NewFactoryModel) named(e Existing) bool {
 	ticket, _, slug := m.parsed()
+	if ticket != "" {
+		return factory.MatchTicket(e.Worktree, ticket)
+	}
+	return slug != "" && e.Worktree == slug
+}
+
+func (m *NewFactoryModel) existing() (Existing, bool) {
 	for _, e := range m.selectedRepo().Existing {
-		if ticket != "" && factory.MatchTicket(e.Worktree, ticket) {
-			return e, true
-		}
-		if ticket == "" && slug != "" && e.Worktree == slug {
+		if !e.Retired && m.named(e) {
 			return e, true
 		}
 	}
 	return Existing{}, false
+}
+
+func (m *NewFactoryModel) retiredMatch() (Existing, bool) {
+	for _, e := range m.selectedRepo().Existing {
+		if e.Retired && m.named(e) {
+			return e, true
+		}
+	}
+	return Existing{}, false
+}
+
+func (m *NewFactoryModel) slug() string {
+	_, _, slug := m.parsed()
+	taken := func(s string) bool {
+		for _, e := range m.selectedRepo().Existing {
+			if e.Worktree == s {
+				return true
+			}
+		}
+		return false
+	}
+	return factory.FreshSlug(slug, taken)
 }
 
 func (m *NewFactoryModel) nearMiss() (Existing, bool) {
@@ -75,9 +101,9 @@ func (m *NewFactoryModel) nearMiss() (Existing, bool) {
 }
 
 func (m *NewFactoryModel) launch() factory.Launch {
-	ticket, _, slug := m.parsed()
+	ticket, _, _ := m.parsed()
 	repo := m.selectedRepo()
-	return factory.Launch{Repo: repo.Path, Slug: slug, Ticket: ticket, SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Ticket: ticket, SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
 }
 
 func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -143,7 +169,7 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		return tea.Quit
 	}
 	if ticket != "" {
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Ticket: ticket, Feature: feature, Slug: slug}
+		m.result = &NewResult{Repo: m.selectedRepo().Path, Ticket: ticket, Feature: feature, Slug: m.slug()}
 		return tea.Quit
 	}
 	m.step = 2
@@ -162,8 +188,8 @@ func (m *NewFactoryModel) briefKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.problem = "The brief is empty. Write at least a sentence about what the feature should do; the factory won't start without one."
 			return nil
 		}
-		_, feature, slug := m.parsed()
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Feature: feature, Slug: slug, Brief: m.brief}
+		_, feature, _ := m.parsed()
+		m.result = &NewResult{Repo: m.selectedRepo().Path, Feature: feature, Slug: m.slug(), Brief: m.brief}
 		return tea.Quit
 	case "enter":
 		m.brief += "\n"
@@ -269,6 +295,10 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 		add(fmt.Sprintf("%s already has a factory: %s in %s. No second factory is created.", e.Label, e.Status, e.Stage), theme.FgInk(theme.Yellow))
 		return spans
 	}
+	if e, ok := m.retiredMatch(); ok {
+		add(fmt.Sprintf("%s's earlier factory is %s and its worktree is gone, so this starts a new one as %s. The old row stays as history.", e.Label, e.Status, m.slug()), theme.Muted)
+		return spans
+	}
 	switch {
 	case m.name == "":
 		add("A ticket id such as ENG-1234, optionally with /feature-name, or a feature name.", theme.Muted)
@@ -301,8 +331,7 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 
 func (m *NewFactoryModel) drawBrief(c *theme.Canvas) {
 	w := c.W - 2
-	_, _, slug := m.parsed()
-	c.Put(1, 0, "New factory · "+slug, theme.Bright.B())
+	c.Put(1, 0, "New factory · "+m.slug(), theme.Bright.B())
 	c.Right(c.W-2, 0, "2 of 2", theme.Muted)
 	y := 2
 	for _, l := range theme.Wrap("Describe the feature: what it should do, for whom, and anything you already know you want. The supervisor writes this to brief.md word for word and won't ask for it again.", w) {

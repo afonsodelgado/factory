@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -51,6 +52,14 @@ func SlugFor(ticket, feature string) string {
 		return strings.ToLower(ticket)
 	}
 	return feature
+}
+
+func FreshSlug(slug string, taken func(string) bool) string {
+	fresh := slug
+	for n := 2; taken(fresh); n++ {
+		fresh = fmt.Sprintf("%s-%d", slug, n)
+	}
+	return fresh
 }
 
 type Launch struct {

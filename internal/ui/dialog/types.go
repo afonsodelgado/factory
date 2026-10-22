@@ -13,6 +13,7 @@ type Existing struct {
 	Status   string `json:"status"`
 	Stage    string `json:"stage"`
 	Archived bool   `json:"archived"`
+	Retired  bool   `json:"retired"`
 }
 
 const UnarchiveAdvice = "In the factory list, H shows archived factories and a on the row unarchives it."

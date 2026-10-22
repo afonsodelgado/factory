@@ -157,6 +157,12 @@ func (l *Loader) logHook(f factory.Factory, hook *state.HookFile) {
 	state.AppendActivity(state.ActivityPath(l.Config.ActivityDir(), f.Repo, f.Slug), state.ActivityEntry{At: main.At, Source: "hook", Text: text})
 }
 
+func (l *Loader) Known(repo, slug string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.Registry.Find(repo, slug) != nil
+}
+
 func (l *Loader) UpdateRegistry(fn func(*state.Registry)) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

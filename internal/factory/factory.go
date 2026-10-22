@@ -133,8 +133,11 @@ func Discover(repos []string, reg *state.Registry) []Factory {
 			}
 			seen[real] = true
 			f := load(repo, path, real)
-			if moved := reg.FindDir(repo, filepath.Dir(real)); moved != nil {
-				f.Slug = moved.Slug
+			if pinned := reg.FindDir(repo, filepath.Dir(real)); pinned != nil {
+				f.Slug = pinned.Slug
+				if f.State == nil || f.State.Worktree == "" {
+					f.Worktree = ""
+				}
 			}
 			if keys[f.Key()] {
 				continue
