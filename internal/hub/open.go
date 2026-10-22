@@ -3,6 +3,8 @@ package hub
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -38,6 +40,9 @@ func (m *Model) open(r OpenRequest) error {
 	slug := factory.SlugFor(ticket, feature)
 	repos := m.Config.Repos
 	if r.Repo != "" {
+		if !slices.Contains(m.Config.Repos, r.Repo) {
+			return fmt.Errorf("the running hub does not list %s; quit it with q and run factory-tui open again to reload the config", r.Repo)
+		}
 		repos = []string{r.Repo}
 	}
 	for _, repo := range repos {
