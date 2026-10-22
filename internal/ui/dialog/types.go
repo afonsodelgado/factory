@@ -12,7 +12,10 @@ type Existing struct {
 	Label    string `json:"label"`
 	Status   string `json:"status"`
 	Stage    string `json:"stage"`
+	Archived bool   `json:"archived"`
 }
+
+const UnarchiveAdvice = "In the factory list, H shows archived factories and a on the row unarchives it."
 
 type RepoOption struct {
 	Name       string     `json:"name"`

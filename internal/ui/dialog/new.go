@@ -117,7 +117,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+u":
 		m.name = ""
 	case "ctrl+w":
-		if e, ok := m.existing(); ok {
+		if e, ok := m.existing(); ok && !e.Archived {
 			m.result = &NewResult{Select: e.Key, Wake: true}
 			return tea.Quit
 		}
@@ -133,6 +133,9 @@ func (m *NewFactoryModel) next() tea.Cmd {
 	ticket, feature, slug := m.parsed()
 	if slug == "" {
 		m.problem = "Type a ticket id, such as ENG-1234, or a feature name."
+		return nil
+	}
+	if e, ok := m.existing(); ok && e.Archived {
 		return nil
 	}
 	if e, ok := m.existing(); ok {
@@ -240,7 +243,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	}
 	hints := "⏎ next: brief   ↑↓ repo   esc cancel"
 	ticket, _, _ := m.parsed()
-	if _, matched := m.existing(); matched {
+	if e, matched := m.existing(); matched && e.Archived {
+		hints = "esc cancel"
+	} else if matched {
 		hints = "⏎ select it   ctrl+w select and wake it   esc cancel"
 	} else if ticket != "" {
 		hints = "⏎ start factory   ↑↓ repo   esc cancel"
@@ -255,6 +260,10 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 		for _, l := range theme.Wrap(text, w) {
 			spans = append(spans, []theme.Span{{Text: l, Ink: ink}})
 		}
+	}
+	if e, ok := m.existing(); ok && e.Archived {
+		add(fmt.Sprintf("%s already has a factory, archived: %s in %s. %s", e.Label, e.Status, e.Stage, UnarchiveAdvice), theme.FgInk(theme.Yellow))
+		return spans
 	}
 	if e, ok := m.existing(); ok {
 		add(fmt.Sprintf("%s already has a factory: %s in %s. No second factory is created.", e.Label, e.Status, e.Stage), theme.FgInk(theme.Yellow))

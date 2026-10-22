@@ -517,6 +517,9 @@ func (m *Model) askArchive() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
+	case it.Factory.Archived():
+		m.report(m.unarchive(it))
+		return m.load()
 	case !archivable(it):
 		m.notice = "Only done, gone or exited factories can be archived. Kill " + it.Factory.Label() + " first."
 		return nil
@@ -875,6 +878,8 @@ func (m *Model) selectorHints() []footer.Hint {
 	switch {
 	case !ok:
 		return hints("n", "new factory", "?", "all keys", "q", "quit the UI")
+	case it.Factory.Archived():
+		return hints("a", "unarchive "+it.Factory.Label(), "H", "hide archived", "⏎", "session", "j/k", "move", "/", "find", "n", "new")
 	case factory.PermissionPrompt(it.Hook):
 		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "x", "kill")
 	case it.Status.Asleep():

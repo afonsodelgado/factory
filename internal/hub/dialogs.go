@@ -144,7 +144,7 @@ func (m *Model) newContext() dialog.NewContext {
 			if it.Factory.State != nil {
 				stage = it.Factory.State.Stage
 			}
-			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage})
+			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage, Archived: it.Factory.Archived()})
 		}
 		if repo == selectedRepo {
 			c.Repo = i
@@ -217,9 +217,26 @@ func (m *Model) newResult(r dialog.NewResult) (tea.Cmd, error) {
 
 func (m *Model) selectExisting(key string) error {
 	if it, ok := m.snap.Find(key); ok && it.Factory.Archived() && !m.showArchived {
-		return fmt.Errorf("%s is archived. Press H to show archived factories", it.Factory.Label())
+		return fmt.Errorf("%s is archived. %s", it.Factory.Label(), dialog.UnarchiveAdvice)
 	}
 	m.choose(key)
+	return nil
+}
+
+func (m *Model) unarchive(it Item) error {
+	if m.Loader == nil {
+		return nil
+	}
+	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
+		if entry := reg.Find(it.Factory.Repo, it.Factory.Slug); entry != nil {
+			entry.Archived = false
+		}
+	})
+	if err != nil {
+		return err
+	}
+	m.Loader.Note(it.Factory, "unarchived")
+	m.notice = it.Factory.Label() + " is back in the list."
 	return nil
 }
 

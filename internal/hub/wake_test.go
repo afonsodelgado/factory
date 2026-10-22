@@ -51,13 +51,26 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	if err := os.MkdirAll(factory.WorktreesDir(repo), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", State: &state.State{Ticket: "ENG-9"}, Entry: &state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true}}}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{repo}}})
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true})
+	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", State: &state.State{Ticket: "ENG-9"}, Entry: entry}}
+	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
 	for _, name := range []string{"!!!", "ENG-9"} {
 		if err := model.open(OpenRequest{Name: name}); err == nil {
 			t.Errorf("open %q succeeded with nothing created or selected; want the reason", name)
 		}
+	}
+
+	model.selectorKey("H")
+	model.choose(archived.Factory.Key())
+	model.selectorKey("a")
+	if registry.Find(repo, "eng-9-clean").Archived {
+		t.Error("a on the archived ENG-9 row left it archived; the ticket could never get its factory back")
 	}
 }
 
