@@ -41,11 +41,6 @@ func (i Ink) B() Ink {
 	return i
 }
 
-func (i Ink) On(bg color.Color) Ink {
-	i.BG = bg
-	return i
-}
-
 func (i Ink) Style() lipgloss.Style {
 	s := lipgloss.NewStyle()
 	if i.FG != nil {

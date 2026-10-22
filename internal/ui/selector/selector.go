@@ -2,10 +2,6 @@ package selector
 
 import (
 	"fmt"
-	"sort"
-	"strings"
-
-	"github.com/sahilm/fuzzy"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -92,25 +88,6 @@ func Counts(d Data) (active, done int) {
 		}
 	}
 	return active, done
-}
-
-func Find(rows []Row, query string) []Row {
-	if strings.TrimSpace(query) == "" {
-		sorted := append([]Row(nil), rows...)
-		sort.SliceStable(sorted, func(i, j int) bool {
-			return sorted[i].Status == factory.NeedsYou && sorted[j].Status != factory.NeedsYou
-		})
-		return sorted
-	}
-	targets := make([]string, len(rows))
-	for i, r := range rows {
-		targets[i] = r.Label + " " + r.Title
-	}
-	var found []Row
-	for _, m := range fuzzy.Find(query, targets) {
-		found = append(found, rows[m.Index])
-	}
-	return found
 }
 
 func Render(d Data, w, h int) string {

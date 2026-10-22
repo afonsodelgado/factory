@@ -185,20 +185,6 @@ func (c *Canvas) Render() string {
 	return strings.Join(lines, "\n")
 }
 
-func (c *Canvas) Plain() string {
-	lines := make([]string, c.H)
-	for y, row := range c.cells {
-		var b strings.Builder
-		for _, cl := range row {
-			if !cl.cont {
-				b.WriteString(cl.text)
-			}
-		}
-		lines[y] = b.String()
-	}
-	return strings.Join(lines, "\n")
-}
-
 func Truncate(text string, limit int) string {
 	if limit <= 0 {
 		return ""
