@@ -170,10 +170,14 @@ func (m *Model) switchContext() dialog.SwitchContext {
 }
 
 func factoryDir(f factory.Factory) string {
-	if f.Dir != "" {
-		return tilde(f.Dir)
+	if f.Dir == "" {
+		return ".claude/factory/" + f.Label()
 	}
-	return ".claude/factory/" + f.Label()
+	linkedOutOfWorktree := f.Worktree != "" && within(f.Dir, f.Worktree) && !within(resolved(f.Dir), resolved(f.Worktree))
+	if linkedOutOfWorktree {
+		return tilde(resolved(f.Dir))
+	}
+	return tilde(f.Dir)
 }
 
 func (m *Model) killContext(it Item) dialog.KillContext {

@@ -219,17 +219,23 @@ func (a *Archive) View() tea.View {
 	switch {
 	case a.step == 0:
 		c.Put(1, 0, "Hides the row. H shows archived factories again.", theme.Text)
-		c.PutMax(1, 1, "Branches and "+ctx.FactoryDir+" are never deleted.", theme.Text, c.W-2)
+		c.Put(1, 1, "Branches and the factory directory are never deleted:", theme.Text)
+		c.Put(3, 2, pathTail(ctx.FactoryDir, c.W-4), theme.Bright)
 		c.Spans(1, c.H-1, []theme.Span{{Text: "a", Ink: theme.Key}, {Text: " archive   ", Ink: theme.Text}, {Text: "r", Ink: theme.Key}, {Text: " archive and remove the worktree…   ", Ink: theme.Text}, {Text: "esc", Ink: theme.Key}, {Text: " cancel", Ink: theme.Text}})
 	case ctx.Removable:
-		c.Put(1, 0, "Remove the worktree too?", theme.Bright.B())
-		c.PutMax(1, 1, "Deletes  "+ctx.Worktree, theme.Text, c.W-2)
-		kept := ctx.FactoryDir
+		const indent = 10
+		where, kept := "the factory directory, at", ctx.FactoryDir
 		if ctx.FactoryDirMovesTo != "" {
-			kept = "the factory directory, moved to " + ctx.FactoryDirMovesTo
+			where, kept = "the factory directory, moved to", ctx.FactoryDirMovesTo
 		}
-		c.PutMax(1, 2, "Keeps    branch "+ctx.Branch+" and "+kept, theme.Text, c.W-2)
-		c.Put(1, 3, "✓ no uncommitted changes    ✓ every commit is pushed to its upstream", theme.FgInk(theme.Green))
+		c.Put(1, 0, "Remove the worktree too?", theme.Bright.B())
+		c.Put(1, 1, "Deletes", theme.Text)
+		c.Put(indent, 1, pathTail(ctx.Worktree, c.W-indent-1), theme.Bright)
+		c.Put(1, 2, "Keeps", theme.Text)
+		c.Put(indent, 2, "branch "+ctx.Branch, theme.Text)
+		c.Put(indent, 3, where, theme.Text)
+		c.Put(indent, 4, pathTail(kept, c.W-indent-1), theme.Bright)
+		c.Put(1, 6, "✓ no uncommitted changes    ✓ every commit is pushed to its upstream", theme.FgInk(theme.Green))
 		c.Spans(1, c.H-1, []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  remove " + base(ctx.Worktree) + "      ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  archive only, the default", Ink: theme.Text}})
 	default:
 		a.drawRefused(c)
@@ -241,10 +247,21 @@ func base(path string) string {
 	return path[strings.LastIndex(path, "/")+1:]
 }
 
+func pathTail(path string, width int) string {
+	if theme.Width(path) <= width {
+		return path
+	}
+	runes := []rune(path)
+	for len(runes) > 0 && theme.Width(string(runes)) > width-1 {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
+}
+
 func (a *Archive) drawRefused(c *theme.Canvas) {
 	ctx := a.Context
 	c.Put(1, 0, "Can't remove the worktree", theme.FgInk(theme.Red).B())
-	c.PutMax(1, 1, ctx.Worktree, theme.Text, c.W-2)
+	c.Put(1, 1, pathTail(ctx.Worktree, c.W-2), theme.Text)
 	c.Put(1, 2, "It has work that isn't safe to delete:", theme.Text)
 	y := 3
 	label := func(name string, items []string) {
