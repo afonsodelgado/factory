@@ -1,10 +1,15 @@
 package hub
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
 func run(t *testing.T, dir string, args ...string) {
@@ -44,18 +49,27 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, "notes.md"), []byte("draft"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := RemoveWorktree(repo, worktree, factoryDir); err == nil {
+	if _, err := RemoveWorktree(repo, worktree, factoryDir); err == nil {
 		t.Fatal("removed a worktree with uncommitted changes")
 	}
 
 	run(t, worktree, "git", "add", "notes.md")
 	run(t, worktree, "git", "commit", "-q", "-m", "notes")
-	if err := RemoveWorktree(repo, worktree, factoryDir); err == nil {
+	if _, err := RemoveWorktree(repo, worktree, factoryDir); err == nil {
 		t.Fatal("removed a worktree with a commit not pushed to its upstream")
 	}
 
 	run(t, worktree, "git", "push", "-q")
-	if err := RemoveWorktree(repo, worktree, factoryDir); err != nil {
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
+	model := NewModel(Model{Config: cfg, Loader: loader})
+	model.SetSnapshot(loader.Load())
+	key := state.Key(repo, "eng-1-x")
+	if err := model.archive(dialog.ArchiveResult{Key: key, Remove: true}); err != nil {
 		t.Fatalf("a clean, pushed worktree was not removed: %v", err)
 	}
 	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
@@ -65,4 +79,12 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 		t.Errorf("the factory directory inside the worktree was not kept: %v", err)
 	}
 	run(t, repo, "git", "rev-parse", "--verify", "worktree-eng-1-x")
+	after := loader.Load()
+	if len(after.Items) != 1 || after.Items[0].Factory.Key() != key || !after.Items[0].Factory.Archived() {
+		var rows []string
+		for _, it := range after.Items {
+			rows = append(rows, fmt.Sprintf("%s archived=%v", it.Factory.Key(), it.Factory.Archived()))
+		}
+		t.Errorf("after archiving with removal, discovery finds %v; want only %s, archived: a state with no worktree field must keep its row hidden once its directory moves", rows, key)
+	}
 }

@@ -131,6 +131,9 @@ func Discover(repos []string, reg *state.Registry) []Factory {
 			}
 			seen[real] = true
 			f := load(repo, path, real)
+			if moved := reg.FindDir(repo, filepath.Dir(real)); moved != nil {
+				f.Slug = moved.Slug
+			}
 			if keys[f.Key()] {
 				continue
 			}

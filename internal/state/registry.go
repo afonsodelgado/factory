@@ -23,6 +23,7 @@ type Entry struct {
 	CreatedAt time.Time `json:"created_at"`
 	Created   bool      `json:"created,omitempty"`
 	Archived  bool      `json:"archived,omitempty"`
+	Dir       string    `json:"dir,omitempty"`
 }
 
 func (e Entry) Key() string {
@@ -51,6 +52,15 @@ func LoadRegistry(path string) (*Registry, error) {
 func (r *Registry) Find(repo, slug string) *Entry {
 	for i := range r.Factories {
 		if r.Factories[i].Repo == repo && r.Factories[i].Slug == slug {
+			return &r.Factories[i]
+		}
+	}
+	return nil
+}
+
+func (r *Registry) FindDir(repo, dir string) *Entry {
+	for i := range r.Factories {
+		if r.Factories[i].Repo == repo && r.Factories[i].Dir == dir {
 			return &r.Factories[i]
 		}
 	}

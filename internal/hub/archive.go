@@ -70,36 +70,40 @@ func FactoryDirRescue(repo, worktree, dir string) (string, bool) {
 	return filepath.Join(repo, ".claude", "factory", filepath.Base(realDir)), true
 }
 
-func RemoveWorktree(repo, worktree, factoryDir string) error {
+func RemoveWorktree(repo, worktree, factoryDir string) (string, error) {
 	if check := CheckRemoval(worktree); !check.Removable() {
-		return fmt.Errorf("refused: %s has work that is not safe to delete", worktree)
+		return "", fmt.Errorf("refused: %s has work that is not safe to delete", worktree)
 	}
-	restore, err := rescueFactoryDir(repo, worktree, factoryDir)
+	movedTo, restore, err := rescueFactoryDir(repo, worktree, factoryDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	out, err := git(repo, "worktree", "remove", worktree)
 	if err != nil {
 		restore()
-		return fmt.Errorf("git worktree remove: %s", out)
+		return "", fmt.Errorf("git worktree remove: %s", out)
 	}
-	return nil
+	return movedTo, nil
 }
 
-func rescueFactoryDir(repo, worktree, dir string) (func(), error) {
+func rescueFactoryDir(repo, worktree, dir string) (string, func(), error) {
 	target, inside := FactoryDirRescue(repo, worktree, dir)
 	if !inside {
-		return func() {}, nil
+		return "", func() {}, nil
 	}
 	if _, err := os.Lstat(target); err == nil {
-		return nil, fmt.Errorf("refused: %s already exists, so the factory directory has nowhere to go", target)
+		return "", nil, fmt.Errorf("refused: %s already exists, so the factory directory has nowhere to go", target)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	realDir, _ := filepath.EvalSymlinks(dir)
 	if err := os.Rename(realDir, target); err != nil {
-		return nil, fmt.Errorf("refused: cannot move %s out of the worktree: %w", realDir, err)
+		return "", nil, fmt.Errorf("refused: cannot move %s out of the worktree: %w", realDir, err)
 	}
-	return func() { os.Rename(target, realDir) }, nil
+	movedTo, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		movedTo = target
+	}
+	return movedTo, func() { os.Rename(target, realDir) }, nil
 }

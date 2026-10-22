@@ -349,8 +349,10 @@ func (m *Model) archive(r dialog.ArchiveResult) error {
 	if !ok || m.Loader == nil {
 		return nil
 	}
+	movedTo := ""
 	if r.Remove {
-		if err := RemoveWorktree(it.Factory.Repo, it.Factory.Worktree, it.Factory.Dir); err != nil {
+		var err error
+		if movedTo, err = RemoveWorktree(it.Factory.Repo, it.Factory.Worktree, it.Factory.Dir); err != nil {
 			return err
 		}
 	}
@@ -360,6 +362,9 @@ func (m *Model) archive(r dialog.ArchiveResult) error {
 			entry = reg.Upsert(state.Entry{Repo: it.Factory.Repo, Slug: it.Factory.Slug, CreatedAt: it.Factory.CreatedAt()})
 		}
 		entry.Archived = true
+		if movedTo != "" {
+			entry.Dir = movedTo
+		}
 	})
 	if err == nil {
 		m.Loader.Note(it.Factory, "archived")
