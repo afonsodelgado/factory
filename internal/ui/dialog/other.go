@@ -224,7 +224,11 @@ func (a *Archive) View() tea.View {
 	case ctx.Removable:
 		c.Put(1, 0, "Remove the worktree too?", theme.Bright.B())
 		c.PutMax(1, 1, "Deletes  "+ctx.Worktree, theme.Text, c.W-2)
-		c.PutMax(1, 2, "Keeps    branch "+ctx.Branch+" and "+ctx.FactoryDir, theme.Text, c.W-2)
+		kept := ctx.FactoryDir
+		if ctx.FactoryDirMovesTo != "" {
+			kept = "the factory directory, moved to " + ctx.FactoryDirMovesTo
+		}
+		c.PutMax(1, 2, "Keeps    branch "+ctx.Branch+" and "+kept, theme.Text, c.W-2)
 		c.Put(1, 3, "✓ no uncommitted changes    ✓ every commit is pushed to its upstream", theme.FgInk(theme.Green))
 		c.Spans(1, c.H-1, []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  remove " + base(ctx.Worktree) + "      ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  archive only, the default", Ink: theme.Text}})
 	default:

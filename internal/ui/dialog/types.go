@@ -75,6 +75,8 @@ type ArchiveContext struct {
 	Unpushed   []string `json:"unpushed"`
 	NoUpstream bool     `json:"no_upstream"`
 	Problem    string   `json:"problem"`
+
+	FactoryDirMovesTo string `json:"factory_dir_moves_to"`
 }
 
 type ArchiveResult struct {

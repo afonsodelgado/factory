@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -56,7 +57,11 @@ func openMain(name, repo string) error {
 		return err
 	}
 	if repo != "" {
-		repo = state.ExpandHome(repo)
+		configured, ok := configuredRepo(cfg.Repos, repo)
+		if !ok {
+			return fmt.Errorf("%s is not a configured repo; add it to repos in the config (configured: %s)", repo, strings.Join(cfg.Repos, ", "))
+		}
+		repo = configured
 	} else {
 		repo = repoOf(cfg, name)
 	}
@@ -77,6 +82,23 @@ func openMain(name, repo string) error {
 		}
 	}
 	return attach(cfg, tm)
+}
+
+func configuredRepo(repos []string, path string) (string, bool) {
+	abs, err := filepath.Abs(state.ExpandHome(path))
+	if err != nil {
+		return "", false
+	}
+	wanted, statErr := os.Stat(abs)
+	for _, repo := range repos {
+		if filepath.Clean(repo) == abs {
+			return repo, true
+		}
+		if info, err := os.Stat(repo); statErr == nil && err == nil && os.SameFile(info, wanted) {
+			return repo, true
+		}
+	}
+	return "", false
 }
 
 func repoOf(cfg *state.Config, name string) string {

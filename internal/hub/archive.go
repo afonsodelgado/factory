@@ -2,7 +2,9 @@ package hub
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,13 +55,51 @@ func CheckRemoval(worktree string) RemovalCheck {
 	return check
 }
 
-func RemoveWorktree(repo, worktree string) error {
+func FactoryDirRescue(repo, worktree, dir string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	realWorktree, err := filepath.EvalSymlinks(worktree)
+	if err != nil || !strings.HasPrefix(realDir, realWorktree+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.Join(repo, ".claude", "factory", filepath.Base(realDir)), true
+}
+
+func RemoveWorktree(repo, worktree, factoryDir string) error {
 	if check := CheckRemoval(worktree); !check.Removable() {
 		return fmt.Errorf("refused: %s has work that is not safe to delete", worktree)
 	}
+	restore, err := rescueFactoryDir(repo, worktree, factoryDir)
+	if err != nil {
+		return err
+	}
 	out, err := git(repo, "worktree", "remove", worktree)
 	if err != nil {
+		restore()
 		return fmt.Errorf("git worktree remove: %s", out)
 	}
 	return nil
+}
+
+func rescueFactoryDir(repo, worktree, dir string) (func(), error) {
+	target, inside := FactoryDirRescue(repo, worktree, dir)
+	if !inside {
+		return func() {}, nil
+	}
+	if _, err := os.Lstat(target); err == nil {
+		return nil, fmt.Errorf("refused: %s already exists, so the factory directory has nowhere to go", target)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return nil, err
+	}
+	realDir, _ := filepath.EvalSymlinks(dir)
+	if err := os.Rename(realDir, target); err != nil {
+		return nil, fmt.Errorf("refused: cannot move %s out of the worktree: %w", realDir, err)
+	}
+	return func() { os.Rename(target, realDir) }, nil
 }

@@ -188,7 +188,13 @@ func (m *Model) archiveContext(it Item) dialog.ArchiveContext {
 	}
 	check := CheckRemoval(it.Factory.Worktree)
 	c.Branch, c.Dirty, c.Unpushed, c.NoUpstream, c.Problem = check.Branch, check.Dirty, check.Unpushed, check.NoUpstream, check.Problem
-	c.Removable = check.Removable()
+	if target, inside := FactoryDirRescue(it.Factory.Repo, it.Factory.Worktree, it.Factory.Dir); inside {
+		c.FactoryDirMovesTo = tilde(target)
+		if _, err := os.Lstat(target); err == nil && c.Problem == "" {
+			c.Problem = tilde(target) + " already exists, so the factory directory has nowhere to go"
+		}
+	}
+	c.Removable = check.Removable() && c.Problem == ""
 	return c
 }
 
@@ -344,7 +350,7 @@ func (m *Model) archive(r dialog.ArchiveResult) error {
 		return nil
 	}
 	if r.Remove {
-		if err := RemoveWorktree(it.Factory.Repo, it.Factory.Worktree); err != nil {
+		if err := RemoveWorktree(it.Factory.Repo, it.Factory.Worktree, it.Factory.Dir); err != nil {
 			return err
 		}
 	}
