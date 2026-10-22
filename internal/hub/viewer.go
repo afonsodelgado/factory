@@ -41,16 +41,16 @@ func (v *Viewer) dial() tea.Cmd {
 	}
 }
 
-func (v *Viewer) read(conn net.Conn) {
+func read(conn net.Conn, in chan<- Message) {
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		var m Message
 		if json.Unmarshal(scanner.Bytes(), &m) == nil {
-			v.in <- m
+			in <- m
 		}
 	}
-	v.in <- Message{T: "disconnected"}
+	in <- Message{T: "disconnected"}
 }
 
 func (v *Viewer) wait() tea.Cmd {
@@ -71,7 +71,7 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectedMsg:
 		v.conn = msg.conn
 		v.in = make(chan Message, 16)
-		go v.read(msg.conn)
+		go read(msg.conn, v.in)
 		v.send(Message{T: "hello", Pane: v.Kind, W: v.width, H: v.height})
 		return v, v.wait()
 	case disconnectedMsg:

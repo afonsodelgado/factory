@@ -29,6 +29,7 @@ type Model struct {
 	Server *Server
 	Loader *Loader
 	Events chan Event
+	Watch  *Watcher
 	Now    func() time.Time
 	Icons  theme.Icons
 
@@ -51,6 +52,7 @@ type pollMsg struct{}
 type focusPollMsg struct{}
 type activeMsg string
 type eventMsg Event
+type changedMsg struct{}
 
 func NewModel(m Model) *Model {
 	model := &m
@@ -69,19 +71,45 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange())
 }
 
 func (m *Model) load() tea.Cmd {
 	if m.Loader == nil {
 		return nil
 	}
+	layout := m.Layout
 	return func() tea.Msg {
 		if m.Engine != nil {
-			m.Engine.Adopt(m.Layout, m.Config.Repos)
+			m.Engine.Adopt(layout, m.Config.Repos)
 		}
 		return snapshotMsg(m.Loader.Load())
 	}
+}
+
+func (m *Model) waitChange() tea.Cmd {
+	if m.Watch == nil {
+		return nil
+	}
+	changes := m.Watch.C
+	return func() tea.Msg {
+		<-changes
+		return changedMsg{}
+	}
+}
+
+func (m *Model) watchDirs() {
+	if m.Watch == nil {
+		return
+	}
+	dirs := []string{m.Config.SessionsDir()}
+	for _, repo := range m.Config.Repos {
+		dirs = append(dirs, factory.WorktreesDir(repo), filepath.Join(repo, ".claude", "factory"))
+	}
+	for _, it := range m.snap.Items {
+		dirs = append(dirs, it.Factory.Dir)
+	}
+	m.Watch.Watch(dirs)
 }
 
 func (m *Model) poll() tea.Cmd {
@@ -125,6 +153,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apply(Snapshot(msg))
 	case pollMsg:
 		cmd = tea.Batch(m.load(), m.poll())
+	case changedMsg:
+		cmd = tea.Batch(m.load(), m.waitChange())
 	case focusPollMsg:
 		cmd = tea.Batch(m.activePane(), m.focusPoll())
 	case activeMsg:
@@ -146,6 +176,9 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) apply(s Snapshot) {
+	if s.At.Before(m.snap.At) {
+		return
+	}
 	m.snap = s
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
@@ -157,6 +190,7 @@ func (m *Model) apply(s Snapshot) {
 	m.syncTitles()
 	m.showSelected()
 	m.arrange()
+	m.watchDirs()
 }
 
 func containsKey(rows []selector.Row, key string) bool {

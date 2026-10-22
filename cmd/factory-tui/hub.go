@@ -71,6 +71,14 @@ func hubMain() error {
 	defer server.Close()
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, self)
 	defer restore()
+	if err := os.MkdirAll(cfg.SessionsDir(), 0o755); err != nil {
+		return err
+	}
+	watch, err := hub.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watch.Close()
 
 	model := hub.NewModel(hub.Model{
 		Config: cfg,
@@ -79,6 +87,7 @@ func hubMain() error {
 		Server: server,
 		Loader: &hub.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now},
 		Events: events,
+		Watch:  watch,
 		Icons:  theme.IconsFor(cfg.Icons),
 	})
 	_, err = tea.NewProgram(model).Run()
