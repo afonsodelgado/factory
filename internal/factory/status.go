@@ -66,10 +66,10 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Done
 	case !live.Pane.Found:
 		return Gone
+	case live.Pane.Shell && !launching(f, live, now):
+		return Exited
 	case f.State == nil && live.Hook == nil:
 		return startingStatus(f, now)
-	case live.Pane.Shell:
-		return Exited
 	case needsYou(f, live.Hook):
 		return NeedsYou
 	case stalled(f, live.Hook, now, stalledAfter):
@@ -80,6 +80,10 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return WaitingAgent
 	}
 	return Running
+}
+
+func launching(f Factory, live Live, now time.Time) bool {
+	return f.State == nil && live.Hook == nil && now.Sub(f.CreatedAt()) < LaunchGrace
 }
 
 func startingStatus(f Factory, now time.Time) Status {

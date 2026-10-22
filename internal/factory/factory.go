@@ -10,7 +10,10 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const StartTimeout = 5 * time.Minute
+const (
+	StartTimeout = 5 * time.Minute
+	LaunchGrace  = 30 * time.Second
+)
 
 type Factory struct {
 	Repo      string

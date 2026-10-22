@@ -47,7 +47,9 @@ func TestStatusOf(t *testing.T) {
 		{"no pane", Factory{State: v2("agent")}, Live{Pane{}, nil}, Gone},
 		{"done", Factory{State: &state.State{Stages: map[string]state.Stage{"handoff": {Status: "done"}}}}, Live{Pane{}, nil}, Done},
 		{"created a minute ago", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{alive, nil}, Starting},
-		{"no state five minutes after creation, claude never started", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{Pane{Found: true, Shell: true}, nil}, FailedToStart},
+		{"no state five minutes after creation, claude still up", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{alive, nil}, FailedToStart},
+		{"claude exited right after launch, so wake can reuse the shell", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{Pane{Found: true, Shell: true}, nil}, Exited},
+		{"login shell still loading before claude starts", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(2 * time.Second)}}, Live{Pane{Found: true, Shell: true}, nil}, Starting},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
