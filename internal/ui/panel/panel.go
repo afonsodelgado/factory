@@ -204,8 +204,11 @@ func renderList(c *theme.Canvas, v View, ic theme.Icons, x, y, h int) {
 		if it.Kind == "question" && on {
 			for qi, q := range it.Questions {
 				mark, markInk := "✓", theme.FgInk(theme.Green)
-				if v.Draft.Typing(q, qi) {
+				switch {
+				case v.Draft.Typing(q, qi):
 					mark, markInk = "✎", theme.FgInk(theme.Cyan)
+				case !v.Draft.Answered(q, qi):
+					mark, markInk = "○", theme.FgInk(theme.Orange)
 				}
 				c.Put(x+4, r, mark, markInk)
 				c.PutMax(x+6, r, fmt.Sprintf("%d %s", qi+1, q.Text), theme.Text, ListWidth-7)
@@ -245,18 +248,18 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		if middle == nil {
 			middle = []line{blank(), hints("e", "type an answer")}
 		}
-		return top, middle, sendFooter(v, w, "ctrl+s", "send"), 0
+		return top, middle, questionFooter(v, w), 0
 	case it.Kind == "question":
 		middle, focus := questionForm(v, it, w)
-		return top, middle, sendFooter(v, w, "ctrl+s", "send"), focus
+		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), append(textBox("notes", v.Draft, w), gateHints(it, v)...), 0
+		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), gateHints(it, v)), 0
 	case it.Kind == "comment":
-		return top, nil, append(textBox("reply", v.Draft, w), commentHints(it, v)...), 0
+		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), commentHints(it, v)), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else"), 0
+		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else")), 0
 	case it.Kind == "failure":
-		return top, freeText(v, w), choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead"), 0
+		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead")), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -358,23 +361,37 @@ func padTo(s string, w int) string {
 	return s + strings.Repeat(" ", max(w-theme.Width(s), 0))
 }
 
-func sendFooter(v View, w int, key, does string) []line {
+func withStatus(v View, w int, blocks ...[]line) []line {
+	var lines []line
+	for _, b := range blocks {
+		lines = append(lines, b...)
+	}
+	return append(lines, sendStatus(v, w)...)
+}
+
+func sendStatus(v View, w int) []line {
 	lines := []line{text(strings.Repeat("─", max(w, 0)), theme.Line)}
 	switch {
 	case v.Send.Refused != "":
-		lines = append(lines, warning("Not sent. "+v.Send.Refused+" Draft kept.", w)...)
-		return append(lines, hints(key, "send once it is idle", "⏎", "watch the session", "d", "discard draft"))
+		return append(lines, warning("Not sent. "+v.Send.Refused+" Draft kept.", w)...)
 	case !v.Send.SentAt.IsZero():
-		return append(lines, text("✓ Sent at "+v.Send.SentAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green)))
+		sent := text("✓ Sent at "+v.Send.SentAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
+		return append(lines, sent, hints("d", "clear and answer again"))
 	case v.Send.Ready:
-		lines = append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
-	default:
-		lines = append(lines, warning(v.Send.Reason, w)...)
+		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
 	}
-	if v.Send.Preview != "" {
-		lines = append(lines, line{{Text: "preview  ", Ink: theme.Quiet}, {Text: strings.ReplaceAll(v.Send.Preview, "\n", " · "), Ink: theme.Text}})
+	return append(lines, warning(v.Send.Reason, w)...)
+}
+
+func questionFooter(v View, w int) []line {
+	lines := sendStatus(v, w)
+	switch {
+	case v.Send.Refused != "":
+		return append(lines, hints("ctrl+s", "send once it is idle", "⏎", "watch the session", "d", "discard draft"))
+	case !v.Send.SentAt.IsZero() || v.Send.Preview == "":
+		return lines
 	}
-	return lines
+	return append(lines, line{{Text: "preview  ", Ink: theme.Quiet}, {Text: strings.ReplaceAll(v.Send.Preview, "\n", " · "), Ink: theme.Text}})
 }
 
 func warning(s string, w int) []line {

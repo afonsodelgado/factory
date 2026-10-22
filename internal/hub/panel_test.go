@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +74,49 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 	tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
 	if len(typist.typed) != 1 || typist.typed[0] != "%9: q-7452-1 yes" {
 		t.Errorf("typed %q, want the answer as text for the item: a question item without its questions list must not crash the hub", typist.typed)
+	}
+}
+
+var escapes = regexp.MustCompile("\x1b\\[[0-9;:]*m")
+
+func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	gate := state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+	unrecommended := state.Attention{ID: "q-7452-2", Kind: "question", Title: "1 question", Questions: []string{"Which region?"}, CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+
+	cases := []struct {
+		name  string
+		item  *state.Attention
+		hook  string
+		keys  []string
+		typed int
+		shows string
+	}{
+		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"a"}, 0, "Not sent."},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"a", "a"}, 1, "Sent at"},
+		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, 1, "Sent at"},
+		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, 0, "Question 1 has no recommended answer"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snap := questionFactory(c.hook, now)
+			if c.item != nil {
+				snap.Items[0].Factory.State.Attention[0] = *c.item
+			}
+			typist := &fakeTypist{}
+			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
+			model.SetSnapshot(snap)
+			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+			panelKeys(tm, c.keys...)
+			if err := tm.Quit(); err != nil {
+				t.Fatal(err)
+			}
+			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
+			if len(typist.typed) != c.typed || !strings.Contains(view, c.shows) {
+				t.Errorf("typed %q, panel:\n%s\nwant %d message(s) and %q shown", typist.typed, view, c.typed, c.shows)
+			}
+		})
 	}
 }
 

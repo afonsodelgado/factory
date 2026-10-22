@@ -190,6 +190,9 @@ func (m *Model) saveDraft() {
 	if !ok || item.ID == "" || m.Config.StateDir == "" {
 		return
 	}
+	if _, sent := m.panel.sent[draftKey(it.Factory, item.ID)]; sent {
+		return
+	}
 	d := m.draft(it.Factory, item)
 	d.Editing = false
 	data, err := json.Marshal(d)
@@ -206,6 +209,7 @@ func (m *Model) discardDraft() {
 	key := draftKey(it.Factory, item.ID)
 	delete(m.panel.drafts, key)
 	delete(m.panel.refused, key)
+	delete(m.panel.sent, key)
 	os.Remove(m.draftPath(it.Factory, item.ID))
 }
 
@@ -267,13 +271,15 @@ func (m *Model) deliver(action string) {
 	if !ok || !item.Answerable() {
 		return
 	}
-	d := m.draft(it.Factory, item)
-	text := m.message(item, d, action)
 	key := draftKey(it.Factory, item.ID)
-	if m.Typist == nil {
+	if _, alreadySent := m.panel.sent[key]; alreadySent || m.Typist == nil {
 		return
 	}
-	reason, err := Deliver(m.Typist, m.freshTarget(it), text)
+	d := m.draft(it.Factory, item)
+	if unanswered(item, d) != "" {
+		return
+	}
+	reason, err := Deliver(m.Typist, m.freshTarget(it), m.message(item, d, action))
 	if err != nil {
 		reason = err.Error()
 	}
@@ -284,11 +290,20 @@ func (m *Model) deliver(action string) {
 	}
 	delete(m.panel.refused, key)
 	m.panel.sent[key] = m.Now()
-	delete(m.panel.drafts, key)
 	os.Remove(m.draftPath(it.Factory, item.ID))
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
+}
+
+func unanswered(item panel.Item, d *panel.Draft) string {
+	if item.Kind != "question" {
+		return ""
+	}
+	if i := d.Unanswered(item.Questions); i >= 0 {
+		return fmt.Sprintf("Question %d has no recommended answer. Pick or type one first.", i+1)
+	}
+	return ""
 }
 
 func (m *Model) answering() bool {
@@ -336,9 +351,13 @@ func (m *Model) panelView() panel.View {
 
 func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	key := draftKey(it.Factory, item.ID)
-	reason := Refusal(m.target(it))
-	s := panel.Send{Ready: reason == "", Reason: reason, Refused: m.panel.refused[key], SentAt: m.panel.sent[key], Preview: m.message(item, d, "approve")}
-	if s.Ready {
+	s := panel.Send{Refused: m.panel.refused[key], SentAt: m.panel.sent[key]}
+	if missing := unanswered(item, d); missing != "" {
+		s.Reason = missing
+		return s
+	}
+	s.Reason, s.Preview = Refusal(m.target(it)), m.message(item, d, "approve")
+	if s.Ready = s.Reason == ""; s.Ready {
 		s.Reason = fmt.Sprintf("Sends 1 message to %s, which is idle at its prompt.", it.Factory.Label())
 	}
 	return s

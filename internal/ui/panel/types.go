@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -79,6 +80,25 @@ func (d *Draft) Fit(questions int) {
 
 func (d Draft) Typing(q Question, i int) bool {
 	return i < len(d.Choice) && d.Choice[i] == len(q.Options)
+}
+
+func (d Draft) Answered(q Question, i int) bool {
+	switch {
+	case d.Typing(q, i):
+		return strings.TrimSpace(d.Typed[i]) != ""
+	case i < len(d.Choice) && d.Choice[i] >= 0:
+		return true
+	}
+	return q.Recommended != ""
+}
+
+func (d Draft) Unanswered(questions []Question) int {
+	for i, q := range questions {
+		if !d.Answered(q, i) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (d Draft) Answer(q Question, i int) string {
