@@ -68,6 +68,18 @@ func (c Client) Run(args ...string) (string, error) {
 	return strings.TrimRight(stdout.String(), "\n"), nil
 }
 
+func (c Client) RunInput(input string, args ...string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := c.Command(args...)
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimRight(stdout.String(), "\n"), nil
+}
+
 func (c Client) Panes() ([]Pane, error) {
 	out, err := c.Run("list-panes", "-a", "-F", strings.Join(paneFields, sep))
 	if err != nil {

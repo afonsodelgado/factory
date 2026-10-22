@@ -13,7 +13,7 @@ const (
 	SlotParking         = "hub-slot"
 	SelectorWidth       = 34
 	NarrowSelectorWidth = 5
-	NarrowBelow         = 100
+	NarrowAt            = 100
 	PanelShare          = 1.0 / 3
 	AnsweringShare      = 2.0 / 3
 )
@@ -44,7 +44,7 @@ type Shape struct {
 }
 
 func (s Shape) SelectorWidth() int {
-	if s.Width < NarrowBelow {
+	if s.Width <= NarrowAt {
 		return NarrowSelectorWidth
 	}
 	return SelectorWidth
@@ -115,6 +115,9 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 			return l, err
 		}
 	}
+	if err := e.ensureSlotViewer(); err != nil {
+		return l, err
+	}
 	if err := e.TM.DisableInput(l.Footer); err != nil {
 		return l, err
 	}
@@ -131,6 +134,23 @@ func (e *Engine) slotPane(panes []tmux.Pane, self string, shape Shape) (string, 
 		}
 	}
 	return e.uiPane("slot", tmux.Split{Target: self, Horizontal: true, Size: shape.RightWidth()})
+}
+
+func (e *Engine) ensureSlotViewer() error {
+	panes, err := e.TM.Panes()
+	if err != nil {
+		return err
+	}
+	for _, p := range panes {
+		if p.UI == "slot" && p.Session == e.Session {
+			return nil
+		}
+	}
+	id, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: SlotParking, Command: e.ViewCommand("slot")})
+	if err != nil {
+		return err
+	}
+	return e.TM.SetPaneOption(id, "@factory_ui", "slot")
 }
 
 func (e *Engine) uiPane(kind string, split tmux.Split) (string, error) {
@@ -171,6 +191,41 @@ func (e *Engine) styleWindow(window string) error {
 		}
 	}
 	return nil
+}
+
+func (e *Engine) BindReturn(key, selector string) func() {
+	table, binding, fallback := "root", key, "send-keys "+key
+	if key == "prefix" {
+		table, binding, fallback = "prefix", "f", `command-prompt "find-window -Z -- '%%'"`
+	}
+	saved := e.binding(table, binding)
+	guard := fmt.Sprintf("#{==:#{session_name},%s}", e.Session)
+	if strings.Contains(saved, "session_name},"+e.Session) {
+		saved = ""
+	}
+	e.TM.Run("bind-key", "-T", table, binding, "if-shell", "-F", guard, "select-pane -t "+selector, fallback)
+	return func() {
+		e.TM.Run("unbind-key", "-T", table, binding)
+		if saved != "" {
+			e.TM.RunInput(saved+"\n", "source-file", "-")
+		}
+	}
+}
+
+func (e *Engine) binding(table, key string) string {
+	out, err := e.TM.Run("list-keys", "-T", table)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		for i := 0; i+2 < len(fields); i++ {
+			if fields[i] == "-T" && fields[i+1] == table && fields[i+2] == key {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 func (e *Engine) Arrange(l Layout, shape Shape) error {
