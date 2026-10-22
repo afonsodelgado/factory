@@ -152,7 +152,11 @@ func TestUnreadableStateIsSaidNotHidden(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
-	loader := &Loader{Config: cfg, Registry: &state.Registry{}, Now: time.Now}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
 	model := NewModel(Model{Config: cfg, Now: time.Now, Icons: theme.Nerd})
 	model.SetSnapshot(loader.Load())
 
