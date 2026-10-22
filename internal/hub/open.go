@@ -38,6 +38,9 @@ func (m *Model) open(r OpenRequest) error {
 	}
 	ticket, feature := factory.ParseName(r.Name)
 	slug := factory.SlugFor(ticket, feature)
+	if slug == "" {
+		return fmt.Errorf("%q has no letters or digits to name a factory by. Type a ticket id, such as ENG-1234, or a feature name", r.Name)
+	}
 	repos := m.Config.Repos
 	if r.Repo != "" {
 		if !slices.Contains(m.Config.Repos, r.Repo) {
@@ -47,8 +50,7 @@ func (m *Model) open(r OpenRequest) error {
 	}
 	for _, repo := range repos {
 		if key, ok := m.existingFactory(repo, ticket, slug); ok {
-			m.choose(key)
-			return nil
+			return m.selectExisting(key)
 		}
 	}
 	if len(repos) == 0 {

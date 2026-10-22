@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,21 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), state.Profile{}, false, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
+	}
+}
+
+func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(factory.WorktreesDir(repo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", State: &state.State{Ticket: "ENG-9"}, Entry: &state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true}}}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{repo}}})
+	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
+	for _, name := range []string{"!!!", "ENG-9"} {
+		if err := model.open(OpenRequest{Name: name}); err == nil {
+			t.Errorf("open %q succeeded with nothing created or selected; want the reason", name)
+		}
 	}
 }
 

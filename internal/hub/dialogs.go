@@ -200,7 +200,9 @@ func (m *Model) archiveContext(it Item) dialog.ArchiveContext {
 
 func (m *Model) newResult(r dialog.NewResult) (tea.Cmd, error) {
 	if r.Select != "" {
-		m.choose(r.Select)
+		if err := m.selectExisting(r.Select); err != nil {
+			return nil, err
+		}
 		if r.Wake {
 			return nil, m.wake(r.Select)
 		}
@@ -209,13 +211,20 @@ func (m *Model) newResult(r dialog.NewResult) (tea.Cmd, error) {
 	return nil, m.create(r)
 }
 
+func (m *Model) selectExisting(key string) error {
+	if it, ok := m.snap.Find(key); ok && it.Factory.Archived() && !m.showArchived {
+		return fmt.Errorf("%s is archived. Press H to show archived factories", it.Factory.Label())
+	}
+	m.choose(key)
+	return nil
+}
+
 func (m *Model) create(r dialog.NewResult) error {
 	if r.Repo == "" || r.Slug == "" {
 		return errors.New("a factory needs a repo and a name")
 	}
 	if existing, ok := m.existingFactory(r.Repo, r.Ticket, r.Slug); ok {
-		m.choose(existing)
-		return nil
+		return m.selectExisting(existing)
 	}
 	if m.Engine == nil || m.Loader == nil {
 		return errors.New("the hub is not attached to tmux")
@@ -269,7 +278,7 @@ func (m *Model) existingFactory(repo, ticket, slug string) (string, bool) {
 		if wt, ok := factory.FindWorktree(repo, ticket); ok {
 			return state.Key(repo, filepath.Base(wt)), true
 		}
-	} else if wt := filepath.Join(factory.WorktreesDir(repo), slug); dirExists(wt) {
+	} else if wt := filepath.Join(factory.WorktreesDir(repo), slug); slug != "" && dirExists(wt) {
 		return state.Key(repo, slug), true
 	}
 	return "", false
