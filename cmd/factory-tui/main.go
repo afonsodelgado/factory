@@ -29,6 +29,10 @@ func run(args []string) int {
 		return 0
 	case "hook":
 		return runHook(os.Stdin)
+	case "hub":
+		return runHub(args[1:])
+	case "view":
+		return runView(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "factory-tui: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -47,6 +51,8 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: factory-tui <command> [arguments]
 
 commands:
+  hub         run the hub in the factory tmux session
+  view        run a viewer pane of the hub (started by the hub)
   hook        record a Claude Code hook event (run by Claude Code)
   --version   print the version
 `)
