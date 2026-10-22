@@ -165,7 +165,7 @@ func draftKey(f factory.Factory, itemID string) string {
 }
 
 func (m *Model) draftPath(f factory.Factory, itemID string) string {
-	return filepath.Join(m.Config.DraftsDir(), filepath.Base(f.Repo)+"-"+f.Slug, itemID+".json")
+	return filepath.Join(m.Config.DraftsDir(), state.FileStem(f.Repo, f.Slug), itemID+".json")
 }
 
 func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
