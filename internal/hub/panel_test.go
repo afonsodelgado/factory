@@ -44,21 +44,30 @@ func questionFactory(hookEvent string, at time.Time) Snapshot {
 func panelKeys(tm *teatest.TestModel, keys ...string) {
 	for _, k := range keys {
 		text := ""
-		if len([]rune(k)) == 1 {
+		switch {
+		case k == "space":
+			text = " "
+		case len([]rune(k)) == 1:
 			text = k
 		}
 		tm.Send(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: k, Text: text}}))
 	}
 }
 
-func typeText(tm *teatest.TestModel, s string) {
+func keystrokes(s string) []string {
+	var keys []string
 	for _, r := range s {
 		k := string(r)
 		if r == ' ' {
 			k = "space"
 		}
-		tm.Send(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: k, Text: string(r)}}))
+		keys = append(keys, k)
 	}
+	return keys
+}
+
+func typeText(tm *teatest.TestModel, s string) {
+	panelKeys(tm, keystrokes(s)...)
 }
 
 func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
@@ -69,7 +78,7 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 	model.SetSnapshot(snap)
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
-	panelKeys(tm, "right", "left", "e")
+	panelKeys(tm, "right", "left")
 	typeText(tm, "yes")
 	panelKeys(tm, "ctrl+s")
 	if err := tm.Quit(); err != nil {
@@ -97,10 +106,11 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		shows string
 		hides string
 	}{
-		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"a"}, 0, "Not sent.", ""},
-		{"gate approve pressed twice sends once", &gate, "Stop", []string{"a", "a"}, 1, "Sent at", ""},
+		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, 0, "Not sent.", ""},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, 1, "Sent at", ""},
+		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), 0, "change the colour", ""},
 		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, 1, "Sent at", ""},
-		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "e", "x", "x", "x", "esc", "ctrl+s"}, 1, "Sent at", "xxx"},
+		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, 1, "Sent at", "xxx"},
 		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, 0, "Question 1 has no recommended answer", ""},
 	}
 	for _, c := range cases {
@@ -140,10 +150,10 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 	model.SetSnapshot(withCap(now.Add(-time.Hour), now))
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
-	panelKeys(tm, "c")
+	panelKeys(tm, "ctrl+r")
 	tm.Send(snapshotMsg(resolved))
 	tm.Send(snapshotMsg(withCap(now.Add(2*time.Second), now.Add(2*time.Second))))
-	panelKeys(tm, "c")
+	panelKeys(tm, "ctrl+r")
 	if err := tm.Quit(); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +233,7 @@ func TestQuestionBatchPanel(t *testing.T) {
 			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 			model.SetSnapshot(questionFactory(c.hook, now))
 			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
-			panelKeys(tm, "right", "down", "e")
+			panelKeys(tm, "right", "down")
 			typeText(tm, "429 with Retry-After.")
 			panelKeys(tm, "esc")
 			if c.send {

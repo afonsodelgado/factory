@@ -463,13 +463,11 @@ func (m *Model) PanelView(width, height int) string {
 
 func (m *Model) panelKey(key, text string) tea.Cmd {
 	it, item, hasItem := m.currentAttention()
-	var d *panel.Draft
-	if hasItem && item.ID != "" {
-		d = m.draft(it.Factory, item)
-	}
-	if d != nil && d.Editing {
-		m.edit(item, d, key, text)
-		return nil
+	answerFormShown := hasItem && item.Answerable() && m.panel.tab == panel.Attention
+	if answerFormShown {
+		if cmd, handled := m.answerKey(it, item, key, text); handled {
+			return cmd
+		}
 	}
 	switch key {
 	case "esc":
@@ -503,18 +501,10 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	if m.panel.tab != panel.Attention {
 		return m.listKey(key)
 	}
-	if !hasItem {
-		return nil
-	}
-	if item.Kind == "permission" && key == "enter" {
+	if hasItem && item.Kind == "permission" && key == "enter" {
 		m.focusSession()
-		return nil
 	}
-	lockedAfterSend := m.isSent(it.Factory, item) && key != "d" && key != "o"
-	if d == nil || lockedAfterSend {
-		return nil
-	}
-	return m.formKey(item, d, key)
+	return nil
 }
 
 func (m *Model) switchTab(delta int) {
@@ -522,99 +512,169 @@ func (m *Model) switchTab(delta int) {
 	m.panel.row = 0
 }
 
-func (m *Model) formKey(item panel.Item, d *panel.Draft, key string) tea.Cmd {
-	kind := item.Kind
-	if kind == "question" && len(item.Questions) == 0 {
-		kind = "open question"
+func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, bool) {
+	d := m.draft(it.Factory, item)
+	movingBetweenItems := !d.Editing && (key == "[" || key == "]")
+	if movingBetweenItems || key == "tab" || key == "shift+tab" {
+		return nil, false
 	}
-	switch kind {
-	case "open question":
-		switch key {
-		case "e", "enter":
-			d.Editing = true
-		case "ctrl+s":
-			if strings.TrimSpace(d.Text) != "" {
-				m.deliver("")
-			}
-		case "d":
-			m.discardDraft()
+	if m.isSent(it.Factory, item) {
+		return m.sentKey(item, d, key)
+	}
+	if cmd, isAction := m.answerAction(item, d, key); isAction {
+		return cmd, true
+	}
+	switch {
+	case key == "esc" && d.Editing:
+		d.Editing = false
+		m.saveDraft()
+	case key == "esc":
+		return nil, false
+	case key == "enter" && d.Editing:
+		typeInto(item, d, "\n")
+	case key == "enter":
+		startTyping(item, d)
+	case key == "backspace":
+		field := answerField(item, d)
+		*field = dropLast(*field)
+	case text != "":
+		typeInto(item, d, text)
+	case !d.Editing:
+		moveIn(item, d, key)
+	}
+	return nil, true
+}
+
+func (m *Model) sentKey(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
+	switch key {
+	case "ctrl+d":
+		m.discardDraft()
+	case "ctrl+o":
+		return m.openCmd(itemURL(item, d)), true
+	case "esc":
+		return nil, false
+	}
+	return nil, true
+}
+
+func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
+	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+x"
+	if sends {
+		d.Editing = false
+	}
+	switch key {
+	case "ctrl+s":
+		m.sendTyped(item, d)
+	case "ctrl+a":
+		if item.Kind == "gate" {
+			m.deliver("approve")
 		}
-	case "question":
+	case "ctrl+r":
+		m.recommendedOrRetry(item, d)
+	case "ctrl+x":
+		if item.Kind == "cap" || item.Kind == "failure" {
+			m.deliver("skip")
+		}
+	case "ctrl+o":
+		return m.openCmd(itemURL(item, d)), true
+	case "ctrl+d":
+		m.discardDraft()
+	case "ctrl+u":
+		*answerField(item, d) = ""
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+func (m *Model) recommendedOrRetry(item panel.Item, d *panel.Draft) {
+	switch {
+	case item.Kind == "cap":
+		m.deliver("continue")
+	case item.Kind == "failure":
+		m.deliver("retry")
+	case item.Kind == "question" && len(item.Questions) > 0:
+		d.Choice[d.Question] = -1
+	}
+}
+
+func (m *Model) sendTyped(item panel.Item, d *panel.Draft) {
+	if item.Kind == "question" && len(item.Questions) > 0 {
+		m.deliver("")
+		return
+	}
+	if strings.TrimSpace(d.Text) == "" {
+		m.notice = nothingTyped(item.Kind)
+		return
+	}
+	m.deliver(textAction(item.Kind))
+}
+
+func textAction(kind string) string {
+	switch kind {
+	case "gate":
+		return "changes"
+	case "comment":
+		return "reply"
+	}
+	return ""
+}
+
+func nothingTyped(kind string) string {
+	switch kind {
+	case "gate":
+		return "Type notes first: ctrl+s sends them as change requests, ctrl+a approves"
+	case "comment":
+		return "Type a reply first: ctrl+s sends it"
+	case "cap":
+		return "Type an instruction first, or ctrl+r for one more round, ctrl+x to skip"
+	case "failure":
+		return "Type an instruction first, or ctrl+r to retry, ctrl+x to skip"
+	}
+	return "Type an answer first: ctrl+s sends it"
+}
+
+func answerField(item panel.Item, d *panel.Draft) *string {
+	if item.Kind == "question" && len(item.Questions) > 0 {
+		return &d.Typed[d.Question]
+	}
+	return &d.Text
+}
+
+func startTyping(item panel.Item, d *panel.Draft) {
+	d.Editing = true
+	if item.Kind == "question" && len(item.Questions) > 0 {
+		d.Choice[d.Question] = len(item.Questions[d.Question].Options)
+	}
+}
+
+func typeInto(item panel.Item, d *panel.Draft, text string) {
+	startTyping(item, d)
+	*answerField(item, d) += text
+}
+
+func moveIn(item panel.Item, d *panel.Draft, key string) {
+	switch {
+	case item.Kind == "question" && len(item.Questions) > 0:
 		q := item.Questions[d.Question]
 		switch key {
-		case "up", "k":
+		case "up":
 			d.Question = max(d.Question-1, 0)
-		case "down", "j":
+		case "down":
 			d.Question = min(d.Question+1, len(item.Questions)-1)
-		case "left", "h":
+		case "left":
 			d.Choice[d.Question] = max(choice(d, q)-1, 0)
-		case "right", "l":
+		case "right":
 			d.Choice[d.Question] = min(choice(d, q)+1, len(q.Options))
-		case "e", "enter":
-			d.Choice[d.Question] = len(q.Options)
-			d.Editing = true
-		case "r":
-			d.Choice[d.Question] = -1
-		case "R":
-			for i := range d.Choice {
-				d.Choice[i] = -1
-			}
-		case "ctrl+s":
-			m.deliver("")
-		case "d":
-			m.discardDraft()
 		}
-	case "gate":
+	case item.Kind == "gate":
 		switch key {
-		case "up", "k":
+		case "up":
 			d.Artifact = max(d.Artifact-1, 0)
-		case "down", "j":
+		case "down":
 			d.Artifact = min(d.Artifact+1, max(len(item.Artifacts)-1, 0))
-		case "e", "enter":
-			d.Editing = true
-		case "a":
-			m.deliver("approve")
-		case "c", "ctrl+s":
-			if strings.TrimSpace(d.Text) != "" {
-				m.deliver("changes")
-			}
-		case "o":
-			return m.openCmd(gateURL(item, d))
-		case "d":
-			m.discardDraft()
-		}
-	case "comment":
-		switch key {
-		case "e", "enter":
-			d.Editing = true
-		case "ctrl+s":
-			if strings.TrimSpace(d.Text) != "" {
-				m.deliver("reply")
-			}
-		case "o":
-			return m.openCmd(item.ArtifactURL)
-		case "d":
-			m.discardDraft()
-		}
-	case "cap", "failure":
-		switch key {
-		case "c":
-			if item.Kind == "cap" {
-				m.deliver("continue")
-			}
-		case "r":
-			if item.Kind == "failure" {
-				m.deliver("retry")
-			}
-		case "s":
-			m.deliver("skip")
-		case "e", "enter":
-			d.Editing = true
-		case "d":
-			m.discardDraft()
 		}
 	}
-	return nil
 }
 
 func choice(d *panel.Draft, q panel.Question) int {
@@ -624,44 +684,11 @@ func choice(d *panel.Draft, q panel.Question) int {
 	return max(q.RecommendedIndex(), 0)
 }
 
-func gateURL(item panel.Item, d *panel.Draft) string {
+func itemURL(item panel.Item, d *panel.Draft) string {
 	if d.Artifact < len(item.Artifacts) {
 		return item.Artifacts[d.Artifact].URL
 	}
 	return item.ArtifactURL
-}
-
-func (m *Model) edit(item panel.Item, d *panel.Draft, key, text string) {
-	field := &d.Text
-	if item.Kind == "question" && len(item.Questions) > 0 {
-		field = &d.Typed[d.Question]
-	}
-	switch key {
-	case "esc":
-		d.Editing = false
-		m.saveDraft()
-	case "ctrl+s":
-		d.Editing = false
-		m.deliver(editAction(item.Kind))
-	case "backspace":
-		*field = dropLast(*field)
-	case "enter":
-		*field += "\n"
-	case "ctrl+u":
-		*field = ""
-	default:
-		*field += text
-	}
-}
-
-func editAction(kind string) string {
-	switch kind {
-	case "gate":
-		return "changes"
-	case "comment":
-		return "reply"
-	}
-	return ""
 }
 
 func dropLast(s string) string {
@@ -676,14 +703,10 @@ func dropLast(s string) string {
 
 func (m *Model) paste(text string) {
 	it, item, ok := m.currentAttention()
-	if !ok || item.ID == "" {
+	if !ok || !item.Answerable() || m.panel.tab != panel.Attention || m.isSent(it.Factory, item) {
 		return
 	}
-	d := m.draft(it.Factory, item)
-	if !d.Editing {
-		return
-	}
-	m.edit(item, d, "", text)
+	typeInto(item, m.draft(it.Factory, item), text)
 }
 
 func (m *Model) listKey(key string) tea.Cmd {

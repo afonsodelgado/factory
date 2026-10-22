@@ -315,11 +315,23 @@ var keyColumns = [][][2]string{
 	{{"+Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
 }
 
+var answerKeys = [][2]string{
+	{"type", "into the box"},
+	{"ctrl+s", "send"},
+	{"ctrl+a", "approve"},
+	{"ctrl+r", "retry / one more round"},
+	{"ctrl+x", "skip"},
+	{"ctrl+d", "discard"},
+	{"ctrl+o", "open link"},
+}
+
 func (k *Keys) View() tea.View {
 	c := theme.NewCanvas(k.width, k.height)
 	col := max((c.W-2)/len(keyColumns), 20)
+	rows := 0
 	for i, column := range keyColumns {
 		x := 1 + i*col
+		rows = max(rows, len(column))
 		for y, row := range column {
 			if row[1] == "" {
 				c.Put(x, y, row[0], theme.FgInk(theme.Magenta).B())
@@ -328,6 +340,16 @@ func (k *Keys) View() tea.View {
 			c.Put(x, y, fmt.Sprintf("%-3s", row[0]), theme.Key)
 			c.PutMax(x+4, y, "➜ "+row[1], theme.Text, col-5)
 		}
+	}
+	heading := rows + 1
+	c.Put(1, heading, "+Answering in the panel", theme.FgInk(theme.Magenta).B())
+	x, y := 1, heading+1
+	for _, pair := range answerKeys {
+		entry := []theme.Span{{Text: pair[0], Ink: theme.Key}, {Text: " ➜ " + pair[1] + "    ", Ink: theme.Text}}
+		if x > 1 && x+theme.SpansWidth(entry) > c.W-1 {
+			x, y = 1, y+1
+		}
+		x = c.Spans(x, y, entry)
 	}
 	c.Put(1, c.H-1, "any key closes", theme.Muted)
 	return view(c)

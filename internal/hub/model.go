@@ -903,26 +903,27 @@ func (m *Model) panelHints() []footer.Hint {
 	if !ok {
 		return hints("tab", "next tab", "esc", "back to factories")
 	}
-	if item.ID != "" && m.isSent(it.Factory, item) {
-		return hints("d", "clear and answer again", "[ ]", "item", "esc", "back")
+	if item.Answerable() && m.isSent(it.Factory, item) {
+		return hints("ctrl+d", "clear and answer again", "[ ]", "item", "esc", "back")
 	}
-	if item.ID != "" && m.draft(it.Factory, item).Editing {
-		return hints("ctrl+s", "send", "esc", "stop typing", "ctrl+u", "clear")
+	back := "back, keep draft"
+	if item.Answerable() && m.draft(it.Factory, item).Editing {
+		back = "stop typing"
 	}
 	if item.Kind == "question" && len(item.Questions) == 0 {
-		return hints("e", "type an answer", "ctrl+s", "send", "esc", "back, keep draft")
+		return hints("type", "your answer", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
 	}
 	switch item.Kind {
 	case "question":
-		return hints("↑↓", "question", "←→", "option", "e", "type", "r", "use recommended", "R", "all recommended", "ctrl+s", "send", "esc", "back, keep draft")
+		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
 	case "gate":
-		return hints("a", "approve", "c", "changes", "e", "notes", "↑↓", "pick", "o", "open", "[ ]", "item", "esc", "back")
+		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "[ ]", "item", "esc", back)
 	case "comment":
-		return hints("e", "reply", "ctrl+s", "send", "o", "open thread", "[ ]", "item", "esc", "back, keep draft")
+		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "[ ]", "item", "esc", back)
 	case "cap":
-		return hints("c", "one more round", "s", "skip", "e", "type", "[ ]", "item", "esc", "back")
+		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
 	case "failure":
-		return hints("r", "retry", "s", "skip", "e", "type", "[ ]", "item", "esc", "back")
+		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
 	case "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	}

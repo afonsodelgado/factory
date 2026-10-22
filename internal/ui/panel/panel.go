@@ -247,7 +247,7 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 	case it.Kind == "question" && len(it.Questions) == 0:
 		middle := freeText(v, w)
 		if middle == nil {
-			middle = []line{blank(), hints("e", "type an answer")}
+			middle = []line{blank(), hints("type", "your answer, then ctrl+s sends it")}
 		}
 		return top, middle, questionFooter(v, w), 0
 	case it.Kind == "question":
@@ -258,9 +258,9 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 	case it.Kind == "comment":
 		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "c", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "s", "skip", "sends /factory skip "+it.Stage, "type something else"))), 0
+		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it"))), 0
 	case it.Kind == "failure":
-		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "r", "retry", "sends /factory resume", "s", "skip", "sends /factory skip "+it.Stage, "type an instruction instead"))), 0
+		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "an instruction instead, then ctrl+s sends it"))), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -384,7 +384,7 @@ func sendStatus(v View, w int) []line {
 		return append(lines, warning("Not sent. "+v.Send.Refused+" Draft kept.", w)...)
 	case !v.Send.SentAt.IsZero():
 		sent := text("✓ Sent at "+v.Send.SentAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
-		return append(lines, sent, hints("d", "clear and answer again"))
+		return append(lines, sent, hints("ctrl+d", "clear and answer again"))
 	case v.Send.Ready:
 		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
 	}
@@ -395,7 +395,7 @@ func questionFooter(v View, w int) []line {
 	lines := sendStatus(v, w)
 	switch {
 	case v.Send.Refused != "":
-		return append(lines, hints("ctrl+s", "send once it is idle", "⏎", "watch the session", "d", "discard draft"))
+		return append(lines, hints("ctrl+s", "send once it is idle", "ctrl+d", "discard draft"))
 	case !v.Send.SentAt.IsZero() || v.Send.Preview == "":
 		return lines
 	}
@@ -456,15 +456,15 @@ func gateHints(it Item, v View) []line {
 		pick = " " + it.Artifacts[max(0, min(v.Draft.Artifact, len(it.Artifacts)-1))].Title
 	}
 	return []line{
-		append(hints("a", "approve"+pick), theme.Span{Text: "  sends /factory approve " + it.Stage + " with these notes", Ink: theme.Muted}),
-		hints("c", "send notes as change requests", "o", "open artifact", "e", "edit notes", "↑↓", "pick"),
+		append(hints("ctrl+a", "approve"+pick), theme.Span{Text: "  sends /factory approve " + it.Stage + " with these notes", Ink: theme.Muted}),
+		hints("ctrl+s", "send notes as change requests", "ctrl+o", "open artifact", "↑↓", "pick"),
 	}
 }
 
 func commentHints(it Item, v View) []line {
 	return []line{
 		append(hints("ctrl+s", "send"), theme.Span{Text: "  tells the supervisor to reply on thread " + it.ThreadID + " with this text", Ink: theme.Muted}),
-		hints("e", "edit reply", "o", "open the thread in the browser", "esc", "back, keep draft"),
+		hints("type", "your reply", "ctrl+o", "open the thread in the browser", "esc", "back, keep draft"),
 	}
 }
 
@@ -483,7 +483,7 @@ func choiceHints(v View, k1, d1, m1, k2, d2, m2, other string) []line {
 	if v.Draft.Text != "" || v.Draft.Editing {
 		return append(lines, hints("ctrl+s", "send the instruction", "esc", "stop typing"))
 	}
-	return append(lines, hints("e", other))
+	return append(lines, hints("type", other))
 }
 
 func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
