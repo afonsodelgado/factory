@@ -60,4 +60,8 @@ func TestStatusOf(t *testing.T) {
 	if !IdleAtPrompt(subagentBusy) {
 		t.Error("a supervisor at its prompt reads as busy while a stage agent runs, so delivery would be refused for the agent's whole run")
 	}
+	compacting := &state.HookFile{Main: &state.HookEvent{Event: "SessionStart", Matcher: "compact", At: ago(time.Second)}}
+	if IdleAtPrompt(compacting) {
+		t.Error("auto-compaction in the middle of a turn reads as idle, so delivery would type into a busy session")
+	}
 }

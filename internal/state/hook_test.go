@@ -42,3 +42,9 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 		t.Errorf("last slot = %+v, want the subagent's PreToolUse", file.Last)
 	}
 }
+
+func TestFactoriesInReposWithTheSameNameKeepSeparateFiles(t *testing.T) {
+	if FileStem("/home/a/dev/cowork", "eng-1") == FileStem("/home/a/work/cowork", "eng-1") {
+		t.Error("two repos named cowork share one activity log and one set of drafts")
+	}
+}

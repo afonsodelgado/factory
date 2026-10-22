@@ -2,6 +2,8 @@ package state
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -18,7 +20,12 @@ type ActivityEntry struct {
 }
 
 func ActivityPath(activityDir, repo, slug string) string {
-	return filepath.Join(activityDir, filepath.Base(repo)+"-"+slug+".jsonl")
+	return filepath.Join(activityDir, FileStem(repo, slug)+".jsonl")
+}
+
+func FileStem(repo, slug string) string {
+	sum := sha256.Sum256([]byte(repo))
+	return filepath.Base(repo) + "-" + hex.EncodeToString(sum[:4]) + "-" + slug
 }
 
 func AppendActivity(path string, entry ActivityEntry) error {

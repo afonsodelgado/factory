@@ -128,7 +128,8 @@ func IdleAtPrompt(hook *state.HookFile) bool {
 		return false
 	}
 	main := *hook.Main
-	return main.Is("Stop") || main.Is("StopFailure") || main.Is("SessionStart") || main.Is("Notification", "idle_prompt")
+	freshSession := main.Is("SessionStart") && main.Matcher != "compact"
+	return main.Is("Stop") || main.Is("StopFailure") || freshSession || main.Is("Notification", "idle_prompt")
 }
 
 func PermissionPrompt(hook *state.HookFile) bool {
