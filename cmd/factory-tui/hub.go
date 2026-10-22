@@ -73,6 +73,8 @@ func hubMain() error {
 	defer server.Close()
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, self)
 	defer restore()
+	icons := theme.IconsFor(cfg.Icons)
+	defer engine.SetHeader(hub.StoppedHeader(icons))
 	if err := os.MkdirAll(cfg.SessionsDir(), 0o755); err != nil {
 		return err
 	}
@@ -95,7 +97,7 @@ func hubMain() error {
 		Open:   openURL,
 		Bell:   os.Stderr,
 		Notify: notify,
-		Icons:  theme.IconsFor(cfg.Icons),
+		Icons:  icons,
 		DialogCommand: func(kind string) string {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},

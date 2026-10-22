@@ -181,6 +181,11 @@ func (e *Engine) styleSession() error {
 	return nil
 }
 
+func (e *Engine) SetHeader(left, right string) {
+	e.TM.SetSessionOption(e.Session, "status-left", left)
+	e.TM.SetSessionOption(e.Session, "status-right", right)
+}
+
 func (e *Engine) styleWindow(window string) error {
 	if e.TM.SetWindowOption(window, "pane-border-lines", "spaces") != nil {
 		if err := e.TM.SetWindowOption(window, "pane-border-lines", "single"); err != nil {

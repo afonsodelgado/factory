@@ -713,15 +713,24 @@ func (m *Model) updateHeader() {
 		return
 	}
 	m.header = [2]string{left, right}
-	m.Engine.TM.SetSessionOption(m.Engine.Session, "status-left", left)
-	m.Engine.TM.SetSessionOption(m.Engine.Session, "status-right", right)
+	m.Engine.SetHeader(left, right)
+}
+
+func appBadge(ic theme.Icons) string {
+	return fmt.Sprintf("#[fg=#15161e,bg=#7aa2f7,bold] %sfactory #[default] ", ic.Icon("app"))
+}
+
+const hostLabel = "#[fg=#3b4261]#H "
+
+func StoppedHeader(ic theme.Icons) (string, string) {
+	return appBadge(ic) + " #[fg=#737aa2]hub closed · factory-tui open brings it back", hostLabel
 }
 
 func (m *Model) Header() (string, string) {
 	ic := m.Icons
-	left := fmt.Sprintf("#[fg=#15161e,bg=#7aa2f7,bold] %sfactory #[default] ", ic.Icon("app"))
+	left := appBadge(ic)
 	if len(m.snap.Items) == 0 {
-		return left + " #[fg=#737aa2]no factories yet", "#[fg=#3b4261]#H "
+		return left + " #[fg=#737aa2]no factories yet", hostLabel
 	}
 	count := func(statuses ...factory.Status) int {
 		n := 0
@@ -747,14 +756,15 @@ func (m *Model) Header() (string, string) {
 		{"running", "#9ece6a", "running", []factory.Status{factory.Running}},
 		{"ci", "#bb9af7", "waiting", []factory.Status{factory.WaitingCI, factory.WaitingAgent}},
 		{"stalled", "#e0af68", "asleep", []factory.Status{factory.Stalled, factory.Exited, factory.Gone}},
-		{"starting", "#7dcfff", "starting", []factory.Status{factory.Starting, factory.FailedToStart}},
+		{"starting", "#7dcfff", "starting", []factory.Status{factory.Starting}},
+		{"failstart", "#f7768e", "failed to start", []factory.Status{factory.FailedToStart}},
 	}
 	for _, p := range parts {
 		if n := count(p.statuses...); n > 0 {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, m.ghLabel() + "#[fg=#3b4261]#H "
+	return left, m.ghLabel() + hostLabel
 }
 
 func (m *Model) ghLabel() string {
