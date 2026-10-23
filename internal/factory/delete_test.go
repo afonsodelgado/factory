@@ -91,7 +91,7 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 			f = found
 		}
 	}
-	r := PlanRemoval(f, cfg.ActivityDir(), cfg.DraftsDir())
+	r := PlanRemoval(f, cfg)
 
 	work := CheckWork(r)
 	unpushed := slices.Sorted(func(yield func(string) bool) {

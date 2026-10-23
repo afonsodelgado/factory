@@ -50,8 +50,9 @@ type Pane struct {
 }
 
 type Live struct {
-	Pane Pane
-	Hook *state.HookFile
+	Pane  Pane
+	Hook  *state.HookFile
+	Stage *state.HookFile
 }
 
 var shells = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -70,9 +71,9 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Exited
 	case f.State == nil && live.Hook == nil:
 		return startingStatus(f, now)
-	case needsYou(f, live.Hook):
+	case needsYou(f, live.Hook), PermissionPrompt(live.Stage):
 		return NeedsYou
-	case stalled(f, live.Hook, now, stalledAfter):
+	case stalled(f, live, now, stalledAfter):
 		return Stalled
 	case f.WaitingOn() == "ci":
 		return WaitingCI
@@ -104,21 +105,24 @@ func needsYou(f Factory, hook *state.HookFile) bool {
 	return idle(hook) && waitingOnUser
 }
 
-func stalled(f Factory, hook *state.HookFile, now time.Time, after time.Duration) bool {
+func stalled(f Factory, live Live, now time.Time, after time.Duration) bool {
 	waitingOn := f.WaitingOn()
 	if waitingOn != "agent" && waitingOn != "ci" {
 		return false
 	}
-	return idle(hook) && now.Sub(lastSign(f, hook)) > after
+	stageWorking := live.Stage != nil && !idle(live.Stage)
+	return idle(live.Hook) && !stageWorking && now.Sub(lastSign(f, live)) > after
 }
 
-func lastSign(f Factory, hook *state.HookFile) time.Time {
+func lastSign(f Factory, live Live) time.Time {
 	newest := f.StateMod
 	if f.Heartbeat.After(newest) {
 		newest = f.Heartbeat
 	}
-	if hook != nil && hook.Last.At.After(newest) {
-		newest = hook.Last.At
+	for _, hook := range []*state.HookFile{live.Hook, live.Stage} {
+		if hook != nil && hook.Last.At.After(newest) {
+			newest = hook.Last.At
+		}
 	}
 	return newest
 }

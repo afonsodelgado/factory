@@ -22,7 +22,7 @@ const (
 
 var Tools = []string{ToolClaude, ToolCodex, ToolOpenCode}
 
-var RoleTools = []string{ToolClaude}
+var RoleTools = Tools
 
 var SupervisorTools = []string{ToolClaude}
 

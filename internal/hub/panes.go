@@ -193,6 +193,58 @@ func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
 	return pane, e.FitParking(l)
 }
 
+type StagePane struct {
+	Repo  string
+	Slug  string
+	Role  string
+	Token string
+	Dir   string
+}
+
+func StageParkName(slug, role string) string {
+	return "s-" + slug + "-" + role
+}
+
+func (e *Engine) NewStagePane(l Layout, s StagePane) (string, error) {
+	env := []string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token}
+	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: StageParkName(s.Slug, s.Role), Dir: s.Dir, Env: env, Command: loginShell()})
+	if err != nil {
+		return "", err
+	}
+	options := [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}}
+	for _, o := range options {
+		if err := e.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
+			return pane, err
+		}
+	}
+	return pane, e.FitParking(l)
+}
+
+func stagePaneOf(panes []tmux.Pane, f factory.Factory, role, token string) (tmux.Pane, bool) {
+	for _, p := range panes {
+		if p.Repo == f.Repo && p.StageOf == f.Slug && p.Stage == role && p.Token == token {
+			return p, true
+		}
+	}
+	return tmux.Pane{}, false
+}
+
+func (e *Engine) KillStages(repo, slug, role string) error {
+	panes, err := e.TM.Panes()
+	if err != nil {
+		return err
+	}
+	for _, p := range panes {
+		ofThisFactory := p.Repo == repo && p.StageOf == slug
+		if ofThisFactory && (role == "" || p.Stage == role) {
+			if err := e.TM.KillWindow(p.WindowID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func loginShell() string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -214,6 +266,9 @@ func bufferName(pane string) string {
 }
 
 func (e *Engine) Pause(l *Layout, repo, slug string) error {
+	if err := e.KillStages(repo, slug, ""); err != nil {
+		return err
+	}
 	panes, err := e.TM.Panes()
 	if err != nil {
 		return err

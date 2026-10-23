@@ -208,7 +208,7 @@ func (m *Model) pauseContext(it Item) dialog.PauseContext {
 }
 
 func (m *Model) deleteContext(it Item) dialog.DeleteContext {
-	removal := factory.PlanRemoval(it.Factory, m.Config.ActivityDir(), m.Config.DraftsDir())
+	removal := factory.PlanRemoval(it.Factory, m.Config)
 	work := factory.CheckWork(removal)
 	return dialog.DeleteContext{
 		Key:          it.Factory.Key(),
@@ -503,11 +503,16 @@ func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 			return nil, err
 		}
 	}
+	if m.Engine != nil {
+		if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, ""); err != nil {
+			return nil, err
+		}
+	}
 	if m.selected == key {
 		m.choose(m.rowAfter(key))
 	}
 	m.forgetFactory(key)
-	removal := factory.PlanRemoval(it.Factory, m.Config.ActivityDir(), m.Config.DraftsDir())
+	removal := factory.PlanRemoval(it.Factory, m.Config)
 	steps := factory.Run(removal, m.Loader.UpdateRegistry)
 	m.Loader.Forget(key)
 	if failed, stopped := factory.FirstFailure(steps); stopped {

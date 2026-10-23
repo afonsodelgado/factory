@@ -25,6 +25,7 @@ type Config struct {
 	DefaultPipeline string                  `yaml:"default_pipeline"`
 	Agents          map[string]AgentSetting `yaml:"agents"`
 	Supervisor      AgentSetting            `yaml:"supervisor"`
+	Codex           Codex                   `yaml:"codex"`
 
 	ConfigDir string `yaml:"-"`
 	StateDir  string `yaml:"-"`
@@ -42,6 +43,10 @@ type Alerts struct {
 
 type Claude struct {
 	RemoteControl *bool `yaml:"remote_control"`
+}
+
+type Codex struct {
+	WritableDirs []string `yaml:"writable_dirs"`
 }
 
 type Tmux struct {

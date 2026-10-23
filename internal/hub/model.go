@@ -65,6 +65,7 @@ type Model struct {
 	notice       string
 	wakes        map[string]Wake
 	pipelines    map[string]string
+	typeQueue    []queuedType
 }
 
 type snapshotMsg Snapshot
@@ -218,6 +219,7 @@ func (m *Model) apply(s Snapshot) {
 	m.snap = s
 	m.forgetClosedItems()
 	m.checkReceipts()
+	m.flushTypeQueue()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {
@@ -225,6 +227,7 @@ func (m *Model) apply(s Snapshot) {
 	}
 	m.planWakes()
 	m.notePipelines()
+	m.closeFinishedStages()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		topRow := ""
@@ -306,6 +309,7 @@ func (m *Model) planWakes() {
 	var hooks []*state.HookFile
 	if m.Config.StateDir != "" {
 		hooks, _ = state.ReadHookFiles(m.Config.StateDir)
+		hooks = withoutTokens(hooks, m.snap.StageTokens)
 	}
 	for _, it := range m.snap.Items {
 		if !it.Status.Asleep() {
@@ -469,6 +473,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.dialogResult(e)
 	case "open":
 		return m.openRequest(e)
+	case "stage":
+		return m.stageRequest(e)
 	case "delete":
 		return m.deleteRequest(e)
 	case "paste":

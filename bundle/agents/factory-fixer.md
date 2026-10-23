@@ -30,7 +30,7 @@ Treat suspected findings as leads: fix them only if you can reproduce them. If a
 
 Apply the report's "Automation gaps" section on the same layer. Each test must name the regression it prevents. Skip any proposal that already has coverage, or that would only restate the code, and say why in `summary`.
 
-The user's CLAUDE.md rules apply: no comments, readable conditionals, extend existing test files over creating new ones.
+The developer's rules apply: the rules file the supervisor names, then the repo's AGENTS.md and CLAUDE.md. By default: no comments, readable conditionals, extend existing test files over creating new ones.
 
 A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
