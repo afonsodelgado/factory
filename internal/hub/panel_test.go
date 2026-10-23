@@ -124,6 +124,7 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", "", nil, ""},
 		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", "", nil, ""},
 		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx", nil, ""},
+		{"enter picks each answer and moves on until it sends", nil, "Stop", append(append([]string{"down", "enter", "enter"}, keystrokes("5,000 entries")...), "enter", "enter"), nil, 1, "Sent at", "", nil, "1) 30 per minute per IP\n2) recommended\n3) 5,000 entries"},
 		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", "", nil, ""},
 		{"a received answer leaves the panel before the supervisor resolves it", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, nil, nil}}, 1, "Answered q-7452-1", "How many failed auth", nil, ""},
 		{"a received answer the supervisor left open comes back to send again", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, []string{"ctrl+s"}, turnEnded}}, 2, "waiting for the supervisor", "", nil, ""},
@@ -269,9 +270,9 @@ func TestQuestionBatchPanel(t *testing.T) {
 			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 			model.SetSnapshot(questionFactory(c.hook, now))
 			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
-			panelKeys(tm, "right", "down")
+			panelKeys(tm, "down", "enter", "down")
 			typeText(tm, "429 with Retry-After.")
-			panelKeys(tm, "esc")
+			panelKeys(tm, "enter")
 			if c.send {
 				panelKeys(tm, "ctrl+s")
 			}

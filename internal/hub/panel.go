@@ -306,6 +306,9 @@ func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
 		m.panel.drafts[key] = d
 	}
 	d.Fit(len(item.Questions))
+	if !ok && asksQuestions(item) {
+		enterQuestion(item, d, d.Question)
+	}
 	if item.Kind == "gate" {
 		d.Artifact = max(0, min(d.Artifact, approveRow(item)))
 	}
@@ -364,7 +367,7 @@ func (m *Model) freshTarget(it Item) Target {
 
 func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	switch {
-	case item.Kind == "question" && len(item.Questions) > 0:
+	case asksQuestions(item):
 		answers := make([]string, len(item.Questions))
 		for i, q := range item.Questions {
 			answers[i] = d.Answer(q, i)
@@ -623,6 +626,8 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 		m.saveDraft()
 	case key == "esc":
 		return nil, false
+	case asksQuestions(item):
+		m.questionKey(item, d, key, text)
 	case key == "enter" && d.Editing:
 		typeInto(item, d, "\n")
 	case key == "enter" && onApproveRow(item, d):
@@ -638,6 +643,53 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 		moveIn(item, d, key)
 	}
 	return nil, true
+}
+
+func (m *Model) questionKey(item panel.Item, d *panel.Draft, key, text string) {
+	switch {
+	case key == "enter" && d.Editing:
+		confirmTyped(item, d)
+	case key == "enter":
+		m.pick(item, d)
+	case onSendRow(item, d):
+		moveInQuestions(item, d, key)
+	case key == "backspace":
+		field := answerField(item, d)
+		*field = dropLast(*field)
+	case text != "":
+		typeInto(item, d, text)
+	case !d.Editing:
+		moveInQuestions(item, d, key)
+	}
+}
+
+func (m *Model) pick(item panel.Item, d *panel.Draft) {
+	if onSendRow(item, d) {
+		m.sendAnswers(item, d)
+		return
+	}
+	if d.Cursor == len(item.Questions[d.Question].Options) {
+		startTyping(item, d)
+		return
+	}
+	d.Choice[d.Question] = d.Cursor
+	enterQuestion(item, d, d.Question+1)
+}
+
+func (m *Model) sendAnswers(item panel.Item, d *panel.Draft) {
+	if i := d.Unanswered(item.Questions); i >= 0 {
+		enterQuestion(item, d, i)
+		return
+	}
+	m.deliver("")
+}
+
+func confirmTyped(item panel.Item, d *panel.Draft) {
+	if strings.TrimSpace(d.Typed[d.Question]) == "" {
+		return
+	}
+	d.Editing = false
+	enterQuestion(item, d, d.Question+1)
 }
 
 func (m *Model) sentKey(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
@@ -675,7 +727,9 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 	case "ctrl+d":
 		m.discardDraft()
 	case "ctrl+u":
-		*answerField(item, d) = ""
+		if !onSendRow(item, d) {
+			*answerField(item, d) = ""
+		}
 	default:
 		return nil, false
 	}
@@ -688,13 +742,14 @@ func (m *Model) recommendedOrRetry(item panel.Item, d *panel.Draft) {
 		m.deliver("continue")
 	case item.Kind == "failure":
 		m.deliver("retry")
-	case item.Kind == "question" && len(item.Questions) > 0:
+	case asksQuestions(item) && !onSendRow(item, d):
 		d.Choice[d.Question] = -1
+		enterQuestion(item, d, d.Question+1)
 	}
 }
 
 func (m *Model) sendTyped(item panel.Item, d *panel.Draft) {
-	if item.Kind == "question" && len(item.Questions) > 0 {
+	if asksQuestions(item) {
 		m.deliver("")
 		return
 	}
@@ -730,53 +785,72 @@ func nothingTyped(kind string) string {
 }
 
 func answerField(item panel.Item, d *panel.Draft) *string {
-	if item.Kind == "question" && len(item.Questions) > 0 {
+	if asksQuestions(item) {
 		return &d.Typed[d.Question]
 	}
 	return &d.Text
 }
 
+func asksQuestions(item panel.Item) bool {
+	return item.Kind == "question" && len(item.Questions) > 0
+}
+
+func onSendRow(item panel.Item, d *panel.Draft) bool {
+	return asksQuestions(item) && d.Question == len(item.Questions)
+}
+
+func enterQuestion(item panel.Item, d *panel.Draft, i int) {
+	d.Question = max(0, min(i, len(item.Questions)))
+	if !onSendRow(item, d) {
+		d.Cursor = d.Picked(item.Questions[d.Question], d.Question)
+	}
+}
+
 func startTyping(item panel.Item, d *panel.Draft) {
 	d.Editing = true
-	if item.Kind == "question" && len(item.Questions) > 0 {
-		d.Choice[d.Question] = len(item.Questions[d.Question].Options)
+	if asksQuestions(item) {
+		typeRow := len(item.Questions[d.Question].Options)
+		d.Choice[d.Question] = typeRow
+		d.Cursor = typeRow
 	}
 }
 
 func typeInto(item panel.Item, d *panel.Draft, text string) {
+	if onSendRow(item, d) {
+		return
+	}
 	startTyping(item, d)
 	*answerField(item, d) += text
 }
 
 func moveIn(item panel.Item, d *panel.Draft, key string) {
-	switch {
-	case item.Kind == "question" && len(item.Questions) > 0:
-		q := item.Questions[d.Question]
-		switch key {
-		case "up":
-			d.Question = max(d.Question-1, 0)
-		case "down":
-			d.Question = min(d.Question+1, len(item.Questions)-1)
-		case "left":
-			d.Choice[d.Question] = max(choice(d, q)-1, 0)
-		case "right":
-			d.Choice[d.Question] = min(choice(d, q)+1, len(q.Options))
-		}
-	case item.Kind == "gate":
-		switch key {
-		case "up":
-			d.Artifact = max(d.Artifact-1, 0)
-		case "down":
-			d.Artifact = min(d.Artifact+1, approveRow(item))
-		}
+	if item.Kind != "gate" {
+		return
+	}
+	switch key {
+	case "up":
+		d.Artifact = max(d.Artifact-1, 0)
+	case "down":
+		d.Artifact = min(d.Artifact+1, approveRow(item))
 	}
 }
 
-func choice(d *panel.Draft, q panel.Question) int {
-	if c := d.Choice[d.Question]; c >= 0 {
-		return c
+func moveInQuestions(item panel.Item, d *panel.Draft, key string) {
+	sendRow := len(item.Questions)
+	atTop := d.Question == sendRow || d.Cursor == item.Questions[d.Question].TopRow()
+	atBottom := d.Question < sendRow && d.Cursor == len(item.Questions[d.Question].Options)
+	switch {
+	case key == "left" || key == "up" && atTop:
+		if d.Question > 0 {
+			enterQuestion(item, d, d.Question-1)
+		}
+	case key == "right" || key == "down" && atBottom:
+		enterQuestion(item, d, d.Question+1)
+	case key == "up":
+		d.Cursor--
+	case key == "down" && d.Question < sendRow:
+		d.Cursor++
 	}
-	return max(q.RecommendedIndex(), 0)
 }
 
 func itemURL(item panel.Item, d *panel.Draft) string {
