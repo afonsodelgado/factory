@@ -131,6 +131,9 @@ func (m *Model) watchDirs() {
 	}
 	for _, it := range m.snap.Items {
 		dirs = append(dirs, it.Factory.Dir)
+		if it.Stage != nil {
+			dirs = append(dirs, filepath.Dir(it.Stage.Run.Result))
+		}
 	}
 	m.Watch.Watch(dirs)
 }
@@ -354,9 +357,25 @@ func (m *Model) showSelected() {
 	if ok && it.Pane != nil && !it.Pane.Dead {
 		target = it.Pane.ID
 	}
+	stage := m.shownStage(it, ok && target != m.slotViewer())
+	if target == m.Layout.Slot && stage == m.Layout.Stage {
+		return
+	}
+	m.Engine.HideStage(&m.Layout)
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
 	}
+	if stage != "" {
+		m.Engine.ShowStage(&m.Layout, stage)
+	}
+}
+
+func (m *Model) shownStage(it Item, supervisorShown bool) string {
+	roomForTwo := m.window[0] == 0 || m.window[0] > NarrowAt
+	if !supervisorShown || !roomForTwo || it.Stage == nil || it.Stage.Pane == nil || it.Stage.Pane.Dead {
+		return ""
+	}
+	return it.Stage.Pane.ID
 }
 
 func (m *Model) measureWindow() {
@@ -398,7 +417,7 @@ func (m *Model) focusFromPane(id string) {
 		m.focus = footer.Panel
 	case m.Layout.Frame.Has(id):
 		m.focusSlot()
-	case id == m.Layout.Slot && id != m.slotViewer():
+	case id == m.Layout.Slot && id != m.slotViewer(), id == m.Layout.Stage && id != "":
 		m.focus = footer.Session
 	}
 }
@@ -771,19 +790,26 @@ func (m *Model) publish() {
 }
 
 func (m *Model) pushFrame() {
-	title, path := "", ""
+	title, path, stage := "", "", ""
 	if it, ok := m.snap.Find(m.selected); ok {
 		title, path = paneTitle(it.Factory), it.Factory.Worktree
 		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
 			path = it.Pane.Path
+		}
+		if m.Layout.Stage != "" && it.Stage != nil {
+			stage = stageLabel(it.Stage.Run)
 		}
 	}
 	focused := m.focus == footer.Session
 	for _, side := range FrameSides {
 		pane := "frame-" + side
 		width, height := m.size(pane)
-		m.push(pane, frame.Render(side, width, height, title, tilde(path), focused))
+		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: tilde(path), Stage: stage}, focused))
 	}
+}
+
+func stageLabel(run state.StageRun) string {
+	return strings.TrimSpace(run.Role + " · " + run.Setting.ToolName() + " " + run.Setting.Model)
 }
 
 func (m *Model) size(pane string) (int, int) {

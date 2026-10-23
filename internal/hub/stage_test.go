@@ -80,3 +80,56 @@ func TestWakeResumesTheSupervisorNotTheStageAgentThatWorkedLast(t *testing.T) {
 		t.Errorf("wake resumes %q; want the supervisor's session, not the engineer that wrote the newest hook in the worktree", got)
 	}
 }
+
+func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testing.T) {
+	e, l := hubFixture(t)
+	supervisor, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "csv", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Select(&l, supervisor); err != nil {
+		t.Fatal(err)
+	}
+	framedWidth := areaOf(t, e.TM, l.Slot).w
+	_, stageWidth := SplitWidths(framedWidth)
+	stage, err := e.NewStagePane(l, StagePane{Repo: "/repo", Slug: "csv", Role: "engineer", Token: "t-eng", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := pane(t, e.TM, stage).Width; w != stageWidth {
+		t.Errorf("the parked stage is %d wide; want the split's %d, or the agent's screen reflows when it appears", w, stageWidth)
+	}
+
+	if err := e.ShowStage(&l, stage); err != nil {
+		t.Fatal(err)
+	}
+	left, right, top := areaOf(t, e.TM, l.Slot), areaOf(t, e.TM, stage), areaOf(t, e.TM, l.Frame.Top)
+	if right.y != left.y || right.x != left.x+left.w+1 || right.w != stageWidth || top.w != framedWidth {
+		t.Errorf("supervisor %+v, stage %+v, top strip %+v; want them side by side under one %d-wide frame", left, right, top, framedWidth)
+	}
+	other, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "other", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := pane(t, e.TM, other).Width; w != framedWidth {
+		t.Errorf("another factory parked while the split shows is %d wide; want the whole frame's %d, or it reflows when selected", w, framedWidth)
+	}
+
+	width, height, _ := e.TM.WindowSize(l.Selector)
+	rebuilt, err := e.Build(l.Selector, Shape{Width: width, Height: height})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebuilt.Stage != stage {
+		t.Errorf("after a hub restart the layout has stage %q; want %s, or the split could never close", rebuilt.Stage, stage)
+	}
+
+	if err := e.HideStage(&rebuilt); err != nil {
+		t.Fatal(err)
+	}
+	parkedStage := pane(t, e.TM, stage)
+	if parkedStage.WindowName != StageParkName("csv", "engineer") || parkedStage.Width != stageWidth {
+		t.Errorf("hidden stage is %q at %d wide; want %q at %d", parkedStage.WindowName, parkedStage.Width, StageParkName("csv", "engineer"), stageWidth)
+	}
+	framed(t, e, rebuilt, "after the split closed")
+}

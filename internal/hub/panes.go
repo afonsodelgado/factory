@@ -202,7 +202,7 @@ type StagePane struct {
 }
 
 func StageParkName(slug, role string) string {
-	return "s-" + slug + "-" + role
+	return StageParking + slug + "-" + role
 }
 
 func (e *Engine) NewStagePane(l Layout, s StagePane) (string, error) {
@@ -236,13 +236,32 @@ func (e *Engine) KillStages(repo, slug, role string) error {
 	}
 	for _, p := range panes {
 		ofThisFactory := p.Repo == repo && p.StageOf == slug
-		if ofThisFactory && (role == "" || p.Stage == role) {
-			if err := e.TM.KillWindow(p.WindowID); err != nil {
-				return err
-			}
+		if !ofThisFactory || (role != "" && p.Stage != role) {
+			continue
+		}
+		if err := e.killStage(p); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (e *Engine) hideStageOf(l *Layout, repo, slug string) error {
+	panes, err := e.TM.Panes()
+	if err != nil {
+		return err
+	}
+	if p, shown := byID(panes, l.Stage); shown && p.Repo == repo && p.StageOf == slug {
+		return e.HideStage(l)
+	}
+	return nil
+}
+
+func (e *Engine) killStage(p tmux.Pane) error {
+	if p.WindowName == HubWindow {
+		return e.TM.KillPane(p.ID)
+	}
+	return e.TM.KillWindow(p.WindowID)
 }
 
 func loginShell() string {
@@ -266,6 +285,9 @@ func bufferName(pane string) string {
 }
 
 func (e *Engine) Pause(l *Layout, repo, slug string) error {
+	if err := e.hideStageOf(l, repo, slug); err != nil {
+		return err
+	}
 	if err := e.KillStages(repo, slug, ""); err != nil {
 		return err
 	}
