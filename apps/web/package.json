@@ -9,10 +9,12 @@
     "test": "node --test tests/frames.test.ts && playwright test",
     "dev": "astro dev --host 127.0.0.1 --port 4321 --ignore-lock",
     "preview": "astro preview --host 127.0.0.1 --port 4321 --ignore-lock",
-    "fonts": "node scripts/build-fonts.mjs"
+    "fonts": "node scripts/build-fonts.mjs",
+    "assets": "node scripts/build-assets.mjs"
   },
   "dependencies": {
     "@astrojs/react": "7.1.1",
+    "@astrojs/sitemap": "3.7.4",
     "astro": "7.4.2",
     "react": "19.3.1",
     "react-dom": "19.3.1"
@@ -23,6 +25,7 @@
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "lighthouse": "13.5.0",
     "prettier": "3.9.10",
     "prettier-plugin-astro": "1.1.2",
     "typescript": "6.0.3"

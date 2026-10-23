@@ -15,6 +15,14 @@ const LINUX_ARM_COMMAND = [
   "chmod +x ~/.local/bin/factory",
 ].join("\n");
 
+const SITE = new URL(process.env.SITE_URL || "http://localhost:4321").origin;
+
+const SHARE_TITLE =
+  "Manage your agents, like a factory. Stay in control when it matters.";
+
+const DESCRIPTION =
+  "Manage your agents, like a factory, and stay in control when it matters. Give the instructions and your factory takes it to a tested, ready-to-deploy feature, stopping only when it needs you.";
+
 interface FakeClipboard {
   copied: string[];
   refuse: boolean;
@@ -31,6 +39,7 @@ test.describe("without JavaScript", () => {
 
   test("the production document renders without JavaScript", async ({
     page,
+    request,
   }) => {
     const response = await page.goto("/");
     expect(response?.ok()).toBe(true);
@@ -109,6 +118,59 @@ test.describe("without JavaScript", () => {
         document.documentElement.clientWidth,
     );
     expect(overflow).toBe(0);
+
+    await expect(page).toHaveTitle("factory · manage your agents");
+    await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
+    const meta = await page
+      .locator("meta[name], meta[property]")
+      .evaluateAll((tags) =>
+        Object.fromEntries(
+          tags.map((tag) => [
+            tag.getAttribute("name") ?? tag.getAttribute("property"),
+            tag.getAttribute("content"),
+          ]),
+        ),
+      );
+    expect(meta).toMatchObject({
+      description: DESCRIPTION,
+      "og:type": "website",
+      "og:title": SHARE_TITLE,
+      "og:description": DESCRIPTION,
+      "og:image": `${SITE}/og.png`,
+      "og:image:width": "1200",
+      "og:image:height": "630",
+      "twitter:card": "summary_large_image",
+      "twitter:title": SHARE_TITLE,
+      "twitter:description": DESCRIPTION,
+      "twitter:image": `${SITE}/og.png`,
+    });
+    expect(meta["og:image:alt"]).toBeTruthy();
+    expect(meta["twitter:image:alt"]).toBe(meta["og:image:alt"]);
+
+    const robots = await request.get("/robots.txt");
+    expect(await robots.text()).toBe(
+      `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap-index.xml\n`,
+    );
+    const index = await (await request.get("/sitemap-index.xml")).text();
+    expect(index.match(/<loc>[^<]*<\/loc>/g)).toEqual([
+      `<loc>${SITE}/sitemap-0.xml</loc>`,
+    ]);
+    const urls = await (await request.get("/sitemap-0.xml")).text();
+    expect(urls.match(/<loc>[^<]*<\/loc>/g)).toEqual([`<loc>${SITE}/</loc>`]);
+
+    for (const file of [
+      "/favicon.svg",
+      "/fonts/jetbrains-mono-regular.woff2",
+      "/fonts/jetbrains-mono-bold.woff2",
+      "/fonts/OFL.txt",
+      "/fonts/NOTICE.md",
+    ]) {
+      expect((await request.get(file)).status(), file).toBe(200);
+    }
+    const favicon = await (await request.get("/favicon.svg")).text();
+    expect(favicon).not.toContain("<text");
+    const og = await (await request.get("/og.png")).body();
+    expect([og.readUInt32BE(16), og.readUInt32BE(20)]).toEqual([1200, 630]);
   });
 });
 

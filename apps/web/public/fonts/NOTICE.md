@@ -26,3 +26,11 @@ PATH=/tmp/factory-fonts/bin:$PATH NERD_FONT_DIR=<directory with both TTF files> 
 ```
 
 `NERD_FONT_DIR` defaults to `~/Library/Fonts`. The script refuses inputs whose SHA-256 differs, subsets both weights with `pyftsubset --flavor=woff2 --no-hinting`, and fails when a character the page uses is in the source font but missing from a subset. Characters the source font does not have at all are listed; the browser draws them with the fallback font.
+
+## Favicon and Open Graph image
+
+`../favicon.svg` is the Font Awesome `industry` icon (U+F275, CC BY 4.0) taken from the bold subset as outlined paths on a `#7aa2f7` square. `../og.png` is the hero factory list, drawn by the site's renderer with these fonts and captured at 1200×630. Regenerate both after changing the fonts or the hero frame, with the same Python environment and Playwright's Chromium installed:
+
+```sh
+PATH=/tmp/factory-fonts/bin:$PATH pnpm assets
+```
