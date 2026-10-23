@@ -1,6 +1,10 @@
 package factory
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,7 +30,7 @@ func TestCreateCommand(t *testing.T) {
 		t.Errorf("factory with its own stages and agent overrides runs =\n%s\nwant\n%s\nthe skill parses this first line, so its shape is a contract", got, want)
 	}
 	onCodex := Launch{Repo: "/r/factory", Slug: "csv-export", Prompt: "Export contacts.", Supervisor: state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-5.6-sol", Effort: "high"}, AddDirs: []string{"/r/factory/.git"}}
-	want = "git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export' origin/HEAD || git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export'\ncd '/r/factory/.claude/worktrees/csv-export' && codex -m gpt-5.6-sol -c model_reasoning_effort=high -a never -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir '/r/factory/.git' '$factory csv-export\nExport contacts.'"
+	want = "git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export' origin/HEAD || git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export'\ncd '/r/factory/.claude/worktrees/csv-export' && codex -m gpt-5.6-sol -c model_reasoning_effort=high -a never -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir '/r/factory/.git' --add-dir \"$(git rev-parse --path-format=absolute --git-dir)\" '$factory csv-export\nExport contacts.'"
 	if got := onCodex.CreateCommand(); got != want {
 		t.Errorf("a Codex supervisor runs =\n%s\nwant\n%s\nCodex refuses a /factory line, and without the worktree branch delete cannot clean up", got, want)
 	}
@@ -37,5 +41,32 @@ func TestCreateCommand(t *testing.T) {
 	}
 	if got := ForSupervisor(state.ToolOpenCode, "/factory resume"); got != "Use the factory skill for: /factory resume" {
 		t.Errorf("a panel message reaches OpenCode as %q; want it to name the skill", got)
+	}
+}
+
+func TestCodexInAWorktreeCanWriteTheWorktreesOwnGitDir(t *testing.T) {
+	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"} {
+		t.Setenv(k, v)
+	}
+	bin := t.TempDir()
+	args := filepath.Join(bin, "args")
+	writeFile(t, filepath.Join(bin, "codex"), "#!/bin/sh\necho \"$@\" > "+args+"\n")
+	os.Chmod(filepath.Join(bin, "codex"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	repo, _ := filepath.EvalSymlinks(t.TempDir())
+	gitRun(t, repo, "init", "-q")
+	gitRun(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	launch := Launch{Repo: repo, Slug: "csv", Supervisor: state.AgentSetting{Tool: state.ToolCodex}}
+	gitDir := filepath.Join(repo, ".git", "worktrees", "csv")
+
+	if out, err := exec.Command("sh", "-c", launch.CreateCommand()).CombinedOutput(); err != nil {
+		t.Fatalf("create command: %v\n%s", err, out)
+	}
+
+	if got, _ := os.ReadFile(args); !strings.Contains(string(got), "--add-dir "+gitDir+" ") {
+		t.Errorf("a new Codex supervisor ran codex %q; want --add-dir %s, or it cannot commit in its own worktree", got, gitDir)
+	}
+	if dirs := CodexWritableDirs(launch.worktree(), nil); !slices.Contains(dirs, gitDir) {
+		t.Errorf("codex writable dirs %q lack %s; Codex keeps a worktree's gitdir read-only unless it is named, so stages cannot commit, rebase or run gh stack", dirs, gitDir)
 	}
 }

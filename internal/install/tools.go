@@ -8,10 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/catalog"
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -123,8 +125,10 @@ func codexSandbox(o Options) Check {
 		return Check{Name: "codex sandbox", Mark: Fail, Detail: err.Error()}
 	}
 	defer os.RemoveAll(dir)
+	dir, _ = filepath.EvalSymlinks(dir)
 	repo, remote := filepath.Join(dir, "repo"), filepath.Join(dir, "remote.git")
-	setup := [][]string{{"init", "-q", "--bare", remote}, {"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", remote}}
+	worktree := filepath.Join(factory.WorktreesDir(repo), "probe")
+	setup := [][]string{{"init", "-q", "--bare", remote}, {"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", remote}, {"-C", repo, "-c", "user.name=f", "-c", "user.email=f@f", "commit", "-q", "--allow-empty", "-m", "init"}, {"-C", repo, "worktree", "add", "-q", "-b", "probe", worktree}}
 	for _, args := range setup {
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 			return Check{Name: "codex sandbox", Mark: Fail, Detail: "git " + args[0] + ": " + strings.TrimSpace(string(out))}
@@ -135,8 +139,13 @@ git push -q origin HEAD:refs/heads/probe || { echo "push is blocked"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh cannot reach its login"; exit 1; }`
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "codex", "sandbox", "-c", `sandbox_mode="workspace-write"`, "-c", "sandbox_workspace_write.network_access=true", "-c", fmt.Sprintf("sandbox_workspace_write.writable_roots=[%q, %q]", remote, filepath.Join(repo, ".git")), "--", "sh", "-c", probe)
-	cmd.Dir = repo
+	roots := append(factory.CodexWritableDirs(worktree, o.Config.Codex.WritableDirs), remote)
+	quoted := make([]string, len(roots))
+	for i, root := range roots {
+		quoted[i] = strconv.Quote(root)
+	}
+	cmd := exec.CommandContext(ctx, "codex", "sandbox", "-c", `sandbox_mode="workspace-write"`, "-c", "sandbox_workspace_write.network_access=true", "-c", "sandbox_workspace_write.writable_roots=["+strings.Join(quoted, ", ")+"]", "--", "sh", "-c", probe)
+	cmd.Dir = worktree
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return Check{Name: "codex sandbox", Mark: Fail, Detail: "a stage in Codex would stop: " + strings.TrimSpace(string(out)), Fix: "add the blocked directories to codex.writable_dirs in " + tilde(o.ConfigFile)}
 	}

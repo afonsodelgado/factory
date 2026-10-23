@@ -116,7 +116,9 @@ func (l Launch) worktree() string {
 
 func (l Launch) CreateCommand() string {
 	if !l.Supervisor.OnClaude() {
-		return l.addWorktree() + "\ncd " + ShellQuote(l.worktree()) + " && " + l.supervisor("", l.Message())
+		supervisor := l.supervisorLaunch("", l.Message())
+		supervisor.AddCwdGitDir = true
+		return l.addWorktree() + "\ncd " + ShellQuote(l.worktree()) + " && " + supervisor.Command()
 	}
 	parts := append([]string{"claude", "--worktree", l.Slug, "--session-id", l.SessionID}, l.flags()...)
 	return strings.Join(parts, " ") + " " + ShellQuote(l.Message()) + "; cd " + ShellQuote(l.worktree())

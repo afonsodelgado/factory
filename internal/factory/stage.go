@@ -1,6 +1,9 @@
 package factory
 
 import (
+	"os"
+	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/state"
@@ -9,11 +12,12 @@ import (
 const openCodeQuiet = `OPENCODE_CONFIG_CONTENT='{"autoupdate":false}'`
 
 type StageLaunch struct {
-	Setting   state.AgentSetting
-	Kickoff   string
-	SessionID string
-	Chrome    bool
-	AddDirs   []string
+	Setting      state.AgentSetting
+	Kickoff      string
+	SessionID    string
+	Chrome       bool
+	AddDirs      []string
+	AddCwdGitDir bool
 }
 
 func (s StageLaunch) Command() string {
@@ -53,6 +57,9 @@ func (s StageLaunch) codex() string {
 		parts = append(parts, "-c", "model_reasoning_effort="+s.Setting.Effort)
 	}
 	parts = append(parts, CodexSandbox(s.AddDirs)...)
+	if s.AddCwdGitDir {
+		parts = append(parts, "--add-dir", `"$(git rev-parse --path-format=absolute --git-dir)"`)
+	}
 	return strings.Join(append(parts, ShellQuote(s.Kickoff)), " ")
 }
 
@@ -85,4 +92,34 @@ func option(flag, value string) []string {
 		return nil
 	}
 	return []string{flag, value}
+}
+
+func CodexWritableDirs(checkout string, extra []string) []string {
+	var dirs []string
+	if out, err := exec.Command("git", "-C", checkout, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir").Output(); err == nil {
+		dirs = append(dirs, strings.Split(strings.TrimSpace(string(out)), "\n")...)
+	}
+	dirs = append(dirs, toolOutput("go", "env", "GOCACHE", "GOMODCACHE")...)
+	dirs = append(dirs, toolOutput("npm", "config", "get", "cache")...)
+	for _, dir := range extra {
+		dirs = append(dirs, state.ExpandHome(dir))
+	}
+	var existing []string
+	for _, dir := range dirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() && !slices.Contains(existing, dir) {
+			existing = append(existing, dir)
+		}
+	}
+	return existing
+}
+
+func toolOutput(tool string, args ...string) []string {
+	if _, err := exec.LookPath(tool); err != nil {
+		return nil
+	}
+	out, err := exec.Command(tool, args...).Output()
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(out))
 }
