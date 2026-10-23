@@ -1,6 +1,6 @@
-# factory-tui
+# factory
 
-One Go binary, `factory-tui`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
+One Go binary, `factory`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
 
 ## Commands
 
@@ -8,7 +8,7 @@ One Go binary, `factory-tui`, that runs every factory in one tmux session and sh
 go build ./...
 go vet ./...
 go test ./...
-go run ./cmd/factory-tui --version
+go run ./cmd/factory --version
 ```
 
 CI runs the same three commands on ubuntu and macos for every pull request.

@@ -1,6 +1,6 @@
 # state.json
 
-One file per ticket at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer; the factory-tui app only reads it.
+One file per ticket at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer; the factory app only reads it.
 
 | Field | Meaning |
 |---|---|

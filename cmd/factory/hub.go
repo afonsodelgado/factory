@@ -21,7 +21,7 @@ import (
 
 func runHub(args []string) int {
 	if err := hubMain(); err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui hub:", err)
+		fmt.Fprintln(os.Stderr, "factory hub:", err)
 		return 1
 	}
 	return 0
@@ -34,7 +34,7 @@ func hubMain() error {
 	}
 	self := os.Getenv("TMUX_PANE")
 	if self == "" {
-		return errors.New("not inside tmux; start the hub with factory-tui open")
+		return errors.New("not inside tmux; start the hub with factory open")
 	}
 	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
 		return err
@@ -113,14 +113,14 @@ func lockHub(path string) (func(), error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, errors.New("another factory-tui hub is already running")
+		return nil, errors.New("another factory hub is already running")
 	}
 	return func() { f.Close() }, nil
 }
 
 func runView(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory-tui view <panel|footer|slot> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory view <panel|footer|slot> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("view", flag.ContinueOnError)
@@ -130,7 +130,7 @@ func runView(args []string) int {
 	}
 	viewer := &hub.Viewer{Kind: args[0], Socket: *socket}
 	if _, err := tea.NewProgram(viewer).Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui view:", err)
+		fmt.Fprintln(os.Stderr, "factory view:", err)
 		return 1
 	}
 	return 0
@@ -148,7 +148,7 @@ func notify(text string) {
 	if runtime.GOOS != "darwin" {
 		return
 	}
-	script := fmt.Sprintf("display notification %q with title %q", text, "factory-tui")
+	script := fmt.Sprintf("display notification %q with title %q", text, "factory")
 	exec.Command("osascript", "-e", script).Run()
 }
 

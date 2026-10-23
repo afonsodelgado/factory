@@ -29,7 +29,7 @@ func runOpen(args []string) int {
 		return 2
 	}
 	if err := openMain(strings.Join(flags.Args(), " "), *repo); err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui open:", err)
+		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0

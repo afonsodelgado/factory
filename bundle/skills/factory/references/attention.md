@@ -1,6 +1,6 @@
 # Attention items
 
-An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and sets `resolved_at` when the answer arrives. The factory-tui app shows open items (no `resolved_at`) in its panel and never writes them.
+An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and sets `resolved_at` when the answer arrives. The factory app shows open items (no `resolved_at`) in its panel and never writes them.
 
 ```json
 {

@@ -278,7 +278,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err := m.Engine.Type(pane, launch.CreateCommand()); err != nil {
 		return err
 	}
-	note := "created by factory-tui"
+	note := "created by factory"
 	if r.Brief != "" {
 		note += fmt.Sprintf(" with a %d-line brief", strings.Count(strings.TrimRight(r.Brief, "\n"), "\n")+1)
 	}
@@ -434,7 +434,7 @@ func (m *Model) kill(key string) error {
 		return err
 	}
 	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "killed from factory-tui")
+		m.Loader.Note(it.Factory, "killed from factory")
 	}
 	return nil
 }

@@ -10,7 +10,7 @@ import (
 func TestDoctorReportsWhatIsMissingWithTheFix(t *testing.T) {
 	t.Setenv("PATH", "")
 	dir := t.TempDir()
-	o := Options{ClaudeDir: dir, Binary: "/opt/factory-tui/bin/factory-tui", Home: t.TempDir()}
+	o := Options{ClaudeDir: dir, Binary: "/opt/factory/bin/factory", Home: t.TempDir()}
 
 	var out bytes.Buffer
 	problems, _ := Report(&out, Doctor(o), "doctor")

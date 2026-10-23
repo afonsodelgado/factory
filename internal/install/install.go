@@ -169,7 +169,7 @@ type group struct {
 
 func ours(command string) bool {
 	binary, ok := hookBinary(command)
-	return ok && filepath.Base(binary) == "factory-tui"
+	return ok && filepath.Base(binary) == "factory"
 }
 
 func hookBinary(command string) (string, bool) {
@@ -194,7 +194,7 @@ func bundledHooks(command string) (*object, error) {
 		return nil, err
 	}
 	encoded, _ := json.Marshal(command)
-	data = bytes.ReplaceAll(data, []byte(`"factory-tui hook"`), encoded)
+	data = bytes.ReplaceAll(data, []byte(`"factory hook"`), encoded)
 	return parseObject(data)
 }
 

@@ -15,7 +15,7 @@ import (
 func binaryPath() string {
 	bin, err := os.Executable()
 	if err != nil {
-		return "factory-tui"
+		return "factory"
 	}
 	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
 		return resolved
@@ -40,7 +40,7 @@ func doctorOptions() install.Options {
 }
 
 func runDoctor(args []string) int {
-	header := fmt.Sprintf("factory-tui doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
+	header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
 	problems, warnings := install.Report(os.Stdout, install.Doctor(doctorOptions()), header)
 	summary := fmt.Sprintf("%d problems, %d warnings. Nothing was changed.", problems, warnings)
 	if problems > 0 {
@@ -57,10 +57,10 @@ func runBootstrap(args []string) int {
 	o := doctorOptions()
 	plan, err := install.NewPlan(o.ClaudeDir, o.Binary)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui bootstrap:", err)
+		fmt.Fprintln(os.Stderr, "factory bootstrap:", err)
 		return 1
 	}
-	fmt.Printf("factory-tui bootstrap · installs the bundled skills, agents and hooks into %s\n\n", o.ClaudeDir)
+	fmt.Printf("factory bootstrap · installs the bundled skills, agents and hooks into %s\n\n", o.ClaudeDir)
 	if plan.Changes() == 0 {
 		fmt.Println("Everything is installed and current. Nothing changed.")
 	} else {
@@ -72,7 +72,7 @@ func runBootstrap(args []string) int {
 			fmt.Println("  wrote      " + written)
 		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "factory-tui bootstrap:", err)
+			fmt.Fprintln(os.Stderr, "factory bootstrap:", err)
 			return 1
 		}
 		fmt.Printf("\n%s written, %d backed up. Restart running Claude Code sessions so they pick up the hooks.\n", count(len(result.Written), "file"), len(result.Backups))
@@ -106,7 +106,7 @@ func printToolFixes(o install.Options) {
 
 func runInstallHooks(args []string) int {
 	flags := flag.NewFlagSet("install-hooks", flag.ContinueOnError)
-	remove := flags.Bool("remove", false, "remove the factory-tui hooks")
+	remove := flags.Bool("remove", false, "remove the factory hooks")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -120,7 +120,7 @@ func runInstallHooks(args []string) int {
 		written, backup, err = install.MergeHooks(dir, install.HookCommand(binaryPath()), stamp)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui install-hooks:", err)
+		fmt.Fprintln(os.Stderr, "factory install-hooks:", err)
 		return 1
 	}
 	if written == "" {

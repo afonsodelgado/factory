@@ -18,7 +18,7 @@ import (
 
 func runDialog(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory-tui dialog <new|switch|kill|archive|keys> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|switch|kill|archive|keys> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)
@@ -27,7 +27,7 @@ func runDialog(args []string) int {
 		return 2
 	}
 	if err := dialogMain(args[0], *socket); err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui dialog:", err)
+		fmt.Fprintln(os.Stderr, "factory dialog:", err)
 		time.Sleep(2 * time.Second)
 		return 1
 	}
