@@ -41,6 +41,31 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 	if file.Last.Event != "PreToolUse" || file.Last.Matcher != "Bash" || !file.Last.At.Equal(at.Add(time.Minute)) {
 		t.Errorf("last slot = %+v, want the subagent's PreToolUse", file.Last)
 	}
+
+	steps := []struct {
+		event      string
+		pending    bool
+		regression string
+	}{
+		{`"hook_event_name":"Notification","notification_type":"permission_prompt"`, true, "a permission prompt does not need the user"},
+		{`"hook_event_name":"PostToolUse","tool_name":"Bash"`, false, "the badge stays stuck after an approved prompt, as on cowork security-2-4"},
+		{`"hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"a1"`, true, "a stage agent's permission prompt does not need the user"},
+		{`"hook_event_name":"Notification","notification_type":"permission_prompt"`, true, "the notification for a stage agent's prompt drops it"},
+		{`"hook_event_name":"PostToolUse","tool_name":"Bash","agent_id":"a2"`, true, "another agent's tool clears a prompt the user has not answered"},
+		{`"hook_event_name":"PostToolUseFailure","tool_name":"Bash","agent_id":"a1"`, false, "the asking agent's own tool result leaves the prompt open"},
+		{`"hook_event_name":"Notification","notification_type":"permission_prompt"`, true, "a second prompt does not need the user"},
+		{`"hook_event_name":"PostToolUse","tool_name":"Read","agent_id":"a2"`, false, "a prompt with no thread id is never cleared"},
+	}
+	for i, step := range steps {
+		record(`{"session_id":"s1","cwd":"`+worktree+`",`+step.event+`}`, at.Add(time.Duration(i+2)*time.Minute))
+		file, err := ReadHookFile(filepath.Join(SessionsDir(stateDir), "s1.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pending := file.Prompt != nil; pending != step.pending {
+			t.Errorf("after step %d (%s) a prompt is pending = %v, want %v: %s", i+1, step.event, pending, step.pending, step.regression)
+		}
+	}
 }
 
 func TestFactoriesInReposWithTheSameNameKeepSeparateFiles(t *testing.T) {

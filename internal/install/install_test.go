@@ -93,7 +93,7 @@ func TestBootstrapBacksUpKeepsExistingHooksAndIsIdempotent(t *testing.T) {
 			t.Errorf("the vault %s hook was removed: %v", vault, commands[vault])
 		}
 	}
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"} {
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Notification", "Stop", "StopFailure", "SessionEnd"} {
 		ours := 0
 		for _, c := range commands[event] {
 			if c == binary+" hook" {

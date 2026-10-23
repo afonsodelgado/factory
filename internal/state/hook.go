@@ -10,11 +10,18 @@ import (
 )
 
 type HookFile struct {
-	SessionID      string     `json:"session_id"`
-	CWD            string     `json:"cwd"`
-	TranscriptPath string     `json:"transcript_path"`
-	Main           *HookEvent `json:"main,omitempty"`
-	Last           HookEvent  `json:"last"`
+	SessionID      string         `json:"session_id"`
+	CWD            string         `json:"cwd"`
+	TranscriptPath string         `json:"transcript_path"`
+	Main           *HookEvent     `json:"main,omitempty"`
+	Last           HookEvent      `json:"last"`
+	Prompt         *PendingPrompt `json:"prompt,omitempty"`
+}
+
+type PendingPrompt struct {
+	At      time.Time `json:"at"`
+	AgentID string    `json:"agent_id,omitempty"`
+	Tool    string    `json:"tool,omitempty"`
 }
 
 type HookEvent struct {
@@ -45,6 +52,45 @@ func (p hookPayload) matcher() string {
 		}
 	}
 	return ""
+}
+
+func (p hookPayload) asksPermission() bool {
+	return p.HookEventName == "PermissionRequest" || (p.HookEventName == "Notification" && p.NotificationType == "permission_prompt")
+}
+
+func (p hookPayload) toolFinished() bool {
+	return p.HookEventName == "PostToolUse" || p.HookEventName == "PostToolUseFailure"
+}
+
+func (p hookPayload) mainTurnMoved() bool {
+	switch p.HookEventName {
+	case "Stop", "UserPromptSubmit", "SessionStart":
+		return p.AgentID == ""
+	}
+	return false
+}
+
+func (pp *PendingPrompt) answeredBy(p hookPayload) bool {
+	sameThread := pp.AgentID == "" || pp.AgentID == p.AgentID
+	sameTool := pp.Tool == "" || pp.Tool == p.ToolName
+	return sameThread && sameTool
+}
+
+func nextPrompt(pending *PendingPrompt, p hookPayload, now time.Time) *PendingPrompt {
+	repeatsTheOpenPrompt := pending != nil && p.HookEventName == "Notification"
+	switch {
+	case p.asksPermission() && repeatsTheOpenPrompt:
+		return pending
+	case p.asksPermission():
+		return &PendingPrompt{At: now, AgentID: p.AgentID, Tool: p.ToolName}
+	case pending == nil:
+		return nil
+	case p.toolFinished() && pending.answeredBy(p):
+		return nil
+	case p.mainTurnMoved() && pending.AgentID == "":
+		return nil
+	}
+	return pending
 }
 
 func IsFactoryDir(cwd string) bool {
@@ -89,6 +135,7 @@ func RecordHook(stateDir string, payload []byte, now time.Time) error {
 	if mainThread && (file.Main == nil || !now.Before(file.Main.At)) {
 		file.Main = &event
 	}
+	file.Prompt = nextPrompt(file.Prompt, p, now)
 	data, err := json.Marshal(file)
 	if err != nil {
 		return err

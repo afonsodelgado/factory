@@ -147,7 +147,8 @@ func (l *Loader) logHook(f factory.Factory, hook *state.HookFile) {
 	signature := main.Event + "|" + main.Matcher + "|" + main.At.String()
 	previous, seen := l.lastMain[f.Key()]
 	l.lastMain[f.Key()] = signature
-	if !seen || previous == signature || main.Is("PreToolUse") {
+	toolEvent := main.Is("PreToolUse") || main.Is("PostToolUse") || main.Is("PostToolUseFailure")
+	if !seen || previous == signature || toolEvent {
 		return
 	}
 	text := main.Event

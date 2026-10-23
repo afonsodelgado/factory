@@ -83,15 +83,11 @@ func attentionItems(it Item, now time.Time) []panel.Item {
 		}
 	}
 	if factory.PermissionPrompt(it.Hook) {
-		at := it.Hook.Last.At
-		if it.Hook.Main != nil && it.Hook.Main.At.After(at) {
-			at = it.Hook.Main.At
-		}
 		items = append(items, panel.Item{
 			Kind:   "permission",
 			Title:  "waiting on a permission prompt",
 			Body:   "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot.",
-			Since:  at,
+			Since:  it.Hook.Prompt.At,
 			Action: "⏎ answer in the session",
 		})
 	}
