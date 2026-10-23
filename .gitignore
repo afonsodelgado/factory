@@ -4,3 +4,9 @@
 .claude/worktrees/
 dist/
 /factory
+node_modules/
+.turbo/
+/apps/*/build/
+/packages/*/build/
+/apps/*/coverage/
+/packages/*/coverage/
