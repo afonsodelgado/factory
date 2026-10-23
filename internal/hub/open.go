@@ -14,9 +14,10 @@ import (
 )
 
 type OpenRequest struct {
-	Name   string `json:"name"`
-	Repo   string `json:"repo"`
-	Prompt string `json:"prompt,omitempty"`
+	Name     string `json:"name"`
+	Repo     string `json:"repo"`
+	Prompt   string `json:"prompt,omitempty"`
+	Pipeline string `json:"pipeline,omitempty"`
 }
 
 func (m *Model) openRequest(e Event) tea.Cmd {
@@ -60,5 +61,5 @@ func (m *Model) open(r OpenRequest) error {
 	if earlier, ok := m.retiredMatch(repos, id); ok {
 		repo = earlier
 	}
-	return m.create(dialog.NewResult{Repo: repo, Slug: id, Prompt: r.Prompt})
+	return m.create(dialog.NewResult{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline})
 }

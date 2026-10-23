@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type Existing struct {
@@ -25,6 +27,10 @@ type RepoOption struct {
 	Browser    bool       `json:"browser"`
 	CodeRabbit bool       `json:"coderabbit"`
 	Existing   []Existing `json:"existing"`
+
+	Pipelines       []state.Pipeline `json:"pipelines"`
+	DefaultPipeline string           `json:"default_pipeline"`
+	PipelineProblem string           `json:"pipeline_problem,omitempty"`
 }
 
 type NewContext struct {
@@ -34,11 +40,12 @@ type NewContext struct {
 }
 
 type NewResult struct {
-	Repo   string `json:"repo"`
-	Slug   string `json:"slug,omitempty"`
-	Prompt string `json:"prompt,omitempty"`
-	Select string `json:"select,omitempty"`
-	Wake   bool   `json:"wake,omitempty"`
+	Repo     string `json:"repo"`
+	Slug     string `json:"slug,omitempty"`
+	Prompt   string `json:"prompt,omitempty"`
+	Pipeline string `json:"pipeline,omitempty"`
+	Select   string `json:"select,omitempty"`
+	Wake     bool   `json:"wake,omitempty"`
 }
 
 type SwitchRow struct {
