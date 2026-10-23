@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/state"
@@ -24,6 +25,17 @@ func Slugify(s string) string {
 		}
 	}
 	return strings.TrimSuffix(b.String(), "-")
+}
+
+var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "help", "delete", "-h", "--help", "--version"}
+
+func IsReservedID(name string) bool {
+	return slices.Contains(ReservedIDs, name) || slices.Contains(ReservedIDs, Slugify(name))
+}
+
+func ReservedIDRefusal(name string) string {
+	id := Slugify(name)
+	return fmt.Sprintf("`%s` is a factory command, not an id. Pick another id, such as %s-fixes.", strings.TrimSpace(name), id)
 }
 
 func FreshSlug(slug string, taken func(string) bool) string {

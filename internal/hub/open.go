@@ -23,6 +23,27 @@ type OpenRequest struct {
 	Agents   map[string]state.AgentSetting `json:"agents,omitempty"`
 }
 
+type DeleteRequest struct {
+	Repo string `json:"repo"`
+	Slug string `json:"slug"`
+}
+
+func (m *Model) deleteRequest(e Event) tea.Cmd {
+	var r DeleteRequest
+	var steps []factory.RemovalStep
+	err := json.Unmarshal(e.Data, &r)
+	if err == nil {
+		steps, err = m.delete(state.Key(r.Repo, r.Slug))
+	}
+	report, _ := json.Marshal(factory.Report(steps))
+	reply := Message{T: "done", Data: report}
+	if err != nil {
+		reply = Message{T: "error", Error: err.Error(), Data: report}
+	}
+	e.From.Send(reply)
+	return m.load()
+}
+
 func (m *Model) openRequest(e Event) tea.Cmd {
 	var r OpenRequest
 	err := json.Unmarshal(e.Data, &r)
@@ -40,6 +61,9 @@ func (m *Model) openRequest(e Event) tea.Cmd {
 func (m *Model) open(r OpenRequest) error {
 	if strings.TrimSpace(r.Name) == "" {
 		return nil
+	}
+	if factory.IsReservedID(r.Name) {
+		return errors.New(factory.ReservedIDRefusal(r.Name))
 	}
 	id := factory.Slugify(r.Name)
 	if id == "" {

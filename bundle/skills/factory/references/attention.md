@@ -58,6 +58,8 @@ The app delivers answers into the session as one message, in exactly these forms
 
 Slash commands are always one line. Free text may span several lines.
 
+The panel keeps the user's draft until the supervisor's session has received the message, which it reads from the session's own `UserPromptSubmit` hook. When the message does not arrive, for example because the session was showing a stage agent's transcript and the agent got it instead, the panel says so and the user sends it again.
+
 Example of a question answer:
 
 ```

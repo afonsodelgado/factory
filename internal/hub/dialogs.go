@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,21 +18,25 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
+	"github.com/afonsodelgado/factory/internal/ui/panel"
+	"github.com/afonsodelgado/factory/internal/ui/selector"
 )
 
 var popupSizes = map[string][2]int{
 	"new":     {88, 30},
 	"switch":  {112, 14},
-	"kill":    {68, 9},
+	"pause":   {68, 9},
 	"archive": {80, 12},
-	"keys":    {116, 14},
+	"delete":  {84, 14},
+	"keys":    {116, 16},
 }
 
 var popupTitles = map[string]string{
 	"new":     " + New factory ",
 	"switch":  " ⌕ Factories ",
-	"kill":    " ■ Kill ",
+	"pause":   " ‖ Pause ",
 	"archive": " ▭ Archive ",
+	"delete":  " ✕ Delete ",
 	"keys":    " Keys ",
 }
 
@@ -54,7 +59,7 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 	size := popupSizes[kind]
 	width, height := min(size[0], max(m.window[0]-4, 20)), min(size[1], max(m.window[1]-4, 6))
 	title := popupTitles[kind]
-	if kind == "kill" || kind == "archive" {
+	if kind == "pause" || kind == "archive" || kind == "delete" {
 		if it, ok := m.selectedItem(); ok {
 			title = strings.TrimRight(title, " ") + " " + it.Factory.Label() + "? "
 		}
@@ -108,15 +113,20 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			m.choose(r.Key)
 		}
-	case "kill":
+	case "pause":
 		var r dialog.KeyResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
-			err = m.kill(r.Key)
+			err = m.pause(r.Key)
 		}
 	case "archive":
 		var r dialog.ArchiveResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			err = m.archive(r)
+		}
+	case "delete":
+		var r dialog.DeleteResult
+		if err = json.Unmarshal(e.Data, &r); err == nil && r.Confirmed {
+			_, err = m.delete(r.Key)
 		}
 	}
 	reply := Message{T: "done"}
@@ -193,8 +203,23 @@ func factoryDir(f factory.Factory) string {
 	return tilde(f.Dir)
 }
 
-func (m *Model) killContext(it Item) dialog.KillContext {
-	return dialog.KillContext{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), FactoryDir: factoryDir(it.Factory)}
+func (m *Model) pauseContext(it Item) dialog.PauseContext {
+	return dialog.PauseContext{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), FactoryDir: factoryDir(it.Factory)}
+}
+
+func (m *Model) deleteContext(it Item) dialog.DeleteContext {
+	removal := factory.PlanRemoval(it.Factory, m.Config.ActivityDir(), m.Config.DraftsDir())
+	work := factory.CheckWork(removal)
+	return dialog.DeleteContext{
+		Key:          it.Factory.Key(),
+		Label:        it.Factory.Label(),
+		Title:        it.Factory.Title(),
+		Worktree:     tilde(removal.Worktree),
+		WorktreeGone: !dirExists(removal.Worktree),
+		Branches:     removal.Branches,
+		Dirty:        work.Dirty,
+		Unpushed:     work.Unpushed,
+	}
 }
 
 func (m *Model) archiveContext(it Item) dialog.ArchiveContext {
@@ -290,7 +315,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if m.Engine == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(r.Slug + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: []string{"FACTORY=1"}})
 	if err != nil {
 		return err
 	}
@@ -402,7 +427,7 @@ func (m *Model) wake(key string) error {
 		if !dirExists(dir) {
 			return fmt.Errorf("the worktree %s is gone", tilde(dir))
 		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY=1"}})
+		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: []string{"FACTORY=1"}})
 		if err != nil {
 			return err
 		}
@@ -454,18 +479,64 @@ func (m *Model) wakeAll() error {
 	return nil
 }
 
-func (m *Model) kill(key string) error {
+func (m *Model) pause(key string) error {
 	it, ok := m.snap.Find(key)
 	if !ok || m.Engine == nil {
 		return nil
 	}
-	if err := m.Engine.Kill(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
+	if err := m.Engine.Pause(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
 		return err
 	}
 	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "killed from factory")
+		m.Loader.Note(it.Factory, "paused from factory")
 	}
 	return nil
+}
+
+func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
+	it, ok := m.snap.Find(key)
+	if !ok || m.Loader == nil {
+		return nil, fmt.Errorf("the hub does not list %s", key)
+	}
+	if it.Pane != nil && m.Engine != nil {
+		if err := m.Engine.Pause(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
+			return nil, err
+		}
+	}
+	if m.selected == key {
+		m.choose(m.rowAfter(key))
+	}
+	m.forgetFactory(key)
+	removal := factory.PlanRemoval(it.Factory, m.Config.ActivityDir(), m.Config.DraftsDir())
+	steps := factory.Run(removal, m.Loader.UpdateRegistry)
+	m.Loader.Forget(key)
+	if failed, stopped := factory.FirstFailure(steps); stopped {
+		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", it.Factory.Label(), failed.Name, failed.Detail, failed.Err)
+	}
+	m.notice = it.Factory.Label() + " is deleted."
+	return steps, nil
+}
+
+func (m *Model) rowAfter(key string) string {
+	rows := selector.Visible(m.data())
+	i := slices.IndexFunc(rows, func(r selector.Row) bool { return r.Key == key })
+	switch {
+	case i < 0:
+		return ""
+	case i+1 < len(rows):
+		return rows[i+1].Key
+	case i > 0:
+		return rows[i-1].Key
+	}
+	return ""
+}
+
+func (m *Model) forgetFactory(key string) {
+	ownDraft := func(draftKey string) bool { return strings.HasPrefix(draftKey, key+"|") }
+	maps.DeleteFunc(m.panel.drafts, func(k string, _ *panel.Draft) bool { return ownDraft(k) })
+	maps.DeleteFunc(m.panel.sent, func(k string, _ sentMark) bool { return ownDraft(k) })
+	maps.DeleteFunc(m.panel.refused, func(k string, _ string) bool { return ownDraft(k) })
+	delete(m.panel.prs, key)
 }
 
 func (m *Model) archive(r dialog.ArchiveResult) error {

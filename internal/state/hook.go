@@ -4,25 +4,38 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 )
 
 type HookFile struct {
-	SessionID      string     `json:"session_id"`
-	CWD            string     `json:"cwd"`
-	TranscriptPath string     `json:"transcript_path"`
-	Main           *HookEvent `json:"main,omitempty"`
-	Last           HookEvent  `json:"last"`
+	SessionID      string         `json:"session_id"`
+	CWD            string         `json:"cwd"`
+	TranscriptPath string         `json:"transcript_path"`
+	Token          string         `json:"token,omitempty"`
+	Main           *HookEvent     `json:"main,omitempty"`
+	Last           HookEvent      `json:"last"`
+	Submit         *HookEvent     `json:"submit,omitempty"`
+	Prompt         *PendingPrompt `json:"prompt,omitempty"`
+}
+
+const promptHeadLength = 120
+
+type PendingPrompt struct {
+	At      time.Time `json:"at"`
+	AgentID string    `json:"agent_id,omitempty"`
+	Tool    string    `json:"tool,omitempty"`
 }
 
 type HookEvent struct {
-	Event     string    `json:"event"`
-	Matcher   string    `json:"matcher,omitempty"`
-	At        time.Time `json:"at"`
-	AgentID   string    `json:"agent_id,omitempty"`
-	AgentType string    `json:"agent_type,omitempty"`
+	Event      string    `json:"event"`
+	Matcher    string    `json:"matcher,omitempty"`
+	At         time.Time `json:"at"`
+	AgentID    string    `json:"agent_id,omitempty"`
+	AgentType  string    `json:"agent_type,omitempty"`
+	PromptHead string    `json:"prompt_head,omitempty"`
 }
 
 type hookPayload struct {
@@ -36,12 +49,64 @@ type hookPayload struct {
 	NotificationType string `json:"notification_type"`
 	ToolName         string `json:"tool_name"`
 	Reason           string `json:"reason"`
+	Prompt           string `json:"prompt"`
 }
 
 func (p hookPayload) matcher() string {
 	for _, m := range []string{p.Source, p.NotificationType, p.ToolName, p.Reason} {
 		if m != "" {
 			return m
+		}
+	}
+	return ""
+}
+
+func (p hookPayload) asksPermission() bool {
+	return p.HookEventName == "PermissionRequest" || (p.HookEventName == "Notification" && p.NotificationType == "permission_prompt")
+}
+
+func (p hookPayload) toolFinished() bool {
+	return p.HookEventName == "PostToolUse" || p.HookEventName == "PostToolUseFailure"
+}
+
+func (p hookPayload) mainTurnMoved() bool {
+	switch p.HookEventName {
+	case "Stop", "UserPromptSubmit", "SessionStart":
+		return p.AgentID == ""
+	}
+	return false
+}
+
+func (pp *PendingPrompt) answeredBy(p hookPayload) bool {
+	sameThread := pp.AgentID == "" || pp.AgentID == p.AgentID
+	sameTool := pp.Tool == "" || pp.Tool == p.ToolName
+	return sameThread && sameTool
+}
+
+func nextPrompt(pending *PendingPrompt, p hookPayload, now time.Time) *PendingPrompt {
+	repeatsTheOpenPrompt := pending != nil && p.HookEventName == "Notification"
+	switch {
+	case p.asksPermission() && repeatsTheOpenPrompt:
+		return pending
+	case p.asksPermission():
+		return &PendingPrompt{At: now, AgentID: p.AgentID, Tool: p.ToolName}
+	case pending == nil:
+		return nil
+	case p.toolFinished() && pending.answeredBy(p):
+		return nil
+	case p.mainTurnMoved() && pending.AgentID == "":
+		return nil
+	}
+	return pending
+}
+
+var pastedMarker = regexp.MustCompile(`</?pasted_content[^>]*>`)
+
+func PromptHead(prompt string) string {
+	unwrapped := pastedMarker.ReplaceAllString(prompt, "\n")
+	for _, line := range strings.Split(unwrapped, "\n") {
+		if runes := []rune(strings.TrimSpace(line)); len(runes) > 0 {
+			return string(runes[:min(len(runes), promptHeadLength)])
 		}
 	}
 	return ""
@@ -55,7 +120,7 @@ func IsFactoryDir(cwd string) bool {
 	return err == nil && info.IsDir()
 }
 
-func RecordHook(stateDir string, payload []byte, now time.Time) error {
+func RecordHook(stateDir string, payload []byte, token string, now time.Time) error {
 	var p hookPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -79,6 +144,13 @@ func RecordHook(stateDir string, payload []byte, now time.Time) error {
 		file = &HookFile{}
 	}
 	event := HookEvent{Event: p.HookEventName, Matcher: p.matcher(), At: now, AgentID: p.AgentID, AgentType: p.AgentType}
+	if p.HookEventName == "UserPromptSubmit" {
+		event.PromptHead = PromptHead(p.Prompt)
+		file.Submit = &event
+	}
+	if token != "" {
+		file.Token = token
+	}
 	file.SessionID = p.SessionID
 	file.CWD = p.CWD
 	file.TranscriptPath = p.TranscriptPath
@@ -89,6 +161,7 @@ func RecordHook(stateDir string, payload []byte, now time.Time) error {
 	if mainThread && (file.Main == nil || !now.Before(file.Main.At)) {
 		file.Main = &event
 	}
+	file.Prompt = nextPrompt(file.Prompt, p, now)
 	data, err := json.Marshal(file)
 	if err != nil {
 		return err

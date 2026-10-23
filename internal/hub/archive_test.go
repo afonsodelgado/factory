@@ -75,8 +75,8 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
 		t.Error("the worktree directory is still there")
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".claude", "factory", "ENG-1", "state.json")); err != nil {
-		t.Errorf("the factory directory inside the worktree was not kept: %v", err)
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "factory-archive", "ENG-1", "state.json")); err != nil {
+		t.Errorf("the factory directory inside the worktree was not kept in .claude/factory-archive, out of the skill's legacy path: %v", err)
 	}
 	run(t, repo, "git", "rev-parse", "--verify", "worktree-eng-1-x")
 	after := loader.Load()
@@ -86,5 +86,17 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 			rows = append(rows, fmt.Sprintf("%s archived=%v", it.Factory.Key(), it.Factory.Archived()))
 		}
 		t.Errorf("after archiving with removal, discovery finds %v; want only %s, archived: a state with no worktree field must keep its row hidden once its directory moves", rows, key)
+	}
+
+	if err := os.Remove(cfg.RegistryPath()); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgotten := (&Loader{Config: cfg, Registry: empty, Now: time.Now}).Load()
+	if len(forgotten.Items) != 1 || !forgotten.Items[0].Factory.Archived() || !retired(forgotten.Items[0].Factory) {
+		t.Errorf("with the registry entry lost, discovery finds %+v; want the moved directory still read as retired, archived history, or a new factory with the id picks up its state", forgotten.Items)
 	}
 }

@@ -32,6 +32,8 @@ Apply the report's "Automation gaps" section on the same layer. Each test must n
 
 The user's CLAUDE.md rules apply: no comments, readable conditionals, extend existing test files over creating new ones.
 
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+
 End every turn with:
 
 ```factory-result

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -73,6 +74,12 @@ func (r *Registry) Upsert(e Entry) *Entry {
 	}
 	r.Factories = append(r.Factories, e)
 	return &r.Factories[len(r.Factories)-1]
+}
+
+func (r *Registry) Remove(match func(Entry) bool) int {
+	before := len(r.Factories)
+	r.Factories = slices.DeleteFunc(r.Factories, match)
+	return before - len(r.Factories)
 }
 
 func (r *Registry) Observe(repo, slug string, seen time.Time) (*Entry, bool) {

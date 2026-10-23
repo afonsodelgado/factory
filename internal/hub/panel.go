@@ -33,7 +33,16 @@ type panelState struct {
 type sentMark struct {
 	at        time.Time
 	itemSince time.Time
+	factory   string
+	itemID    string
+	head      string
+	draft     string
+	received  time.Time
 }
+
+const receiptWait = 10 * time.Second
+
+const notReceived = "Not received by the supervisor. The session is probably showing a stage agent's transcript: open the session (esc, then ⏎), leave that view, then send again."
 
 func (m *Model) forgetClosedItems() {
 	open := map[string]time.Time{}
@@ -48,6 +57,7 @@ func (m *Model) forgetClosedItems() {
 		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.itemSince) {
 			delete(m.panel.sent, key)
 			delete(m.panel.drafts, key)
+			os.Remove(mark.draft)
 		}
 	}
 	for key := range m.panel.refused {
@@ -55,6 +65,42 @@ func (m *Model) forgetClosedItems() {
 			delete(m.panel.refused, key)
 		}
 	}
+}
+
+func (m *Model) checkReceipts() {
+	for key, mark := range m.panel.sent {
+		if !mark.received.IsZero() {
+			continue
+		}
+		var submit *state.HookEvent
+		if it, ok := m.snap.Find(mark.factory); ok && it.Hook != nil {
+			submit = it.Hook.Submit
+		}
+		switch {
+		case mark.receivedIn(submit):
+			mark.received = submit.At
+			m.panel.sent[key] = mark
+			os.Remove(mark.draft)
+		case mark.misroutedIn(submit) || m.snap.At.Sub(mark.at) > receiptWait:
+			delete(m.panel.sent, key)
+			m.panel.refused[key] = notReceived
+			if it, ok := m.snap.Find(mark.factory); ok && m.Loader != nil {
+				m.Loader.Note(it.Factory, "answer to "+mark.itemID+" did not reach the supervisor")
+			}
+		}
+	}
+}
+
+func (s sentMark) receivedIn(submit *state.HookEvent) bool {
+	if submit == nil || submit.AgentID != "" || submit.At.Before(s.at) {
+		return false
+	}
+	headIsText := submit.PromptHead != "" && !strings.HasPrefix(submit.PromptHead, "[Pasted text")
+	return !headIsText || submit.PromptHead == s.head
+}
+
+func (s sentMark) misroutedIn(submit *state.HookEvent) bool {
+	return submit != nil && submit.AgentID != "" && !submit.At.Before(s.at)
 }
 
 func (m *Model) isSent(f factory.Factory, item panel.Item) bool {
@@ -83,15 +129,11 @@ func attentionItems(it Item, now time.Time) []panel.Item {
 		}
 	}
 	if factory.PermissionPrompt(it.Hook) {
-		at := it.Hook.Last.At
-		if it.Hook.Main != nil && it.Hook.Main.At.After(at) {
-			at = it.Hook.Main.At
-		}
 		items = append(items, panel.Item{
 			Kind:   "permission",
 			Title:  "waiting on a permission prompt",
 			Body:   "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot.",
-			Since:  at,
+			Since:  it.Hook.Prompt.At,
 			Action: "⏎ answer in the session",
 		})
 	}
@@ -237,8 +279,8 @@ func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
 		m.panel.drafts[key] = d
 	}
 	d.Fit(len(item.Questions))
-	if len(item.Artifacts) > 0 {
-		d.Artifact = max(0, min(d.Artifact, len(item.Artifacts)-1))
+	if item.Kind == "gate" {
+		d.Artifact = max(0, min(d.Artifact, approveRow(item)))
 	}
 	return d
 }
@@ -317,8 +359,16 @@ func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	return Instruction(item.ID, d.Text)
 }
 
+func approveRow(item panel.Item) int {
+	return len(item.Artifacts)
+}
+
+func onApproveRow(item panel.Item, d *panel.Draft) bool {
+	return item.Kind == "gate" && d.Artifact == approveRow(item)
+}
+
 func (m *Model) gateNotes(item panel.Item, d *panel.Draft) string {
-	if len(item.Artifacts) < 2 {
+	if len(item.Artifacts) < 2 || onApproveRow(item, d) {
 		return d.Text
 	}
 	return strings.TrimSpace("Approve " + item.Artifacts[d.Artifact].Title + ". " + d.Text)
@@ -337,18 +387,20 @@ func (m *Model) deliver(action string) {
 	if unanswered(item, d) != "" {
 		return
 	}
-	reason, err := Deliver(m.Typist, m.freshTarget(it), m.message(item, d, action))
+	sentAt := m.Now()
+	text := m.message(item, d, action)
+	reason, err := Deliver(m.Typist, m.freshTarget(it), text)
 	if err != nil {
 		reason = err.Error()
 	}
 	if reason != "" {
-		m.panel.refused[key] = reason
+		m.panel.refused[key] = "Not sent. " + reason
 		m.saveDraft()
 		return
 	}
 	delete(m.panel.refused, key)
-	m.panel.sent[key] = sentMark{at: m.Now(), itemSince: item.Since}
-	os.Remove(m.draftPath(it.Factory, item.ID))
+	m.saveDraft()
+	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID)}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
@@ -409,7 +461,8 @@ func (m *Model) panelView() panel.View {
 
 func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	key := draftKey(it.Factory, item.ID)
-	s := panel.Send{Refused: m.panel.refused[key], SentAt: m.panel.sent[key].at}
+	mark := m.panel.sent[key]
+	s := panel.Send{Refused: m.panel.refused[key], SentAt: mark.at, ReceivedAt: mark.received}
 	if missing := unanswered(item, d); missing != "" {
 		s.Reason = missing
 		return s
@@ -462,6 +515,14 @@ func (m *Model) PanelView(width, height int) string {
 }
 
 func (m *Model) panelKey(key, text string) tea.Cmd {
+	switch key {
+	case "ctrl+n":
+		m.moveItem(1)
+		return nil
+	case "ctrl+p":
+		m.moveItem(-1)
+		return nil
+	}
 	it, item, hasItem := m.currentAttention()
 	answerFormShown := hasItem && item.Answerable() && m.panel.tab == panel.Attention
 	if answerFormShown {
@@ -490,12 +551,10 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 		m.share = max(m.share-1.0/6, 1.0/6)
 		return nil
 	case "[":
-		m.saveDraft()
-		m.panel.item = max(m.panel.item-1, 0)
+		m.moveItem(-1)
 		return nil
 	case "]":
-		m.saveDraft()
-		m.panel.item++
+		m.moveItem(1)
 		return nil
 	}
 	if m.panel.tab != panel.Attention {
@@ -507,6 +566,11 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	return nil
 }
 
+func (m *Model) moveItem(delta int) {
+	m.saveDraft()
+	m.panel.item = max(m.panel.item+delta, 0)
+}
+
 func (m *Model) switchTab(delta int) {
 	m.panel.tab = m.panel.tab.Next(delta)
 	m.panel.row = 0
@@ -514,8 +578,7 @@ func (m *Model) switchTab(delta int) {
 
 func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, bool) {
 	d := m.draft(it.Factory, item)
-	movingBetweenItems := !d.Editing && (key == "[" || key == "]")
-	if movingBetweenItems || key == "tab" || key == "shift+tab" {
+	if key == "tab" || key == "shift+tab" {
 		return nil, false
 	}
 	if m.isSent(it.Factory, item) {
@@ -532,6 +595,8 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 		return nil, false
 	case key == "enter" && d.Editing:
 		typeInto(item, d, "\n")
+	case key == "enter" && onApproveRow(item, d):
+		m.deliver("approve")
 	case key == "enter":
 		startTyping(item, d)
 	case key == "backspace":
@@ -672,7 +737,7 @@ func moveIn(item panel.Item, d *panel.Draft, key string) {
 		case "up":
 			d.Artifact = max(d.Artifact-1, 0)
 		case "down":
-			d.Artifact = min(d.Artifact+1, max(len(item.Artifacts)-1, 0))
+			d.Artifact = min(d.Artifact+1, approveRow(item))
 		}
 	}
 }

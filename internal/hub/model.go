@@ -15,6 +15,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
+	"github.com/afonsodelgado/factory/internal/ui/frame"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/selector"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -216,6 +217,7 @@ func (m *Model) apply(s Snapshot) {
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
 	m.forgetClosedItems()
+	m.checkReceipts()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {
@@ -233,7 +235,6 @@ func (m *Model) apply(s Snapshot) {
 	} else if m.itemArrived(m.selected, shownBefore) {
 		m.panel.tab = panel.Attention
 	}
-	m.syncTitles()
 	m.ensureSlot()
 	m.showSelected()
 	m.arrange()
@@ -324,20 +325,6 @@ func containsKey(rows []selector.Row, key string) bool {
 	return false
 }
 
-func (m *Model) syncTitles() {
-	if m.Engine == nil {
-		return
-	}
-	for _, it := range m.snap.Items {
-		if it.Pane == nil {
-			continue
-		}
-		if want := paneTitle(it.Factory); it.Pane.Title != want {
-			m.Engine.TM.SetPaneOption(it.Pane.ID, "@factory_title", want)
-		}
-	}
-}
-
 func paneTitle(f factory.Factory) string {
 	if f.Title() == "" {
 		return f.Label()
@@ -359,17 +346,9 @@ func (m *Model) showSelected() {
 		return
 	}
 	it, ok := m.snap.Find(m.selected)
-	viewer := m.slotViewer()
-	target, title, path := viewer, "", ""
-	switch {
-	case ok && it.Pane != nil && !it.Pane.Dead:
+	target := m.slotViewer()
+	if ok && it.Pane != nil && !it.Pane.Dead {
 		target = it.Pane.ID
-	case ok:
-		title, path = paneTitle(it.Factory), tilde(it.Factory.Worktree)
-	}
-	if viewer != "" {
-		m.Engine.TM.SetPaneOption(viewer, "@factory_title", title)
-		m.Engine.TM.SetPaneOption(viewer, "@factory_path", path)
 	}
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
@@ -413,6 +392,8 @@ func (m *Model) focusFromPane(id string) {
 		m.focus = footer.Factories
 	case id == m.Layout.Panel:
 		m.focus = footer.Panel
+	case m.Layout.Frame.Has(id):
+		m.focusSlot()
 	case id == m.Layout.Slot && id != m.slotViewer():
 		m.focus = footer.Session
 	}
@@ -452,10 +433,12 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.openDialog("switch", m.switchContext())
 	case "?":
 		return m.openDialog("keys", nil)
-	case "x":
-		return m.askKill()
+	case "p":
+		return m.askPause()
 	case "a":
 		return m.askArchive()
+	case "d":
+		return m.askDelete()
 	case "w":
 		m.wakeSelected()
 	case "W":
@@ -486,9 +469,15 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.dialogResult(e)
 	case "open":
 		return m.openRequest(e)
+	case "delete":
+		return m.deleteRequest(e)
 	case "paste":
 		if e.Pane == "panel" {
 			m.paste(e.Text)
+		}
+	case "mouse":
+		if strings.HasPrefix(e.Pane, "frame-") {
+			m.focusSlot()
 		}
 	}
 	return nil
@@ -521,16 +510,24 @@ func (m *Model) report(err error) {
 	}
 }
 
-func (m *Model) askKill() tea.Cmd {
+func (m *Model) askPause() tea.Cmd {
 	it, ok := m.selectedItem()
 	switch {
 	case !ok:
 		return nil
 	case it.Pane == nil:
-		m.notice = it.Factory.Label() + " has no pane to kill."
+		m.notice = it.Factory.Label() + " has no pane to pause."
 		return nil
 	}
-	return m.openDialog("kill", m.killContext(it))
+	return m.openDialog("pause", m.pauseContext(it))
+}
+
+func (m *Model) askDelete() tea.Cmd {
+	it, ok := m.selectedItem()
+	if !ok {
+		return nil
+	}
+	return m.openDialog("delete", m.deleteContext(it))
 }
 
 func (m *Model) askArchive() tea.Cmd {
@@ -542,7 +539,7 @@ func (m *Model) askArchive() tea.Cmd {
 		m.report(m.unarchive(it))
 		return m.load()
 	case !archivable(it):
-		m.notice = "Only done, gone or exited factories can be archived. Kill " + it.Factory.Label() + " first."
+		m.notice = "Only done, gone or exited factories can be archived. Pause " + it.Factory.Label() + " first."
 		return nil
 	}
 	return m.openDialog("archive", m.archiveContext(it))
@@ -653,6 +650,16 @@ func (m *Model) focusSession() {
 	m.focus = footer.Session
 }
 
+func (m *Model) focusSlot() {
+	if m.Engine == nil {
+		return
+	}
+	m.Engine.TM.SelectPane(m.Layout.Slot)
+	if m.Layout.Slot != m.slotViewer() {
+		m.focus = footer.Session
+	}
+}
+
 func (m *Model) focusPanel() {
 	if m.Engine != nil {
 		m.Engine.TM.SelectPane(m.Layout.Panel)
@@ -752,8 +759,25 @@ func (m *Model) publish() {
 		m.push("footer", m.FooterView(m.size("footer")))
 		m.push("panel", m.PanelView(m.size("panel")))
 		m.push("slot", m.SlotView(m.size("slot")))
+		m.pushFrame()
 	}
 	m.updateHeader()
+}
+
+func (m *Model) pushFrame() {
+	title, path := "", ""
+	if it, ok := m.snap.Find(m.selected); ok {
+		title, path = paneTitle(it.Factory), it.Factory.Worktree
+		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
+			path = it.Pane.Path
+		}
+	}
+	focused := m.focus == footer.Session
+	for _, side := range FrameSides {
+		pane := "frame-" + side
+		width, height := m.size(pane)
+		m.push(pane, frame.Render(side, width, height, title, tilde(path), focused))
+	}
 }
 
 func (m *Model) size(pane string) (int, int) {
@@ -886,13 +910,15 @@ func (m *Model) hints() []footer.Hint {
 func dialogHints(kind string) []footer.Hint {
 	switch kind {
 	case "new":
-		return hints("⏎", "next", "↑↓", "repo", "esc", "cancel")
+		return hints("⏎", "next", "↑↓", "pick", "esc", "back or cancel")
 	case "switch":
 		return hints("⏎", "select", "ctrl+j/k", "move", "ctrl+g", "next needing you", "esc", "close")
-	case "kill":
-		return hints("y", "kill", "n", "cancel", "esc", "cancel")
+	case "pause":
+		return hints("y", "pause", "n", "cancel", "esc", "cancel")
 	case "archive":
 		return hints("a", "archive", "r", "archive and remove the worktree", "esc", "cancel")
+	case "delete":
+		return hints("y", "delete", "n", "cancel", "esc", "cancel")
 	}
 	return hints("esc", "close")
 }
@@ -903,15 +929,15 @@ func (m *Model) selectorHints() []footer.Hint {
 	case !ok:
 		return hints("n", "new factory", "?", "all keys", "q", "quit the UI")
 	case it.Factory.Archived():
-		return hints("a", "unarchive "+it.Factory.Label(), "H", "hide archived", "⏎", "session", "j/k", "move", "/", "find", "n", "new")
+		return hints("a", "unarchive "+it.Factory.Label(), "H", "hide archived", "⏎", "session", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	case factory.PermissionPrompt(it.Hook):
-		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "x", "kill")
+		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "p", "pause")
 	case it.Status.Asleep():
-		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "x", "kill", "a", "archive")
+		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "p", "pause", "a", "archive", "d", "delete")
 	case it.Status == factory.Done:
-		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new")
+		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "x", "kill", "a", "archive")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
 }
 
 func (m *Model) panelHints() []footer.Hint {
@@ -928,27 +954,31 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("tab", "next tab", "esc", "back to factories")
 	}
 	if item.Answerable() && m.isSent(it.Factory, item) {
-		return hints("ctrl+d", "clear and answer again", "[ ]", "item", "esc", "back")
+		return hints("ctrl+d", "clear and answer again", "ctrl+n/p", "item", "esc", "back")
 	}
+	editing := item.Answerable() && m.draft(it.Factory, item).Editing
 	back := "back, keep draft"
-	if item.Answerable() && m.draft(it.Factory, item).Editing {
+	if editing {
 		back = "stop typing"
 	}
 	if item.Kind == "question" && len(item.Questions) == 0 {
 		return hints("type", "your answer", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
 	}
-	switch item.Kind {
-	case "question":
-		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
-	case "gate":
-		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "[ ]", "item", "esc", back)
-	case "comment":
-		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "[ ]", "item", "esc", back)
-	case "cap":
-		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
-	case "failure":
-		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
-	case "permission":
+	approving := item.Answerable() && !editing && onApproveRow(item, m.draft(it.Factory, item))
+	switch {
+	case item.Kind == "question":
+		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+	case approving:
+		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "gate":
+		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "comment":
+		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "cap":
+		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "failure":
+		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")

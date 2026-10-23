@@ -2,6 +2,8 @@ package dialog
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -128,47 +130,47 @@ func (s *Switch) View() tea.View {
 	return view(c)
 }
 
-type Kill struct {
-	Context KillContext
+type Pause struct {
+	Context PauseContext
 	size
 	result *KeyResult
 }
 
-func (k *Kill) Init() tea.Cmd { return nil }
+func (p *Pause) Init() tea.Cmd { return nil }
 
-func (k *Kill) Result() (any, bool) {
-	if k.result == nil {
+func (p *Pause) Result() (any, bool) {
+	if p.result == nil {
 		return nil, false
 	}
-	return *k.result, true
+	return *p.result, true
 }
 
-func (k *Kill) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	k.resize(msg)
+func (p *Pause) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	p.resize(msg)
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "y":
-			k.result = &KeyResult{Key: k.Context.Key}
-			return k, tea.Quit
+			p.result = &KeyResult{Key: p.Context.Key}
+			return p, tea.Quit
 		case "n", "esc", "ctrl+c", "enter":
-			return k, tea.Quit
+			return p, tea.Quit
 		}
 	}
-	return k, nil
+	return p, nil
 }
 
-func (k *Kill) View() tea.View {
-	c := theme.NewCanvas(k.width, k.height)
-	name := k.Context.Label
-	if k.Context.Title != "" {
-		name += " · " + strings.TrimRight(k.Context.Title, ".")
+func (p *Pause) View() tea.View {
+	c := theme.NewCanvas(p.width, p.height)
+	name := p.Context.Label
+	if p.Context.Title != "" {
+		name += " · " + strings.TrimRight(p.Context.Title, ".")
 	}
 	y := 0
-	for _, l := range theme.Wrap("Stops Claude Code and closes the pane for "+name+". The worktree, its branch and "+k.Context.FactoryDir+" stay. Wake brings it back later.", c.W-2) {
+	for _, l := range theme.Wrap("Stops Claude Code and closes the pane for "+name+". The worktree, its branch and "+p.Context.FactoryDir+" stay. Wake brings it back.", c.W-2) {
 		c.Put(1, y, l, theme.Text)
 		y++
 	}
-	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  kill " + k.Context.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  pause " + p.Context.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
 	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
 	return view(c)
 }
@@ -292,6 +294,116 @@ func (a *Archive) drawRefused(c *theme.Canvas) {
 	c.Spans(1, c.H-1, []theme.Span{{Text: "a", Ink: theme.Key}, {Text: " archive without removing      ", Ink: theme.Text}, {Text: "esc", Ink: theme.Key}, {Text: " cancel", Ink: theme.Text}})
 }
 
+type Delete struct {
+	Context DeleteContext
+	size
+	step   int
+	result *DeleteResult
+}
+
+func (d *Delete) Init() tea.Cmd { return nil }
+
+func (d *Delete) Result() (any, bool) {
+	if d.result == nil {
+		return nil, false
+	}
+	return *d.result, true
+}
+
+func (d *Delete) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	d.resize(msg)
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return d, nil
+	}
+	confirmed := key.String() == "y"
+	switch {
+	case confirmed && d.step == 0 && d.Context.HasWork():
+		d.step = 1
+		return d, nil
+	case confirmed:
+		d.result = &DeleteResult{Key: d.Context.Key, Confirmed: true}
+	}
+	return d, tea.Quit
+}
+
+func (d *Delete) View() tea.View {
+	c := theme.NewCanvas(d.width, d.height)
+	if d.step == 0 {
+		d.drawWhatGoes(c)
+	} else {
+		d.drawWork(c)
+	}
+	return view(c)
+}
+
+func (d *Delete) drawWhatGoes(c *theme.Canvas) {
+	ctx := d.Context
+	name := ctx.Label
+	if ctx.Title != "" {
+		name += " · " + strings.TrimRight(ctx.Title, ".")
+	}
+	const indent = 12
+	c.PutMax(1, 0, "Deletes "+name+" for good:", theme.Bright.B(), c.W-2)
+	worktree, worktreeInk := pathTail(ctx.Worktree, c.W-indent-1), theme.Bright
+	if ctx.WorktreeGone || ctx.Worktree == "" {
+		worktree, worktreeInk = "already removed", theme.Muted
+	}
+	branches, branchesInk := strings.Join(ctx.Branches, ", "), theme.Bright
+	if len(ctx.Branches) == 0 {
+		branches, branchesInk = "none left", theme.Muted
+	}
+	rows := []struct {
+		name, value string
+		ink         theme.Ink
+	}{
+		{"session", "its Claude pane, if it runs", theme.Text},
+		{"worktree", worktree, worktreeInk},
+		{"branches", branches, branchesInk},
+		{"state", "its factory and QA directories, activity log and drafts", theme.Text},
+	}
+	for i, r := range rows {
+		c.Put(3, 2+i, r.name, theme.Text)
+		c.PutMax(indent+2, 2+i, r.value, r.ink, c.W-indent-3)
+	}
+	c.Put(1, 7, "Pushed PRs and remote branches stay. The id can be used again.", theme.Muted)
+	if ctx.HasWork() {
+		c.Put(1, 8, "It has unpushed or uncommitted work: y shows it and asks again.", theme.FgInk(theme.Yellow))
+	}
+	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete " + ctx.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
+}
+
+func (d *Delete) drawWork(c *theme.Canvas) {
+	ctx := d.Context
+	c.Put(1, 0, ctx.Label+" has work that exists nowhere else", theme.FgInk(theme.Red).B())
+	y := 2
+	label := func(name string, items []string) {
+		for i, item := range items {
+			if y >= c.H-3 {
+				return
+			}
+			if i == 0 {
+				c.Put(1, y, name, theme.FgInk(theme.Yellow))
+			}
+			c.PutMax(15, y, item, theme.Text, c.W-17)
+			y++
+		}
+	}
+	label("uncommitted", ctx.Dirty)
+	branches := slices.Sorted(maps.Keys(ctx.Unpushed))
+	for _, branch := range branches {
+		var commits []string
+		for _, commit := range ctx.Unpushed[branch] {
+			commits = append(commits, branch+"  "+commit)
+		}
+		label("not pushed", commits)
+	}
+	c.Put(1, c.H-3, "Deleting loses it. Without a second y, nothing is deleted.", theme.Muted)
+	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete anyway       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  keep everything, the default", Ink: theme.Text}}
+	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
+}
+
 type Keys struct {
 	size
 }
@@ -310,8 +422,8 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 var keyColumns = [][][2]string{
 	{{"+Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
-	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"x", "kill (asks first)"}, {"a", "archive (asks first)"}, {"H", "show archived"}},
-	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "prev or next item"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
+	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
+	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
 	{{"+Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
 }
 
@@ -319,6 +431,8 @@ var answerKeys = [][2]string{
 	{"type", "into the box"},
 	{"ctrl+s", "send"},
 	{"ctrl+a", "approve"},
+	{"⏎", "approve, on the Approve row"},
+	{"ctrl+n/p", "next or previous item"},
 	{"ctrl+r", "retry / one more round"},
 	{"ctrl+x", "skip"},
 	{"ctrl+d", "discard"},

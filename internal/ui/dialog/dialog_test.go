@@ -43,15 +43,19 @@ func TestNewFactoryStartsWithThePickedPipeline(t *testing.T) {
 	tm := teatest.NewTestModel(t, NewFactory(context), teatest.WithInitialTermSize(88, 30), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
 	tm.Type("ssrf-fix")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	tm.Type("Block private addresses in the webhook fetcher.")
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("2 of 3")) }, teatest.WithDuration(5*time.Second))
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
-	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("Stages & agents")) }, teatest.WithDuration(5*time.Second))
-	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Send(tea.PasteMsg{Content: "Block private addresses\x1b[106;5uin the webhook fetcher."})
 	tm.Send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*NewFactoryModel)
 	golden.RequireEqual(t, final.View().Content)
-	if r, _ := final.Result(); r.(NewResult).Pipeline != "quick" || r.(NewResult).Stages != nil {
-		t.Errorf("picking quick with tab started %+v; want the quick pipeline, or a small fix runs every stage", r)
+	r, _ := final.Result()
+	if r.(NewResult).Pipeline != "quick" || r.(NewResult).Stages != nil {
+		t.Errorf("picking quick on the pipeline step started %+v; want the quick pipeline, or a small fix runs every stage", r)
+	}
+	if prompt := r.(NewResult).Prompt; prompt != "Block private addresses\nin the webhook fetcher." {
+		t.Errorf("prompt = %q; want ctrl+j in CSI u form as a newline, or escape bytes reach brief.md and the title", prompt)
 	}
 }
 
@@ -68,14 +72,14 @@ func TestNewFactoryStartsWithItsOwnStagesAndAgents(t *testing.T) {
 	tm := teatest.NewTestModel(t, NewFactory(NewContext{Repos: []RepoOption{repo}}), teatest.WithInitialTermSize(88, 30), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
 	tm.Type("csv-export")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	tm.Type("Export contacts as CSV.")
-	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("Stages & agents")) }, teatest.WithDuration(5*time.Second))
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyDown})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeySpace})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyDown})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyDown})
 	tm.Type("m")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Type("Export contacts as CSV.")
 	tm.Send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*NewFactoryModel)
 	golden.RequireEqual(t, final.View().Content)

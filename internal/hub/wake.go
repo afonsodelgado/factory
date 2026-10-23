@@ -14,7 +14,10 @@ const (
 	NoSession    SessionSource = ""
 )
 
-func SessionFor(f factory.Factory, hooks []*state.HookFile) (string, SessionSource) {
+func SessionFor(f factory.Factory, token string, hooks []*state.HookFile) (string, SessionSource) {
+	if h := paneHook(token, hooks); h != nil {
+		return h.SessionID, FromHooks
+	}
 	if f.Entry != nil && f.Entry.SessionID != "" {
 		return f.Entry.SessionID, FromRegistry
 	}
@@ -52,7 +55,7 @@ const (
 )
 
 func PlanWake(it Item, profile state.Profile, remoteControl bool, hooks []*state.HookFile) Wake {
-	id, source := SessionFor(it.Factory, hooks)
+	id, source := SessionFor(it.Factory, tokenOf(it.Pane), hooks)
 	launch := factory.Launch{Repo: it.Factory.Repo, Slug: it.Factory.Slug, SessionID: id, Chrome: profile.BrowserQA(), RemoteControl: remoteControl}
 	w := Wake{Launch: launch, Source: source, Command: launch.ResumeCommand()}
 	switch it.Status {

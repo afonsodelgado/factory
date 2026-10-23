@@ -18,7 +18,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-var IgnoredPaths = []string{".claude/worktrees/", ".claude/factory/", ".claude/qa/", ".claude/factory.yml"}
+var IgnoredPaths = []string{".claude/worktrees/", ".claude/factory/", ".claude/factory-archive/", ".claude/qa/", ".claude/factory.yml"}
 
 type InitResult struct {
 	Repo           string
