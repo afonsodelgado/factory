@@ -87,13 +87,17 @@ Require the final `ci` check in branch protection. It reports success only when 
 
 ## Add a repo
 
-The factory works in any git repo. From anywhere inside it, or one of its worktrees:
+The factory works in any git repo. Run `factory` anywhere inside it, or inside one of its worktrees. The first time, it sets the repo up before it opens the hub:
 
-```sh
-factory init            # or: factory init ~/dev/some-repo
-```
+- It writes the repo config, `.factory/config.yml`, from the bundled template, with build, lint and test commands detected from `go.mod` or `package.json`.
+- It adds `.factory/` and the factory's other files to the repo's `.git/info/exclude`, so nothing is committed to the repo.
+- It adds the repo to the hub's list, in `repos.json` in the state directory. A hub that is already running shows the repo at once.
 
-`init` writes the repo config, `.factory/config.yml`, from the bundled template, with build, lint and test commands detected from `go.mod` or `package.json`. It adds the factory's files to the repo's `.git/info/exclude` and lists the repo in the config. Nothing is committed to the repo. Edit the repo config to match the repo, and you are done; set `coderabbit: true` only if CodeRabbit reviews the repo. Running `init` again changes nothing. A running hub reads the config only when it starts, so quit it with `q` and run `factory` again.
+The hub then says what it did. Edit the repo config to match the repo; set `coderabbit: true` only if CodeRabbit reviews the repo. Later runs change nothing.
+
+Inside the hub, `n` creates the factory in the repo you ran `factory` from, without a list of repos to choose from. `↑↓` still picks another repo. From outside any repo, the dialog lists them all.
+
+`factory init [path]` does the same setup without opening the hub. `factory forget <path>` removes a repo from the hub's list and leaves its files alone; a listed repo whose directory is gone drops out the next time the hub starts. Repos listed under `repos` in `config.yml` still show too.
 
 Worktrees have no copy of the repo config, so the skill and its agents read it from the main checkout.
 
@@ -110,8 +114,9 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 | `factory open csv-export --stages plan,implement,review` | creates it with exactly these stages, plus the ones that always run |
 | `factory open csv-export --agent engineer=sonnet:medium` | runs this factory's engineer on Sonnet at medium effort; repeat it for more agents |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
+| `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 
-An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
+An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
@@ -124,7 +129,7 @@ Inside the hub, `?` lists every key. `M-0` returns to the factory list from any 
 `~/.config/factory/config.yml` (or `$FACTORY_CONFIG_DIR/config.yml`):
 
 ```yaml
-repos: [~/dev/cowork, ~/dev/factory]  # added by factory init; empty by default
+repos: []  # optional; factory lists the repos you run it in by itself
 hub:
   session: factory
   return_key: M-0

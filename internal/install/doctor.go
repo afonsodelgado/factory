@@ -155,15 +155,14 @@ func repoChecks(o Options) []Check {
 		}
 		if err := profileProblem(o.Config, repo); err != nil {
 			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": the repo config does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
+		} else if err := state.CheckProfileKeys(repo); err != nil {
+			checks = append(checks, Check{Name: "repo config", Mark: Warn, Detail: tilde(repo) + ": the repo config sets a value the factory ignores there", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks
 }
 
 func profileProblem(cfg *state.Config, repo string) error {
-	if err := state.CheckProfileKeys(repo); err != nil {
-		return err
-	}
 	if _, err := cfg.PipelinesFor(repo); err != nil {
 		return err
 	}
@@ -263,11 +262,11 @@ func revmux(o Options) Check {
 }
 
 func chrome(o Options) Check {
-	detail := "can't be detected from here. Only repos whose profile uses browser QA need it"
+	detail := "can't be detected from here. Only repos whose repo config uses browser QA need it"
 	if len(o.Browser) > 0 {
 		detail += " (" + strings.Join(o.Browser, ", ") + ")"
 	}
-	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per profile"}
+	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per repo config"}
 }
 
 func nerdFont(o Options) Check {

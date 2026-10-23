@@ -40,7 +40,6 @@ type Data struct {
 	Selected     string
 	Focused      bool
 	Icons        theme.Icons
-	ConfigFile   string
 	Dim          bool
 }
 
@@ -304,14 +303,9 @@ func renderEmpty(c *theme.Canvas, d Data, w int) {
 		c.PutMax(x+nameWidth-theme.Width(g.Name)+2, y, g.Path, theme.Muted, w-2-x)
 		y++
 	}
-	config := "config.yml"
-	if d.ConfigFile != "" {
-		config = d.ConfigFile
-	}
-	c.PutMax(2, y, "repos live in "+config, theme.Muted, inner)
-	y += 2
+	y++
 	if len(d.Groups) == 0 {
-		for _, line := range theme.Wrap("No repos yet. Add one with factory init <repo> in a shell, then quit with q and run factory again.", inner) {
+		for _, line := range theme.Wrap("No repos yet. Run factory inside a repo, or factory init <repo>, and the hub adds it.", inner) {
 			c.Put(2, y, line, theme.Text)
 			y++
 		}

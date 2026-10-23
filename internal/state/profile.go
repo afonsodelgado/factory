@@ -93,8 +93,8 @@ func CheckProfileKeys(repo string) error {
 			return fmt.Errorf("%s: %s is a setting of this machine, not of a repo; move it to the global config.yml", path, key)
 		}
 	}
-	if stalled, _ := keys["stalled_after"].(string); stalled != "" && !positiveDuration(stalled) {
-		return fmt.Errorf("%s: stalled_after %q is not a duration; write it with a unit, such as 30m", path, stalled)
+	if stalled, set := keys["stalled_after"]; set && !positiveDuration(fmt.Sprint(stalled)) {
+		return fmt.Errorf("%s: stalled_after %v is not a duration, so the global value applies; write it with a unit, such as 30m", path, stalled)
 	}
 	return nil
 }

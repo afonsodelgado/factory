@@ -86,6 +86,9 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	cfg.applyDefaults()
+	if err := cfg.addKnownRepos(); err != nil {
+		return nil, fmt.Errorf("%s: %w", KnownReposPath(cfg.StateDir), err)
+	}
 	return cfg, nil
 }
 

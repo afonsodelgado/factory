@@ -69,6 +69,7 @@ type Model struct {
 	typeQueue    []queuedType
 	typedAt      map[string]time.Time
 	inboxQueued  map[string]bool
+	here         string
 }
 
 type snapshotMsg Snapshot
@@ -106,10 +107,10 @@ func (m *Model) load() tea.Cmd {
 	if m.Loader == nil {
 		return nil
 	}
-	layout := m.Layout
+	layout, repos := m.Layout, m.Config.Repos
 	return func() tea.Msg {
 		if m.Engine != nil {
-			m.Engine.Adopt(layout, m.Config.Repos)
+			m.Engine.Adopt(layout, repos)
 		}
 		return snapshotMsg(m.Loader.Load())
 	}
@@ -507,6 +508,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.dialogResult(e)
 	case "open":
 		return m.openRequest(e)
+	case "repo":
+		return m.repoRequest(e)
 	case "stage":
 		return m.stageRequest(e)
 	case "delete":
@@ -753,7 +756,6 @@ func (m *Model) data() selector.Data {
 		Selected:     m.selected,
 		Focused:      m.focus == footer.Factories,
 		Icons:        m.Icons,
-		ConfigFile:   tilde(filepath.Join(m.Config.ConfigDir, "config.yml")),
 		Dim:          m.focus == footer.Dialog,
 	}
 }

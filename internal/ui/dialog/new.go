@@ -417,9 +417,11 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Quit
 	case "up":
 		m.repo = max(m.repo-1, 0)
+		m.Context.Here = false
 		m.resetChoices()
 	case "down", "tab":
 		m.repo = (m.repo + 1) % max(len(m.Context.Repos), 1)
+		m.Context.Here = false
 		m.resetChoices()
 	case "backspace":
 		m.name = dropLast(m.name)
@@ -567,6 +569,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	c.Right(c.W-2, 0, "1 of 3", theme.Muted)
 	y := 1
 	for i, r := range m.Context.Repos {
+		if m.Context.Here && i != m.repo {
+			continue
+		}
 		mark, ink := "○ ", theme.Text
 		if i == m.repo {
 			c.Put(1, y, "❯", theme.Focused.B())
@@ -604,6 +609,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		m.drawPreview(c, 1, y, w)
 	}
 	hints := "⏎ next: pipeline   ↑↓ repo   esc cancel"
+	if m.Context.Here && len(m.Context.Repos) > 1 {
+		hints = "⏎ next: pipeline   ↑↓ another repo   esc cancel"
+	}
 	if e, matched := m.existing(); matched && e.Archived {
 		hints = "esc cancel"
 	} else if matched {

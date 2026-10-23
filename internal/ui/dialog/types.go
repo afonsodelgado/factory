@@ -46,6 +46,7 @@ type AgentOption struct {
 type NewContext struct {
 	Repos []RepoOption `json:"repos"`
 	Repo  int          `json:"repo"`
+	Here  bool         `json:"here,omitempty"`
 	Tools []ToolOption `json:"tools,omitempty"`
 }
 

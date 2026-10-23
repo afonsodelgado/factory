@@ -141,8 +141,8 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 
 func (m *Model) newContext() dialog.NewContext {
 	c := dialog.NewContext{Tools: m.toolOptions()}
-	selectedRepo := ""
-	if it, ok := m.selectedItem(); ok {
+	selectedRepo := m.here
+	if it, ok := m.selectedItem(); ok && !slices.Contains(m.Config.Repos, m.here) {
 		selectedRepo = it.Factory.Repo
 	}
 	for i, repo := range m.Config.Repos {
@@ -171,7 +171,7 @@ func (m *Model) newContext() dialog.NewContext {
 			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage, Archived: it.Factory.Archived(), Retired: retired(it.Factory)})
 		}
 		if repo == selectedRepo {
-			c.Repo = i
+			c.Repo, c.Here = i, repo == m.here
 		}
 		c.Repos = append(c.Repos, option)
 	}

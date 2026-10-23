@@ -232,7 +232,7 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testing.T) {
+func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repo := filepath.Join(home, "dev", "svc")
@@ -246,17 +246,16 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	git(t, repo, "init", "-q")
 	git(t, repo, "add", "go.mod")
 	git(t, repo, "commit", "-q", "-m", "init")
-	configFile := filepath.Join(t.TempDir(), "config.yml")
-	if err := os.WriteFile(configFile, []byte("# my repos\nrepos: [~/dev/other] # keep me\nicons: unicode\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	stateDir := t.TempDir()
+	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
+	t.Setenv("FACTORY_STATE_DIR", stateDir)
 
-	first, err := Init(subdir, configFile)
+	first, err := Init(subdir, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.ProfileWritten || len(first.Excluded) != len(IgnoredPaths) || !first.ConfigAdded {
-		t.Fatalf("first init from a subdirectory = %+v; want the profile, the exclude lines and the config entry written for the repo", first)
+	if !first.ProfileWritten || len(first.Excluded) != len(IgnoredPaths) || !first.Remembered {
+		t.Fatalf("first init from a subdirectory = %+v; want the repo config, the exclude lines and the hub's entry written for the repo", first)
 	}
 	if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
 		t.Fatalf("init from a subdirectory wrote the profile in the wrong place: %v", err)
@@ -271,7 +270,7 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 
 	worktree := filepath.Join(repo, ".claude", "worktrees", "x")
 	git(t, repo, "worktree", "add", "-q", worktree)
-	second, err := Init(worktree, configFile)
+	second, err := Init(worktree, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,9 +284,8 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	if n := strings.Count(string(exclude), ".claude/worktrees/"); n != 1 {
 		t.Errorf("exclude lists .claude/worktrees/ %d times:\n%s", n, exclude)
 	}
-	config, _ := os.ReadFile(configFile)
-	if want := "# my repos\nrepos: [~/dev/other, ~/dev/svc] # keep me\nicons: unicode\n"; string(config) != want {
-		t.Errorf("config =\n%s\nwant\n%s", config, want)
+	if cfg, err := state.LoadConfig(); err != nil || len(cfg.Repos) != 1 || cfg.Repos[0] != first.Repo {
+		t.Errorf("after init the hub lists %v (%v); want only %s, once, with no config.yml to edit", cfg.Repos, err, first.Repo)
 	}
 	if out, _ := exec.Command("git", "-C", repo, "status", "--porcelain").Output(); len(out) != 0 {
 		t.Errorf("init left the repo dirty, so the factory's clean-tree preflight fails:\n%s", out)
@@ -301,7 +299,7 @@ func TestInitCarriesARepoConfigFromBeforeTheFactoryDirectory(t *testing.T) {
 	os.MkdirAll(filepath.Dir(state.LegacyProfilePath(repo)), 0o755)
 	os.WriteFile(state.LegacyProfilePath(repo), []byte("commands: {build: make build}\nqa: {mode: browser}\n"), 0o644)
 
-	r, err := Init(repo, filepath.Join(t.TempDir(), "config.yml"))
+	r, err := Init(repo, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

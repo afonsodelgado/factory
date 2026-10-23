@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 
 	"github.com/afonsodelgado/factory/bundle"
@@ -27,16 +26,15 @@ type InitResult struct {
 	CopiedFrom     string
 	Excluded       []string
 	ExcludeFile    string
-	ConfigAdded    bool
-	ConfigFile     string
+	Remembered     bool
 }
 
 func (r InitResult) Changed() bool {
-	return r.ProfileWritten || len(r.Excluded) > 0 || r.ConfigAdded
+	return r.ProfileWritten || len(r.Excluded) > 0 || r.Remembered
 }
 
-func Init(path, configFile string) (InitResult, error) {
-	r := InitResult{ConfigFile: configFile}
+func Init(path, stateDir string) (InitResult, error) {
+	var r InitResult
 	repo, commonDir, err := MainCheckout(path)
 	if err != nil {
 		return r, err
@@ -50,7 +48,7 @@ func Init(path, configFile string) (InitResult, error) {
 	if r.Excluded, err = excludeFactoryFiles(repo, r.ExcludeFile); err != nil {
 		return r, err
 	}
-	r.ConfigAdded, err = addRepo(configFile, repo)
+	r.Remembered, err = state.RememberRepo(stateDir, repo)
 	return r, err
 }
 
@@ -196,90 +194,6 @@ func gitIgnores(repo, path string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("git check-ignore %s: %w", path, err)
-}
-
-func addRepo(configFile, repo string) (bool, error) {
-	data, err := os.ReadFile(configFile)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return false, err
-	}
-	listed, err := configuredRepos(data)
-	if err != nil {
-		return false, fmt.Errorf("%s: %w", configFile, err)
-	}
-	for _, r := range listed {
-		if samePath(state.ExpandHome(r), repo) {
-			return false, nil
-		}
-	}
-	entry := HomeRelative(repo)
-	updated, err := withRepo(data, entry)
-	if err != nil {
-		return false, fmt.Errorf("%s: %w; add %s to repos by hand", configFile, err, entry)
-	}
-	if after, err := configuredRepos(updated); err != nil || len(after) != len(listed)+1 || after[len(after)-1] != entry {
-		return false, fmt.Errorf("%s: could not add %s to repos without changing the rest of the file; add it by hand", configFile, entry)
-	}
-	if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
-		return false, err
-	}
-	return true, os.WriteFile(configFile, updated, 0o644)
-}
-
-func configuredRepos(data []byte) ([]string, error) {
-	var cfg struct {
-		Repos []string `yaml:"repos"`
-	}
-	err := yaml.Unmarshal(data, &cfg)
-	return cfg.Repos, err
-}
-
-func withRepo(data []byte, entry string) ([]byte, error) {
-	quoted, err := yaml.Marshal(entry)
-	if err != nil {
-		return nil, err
-	}
-	scalar := strings.TrimSpace(string(quoted))
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return []byte(string(data) + "repos:\n  - " + scalar + "\n"), nil
-	}
-	file, err := parser.ParseBytes(data, parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-	path, err := yaml.PathString("$.repos")
-	if err != nil {
-		return nil, err
-	}
-	node, err := path.FilterFile(file)
-	if err != nil {
-		text := string(data)
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
-		return []byte(text + "repos:\n  - " + scalar + "\n"), nil
-	}
-	switch seq, isSequence := node.(*ast.SequenceNode); {
-	case isSequence && seq.IsFlowStyle:
-		err = path.MergeFromReader(file, strings.NewReader("["+scalar+"]"))
-	case isSequence:
-		err = path.MergeFromReader(file, strings.NewReader("- "+scalar))
-	default:
-		err = path.ReplaceWithReader(file, strings.NewReader("["+scalar+"]"))
-	}
-	if err != nil {
-		return nil, err
-	}
-	return []byte(strings.TrimRight(file.String(), "\n") + "\n"), nil
-}
-
-func samePath(a, b string) bool {
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
-	if errA != nil || errB != nil {
-		return filepath.Clean(a) == filepath.Clean(b)
-	}
-	return ra == rb
 }
 
 func HomeRelative(path string) string {

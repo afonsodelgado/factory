@@ -18,6 +18,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -113,19 +114,32 @@ func reorder(args []string) []string {
 }
 
 func openMain(r hub.OpenRequest) error {
-	name, repo := r.Name, r.Repo
+	name, named := r.Name, r.Repo != ""
+	target := "."
+	if named {
+		target = state.ExpandHome(r.Repo)
+	}
+	setUp, notice, err := setUpRepo(target, named)
+	if err != nil {
+		if named {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "factory: could not set up %s: %v\n", install.HomeRelative(setUp), err)
+	}
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return err
 	}
-	if repo != "" {
-		configured, ok := configuredRepo(cfg.Repos, repo)
-		if !ok {
-			return fmt.Errorf("%s is not a configured repo; add it to repos in the config (configured: %s)", repo, strings.Join(cfg.Repos, ", "))
-		}
-		repo = configured
-	} else {
-		repo = repoOf(cfg, name)
+	here, listed := "", false
+	if setUp != "" {
+		here, listed = configuredRepo(cfg.Repos, setUp)
+	}
+	if named && !listed {
+		return fmt.Errorf("could not add %s to the hub's repos", r.Repo)
+	}
+	repo := here
+	if !named {
+		repo = repoOf(cfg, name, here)
 	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	bin, err := os.Executable()
@@ -138,6 +152,9 @@ func openMain(r hub.OpenRequest) error {
 	if err := ensureHub(cfg, tm, bin); err != nil {
 		return err
 	}
+	if _, err := request(cfg.SocketPath(), "repo", hub.RepoRequest{Repo: here, Here: !named, Notice: notice}); err != nil {
+		return err
+	}
 	if name != "" {
 		reply, err := request(cfg.SocketPath(), "open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
 		if err != nil {
@@ -146,6 +163,9 @@ func openMain(r hub.OpenRequest) error {
 		if reply.T == "error" {
 			return errors.New(reply.Error)
 		}
+	}
+	if notice != "" {
+		fmt.Println(notice)
 	}
 	return attach(cfg, tm)
 }
@@ -167,13 +187,17 @@ func configuredRepo(repos []string, path string) (string, bool) {
 	return "", false
 }
 
-func repoOf(cfg *state.Config, name string) string {
+func repoOf(cfg *state.Config, name, here string) string {
 	id := factory.Slugify(name)
 	for _, repo := range cfg.Repos {
 		if info, err := os.Stat(filepath.Join(factory.WorktreesDir(repo), id)); id != "" && err == nil && info.IsDir() {
 			return repo
 		}
 	}
+	return here
+}
+
+func cwdRepo(cfg *state.Config) string {
 	cwd, _ := os.Getwd()
 	for _, repo := range cfg.Repos {
 		if cwd == repo || strings.HasPrefix(cwd, repo+"/") {

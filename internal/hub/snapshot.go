@@ -47,6 +47,12 @@ type Loader struct {
 	lastMain map[string]string
 }
 
+func (l *Loader) SetRepos(repos []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.Config.Repos = repos
+}
+
 func (l *Loader) Load() Snapshot {
 	l.mu.Lock()
 	defer l.mu.Unlock()
