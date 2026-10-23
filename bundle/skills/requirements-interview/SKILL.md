@@ -20,7 +20,6 @@ answers would lead to different work.
 
 1. Read the user's prompt: `brief.md` in the factory directory, the description you were given, or ask the user for a short one first. It is the spec. Read an external tracker or link only when the prompt itself asks you to (for example "read Linear issue X"), using whatever tools the session has. Never fetch one on your own.
 2. Find the code the feature touches: the routes, pages, schemas, Copilot tools and jobs. Read enough to know what exists today and what the change would collide with. Never ask the user something the code can answer.
-3. If a knowledge vault INDEX entry is clearly about this area, name it. Read it only after the user agrees, or when you are running inside the factory, where the vault counts as an input.
 
 ## 2 · Find the gaps
 

@@ -28,7 +28,7 @@ the notes win, because they know the repo.
 Applies when the `factory-qa` agent runs you, or the argument contains `--factory`. Everything below holds, with these changes:
 
 - **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
-- **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing. Read a clearly relevant vault entry without asking.
+- **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing.
 - **Phase 2:** the environment must run this worktree's code. In browser mode, check which process serves the profile's ports and from which directory (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If it is another checkout, leave it running and start this worktree's stack on free ports, as the notes describe. In terminal mode, build the binary from this worktree into a temporary directory.
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
@@ -50,7 +50,6 @@ Read these sources in order:
 2. **What was built.** `git log --oneline main..HEAD`, `git diff main...HEAD --stat`, then the diff itself. Include uncommitted work too (`git diff`, `git status`). Read every entry point the change reaches. Don't read only the diff hunks: a guard on one path often has a sibling path without it.
 3. **PR**, if there is one: `gh pr view --json title,body,url`.
 4. **Handoff brief**: `.claude/qa/<branch with / replaced by ->.md`, written by `/qa-brief-factory`. It says what the developer already checked and where they are unsure. Spend less time on what they checked and more on what they're unsure about.
-5. **Vault.** If an INDEX entry in the knowledge vault is clearly about this feature or the surface it touches, name it and ask before reading it.
 
 Then write a **test charter** and show it to the user before testing:
 
