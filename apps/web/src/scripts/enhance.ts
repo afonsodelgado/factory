@@ -288,6 +288,15 @@ function setupReveals(
   });
 }
 
+const SECTION_NAMES: Record<string, string> = {
+  what: "what it is",
+  pipeline: "pipeline",
+  agents: "agents",
+  hub: "the hub",
+  keys: "keys",
+  install: "install",
+};
+
 function setupNav() {
   const sect = document.querySelector<HTMLElement>("[data-nav-sect]");
   const wins = document.querySelector<HTMLElement>(".wins");
@@ -299,6 +308,7 @@ function setupNav() {
         if (!entry.isIntersecting) continue;
         const id = entry.target.id;
         sect.textContent = id === "top" ? "~/factory" : `~/factory/${id}`;
+        sect.title = SECTION_NAMES[id] ?? "";
         for (const link of links) {
           if (link.getAttribute("href") !== `#${id}`) {
             link.removeAttribute("aria-current");

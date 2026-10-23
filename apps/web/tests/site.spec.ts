@@ -184,7 +184,7 @@ test("interactive commands stay local and survive reduced motion", async ({
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => hero.innerHTML()).toBe(staticHero);
-  expect(await hub.innerHTML()).toBe(staticHub);
+  await expect.poll(() => hub.innerHTML()).toBe(staticHub);
   await expect(page.locator(".steps li.on")).toHaveAttribute("data-step", "3");
   await expect(page.locator("[data-cursor]")).toBeVisible();
   await expect(page.locator("[data-cursor]")).not.toHaveClass(/blink/);
