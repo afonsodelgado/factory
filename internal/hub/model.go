@@ -330,7 +330,7 @@ func (m *Model) planWakes() {
 			continue
 		}
 		cfg, profile := m.repoConfig(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	}
 }
 

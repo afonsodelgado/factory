@@ -2,12 +2,12 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -212,12 +212,12 @@ func (m *Model) sendStage(it Item, runs *state.StageRuns, r StageRequest) (Stage
 	return m.record(it, runs, run, "resumed")
 }
 
-func (m *Model) writableDirs(repo string, setting state.AgentSetting) []string {
+func (m *Model) writableDirs(repo, checkout string, setting state.AgentSetting) []string {
 	if setting.ToolName() != state.ToolCodex {
 		return nil
 	}
 	cfg, _ := m.repoConfig(repo)
-	return codexWritableDirs(repo, cfg.Codex.WritableDirs)
+	return factory.CodexWritableDirs(cmp.Or(checkout, repo), cfg.Codex.WritableDirs)
 }
 
 func supervisorEnv(supervisor state.AgentSetting) []string {
@@ -295,7 +295,7 @@ func (m *Model) stageLaunch(it Item, run state.StageRun, sessionID string) facto
 		launch.Chrome = profile.BrowserQA()
 	}
 	if run.Setting.ToolName() == state.ToolCodex {
-		launch.AddDirs = codexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)
+		launch.AddDirs = factory.CodexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)
 	}
 	return launch
 }
@@ -460,34 +460,4 @@ func sessionOfToken(token string, hooks []*state.HookFile) string {
 		return h.SessionID
 	}
 	return ""
-}
-
-func codexWritableDirs(worktree string, extra []string) []string {
-	var dirs []string
-	if out, err := exec.Command("git", "-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
-		dirs = append(dirs, strings.TrimSpace(string(out)))
-	}
-	dirs = append(dirs, toolOutput("go", "env", "GOCACHE", "GOMODCACHE")...)
-	dirs = append(dirs, toolOutput("npm", "config", "get", "cache")...)
-	for _, dir := range extra {
-		dirs = append(dirs, state.ExpandHome(dir))
-	}
-	var existing []string
-	for _, dir := range dirs {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() && !slices.Contains(existing, dir) {
-			existing = append(existing, dir)
-		}
-	}
-	return existing
-}
-
-func toolOutput(tool string, args ...string) []string {
-	if _, err := exec.LookPath(tool); err != nil {
-		return nil
-	}
-	out, err := exec.Command(tool, args...).Output()
-	if err != nil {
-		return nil
-	}
-	return strings.Fields(string(out))
 }

@@ -323,7 +323,7 @@ func (m *Model) create(r dialog.NewResult) error {
 		launch.SessionID = uuid.NewString()
 	} else {
 		launch.Chrome, launch.RemoteControl = false, false
-		launch.AddDirs = m.writableDirs(r.Repo, supervisor)
+		launch.AddDirs = m.writableDirs(r.Repo, "", supervisor)
 	}
 	title := firstLine(r.Prompt)
 	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: state.ResolveAgents(m.Config, profile, r.Agents)}
@@ -442,7 +442,7 @@ func (m *Model) wake(key string) error {
 	}
 	cfg, profile := m.repoConfig(it.Factory.Repo)
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, profile, cfg.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
+	plan := PlanWake(it, profile, cfg.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree
