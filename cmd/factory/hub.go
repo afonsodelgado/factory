@@ -120,7 +120,7 @@ func lockHub(path string) (func(), error) {
 
 func runView(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory view <panel|footer|slot|frame-top|frame-bottom|frame-left|frame-right> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory view <panel|footer|slot|frame-top|frame-bottom|frame-left|frame-right|frame-split> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("view", flag.ContinueOnError)
