@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,7 +30,7 @@ func toolChecks(o Options) []Check {
 	if _, ok := used[state.ToolOpenCode]; ok {
 		checks = append(checks, openCodeChecks(o)...)
 	}
-	return checks
+	return append(checks, agentValueChecks(o)...)
 }
 
 func toolsInUse(o Options) map[string][]string {
@@ -49,11 +50,48 @@ func toolsInUse(o Options) map[string][]string {
 			note(setting, repo)
 		}
 	}
+	for _, entry := range liveEntries(o.Config) {
+		note(entry.Supervisor, entry.Repo)
+		for _, setting := range entry.Agents {
+			note(setting, entry.Repo)
+		}
+	}
 	for tool, repos := range used {
 		slices.Sort(repos)
 		used[tool] = slices.Compact(repos)
 	}
 	return used
+}
+
+func liveEntries(cfg *state.Config) []state.Entry {
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		return nil
+	}
+	return slices.DeleteFunc(registry.Factories, func(e state.Entry) bool { return e.Archived })
+}
+
+func agentValueChecks(o Options) []Check {
+	catalogs := catalog.Local(o.Config.StateDir)
+	results := []error{
+		catalogs.ValidateAgents(o.ConfigFile, o.Config.Agents),
+		catalogs.Validate(o.ConfigFile, "supervisor", o.Config.Supervisor),
+	}
+	for _, repo := range o.Repos {
+		profile, _ := state.ReadProfile(repo)
+		results = append(results, catalogs.ValidateAgents(tilde(state.ProfilePath(repo)), profile.Agents))
+	}
+	var checks []Check
+	for _, err := range results {
+		switch {
+		case err == nil:
+		case errors.Is(err, catalog.ErrUnavailable):
+			checks = append(checks, Check{Name: "agents", Mark: Warn, Detail: err.Error()})
+		default:
+			checks = append(checks, Check{Name: "agents", Mark: Fail, Detail: "a stage would fail inside its pane", Lines: []string{err.Error()}, Fix: "pick a listed model and effort in that file"})
+		}
+	}
+	return checks
 }
 
 func codexChecks(o Options, repos []string) []Check {

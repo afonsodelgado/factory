@@ -20,6 +20,7 @@ const (
 
 func (m *Model) toolOptions() []dialog.ToolOption {
 	codex := toolOption(state.ToolCodex, func() ([]catalog.Model, error) { return catalog.Codex(state.CodexHome()) })
+	codex.Default = catalog.CodexDefault(state.CodexHome())
 	openCode := toolOption(state.ToolOpenCode, func() ([]catalog.Model, error) { return catalog.OpenCode(m.Config.StateDir) })
 	return []dialog.ToolOption{{Name: state.ToolClaude, Models: catalog.Claude()}, codex, openCode}
 }

@@ -199,7 +199,7 @@ func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
 }
 
 func (m *NewFactoryModel) agent(role string) state.AgentSetting {
-	return m.overrides[role].Over(m.defaultAgent(role))
+	return m.overrides[role].OverRole(role, m.defaultAgent(role))
 }
 
 func (m *NewFactoryModel) tool(name string) ToolOption {
@@ -258,6 +258,27 @@ func (m *NewFactoryModel) onDefaultTool(role string) bool {
 	return m.agent(role).ToolName() == m.defaultAgent(role).ToolName()
 }
 
+func (m *NewFactoryModel) startProblem() string {
+	if problem := m.selectedRepo().PipelineProblem; problem != "" {
+		return problem
+	}
+	return m.agentProblem()
+}
+
+func (m *NewFactoryModel) agentProblem() string {
+	for _, role := range append([]string{supervisorRole}, state.AgentRoles...) {
+		setting := m.agent(role)
+		tool := m.tool(setting.ToolName())
+		if tool.Problem != "" {
+			continue
+		}
+		if err := catalog.Check("this factory", role, setting, tool.Models, tool.Default); err != nil {
+			return err.Error()
+		}
+	}
+	return ""
+}
+
 func (m *NewFactoryModel) cycleTool(role string) {
 	tools := m.pickableTools()
 	if role == "qa" {
@@ -273,11 +294,17 @@ func (m *NewFactoryModel) cycleTool(role string) {
 		m.setOverride(role, func(o *state.AgentSetting) { *o = state.AgentSetting{} })
 		return
 	}
-	switched := state.AgentSetting{Tool: next}
-	if models := m.models(next); len(models) > 0 {
-		switched.Model = models[0]
-	}
+	switched := m.switchedTo(role, next)
 	m.setOverride(role, func(o *state.AgentSetting) { *o = switched })
+}
+
+func (m *NewFactoryModel) switchedTo(role, tool string) state.AgentSetting {
+	fallback := state.DefaultAgents[role]
+	if tool != state.ToolClaude {
+		option := m.tool(tool)
+		fallback = catalog.ToolDefault(option.Models, option.Default)
+	}
+	return state.AgentSetting{Tool: tool, Model: fallback.Model, Effort: fallback.Effort}
 }
 
 func (m *NewFactoryModel) cycleModel(role string) {
@@ -462,7 +489,7 @@ func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return tea.Quit
 	case "enter":
-		if problem := m.selectedRepo().PipelineProblem; problem != "" {
+		if problem := m.startProblem(); problem != "" {
 			m.problem = problem
 			return nil
 		}
@@ -492,7 +519,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
 		return nil
 	}
-	if problem := m.selectedRepo().PipelineProblem; problem != "" {
+	if problem := m.startProblem(); problem != "" {
 		m.problem = problem
 		return nil
 	}

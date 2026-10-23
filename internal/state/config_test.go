@@ -115,10 +115,17 @@ func TestAgentResolution(t *testing.T) {
 	}
 }
 
-func TestSwitchingAnAgentsToolDropsTheOtherToolsModel(t *testing.T) {
-	cfg := &Config{Agents: map[string]AgentSetting{"engineer": {Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "ultra"}}}
-	got := ResolveAgents(cfg, Profile{}, map[string]AgentSetting{"engineer": {Tool: ToolClaude}})["engineer"]
-	if got != (AgentSetting{Tool: ToolClaude}) {
-		t.Errorf("engineer switched back to claude resolves to %+v; want no model or effort, since claude --model gpt-5.6-sol would fail the spawn", got)
+func TestSwitchingAnAgentsToolBackToClaudeTakesItsFrontmatter(t *testing.T) {
+	cfg := &Config{Agents: map[string]AgentSetting{"engineer": {Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "ultra"}, "reviewer": {Model: "sonnet"}}}
+	profile := Profile{Agents: map[string]AgentSetting{"reviewer": {Tool: ToolOpenCode}}}
+	agents := ResolveAgents(cfg, profile, map[string]AgentSetting{"engineer": {Tool: ToolClaude}})
+	if got, want := agents["engineer"], (AgentSetting{Tool: ToolClaude, Model: "opus", Effort: "xhigh"}); got != want {
+		t.Errorf("engineer switched back to claude resolves to %+v; want %+v, its frontmatter defaults, not gpt-5.6-sol and not a bare claude", got, want)
+	}
+	if got := agents["reviewer"]; got != (AgentSetting{Tool: ToolOpenCode}) {
+		t.Errorf("reviewer switched to opencode resolves to %+v; want no model or effort, so the tool's own default applies at launch", got)
+	}
+	if got := agents["engineer"].Flag("engineer"); got != "engineer=claude/opus:xhigh" {
+		t.Errorf("the engineer reaches the supervisor as %q; want the claude tool named, or the supervisor keeps the codex layer's tool", got)
 	}
 }

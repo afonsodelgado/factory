@@ -102,6 +102,20 @@ func (f Factory) Supervisor() state.AgentSetting {
 	return state.AgentSetting{}
 }
 
+func (f Factory) Agent(role string) state.AgentSetting {
+	if f.State != nil {
+		if setting, ok := f.State.Agents[role]; ok {
+			return setting
+		}
+	}
+	if f.Entry != nil {
+		if setting, ok := f.Entry.Agents[role]; ok {
+			return setting
+		}
+	}
+	return state.DefaultAgents[role]
+}
+
 func (f Factory) WaitingOn() string {
 	if f.State == nil {
 		return ""

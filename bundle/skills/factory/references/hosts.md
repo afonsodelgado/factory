@@ -15,4 +15,4 @@ The factory app sets `FACTORY_SUPERVISOR` to the tool this session runs in: `cla
 | AskUserQuestion | Always ask in plain text, in the factory-app form. |
 | ToolSearch for the Chrome tools | Skip the preflight check. QA always runs on `claude`, which `"${FACTORY_BIN:-factory}" stage start --role qa` opens with Chrome. |
 
-Panel messages reach Codex as `$factory approve …`, `$factory skip …` and `$factory resume`, because Codex refuses an unknown `/` command; read them as the `/factory` commands of the same name.
+Panel messages reach Codex as `$factory approve …`, `$factory skip …` and `$factory resume`, because Codex refuses an unknown `/` command; read them as the `/factory` commands of the same name. OpenCode has no `/factory` command, so its messages start with `Use the factory skill for: /factory`, followed by the same words; OpenCode finds the skill in `~/.claude/skills`, where `factory bootstrap` installs it.

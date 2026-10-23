@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/afonsodelgado/factory/internal/state"
@@ -28,5 +29,13 @@ func TestCreateCommand(t *testing.T) {
 	want = "git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export' origin/HEAD || git -C '/r/factory' worktree add -b worktree-csv-export '/r/factory/.claude/worktrees/csv-export'\ncd '/r/factory/.claude/worktrees/csv-export' && codex -m gpt-5.6-sol -c model_reasoning_effort=high -a never -s workspace-write -c sandbox_workspace_write.network_access=true --add-dir '/r/factory/.git' '$factory csv-export\nExport contacts.'"
 	if got := onCodex.CreateCommand(); got != want {
 		t.Errorf("a Codex supervisor runs =\n%s\nwant\n%s\nCodex refuses a /factory line, and without the worktree branch delete cannot clean up", got, want)
+	}
+	onOpenCode := Launch{Repo: "/r/factory", Slug: "csv-export", Prompt: "Export contacts.", Supervisor: state.AgentSetting{Tool: state.ToolOpenCode, Model: "big-pickle"}}
+	wantKickoff := ShellQuote("Use the factory skill for: /factory csv-export\nExport contacts.")
+	if got := onOpenCode.CreateCommand(); !strings.HasSuffix(got, "--prompt "+wantKickoff) {
+		t.Errorf("an OpenCode supervisor runs\n%s\nwant it to end with --prompt %s: OpenCode has no /factory command, so the bare line would never load the skill", got, wantKickoff)
+	}
+	if got := ForSupervisor(state.ToolOpenCode, "/factory resume"); got != "Use the factory skill for: /factory resume" {
+		t.Errorf("a panel message reaches OpenCode as %q; want it to name the skill", got)
 	}
 }

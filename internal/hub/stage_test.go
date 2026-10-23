@@ -21,12 +21,16 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_HOME", t.TempDir())
 	e, l := hubFixture(t)
 
 	cfg := &state.Config{ConfigDir: t.TempDir(), StateDir: t.TempDir()}
 	os.WriteFile(cfg.RulesPath(), []byte("Write no comments."), 0o644)
 	repo, worktree := t.TempDir(), t.TempDir()
-	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree}
+	cfg.Agents = map[string]state.AgentSetting{"engineer": {Model: "sonnet", Effort: "medium"}}
+	atCreation := &state.Entry{Agents: state.ResolveAgents(cfg, state.Profile{}, nil)}
+	cfg.Agents = map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}}
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
 	supervisor, err := e.NewFactoryPane(l, NewPane{Repo: repo, Slug: "csv", Dir: worktree})
 	if err != nil {
 		t.Fatal(err)
@@ -41,9 +45,9 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	}
 
 	prompt := filepath.Join(f.Dir, "stages", "engineer-1.prompt.md")
-	want := "--model opus --effort xhigh Read " + prompt + " and follow it.\n"
+	want := "--model sonnet --effort medium Read " + prompt + " and follow it.\n"
 	if args := waitForFile(t, calls, want); args != want {
-		t.Errorf("the stage pane ran claude %q; want %q", args, want)
+		t.Errorf("the stage pane ran claude %q; want %q, the engineer as resolved when the factory was created, not the config changed to codex since", args, want)
 	}
 	body, _ := os.ReadFile(prompt)
 	for _, want := range []string{"Write no comments.", "staff engineer", "Implement layer 1 of plan.md.", reply.Result} {

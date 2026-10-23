@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -53,11 +54,23 @@ func runOpen(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 2
 	}
+	if err := catalogRefusal(agents, supervisor); err != nil {
+		fmt.Fprintln(os.Stderr, "factory open:", err)
+		return 2
+	}
 	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0
+}
+
+func catalogRefusal(agents map[string]state.AgentSetting, supervisor state.AgentSetting) error {
+	catalogs := catalog.Local(state.StateDir())
+	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", agents)); err != nil {
+		return err
+	}
+	return catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor))
 }
 
 type agentFlags map[string]state.AgentSetting

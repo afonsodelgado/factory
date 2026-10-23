@@ -156,21 +156,8 @@ func (m *Model) itemForStage(token, cwd string) (Item, bool) {
 	return Item{}, false
 }
 
-func (m *Model) stageSetting(it Item, role string) (state.AgentSetting, error) {
-	if it.Factory.State != nil {
-		if setting, ok := it.Factory.State.Agents[role]; ok {
-			return setting, nil
-		}
-	}
-	agents, err := m.Config.AgentsFor(it.Factory.Repo)
-	return agents[role], err
-}
-
 func (m *Model) startStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
-	setting, err := m.stageSetting(it, r.Role)
-	if err != nil {
-		return StageReply{}, err
-	}
+	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	if err := runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
 	}
