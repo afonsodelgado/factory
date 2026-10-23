@@ -26,7 +26,7 @@ func CommentReply(id, text string) string {
 }
 
 func CapContinue(id, limit string) string {
-	return fmt.Sprintf("%s continue: raise %s by one for this ticket", id, limit)
+	return fmt.Sprintf("%s continue: raise %s by one for this factory", id, limit)
 }
 
 func Skip(stage string) string {

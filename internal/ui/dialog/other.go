@@ -123,7 +123,7 @@ func (s *Switch) View() tea.View {
 		}
 		c.Right(c.W-2, y, r.Status, ink)
 	}
-	c.Put(1, c.H-2, "Matches ticket, slug and title. Factories that need you sort first when the query is empty.", theme.Muted)
+	c.Put(1, c.H-2, "Matches id, worktree and title. Factories that need you sort first when the query is empty.", theme.Muted)
 	c.Put(1, c.H-1, "⏎ select   ctrl+j/k move   ctrl+g next needing you   esc close", theme.Text)
 	return view(c)
 }

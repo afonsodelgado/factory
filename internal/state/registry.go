@@ -17,7 +17,6 @@ type Registry struct {
 type Entry struct {
 	Repo      string    `json:"repo"`
 	Slug      string    `json:"slug"`
-	Ticket    string    `json:"ticket,omitempty"`
 	Title     string    `json:"title,omitempty"`
 	SessionID string    `json:"session_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`

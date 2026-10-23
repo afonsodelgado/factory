@@ -39,10 +39,8 @@ func (f Factory) RepoName() string {
 
 func (f Factory) Label() string {
 	switch {
-	case f.State != nil && f.State.Ticket != "":
-		return f.State.Ticket
-	case f.Entry != nil && f.Entry.Ticket != "":
-		return f.Entry.Ticket
+	case f.State != nil && f.State.ID != "":
+		return f.State.ID
 	case f.ID != "":
 		return f.ID
 	}
@@ -102,23 +100,12 @@ func WorktreesDir(repo string) string {
 	return filepath.Join(repo, ".claude", "worktrees")
 }
 
-func MatchTicket(name, ticket string) bool {
-	name = strings.ToLower(name)
-	ticket = strings.ToLower(ticket)
-	return name == ticket || strings.HasPrefix(name, ticket+"-")
-}
-
-func FindWorktree(repo, ticket string) (string, bool) {
-	entries, err := os.ReadDir(WorktreesDir(repo))
-	if err != nil {
+func existingWorktree(repo, id string) (string, bool) {
+	wt := filepath.Join(WorktreesDir(repo), strings.ToLower(id))
+	if info, err := os.Stat(wt); id == "" || err != nil || !info.IsDir() {
 		return "", false
 	}
-	for _, e := range entries {
-		if e.IsDir() && MatchTicket(e.Name(), ticket) {
-			return filepath.Join(WorktreesDir(repo), e.Name()), true
-		}
-	}
-	return "", false
+	return wt, true
 }
 
 func Discover(repos []string, reg *state.Registry) []Factory {
@@ -204,7 +191,7 @@ func worktreeOf(repo, path, real string, f Factory) string {
 	if wt, ok := ownWorktree(repo, path, real); ok {
 		return wt
 	}
-	if wt, ok := FindWorktree(repo, f.ID); ok {
+	if wt, ok := existingWorktree(repo, f.ID); ok {
 		return wt
 	}
 	return ""

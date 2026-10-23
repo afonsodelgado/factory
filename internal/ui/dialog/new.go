@@ -15,7 +15,7 @@ type NewFactoryModel struct {
 	Context NewContext
 	repo    int
 	name    string
-	brief   string
+	prompt  string
 	step    int
 	problem string
 	result  *NewResult
@@ -43,17 +43,13 @@ func (m *NewFactoryModel) selectedRepo() RepoOption {
 	return m.Context.Repos[m.repo]
 }
 
-func (m *NewFactoryModel) parsed() (ticket, feature, slug string) {
-	ticket, feature = factory.ParseName(m.name)
-	return ticket, feature, factory.SlugFor(ticket, feature)
+func (m *NewFactoryModel) id() string {
+	return factory.Slugify(m.name)
 }
 
 func (m *NewFactoryModel) named(e Existing) bool {
-	ticket, _, slug := m.parsed()
-	if ticket != "" {
-		return factory.MatchTicket(e.Worktree, ticket)
-	}
-	return slug != "" && e.Worktree == slug
+	id := m.id()
+	return id != "" && (e.Worktree == id || strings.ToLower(e.Label) == id)
 }
 
 func (m *NewFactoryModel) existing() (Existing, bool) {
@@ -75,7 +71,6 @@ func (m *NewFactoryModel) retiredMatch() (Existing, bool) {
 }
 
 func (m *NewFactoryModel) slug() string {
-	_, _, slug := m.parsed()
 	taken := func(s string) bool {
 		for _, e := range m.selectedRepo().Existing {
 			if e.Worktree == s {
@@ -84,26 +79,12 @@ func (m *NewFactoryModel) slug() string {
 		}
 		return false
 	}
-	return factory.FreshSlug(slug, taken)
-}
-
-func (m *NewFactoryModel) nearMiss() (Existing, bool) {
-	ticket, _, _ := m.parsed()
-	if ticket == "" {
-		return Existing{}, false
-	}
-	for _, e := range m.selectedRepo().Existing {
-		if strings.HasPrefix(e.Worktree, strings.ToLower(ticket)) {
-			return e, true
-		}
-	}
-	return Existing{}, false
+	return factory.FreshSlug(m.id(), taken)
 }
 
 func (m *NewFactoryModel) launch() factory.Launch {
-	ticket, _, _ := m.parsed()
 	repo := m.selectedRepo()
-	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Ticket: ticket, SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+	return factory.Launch{Repo: repo.Path, Slug: m.slug(), SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
 }
 
 func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -116,7 +97,7 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.step == 1 {
 			return m, m.nameKey(msg)
 		}
-		return m, m.briefKey(msg)
+		return m, m.promptKey(msg)
 	}
 	return m, nil
 }
@@ -126,7 +107,7 @@ func (m *NewFactoryModel) typeText(text string) {
 		m.name += strings.ReplaceAll(text, "\n", " ")
 		return
 	}
-	m.brief += text
+	m.prompt += text
 }
 
 func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -156,9 +137,8 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *NewFactoryModel) next() tea.Cmd {
-	ticket, feature, slug := m.parsed()
-	if slug == "" {
-		m.problem = "Type a ticket id, such as ENG-1234, or a feature name."
+	if m.id() == "" {
+		m.problem = "Type an id made of letters a–z, digits 0–9 and dashes, such as csv-export."
 		return nil
 	}
 	if e, ok := m.existing(); ok && e.Archived {
@@ -168,15 +148,11 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.result = &NewResult{Select: e.Key}
 		return tea.Quit
 	}
-	if ticket != "" {
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Ticket: ticket, Feature: feature, Slug: m.slug()}
-		return tea.Quit
-	}
 	m.step = 2
 	return nil
 }
 
-func (m *NewFactoryModel) briefKey(msg tea.KeyPressMsg) tea.Cmd {
+func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.problem = ""
 	switch msg.String() {
 	case "esc":
@@ -184,21 +160,20 @@ func (m *NewFactoryModel) briefKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return tea.Quit
 	case "ctrl+s":
-		if strings.TrimSpace(m.brief) == "" {
-			m.problem = "The brief is empty. Write at least a sentence about what the feature should do; the factory won't start without one."
+		if strings.TrimSpace(m.prompt) == "" {
+			m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
 			return nil
 		}
-		_, feature, _ := m.parsed()
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Feature: feature, Slug: m.slug(), Brief: m.brief}
+		m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt}
 		return tea.Quit
 	case "enter":
-		m.brief += "\n"
+		m.prompt += "\n"
 	case "backspace":
-		m.brief = dropLast(m.brief)
+		m.prompt = dropLast(m.prompt)
 	case "ctrl+u":
-		m.brief = ""
+		m.prompt = ""
 	default:
-		m.brief += msg.Text
+		m.prompt += msg.Text
 	}
 	return nil
 }
@@ -218,7 +193,7 @@ func (m *NewFactoryModel) View() tea.View {
 	if m.step == 1 {
 		m.drawName(c)
 	} else {
-		m.drawBrief(c)
+		m.drawPrompt(c)
 	}
 	v := tea.NewView(c.Render())
 	v.AltScreen = true
@@ -249,7 +224,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		y++
 	}
 	y++
-	c.Put(1, y, "Ticket or feature", theme.Bright.B())
+	c.Put(1, y, "Factory id", theme.Bright.B())
 	y++
 	drawInput(c, 1, y, w, "", []string{m.name}, true)
 	y += 3
@@ -263,24 +238,20 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			y++
 		}
 	}
-	if _, matched := m.existing(); !matched && m.name != "" {
+	if _, matched := m.existing(); !matched && m.id() != "" {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
-	hints := "⏎ next: brief   ↑↓ repo   esc cancel"
-	ticket, _, _ := m.parsed()
+	hints := "⏎ next: prompt   ↑↓ repo   esc cancel"
 	if e, matched := m.existing(); matched && e.Archived {
 		hints = "esc cancel"
 	} else if matched {
 		hints = "⏎ select it   ctrl+w select and wake it   esc cancel"
-	} else if ticket != "" {
-		hints = "⏎ start factory   ↑↓ repo   esc cancel"
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
 
 func (m *NewFactoryModel) notice(w int) [][]theme.Span {
-	ticket, _, _ := m.parsed()
 	var spans [][]theme.Span
 	add := func(text string, ink theme.Ink) {
 		for _, l := range theme.Wrap(text, w) {
@@ -301,15 +272,9 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	}
 	switch {
 	case m.name == "":
-		add("A ticket id such as ENG-1234, optionally with /feature-name, or a feature name.", theme.Muted)
-	case ticket == "":
-		add("Not a ticket id, so this is a feature. You'll write its brief next.", theme.Muted)
-	default:
-		if e, ok := m.nearMiss(); ok {
-			add(fmt.Sprintf("%s is a new ticket. %s belongs to %s and won't be reused: tickets match exactly.", ticket, e.Worktree, e.Label), theme.Muted)
-		} else {
-			add(ticket+" is a new ticket.", theme.Muted)
-		}
+		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
+	case m.id() != "":
+		add(fmt.Sprintf("%s is a new factory. You'll write its prompt next.", m.id()), theme.Muted)
 	}
 	return spans
 }
@@ -329,18 +294,18 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	c.Put(x, y, reason, theme.Muted)
 }
 
-func (m *NewFactoryModel) drawBrief(c *theme.Canvas) {
+func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "New factory · "+m.slug(), theme.Bright.B())
 	c.Right(c.W-2, 0, "2 of 2", theme.Muted)
 	y := 2
-	for _, l := range theme.Wrap("Describe the feature: what it should do, for whom, and anything you already know you want. The supervisor writes this to brief.md word for word and won't ask for it again.", w) {
+	for _, l := range theme.Wrap("Describe what this factory should do: the change, for whom, and anything you already know you want. The supervisor writes it to brief.md word for word, and every stage reads it as the spec. The factory reads a tracker issue only if you ask it to here.", w) {
 		c.Put(1, y, l, theme.Text)
 		y++
 	}
 	y++
 	var lines []string
-	for i, raw := range strings.Split(m.brief, "\n") {
+	for i, raw := range strings.Split(m.prompt, "\n") {
 		for j, l := range theme.Wrap(raw, w-8) {
 			number := "   "
 			if j == 0 {
@@ -353,7 +318,7 @@ func (m *NewFactoryModel) drawBrief(c *theme.Canvas) {
 	if len(lines) > room && room > 0 {
 		lines = lines[len(lines)-room:]
 	}
-	drawInput(c, 1, y, w, "brief", lines, true)
+	drawInput(c, 1, y, w, "prompt", lines, true)
 	y += len(lines) + 2
 	if m.problem != "" {
 		for _, l := range theme.Wrap("✗ "+m.problem, w) {
@@ -361,7 +326,7 @@ func (m *NewFactoryModel) drawBrief(c *theme.Canvas) {
 			c.Put(1, y, l, theme.FgInk(theme.Red))
 		}
 	}
-	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.brief, "\n")+1, uniseg.GraphemeClusterCount(m.brief))
+	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt, "\n")+1, uniseg.GraphemeClusterCount(m.prompt))
 	c.Put(1, c.H-1, count, theme.Muted)
 	c.Right(c.W-2, c.H-1, "ctrl+s start factory   esc back", theme.Text)
 }

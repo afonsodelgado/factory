@@ -60,8 +60,9 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: factory <command> [arguments]
 
 commands:
-  open [<ticket|slug>] [--repo path]
-              create or select a factory, then attach to the hub
+  open [<id>] [--prompt text | <prompt…>] [--repo path]
+              select the factory with this id, or create it with the prompt
+              as its spec (without one the supervisor asks), then attach
   doctor      check what the factory needs and print the fix commands
   bootstrap   install the bundled skills, agents and hooks into the Claude config
   install-hooks [--remove]

@@ -245,18 +245,18 @@ func (m *Model) create(r dialog.NewResult) error {
 	if r.Repo == "" || r.Slug == "" {
 		return errors.New("a factory needs a repo and a name")
 	}
-	if existing, ok := m.existingFactory(r.Repo, r.Ticket, r.Slug); ok {
+	if existing, ok := m.existingFactory(r.Repo, r.Slug); ok {
 		return m.selectExisting(existing)
 	}
 	if m.Loader == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
-	earlier := m.retiredFactories(r.Repo, r.Ticket, r.Slug)
+	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Ticket: r.Ticket, Brief: r.Brief, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
-	title := firstLine(r.Brief)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Ticket: r.Ticket, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
+	title := firstLine(r.Prompt)
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
 	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		pinDirs(reg, earlier)
 		reg.Upsert(entry)
@@ -267,11 +267,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if m.Engine == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
-	label := r.Ticket
-	if label == "" {
-		label = r.Slug
-	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(label + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(r.Slug + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
 	if err != nil {
 		return err
 	}
@@ -279,8 +275,8 @@ func (m *Model) create(r dialog.NewResult) error {
 		return err
 	}
 	note := "created by factory"
-	if r.Brief != "" {
-		note += fmt.Sprintf(" with a %d-line brief", strings.Count(strings.TrimRight(r.Brief, "\n"), "\n")+1)
+	if r.Prompt != "" {
+		note += fmt.Sprintf(" with a %d-line prompt", strings.Count(strings.TrimRight(r.Prompt, "\n"), "\n")+1)
 	}
 	m.Loader.Note(factory.Factory{Repo: r.Repo, Slug: r.Slug}, note)
 	m.selected = state.Key(r.Repo, r.Slug)
@@ -300,25 +296,25 @@ func retired(f factory.Factory) bool {
 	return finished && !dirExists(f.Worktree)
 }
 
-func named(f factory.Factory, ticket, slug string) bool {
-	return (ticket != "" && factory.MatchTicket(f.Slug, ticket)) || f.Slug == slug
+func named(f factory.Factory, id string) bool {
+	return f.Slug == id || strings.ToLower(f.Label()) == id
 }
 
-func (m *Model) retiredMatch(repos []string, ticket, slug string) (string, bool) {
+func (m *Model) retiredMatch(repos []string, id string) (string, bool) {
 	for _, it := range m.snap.Items {
 		f := it.Factory
-		if retired(f) && slices.Contains(repos, f.Repo) && named(f, ticket, slug) {
+		if retired(f) && slices.Contains(repos, f.Repo) && named(f, id) {
 			return f.Repo, true
 		}
 	}
 	return "", false
 }
 
-func (m *Model) retiredFactories(repo, ticket, slug string) []factory.Factory {
+func (m *Model) retiredFactories(repo, id string) []factory.Factory {
 	var earlier []factory.Factory
 	for _, it := range m.snap.Items {
 		f := it.Factory
-		if f.Repo == repo && f.Dir != "" && retired(f) && named(f, ticket, slug) {
+		if f.Repo == repo && f.Dir != "" && retired(f) && named(f, id) {
 			earlier = append(earlier, f)
 		}
 	}
@@ -342,19 +338,15 @@ func (m *Model) slugTaken(repo string) func(string) bool {
 	}
 }
 
-func (m *Model) existingFactory(repo, ticket, slug string) (string, bool) {
+func (m *Model) existingFactory(repo, id string) (string, bool) {
 	for _, it := range m.snap.Items {
 		f := it.Factory
-		if f.Repo == repo && !retired(f) && named(f, ticket, slug) {
+		if f.Repo == repo && !retired(f) && named(f, id) {
 			return f.Key(), true
 		}
 	}
-	if ticket != "" {
-		if wt, ok := factory.FindWorktree(repo, ticket); ok {
-			return state.Key(repo, filepath.Base(wt)), true
-		}
-	} else if wt := filepath.Join(factory.WorktreesDir(repo), slug); slug != "" && dirExists(wt) {
-		return state.Key(repo, slug), true
+	if id != "" && dirExists(filepath.Join(factory.WorktreesDir(repo), id)) {
+		return state.Key(repo, id), true
 	}
 	return "", false
 }

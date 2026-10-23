@@ -34,13 +34,11 @@ type NewContext struct {
 }
 
 type NewResult struct {
-	Repo    string `json:"repo"`
-	Ticket  string `json:"ticket,omitempty"`
-	Feature string `json:"feature,omitempty"`
-	Slug    string `json:"slug,omitempty"`
-	Brief   string `json:"brief,omitempty"`
-	Select  string `json:"select,omitempty"`
-	Wake    bool   `json:"wake,omitempty"`
+	Repo   string `json:"repo"`
+	Slug   string `json:"slug,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	Select string `json:"select,omitempty"`
+	Wake   bool   `json:"wake,omitempty"`
 }
 
 type SwitchRow struct {

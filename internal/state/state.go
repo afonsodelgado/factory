@@ -11,7 +11,7 @@ import (
 var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "handoff"}
 
 type State struct {
-	Ticket        string           `json:"ticket"`
+	ID            string           `json:"id"`
 	Title         string           `json:"title"`
 	Repo          string           `json:"repo"`
 	SessionID     string           `json:"session_id"`
@@ -136,11 +136,17 @@ func ReadState(path string) (*State, error) {
 }
 
 func ParseState(data []byte) (*State, error) {
-	var s State
+	var s struct {
+		State
+		LegacyTicket string `json:"ticket"`
+	}
 	if err := json.Unmarshal(bytes.TrimSpace(data), &s); err != nil {
 		return nil, err
 	}
-	return &s, nil
+	if s.ID == "" {
+		s.ID = s.LegacyTicket
+	}
+	return &s.State, nil
 }
 
 type Strings []string

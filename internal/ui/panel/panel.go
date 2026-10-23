@@ -258,7 +258,7 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 	case it.Kind == "comment":
 		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this ticket", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it"))), 0
+		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it"))), 0
 	case it.Kind == "failure":
 		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "an instruction instead, then ctrl+s sends it"))), 0
 	}
