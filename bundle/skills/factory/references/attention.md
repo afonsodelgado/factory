@@ -34,13 +34,13 @@ An attention item is something the user must act on. The supervisor writes it to
 
 | Kind | Id |
 |---|---|
-| question batch | `q-<ticket digits or slug>-<n>`, `n` counting batches from 1 |
+| question batch | `q-<id>-<n>`, `n` counting batches from 1 |
 | gate | `gate-<id>-design`, `gate-<id>-plan` |
 | artifact comment | `comment-<id>-<n>` |
 | cap | `cap-<id>-<stage>` |
 | failure | `fail-<id>-<stage>` |
 
-`<id>` is the ticket id or the slug, as in the factory directory name. A cap or failure id ends with the stage key, which is how the app knows which stage `/factory skip` names and which limit a cap raises (`coderabbit_rounds` for `coderabbit`, `qa_rounds` otherwise).
+`<id>` is the factory id, as in the factory directory name. A cap or failure id ends with the stage key, which is how the app knows which stage `/factory skip` names and which limit a cap raises (`coderabbit_rounds` for `coderabbit`, `qa_rounds` otherwise).
 
 ## Messages from the panel
 
@@ -52,7 +52,7 @@ The app delivers answers into the session as one message, in exactly these forms
 | gate approve | `/factory approve <design\|plan> <id> <notes>` on one line |
 | gate changes | `<id> changes: <text>` |
 | artifact comment | `<id> reply: <text>` (reply on the item's thread with that text) |
-| cap, one more round | `<id> continue: raise <coderabbit_rounds\|qa_rounds> by one for this ticket` |
+| cap, one more round | `<id> continue: raise <coderabbit_rounds\|qa_rounds> by one for this factory` |
 | cap or failure, skip | `/factory skip <stage>` |
 | failure, retry | `/factory resume` |
 

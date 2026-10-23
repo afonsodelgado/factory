@@ -1,35 +1,41 @@
 ---
 name: factory
 description: |
-  Drive one feature ticket through the whole software factory: requirements interview,
-  design artifacts, plan artifact, stacked draft PRs, revmux review loop, CodeRabbit
-  triage, QA, QA-fix rounds and the final manual-test handoff. This session is the
-  supervisor; every stage runs as a factory-* subagent that hands off through files.
-  Use when the user says "/factory <ticket>", "/factory status", "/factory resume",
-  "start the factory on ENG-1234" or "run the pipeline for this ticket".
-argument-hint: "<ticket id or slug> [brief] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
+  Drive one factory, a change the user describes in a prompt, through the whole software
+  factory: requirements interview, design artifacts, plan artifact, stacked draft PRs,
+  revmux review loop, CodeRabbit triage, QA, QA-fix rounds and the final manual-test
+  handoff. This session is the supervisor; every stage runs as a factory-* subagent that
+  hands off through files. Use when the user says "/factory <id>", "/factory status",
+  "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
+argument-hint: "<id> [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
 ---
 
 # Factory supervisor
 
-You are the supervisor of one ticket. You do not read or write product code. You start
+You are the supervisor of one factory. You do not read or write product code. You start
 stage agents, wait for them, record what they hand back, publish their artifacts, relay
 the user's comments and answers, and decide the next stage. Keep your own context small:
 read the summaries agents return and the state file, not the diffs.
 
-Starting `/factory` on a ticket is the user's standing authorisation, for that ticket only,
-to commit, push, open draft PRs, mark them ready and reply on CodeRabbit threads. It
-overrides the usual "never commit automatically" rule for this ticket and nothing else.
+Starting `/factory` is the user's standing authorisation, for that factory only, to
+commit, push, open draft PRs, mark them ready and reply on CodeRabbit threads. It
+overrides the usual "never commit automatically" rule for this factory and nothing else.
 It never authorises merging, deploying, force-pushing `main`, or touching production.
+
+## The spec
+
+The spec is the user's prompt, written verbatim to `brief.md`. Every stage reads it. Read an
+external tracker or link only when the prompt itself asks you to (for example "read Linear
+issue X"), using whatever tools the session has. Never fetch one on your own.
 
 ## Files
 
-All state for a ticket lives in the worktree the session runs in:
+All state for a factory lives in the worktree the session runs in:
 
 ```
 <worktree>/.claude/factory/<id>/
   state.json         the single source of truth (schema: references/state.md)
-  brief.md           the feature description, when there is no ticket
+  brief.md           the user's prompt, verbatim: the spec
   requirements.md    stage 1 output
   design/            stage 2: variant-*.html, approved.md
   plan.md, plan.html stage 3 output (schematic.html optional)
@@ -39,7 +45,7 @@ All state for a ticket lives in the worktree the session runs in:
   .heartbeat         touched by scripts/wait-for-review.sh on every poll
 ```
 
-`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the ticket id, or the slug when there is no ticket. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it.
+`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the factory id: the argument of `/factory <id>`, letters a–z, digits and dashes. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it.
 
 QA briefs and reports stay where the QA skills put them, under `.claude/qa/`.
 
@@ -49,7 +55,7 @@ carries `at` (ISO 8601, UTC).
 
 ### The repo profile
 
-Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and the stage agents read it; nothing else configures the pipeline.
+Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and the stage agents read it; nothing else configures the pipeline. Read it in the current worktree; when it is absent there, read it from the main checkout, `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`. `factory init` writes it there without committing it, so worktrees usually do not have it.
 
 | Key | Meaning |
 |---|---|
@@ -63,27 +69,26 @@ Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and
 | `qa.api_port`, `qa.web_port`, `qa.start`, `qa.health` | browser mode only: how the local stack runs |
 | `coderabbit` | `false` skips stage 6 |
 
-When the file is missing, stop at preflight and ask the user to add one from the template.
+When it is missing in both places, stop at preflight and ask the user to run `factory init <main checkout>`.
 
 ## Commands
 
-- `/factory <id>`: start the ticket if `state.json` does not exist, otherwise resume it. For a factory without a ticket, the lines after `/factory <slug>` in the same message are the brief.
-- `/factory resume`: find the ticket from the current branch or the only open `state.json`, then resume.
+- `/factory <id>`: start the factory if `state.json` does not exist, otherwise resume it. The lines after `/factory <id>` in the same message are the prompt.
+- `/factory resume`: find the factory from the current branch or the only open `state.json`, then resume.
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
 - `/factory approve <design|plan> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
 - `/factory skip <stage>`: record `skipped` with the user's reason and move on.
 
 ## Start
 
-1. **Preflight.** Read `.claude/factory.yml`, then run these checks and stop with a clear message if one fails:
+1. **Preflight.** Read the profile, then run these checks and stop with a clear message if one fails:
    - `gh auth status` succeeds.
    - The working tree is clean. Untracked tool caches do not count: ignore `?? .impeccable/` and `?? .revmux/` lines in `git status --porcelain`.
    - In `qa.mode: browser` only: browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome --remote-control` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
-   - The current directory is a worktree for this ticket. If it is the main checkout, ask the user to restart from `claude --worktree <slug> --remote-control <slug>`, adding `--chrome` in browser mode.
+   - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
-   - **With a ticket** (the id looks like `ENG-1234`): read the Linear issue (`mcp__linear__get_issue`, `list_comments`).
-   - **Without a ticket** (the id is a feature slug such as `csv-export`): when the `/factory <slug>` message carries more lines, they are the brief: write them verbatim to `brief.md` and do not ask for the description again. Otherwise ask the user to describe the feature in a few sentences: what it should do, for whom, and anything they already know they want, and write the answer verbatim to `brief.md`. That file stands in for the ticket in every later stage: pass its path wherever a stage would read the Linear issue. Set `ticket` to `null` and use the slug as the directory name.
-   - Then copy `templates/state.json` and fill in the ticket, title, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` (`$CLAUDE_CODE_SESSION_ID`) and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once.
+   - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
+   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` (`$CLAUDE_CODE_SESSION_ID`) and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once.
 3. Tell the user the plan in three lines: which gates need them, and that everything after the plan runs unattended until handoff.
 
 ## Asking the user
@@ -112,7 +117,7 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 {"status": "done|blocked|failed", "summary": "...", "outputs": ["path or url"], "questions": [], "data": {}}
 ```
 
-- **Spawn** with the Agent tool, `subagent_type: "factory-<role>"`. The prompt gives the ticket id, or says "no ticket: the spec is brief.md", plus the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Write `waiting_on: "agent"` with the stage as the reason.
+- **Spawn** with the Agent tool, `subagent_type: "factory-<role>"`. The prompt gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Write `waiting_on: "agent"` with the stage as the reason.
 - **Record** the returned agent id in `state.stages.<stage>.agent_id` straight away. Names do not survive compaction, ids do.
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent with SendMessage, so it keeps its context. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
@@ -132,7 +137,7 @@ Every published artifact is an object in `state.stages.<stage>.artifacts`: `{url
 
 ### 1 · requirements (lit)
 
-Spawn `factory-analyst` with the ticket. It returns `blocked` with a batch of questions until it has enough, then writes `requirements.md`. Relay every batch as a `question` item. When it returns `done`, ask for an explicit go-ahead as one more `question` item, the next `q-` id: its body is the "Open decisions" section of `requirements.md` (or "No open decisions"), its one question is "Go ahead with these requirements?", with the option and recommended answer "Go ahead". Any other answer is a change to forward to the analyst.
+Spawn `factory-analyst` with the factory id and `brief.md`. It returns `blocked` with a batch of questions until it has enough, then writes `requirements.md`. Relay every batch as a `question` item. When it returns `done`, ask for an explicit go-ahead as one more `question` item, the next `q-` id: its body is the "Open decisions" section of `requirements.md` (or "No open decisions"), its one question is "Go ahead with these requirements?", with the option and recommended answer "Go ahead". Any other answer is a change to forward to the analyst.
 
 ### 2 · design (lit, only when `needs_design`)
 
@@ -193,7 +198,7 @@ Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.js
 
 ## Limits
 
-`state.limits` holds `coderabbit_rounds` (default 2), `qa_rounds` (default 3) and `stage_retries` (default 1). When a cap trips: stop, write a `cap` item and `waiting_on: "user"` with the reason, notify, and wait. Never raise a cap on your own. `<item id> continue: raise <limit> by one for this ticket` from the user raises that limit by one in `state.limits` and resumes the stage.
+`state.limits` holds `coderabbit_rounds` (default 2), `qa_rounds` (default 3) and `stage_retries` (default 1). When a cap trips: stop, write a `cap` item and `waiting_on: "user"` with the reason, notify, and wait. Never raise a cap on your own. `<item id> continue: raise <limit> by one for this factory` from the user raises that limit by one in `state.limits` and resumes the stage.
 
 ## Resume
 

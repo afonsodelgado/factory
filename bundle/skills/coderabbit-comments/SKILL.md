@@ -70,7 +70,7 @@ Use this skill to turn CodeRabbit review feedback into a tight implementation lo
 
 ## Factory mode
 
-Applies when the `factory-shepherd` agent runs you, or the user says the ticket is running in the factory. Starting the factory is the user's confirmation and their authorisation to commit, push and reply, so steps 5, 7 and the Output Shape's confirmation requests do not apply. Instead:
+Applies when the `factory-shepherd` agent runs you, or the user says the work is running in the factory. Starting the factory is the user's confirmation and their authorisation to commit, push and reply, so steps 5, 7 and the Output Shape's confirmation requests do not apply. Instead:
 
 1. Fetch and classify every unresolved, non-outdated thread exactly as in steps 3 and 4.
 2. **Relevant and partially relevant:** fix, run the focused checks, commit. Reply on the thread after the push: one line naming the fix and the commit.
