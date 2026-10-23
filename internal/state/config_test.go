@@ -80,6 +80,7 @@ func TestAgentResolution(t *testing.T) {
 		{name: "a profile effort keeps the config's model", config: "agents:\n  engineer: {model: sonnet, effort: medium}\n", profile: "agents:\n  engineer: {effort: low}\n", want: map[string]AgentSetting{"engineer": {Model: "sonnet", Effort: "low"}, "analyst": DefaultAgents["analyst"]}},
 		{name: "unknown model in the profile is refused with the file and key", profile: "agents:\n  engineer: {model: gpt}\n", refused: `factory.yml: agents.engineer.model "gpt" is not a model`},
 		{name: "unknown agent in the config is refused with the file and key", config: "agents:\n  coder: {model: opus}\n", refused: "config.yml: agents.coder is not an agent"},
+		{name: "qa on another tool is refused with the file and key", profile: "agents:\n  qa: {tool: codex}\n", refused: `factory.yml: agents.qa.tool "codex" is refused`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -111,5 +112,13 @@ func TestAgentResolution(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSwitchingAnAgentsToolDropsTheOtherToolsModel(t *testing.T) {
+	cfg := &Config{Agents: map[string]AgentSetting{"engineer": {Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "ultra"}}}
+	got := ResolveAgents(cfg, Profile{}, map[string]AgentSetting{"engineer": {Tool: ToolClaude}})["engineer"]
+	if got != (AgentSetting{Tool: ToolClaude}) {
+		t.Errorf("engineer switched back to claude resolves to %+v; want no model or effort, since claude --model gpt-5.6-sol would fail the spawn", got)
 	}
 }

@@ -41,7 +41,7 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "factory delete:", err)
 		return 1
 	}
-	removal := factory.PlanRemoval(f, cfg.ActivityDir(), cfg.DraftsDir())
+	removal := factory.PlanRemoval(f, cfg)
 	answers := bufio.NewReader(in)
 	if !*yes && !confirm(out, answers, whatGoes(f, removal)+"Delete "+f.Label()+"? [y/N] ") {
 		fmt.Fprintln(out, "Nothing was deleted.")

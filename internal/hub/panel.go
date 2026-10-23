@@ -388,7 +388,7 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	sentAt := m.Now()
-	text := m.message(item, d, action)
+	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
 	reason, err := Deliver(m.Typist, m.freshTarget(it), text)
 	if err != nil {
 		reason = err.Error()
@@ -400,6 +400,9 @@ func (m *Model) deliver(action string) {
 	}
 	delete(m.panel.refused, key)
 	m.saveDraft()
+	if it.Pane != nil {
+		m.typedAt[it.Pane.ID] = sentAt
+	}
 	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID)}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
@@ -467,7 +470,7 @@ func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 		s.Reason = missing
 		return s
 	}
-	s.Reason, s.Preview = Refusal(m.target(it)), m.message(item, d, "approve")
+	s.Reason, s.Preview = Refusal(m.target(it)), factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, "approve"))
 	if s.Ready = s.Reason == ""; s.Ready {
 		s.Reason = fmt.Sprintf("Sends 1 message to %s, which is idle at its prompt.", it.Factory.Label())
 	}

@@ -19,6 +19,7 @@ type State struct {
 	Pipeline       string                  `json:"pipeline"`
 	PipelineStages []string                `json:"pipeline_stages"`
 	Agents         map[string]AgentSetting `json:"agents"`
+	Supervisor     AgentSetting            `json:"supervisor,omitzero"`
 	Worktree       string                  `json:"worktree"`
 	Branch         string                  `json:"branch"`
 	Stage          string                  `json:"stage"`

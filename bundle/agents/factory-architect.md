@@ -14,7 +14,7 @@ You plan one change for a factory. Your plan is the last thing the developer rev
 2. Read the repo's profile, `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none). When it names a `codebase_skill`, load that skill before reading code.
 3. Read the code the change touches, following each path end to end: every entry point that reaches the same action (for a web app: route, service, repository, schema, migration, the page and its queries, and every tool or background job), down to what it stores.
 4. Check the knowledge vault INDEX for entries about this area and read the relevant ones. Past gotchas there are cheaper than rediscovering them.
-5. Apply the repo's rules: AGENTS.md, CLAUDE.md, CLAUDE.local.md. Plan for code that needs no comments, has readable conditionals, and the fewest tests that catch real failures.
+5. Apply the developer's rules file when the supervisor names one, then the repo's rules: AGENTS.md, CLAUDE.md, CLAUDE.local.md. Plan for code that needs no comments, has readable conditionals, and the fewest tests that catch real failures.
 
 ## Write
 

@@ -21,7 +21,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent"}
+var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent", "--supervisor"}
 
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
@@ -32,7 +32,8 @@ func runOpen(args []string) int {
 	pipeline := flags.String("pipeline", "", "the pipeline of stages to run; default_pipeline when omitted")
 	stages := flags.String("stages", "", "the exact stages to run, comma-separated; instead of --pipeline")
 	agents := agentFlags{}
-	flags.Var(agents, "agent", "role=model:effort for one agent of this factory; repeatable")
+	flags.Var(agents, "agent", "role=model:effort or role=tool/model:effort for one agent of this factory; repeatable")
+	supervisorFlag := flags.String("supervisor", "", "tool/model:effort the supervisor runs on, such as codex/gpt-5.6-sol:high")
 	if err := flags.Parse(reorder(args)); err != nil {
 		return 2
 	}
@@ -47,7 +48,12 @@ func runOpen(args []string) int {
 	if *prompt == "" {
 		*prompt = strings.Join(rest, " ")
 	}
-	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents}); err != nil {
+	supervisor := state.ParseSetting(*supervisorFlag)
+	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
+		fmt.Fprintln(os.Stderr, "factory open:", err)
+		return 2
+	}
+	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
@@ -120,7 +126,7 @@ func openMain(r hub.OpenRequest) error {
 		return err
 	}
 	if name != "" {
-		reply, err := request(cfg.SocketPath(), "open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents})
+		reply, err := request(cfg.SocketPath(), "open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
 		if err != nil {
 			return err
 		}

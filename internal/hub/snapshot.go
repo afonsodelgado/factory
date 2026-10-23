@@ -16,12 +16,15 @@ type Item struct {
 	Status  factory.Status
 	Hook    *state.HookFile
 	Pane    *tmux.Pane
+	Stage   *StageView
 }
 
 type Snapshot struct {
-	At    time.Time
-	Items []Item
-	Panes []tmux.Pane
+	At          time.Time
+	Items       []Item
+	Panes       []tmux.Pane
+	Hooks       []*state.HookFile
+	StageTokens map[string]bool
 }
 
 func (s Snapshot) Find(key string) (Item, bool) {
@@ -59,19 +62,73 @@ func (l *Loader) Load() Snapshot {
 	if l.TM != nil {
 		panes, _ = l.TM.Panes()
 	}
-	snap := Snapshot{At: now, Panes: panes}
+	runs := map[string]*state.StageRuns{}
+	tokens := map[string]bool{}
+	for _, f := range found {
+		runs[f.Key()], _ = state.LoadStageRuns(state.StageRunsPath(l.Config.StateDir, f.Repo, f.Slug))
+		for _, token := range runs[f.Key()].Tokens() {
+			tokens[token] = true
+		}
+	}
+	supervisorHooks := withoutTokens(hooks, tokens)
+	snap := Snapshot{At: now, Panes: panes, Hooks: hooks, StageTokens: tokens}
 	for _, f := range found {
 		f = l.keepLastGood(f)
 		var pane *tmux.Pane
 		if p, ok := FactoryPane(panes, f.Repo, f.Slug); ok {
 			pane = &p
 		}
-		hook := hookFor(f, tokenOf(pane), hooks)
-		status := factory.StatusOf(f, factory.Live{Pane: LivePane(panes, f), Hook: hook}, now, l.Config.Stalled())
+		hook := hookFor(f, tokenOf(pane), supervisorHooks)
+		l.rememberSession(f, paneHook(tokenOf(pane), hooks))
+		stage := runningStage(f, runs[f.Key()], panes, hooks)
+		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.hook()}
+		status := factory.StatusOf(f, live, now, l.Config.Stalled())
 		l.logHook(f, hook)
-		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Hook: hook, Pane: pane})
+		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Hook: hook, Pane: pane, Stage: stage})
 	}
 	return snap
+}
+
+func withoutTokens(hooks []*state.HookFile, tokens map[string]bool) []*state.HookFile {
+	var kept []*state.HookFile
+	for _, h := range hooks {
+		if !tokens[h.Token] {
+			kept = append(kept, h)
+		}
+	}
+	return kept
+}
+
+func runningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile) *StageView {
+	if runs == nil {
+		return nil
+	}
+	run, ok := runs.Running()
+	if !ok {
+		return nil
+	}
+	view := &StageView{Run: run, Hook: paneHook(run.Token, hooks)}
+	if p, found := stagePaneOf(panes, f, run.Role, run.Token); found {
+		view.Pane = &p
+	}
+	return view
+}
+
+func (v *StageView) hook() *state.HookFile {
+	if v == nil {
+		return nil
+	}
+	return v.Hook
+}
+
+func (l *Loader) rememberSession(f factory.Factory, hook *state.HookFile) {
+	if hook == nil || f.Entry == nil || f.Entry.SessionID != "" {
+		return
+	}
+	if entry := l.Registry.Find(f.Repo, f.Slug); entry != nil {
+		entry.SessionID = hook.SessionID
+		l.Registry.Save()
+	}
 }
 
 func (l *Loader) observe(found []factory.Factory, now time.Time) {

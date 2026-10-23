@@ -24,6 +24,8 @@ type Config struct {
 	Pipelines       map[string][]string     `yaml:"pipelines"`
 	DefaultPipeline string                  `yaml:"default_pipeline"`
 	Agents          map[string]AgentSetting `yaml:"agents"`
+	Supervisor      AgentSetting            `yaml:"supervisor"`
+	Codex           Codex                   `yaml:"codex"`
 
 	ConfigDir string `yaml:"-"`
 	StateDir  string `yaml:"-"`
@@ -41,6 +43,10 @@ type Alerts struct {
 
 type Claude struct {
 	RemoteControl *bool `yaml:"remote_control"`
+}
+
+type Codex struct {
+	WritableDirs []string `yaml:"writable_dirs"`
 }
 
 type Tmux struct {
@@ -69,6 +75,9 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	if err := ValidateAgents(path, cfg.Agents); err != nil {
+		return nil, err
+	}
+	if err := ValidateSupervisor(path, cfg.Supervisor); err != nil {
 		return nil, err
 	}
 	cfg.applyDefaults()
@@ -126,6 +135,7 @@ func (c *Config) DraftsDir() string    { return filepath.Join(c.StateDir, "draft
 func (c *Config) ActivityDir() string  { return filepath.Join(c.StateDir, "activity") }
 func (c *Config) SocketPath() string   { return filepath.Join(c.StateDir, "hub.sock") }
 func (c *Config) LockPath() string     { return filepath.Join(c.StateDir, "hub.lock") }
+func (c *Config) RulesPath() string    { return filepath.Join(c.ConfigDir, "rules.md") }
 
 func SessionsDir(stateDir string) string {
 	return filepath.Join(stateDir, "sessions")
@@ -143,6 +153,18 @@ func StateDir() string {
 		return dir
 	}
 	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "factory")
+}
+
+func CodexHome() string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+func OpenCodeConfigDir() string {
+	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "opencode")
 }
 
 func xdg(env, fallback string) string {

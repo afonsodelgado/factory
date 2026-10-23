@@ -50,6 +50,8 @@ func run(args []string) int {
 		return runBootstrap(args[1:])
 	case "install-hooks":
 		return runInstallHooks(args[1:])
+	case "stage":
+		return runStage(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -69,7 +71,9 @@ func usage(w io.Writer) {
 
 commands:
   open [<id>] [--prompt text | <prompt…>] [--repo path]
-              [--pipeline name | --stages a,b,c] [--agent role=model:effort]
+              [--pipeline name | --stages a,b,c]
+              [--agent role=model:effort | role=tool/model:effort]
+              [--supervisor tool/model:effort]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
   delete <id> [--repo path] [--yes]
@@ -81,15 +85,25 @@ commands:
               profile, ignore the factory's files in .git/info/exclude and
               list it in config.yml; nothing is committed
   doctor      check what the factory needs and print the fix commands
-  bootstrap   install the bundled skills, agents and hooks into the Claude config
+  bootstrap   install the bundled skills, agents and hooks into the Claude
+              config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]
-              add (or remove) only the factory hooks in settings.json
+              add (or remove) only the factory hooks, in Claude's
+              settings.json and Codex's hooks.json
+  stage start --role <role> --task <file> [--wait]
+  stage send --role <role> --message <file> [--wait]
+              run a stage agent on its own tool in a pane beside the
+              supervisor, or send it a follow-up; prints the result file
+              (run by the supervisor from its pane)
+  stage ci <pr number>...
+              wait for CI and CodeRabbit on these PRs, then type the
+              result into the supervisor (for Codex and OpenCode)
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap
   hub         run the hub in the factory tmux session
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
-  hook        record a Claude Code hook event (run by Claude Code)
+  hook        record a hook event (run by Claude Code, Codex and OpenCode)
 `)
 }

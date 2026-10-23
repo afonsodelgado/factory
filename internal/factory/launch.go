@@ -27,7 +27,7 @@ func Slugify(s string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "help", "delete", "-h", "--help", "--version"}
+var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "help", "delete", "stage", "-h", "--help", "--version"}
 
 func IsReservedID(name string) bool {
 	return slices.Contains(ReservedIDs, name) || slices.Contains(ReservedIDs, Slugify(name))
@@ -56,10 +56,13 @@ type Launch struct {
 	SessionID     string
 	Chrome        bool
 	RemoteControl bool
+	Supervisor    state.AgentSetting
+	AddDirs       []string
 }
 
 func (l Launch) flags() []string {
-	var flags []string
+	flags := option("--model", l.Supervisor.Model)
+	flags = append(flags, option("--effort", l.Supervisor.Effort)...)
 	if l.Chrome {
 		flags = append(flags, "--chrome")
 	}
@@ -69,8 +72,22 @@ func (l Launch) flags() []string {
 	return flags
 }
 
+func SkillCommand(tool string) string {
+	if tool == state.ToolCodex {
+		return "$factory"
+	}
+	return "/factory"
+}
+
+func ForSupervisor(tool, message string) string {
+	if rest, ok := strings.CutPrefix(message, "/factory"); ok {
+		return SkillCommand(tool) + rest
+	}
+	return message
+}
+
 func (l Launch) Message() string {
-	message := "/factory " + l.Slug
+	message := SkillCommand(l.Supervisor.ToolName()) + " " + l.Slug
 	switch {
 	case len(l.Stages) > 0:
 		message += " --stages " + strings.Join(l.Stages, ",")
@@ -88,13 +105,31 @@ func (l Launch) Message() string {
 	return message
 }
 
+func (l Launch) worktree() string {
+	return filepath.Join(WorktreesDir(l.Repo), l.Slug)
+}
+
 func (l Launch) CreateCommand() string {
+	if !l.Supervisor.OnClaude() {
+		return l.addWorktree() + "\ncd " + ShellQuote(l.worktree()) + " && " + l.supervisor("", l.Message())
+	}
 	parts := append([]string{"claude", "--worktree", l.Slug, "--session-id", l.SessionID}, l.flags()...)
-	worktree := filepath.Join(l.Repo, ".claude", "worktrees", l.Slug)
-	return strings.Join(parts, " ") + " " + ShellQuote(l.Message()) + "; cd " + ShellQuote(worktree)
+	return strings.Join(parts, " ") + " " + ShellQuote(l.Message()) + "; cd " + ShellQuote(l.worktree())
+}
+
+func (l Launch) addWorktree() string {
+	add := "git -C " + ShellQuote(l.Repo) + " worktree add -b worktree-" + l.Slug + " " + ShellQuote(l.worktree())
+	return add + " origin/HEAD || " + add
+}
+
+func (l Launch) ResumeMessage() string {
+	return SkillCommand(l.Supervisor.ToolName()) + " resume"
 }
 
 func (l Launch) ResumeCommand() string {
+	if !l.Supervisor.OnClaude() {
+		return l.supervisor(l.SessionID, l.ResumeMessage())
+	}
 	parts := []string{"claude"}
 	if l.SessionID == "" {
 		parts = append(parts, "--continue")
@@ -102,7 +137,19 @@ func (l Launch) ResumeCommand() string {
 		parts = append(parts, "--resume", l.SessionID)
 	}
 	parts = append(parts, l.flags()...)
-	return strings.Join(parts, " ") + " " + ShellQuote("/factory resume")
+	return strings.Join(parts, " ") + " " + ShellQuote(l.ResumeMessage())
+}
+
+func (l Launch) TypesResumeAfterStart() bool {
+	return l.supervisorLaunch(l.SessionID, l.ResumeMessage()).TypesKickoffAfterStart()
+}
+
+func (l Launch) supervisor(sessionID, message string) string {
+	return l.supervisorLaunch(sessionID, message).Command()
+}
+
+func (l Launch) supervisorLaunch(sessionID, message string) StageLaunch {
+	return StageLaunch{Setting: l.Supervisor, Kickoff: message, SessionID: sessionID, AddDirs: l.AddDirs}
 }
 
 func ShellQuote(s string) string {

@@ -1,0 +1,20 @@
+{
+  "SessionStart": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ],
+  "UserPromptSubmit": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ],
+  "PreToolUse": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ],
+  "PostToolUse": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ],
+  "PermissionRequest": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ],
+  "Stop": [
+    { "hooks": [{ "type": "command", "command": "factory hook" }] }
+  ]
+}

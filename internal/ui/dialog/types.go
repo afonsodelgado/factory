@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -40,20 +41,29 @@ type AgentOption struct {
 }
 
 type NewContext struct {
-	Repos         []RepoOption `json:"repos"`
-	Repo          int          `json:"repo"`
-	RemoteControl bool         `json:"remote_control"`
+	Repos         []RepoOption       `json:"repos"`
+	Repo          int                `json:"repo"`
+	RemoteControl bool               `json:"remote_control"`
+	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
+	Tools         []ToolOption       `json:"tools,omitempty"`
+}
+
+type ToolOption struct {
+	Name    string          `json:"name"`
+	Models  []catalog.Model `json:"models,omitempty"`
+	Problem string          `json:"problem,omitempty"`
 }
 
 type NewResult struct {
-	Repo     string                        `json:"repo"`
-	Slug     string                        `json:"slug,omitempty"`
-	Prompt   string                        `json:"prompt,omitempty"`
-	Pipeline string                        `json:"pipeline,omitempty"`
-	Stages   []string                      `json:"stages,omitempty"`
-	Agents   map[string]state.AgentSetting `json:"agents,omitempty"`
-	Select   string                        `json:"select,omitempty"`
-	Wake     bool                          `json:"wake,omitempty"`
+	Repo       string                        `json:"repo"`
+	Slug       string                        `json:"slug,omitempty"`
+	Prompt     string                        `json:"prompt,omitempty"`
+	Pipeline   string                        `json:"pipeline,omitempty"`
+	Stages     []string                      `json:"stages,omitempty"`
+	Agents     map[string]state.AgentSetting `json:"agents,omitempty"`
+	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
+	Select     string                        `json:"select,omitempty"`
+	Wake       bool                          `json:"wake,omitempty"`
 }
 
 type SwitchRow struct {

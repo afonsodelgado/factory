@@ -7,11 +7,24 @@ import (
 )
 
 type AgentSetting struct {
+	Tool   string `yaml:"tool" json:"tool,omitempty"`
 	Model  string `yaml:"model" json:"model,omitempty"`
 	Effort string `yaml:"effort" json:"effort,omitempty"`
 }
 
 var AgentRoles = []string{"analyst", "designer", "architect", "engineer", "reviewer", "shepherd", "qa", "fixer"}
+
+const (
+	ToolClaude   = "claude"
+	ToolCodex    = "codex"
+	ToolOpenCode = "opencode"
+)
+
+var Tools = []string{ToolClaude, ToolCodex, ToolOpenCode}
+
+var RoleTools = Tools
+
+var SupervisorTools = Tools
 
 var AgentModels = []string{"haiku", "sonnet", "opus", "fable"}
 
@@ -42,7 +55,19 @@ var stageRoles = map[string]string{
 
 func RoleOf(stage string) string { return stageRoles[stage] }
 
-func (s AgentSetting) over(base AgentSetting) AgentSetting {
+func (s AgentSetting) ToolName() string {
+	if s.Tool == "" {
+		return ToolClaude
+	}
+	return s.Tool
+}
+
+func (s AgentSetting) OnClaude() bool { return s.ToolName() == ToolClaude }
+
+func (s AgentSetting) Over(base AgentSetting) AgentSetting {
+	if s.Tool != "" && s.ToolName() != base.ToolName() {
+		base = AgentSetting{Tool: s.Tool}
+	}
 	if s.Model != "" {
 		base.Model = s.Model
 	}
@@ -52,8 +77,25 @@ func (s AgentSetting) over(base AgentSetting) AgentSetting {
 	return base
 }
 
+func (s AgentSetting) Value() string {
+	value := s.Model + ":" + s.Effort
+	if s.OnClaude() {
+		return value
+	}
+	return s.Tool + "/" + value
+}
+
 func (s AgentSetting) Flag(role string) string {
-	return role + "=" + s.Model + ":" + s.Effort
+	return role + "=" + s.Value()
+}
+
+func ParseSetting(value string) AgentSetting {
+	tool, rest, hasTool := strings.Cut(value, "/")
+	if !hasTool {
+		tool, rest = "", value
+	}
+	model, effort, _ := strings.Cut(rest, ":")
+	return AgentSetting{Tool: tool, Model: model, Effort: effort}
 }
 
 func ResolveAgents(cfg *Config, profile Profile, overrides map[string]AgentSetting) map[string]AgentSetting {
@@ -61,7 +103,7 @@ func ResolveAgents(cfg *Config, profile Profile, overrides map[string]AgentSetti
 	for _, role := range AgentRoles {
 		setting := DefaultAgents[role]
 		for _, layer := range []map[string]AgentSetting{cfg.Agents, profile.Agents, overrides} {
-			setting = layer[role].over(setting)
+			setting = layer[role].Over(setting)
 		}
 		resolved[role] = setting
 	}
@@ -70,26 +112,47 @@ func ResolveAgents(cfg *Config, profile Profile, overrides map[string]AgentSetti
 
 func ValidateAgents(source string, agents map[string]AgentSetting) error {
 	for _, role := range sortedKeys(agents) {
-		setting := agents[role]
 		if !slices.Contains(AgentRoles, role) {
 			return fmt.Errorf("%s: agents.%s is not an agent; agents are %s", source, role, strings.Join(AgentRoles, ", "))
 		}
-		if setting.Model != "" && !slices.Contains(AgentModels, setting.Model) {
-			return fmt.Errorf("%s: agents.%s.model %q is not a model; models are %s", source, role, setting.Model, strings.Join(AgentModels, ", "))
+		if role == "qa" && !agents[role].OnClaude() {
+			return fmt.Errorf("%s: agents.qa.tool %q is refused; QA drives Chrome and runs only on claude", source, agents[role].Tool)
 		}
-		if setting.Effort != "" && !slices.Contains(AgentEfforts, setting.Effort) {
-			return fmt.Errorf("%s: agents.%s.effort %q is not an effort; efforts are %s", source, role, setting.Effort, strings.Join(AgentEfforts, ", "))
+		if err := validateSetting(source, "agents."+role, agents[role], RoleTools); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func ValidateSupervisor(source string, setting AgentSetting) error {
+	return validateSetting(source, "supervisor", setting, SupervisorTools)
+}
+
+func validateSetting(source, key string, setting AgentSetting, available []string) error {
+	if !slices.Contains(Tools, setting.ToolName()) {
+		return fmt.Errorf("%s: %s.tool %q is not a tool; tools are %s", source, key, setting.Tool, strings.Join(Tools, ", "))
+	}
+	if !slices.Contains(available, setting.ToolName()) {
+		return fmt.Errorf("%s: %s.tool %q is not available yet; use %s", source, key, setting.Tool, strings.Join(available, ", "))
+	}
+	if !setting.OnClaude() {
+		return nil
+	}
+	if setting.Model != "" && !slices.Contains(AgentModels, setting.Model) {
+		return fmt.Errorf("%s: %s.model %q is not a model; models are %s", source, key, setting.Model, strings.Join(AgentModels, ", "))
+	}
+	if setting.Effort != "" && !slices.Contains(AgentEfforts, setting.Effort) {
+		return fmt.Errorf("%s: %s.effort %q is not an effort; efforts are %s", source, key, setting.Effort, strings.Join(AgentEfforts, ", "))
 	}
 	return nil
 }
 
 func ParseAgentFlag(flag string) (string, AgentSetting, error) {
 	role, value, hasValue := strings.Cut(flag, "=")
-	model, effort, _ := strings.Cut(value, ":")
-	setting := AgentSetting{Model: model, Effort: effort}
+	setting := ParseSetting(value)
 	if !hasValue || setting == (AgentSetting{}) {
-		return "", setting, fmt.Errorf("--agent %q: write it as role=model:effort, such as engineer=sonnet:medium or reviewer=:low", flag)
+		return "", setting, fmt.Errorf("--agent %q: write it as role=model:effort or role=tool/model:effort, such as engineer=sonnet:medium, reviewer=:low or engineer=codex/gpt-5.6-sol:high", flag)
 	}
 	return role, setting, ValidateAgents("--agent", map[string]AgentSetting{role: setting})
 }

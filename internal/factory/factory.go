@@ -92,6 +92,16 @@ func (f Factory) SessionID() string {
 	return ""
 }
 
+func (f Factory) Supervisor() state.AgentSetting {
+	if f.Entry != nil && f.Entry.Supervisor != (state.AgentSetting{}) {
+		return f.Entry.Supervisor
+	}
+	if f.State != nil {
+		return f.State.Supervisor
+	}
+	return state.AgentSetting{}
+}
+
 func (f Factory) WaitingOn() string {
 	if f.State == nil {
 		return ""

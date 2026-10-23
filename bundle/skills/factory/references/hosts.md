@@ -1,0 +1,18 @@
+# Supervising from Codex or OpenCode
+
+The factory app sets `FACTORY_SUPERVISOR` to the tool this session runs in: `claude`, `codex` or `opencode`. Unset means `claude`. On Codex and OpenCode, the skill is the same except where it names a tool only Claude Code has. Do this instead:
+
+| The skill says | On Codex or OpenCode |
+|---|---|
+| `$CLAUDE_CODE_SESSION_ID` | Leave `session_id` as it is. The factory app learns the session from its hooks. |
+| Spawn a stage agent with the Agent tool | Every role, `claude` roles included, goes through `"${FACTORY_BIN:-factory}" stage start --role <role> --task <file>`, **without** `--wait`. Record `stage:<role>` as its agent id, set `waiting_on: "agent"`, and end your turn. |
+| SendMessage a stage agent | `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file>`, without `--wait`, then end your turn. |
+| The agent's final message | A message `stage <role> done: <result file>` arrives in this session when the agent finishes. Read the `factory-result` JSON from that file and continue as the skill says for `done`, `blocked` or `failed`. |
+| Workflow fan-out for design variants | Start the variants one after another with `"${FACTORY_BIN:-factory}" stage start --role designer`, waiting for each `done` message. |
+| Publish an artifact; ArtifactComments | Do not publish. Post the absolute path of every HTML file the designer or architect wrote, and record each as an artifact `{"url": "file://<absolute path>", "title": "…"}` so the panel lists it and opens it in the browser. Feedback arrives as plain messages in this session or as `<item id> changes: <text>` from the panel; forward it to the agent as a follow-up, then post the updated paths. `open_threads` stays `null`. |
+| `scripts/wait-for-review.sh` with `run_in_background` | Run `"${FACTORY_BIN:-factory}" stage ci <pr numbers…>` and end your turn. The app waits for CI and CodeRabbit and types the summary into this session. |
+| PushNotification | Skip it. The factory app alerts on every open attention item. |
+| AskUserQuestion | Always ask in plain text, in the factory-app form. |
+| ToolSearch for the Chrome tools | Skip the preflight check. QA always runs on `claude`, which `"${FACTORY_BIN:-factory}" stage start --role qa` opens with Chrome. |
+
+Panel messages reach Codex as `$factory approve …`, `$factory skip …` and `$factory resume`, because Codex refuses an unknown `/` command; read them as the `/factory` commands of the same name.

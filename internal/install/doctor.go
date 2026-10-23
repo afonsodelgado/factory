@@ -103,6 +103,7 @@ func Doctor(o Options) []Check {
 	if o.ConfigErr != nil {
 		return append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
 	}
+	checks = append(checks, toolChecks(o)...)
 	return append(checks, repoChecks(o)...)
 }
 

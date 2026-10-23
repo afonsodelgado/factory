@@ -65,6 +65,9 @@ type Model struct {
 	notice       string
 	wakes        map[string]Wake
 	pipelines    map[string]string
+	typeQueue    []queuedType
+	typedAt      map[string]time.Time
+	inboxQueued  map[string]bool
 }
 
 type snapshotMsg Snapshot
@@ -82,6 +85,8 @@ func NewModel(m Model) *Model {
 	model.share = PanelShare
 	model.panel = newPanelState()
 	model.dialogs = map[string]json.RawMessage{}
+	model.typedAt = map[string]time.Time{}
+	model.inboxQueued = map[string]bool{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -93,7 +98,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll(), m.refreshCatalog())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -130,6 +135,12 @@ func (m *Model) watchDirs() {
 	}
 	for _, it := range m.snap.Items {
 		dirs = append(dirs, it.Factory.Dir)
+		if it.Stage != nil {
+			dirs = append(dirs, filepath.Dir(it.Stage.Run.Result))
+		}
+		if !it.Factory.Supervisor().OnClaude() && it.Factory.Dir != "" {
+			dirs = append(dirs, filepath.Join(it.Factory.Dir, "inbox"), filepath.Join(it.Factory.Dir, "stages"))
+		}
 	}
 	m.Watch.Watch(dirs)
 }
@@ -218,6 +229,8 @@ func (m *Model) apply(s Snapshot) {
 	m.snap = s
 	m.forgetClosedItems()
 	m.checkReceipts()
+	m.queueInbox()
+	m.flushTypeQueue()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {
@@ -225,6 +238,7 @@ func (m *Model) apply(s Snapshot) {
 	}
 	m.planWakes()
 	m.notePipelines()
+	m.closeFinishedStages()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		topRow := ""
@@ -306,13 +320,14 @@ func (m *Model) planWakes() {
 	var hooks []*state.HookFile
 	if m.Config.StateDir != "" {
 		hooks, _ = state.ReadHookFiles(m.Config.StateDir)
+		hooks = withoutTokens(hooks, m.snap.StageTokens)
 	}
 	for _, it := range m.snap.Items {
 		if !it.Status.Asleep() {
 			continue
 		}
 		profile, _ := state.ReadProfile(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	}
 }
 
@@ -350,9 +365,25 @@ func (m *Model) showSelected() {
 	if ok && it.Pane != nil && !it.Pane.Dead {
 		target = it.Pane.ID
 	}
+	stage := m.shownStage(it, ok && target != m.slotViewer())
+	if target == m.Layout.Slot && stage == m.Layout.Stage {
+		return
+	}
+	m.Engine.HideStage(&m.Layout)
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
 	}
+	if stage != "" {
+		m.Engine.ShowStage(&m.Layout, stage)
+	}
+}
+
+func (m *Model) shownStage(it Item, supervisorShown bool) string {
+	roomForTwo := m.window[0] == 0 || m.window[0] > NarrowAt
+	if !supervisorShown || !roomForTwo || it.Stage == nil || it.Stage.Pane == nil || it.Stage.Pane.Dead {
+		return ""
+	}
+	return it.Stage.Pane.ID
 }
 
 func (m *Model) measureWindow() {
@@ -394,7 +425,7 @@ func (m *Model) focusFromPane(id string) {
 		m.focus = footer.Panel
 	case m.Layout.Frame.Has(id):
 		m.focusSlot()
-	case id == m.Layout.Slot && id != m.slotViewer():
+	case id == m.Layout.Slot && id != m.slotViewer(), id == m.Layout.Stage && id != "":
 		m.focus = footer.Session
 	}
 }
@@ -469,6 +500,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.dialogResult(e)
 	case "open":
 		return m.openRequest(e)
+	case "stage":
+		return m.stageRequest(e)
 	case "delete":
 		return m.deleteRequest(e)
 	case "paste":
@@ -765,19 +798,26 @@ func (m *Model) publish() {
 }
 
 func (m *Model) pushFrame() {
-	title, path := "", ""
+	title, path, stage := "", "", ""
 	if it, ok := m.snap.Find(m.selected); ok {
 		title, path = paneTitle(it.Factory), it.Factory.Worktree
 		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
 			path = it.Pane.Path
+		}
+		if m.Layout.Stage != "" && it.Stage != nil {
+			stage = stageLabel(it.Stage.Run)
 		}
 	}
 	focused := m.focus == footer.Session
 	for _, side := range FrameSides {
 		pane := "frame-" + side
 		width, height := m.size(pane)
-		m.push(pane, frame.Render(side, width, height, title, tilde(path), focused))
+		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: tilde(path), Stage: stage}, focused))
 	}
+}
+
+func stageLabel(run state.StageRun) string {
+	return strings.TrimSpace(run.Role + " · " + run.Setting.ToolName() + " " + run.Setting.Model)
 }
 
 func (m *Model) size(pane string) (int, int) {

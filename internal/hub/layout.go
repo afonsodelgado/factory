@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/frame"
 )
 
 const (
 	HubWindow           = "hub"
 	SlotParking         = "hub-slot"
+	StageParking        = "s-"
 	SelectorWidth       = 34
 	NarrowSelectorWidth = 5
 	NarrowAt            = 100
@@ -39,6 +41,7 @@ type Layout struct {
 	Window   string
 	Selector string
 	Slot     string
+	Stage    string
 	Panel    string
 	Footer   string
 	Frame    Frame
@@ -144,12 +147,17 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 			l.Panel = p.ID
 		case p.UI == "footer":
 			l.Footer = p.ID
+		case p.UI == "stage":
+			l.Stage = p.ID
 		case p.UI == "slot" || p.Slug != "":
 			l.Slot = p.ID
 		}
 	}
 	rebuildFrame := l.Slot == "" || l.Panel == "" || !l.Frame.Complete()
 	if rebuildFrame {
+		if err := e.HideStage(&l); err != nil {
+			return l, err
+		}
 		if err := e.removeFrame(&l); err != nil {
 			return l, err
 		}
@@ -384,17 +392,68 @@ func (e *Engine) FitParking(l Layout) error {
 	if err != nil {
 		return err
 	}
+	if stage, shown := byID(panes, l.Stage); shown && l.Stage != "" {
+		width += 1 + stage.Width
+	}
+	_, stageWidth := SplitWidths(width)
 	fitted := map[string]bool{}
 	for _, p := range panes {
 		if p.Session != e.Session || fitted[p.WindowID] || !parked(p) {
 			continue
 		}
 		fitted[p.WindowID] = true
-		if err := e.fit(p.WindowID, width, height); err != nil {
+		windowWidth := width
+		if strings.HasPrefix(p.WindowName, StageParking) {
+			windowWidth = stageWidth
+		}
+		if err := e.fit(p.WindowID, windowWidth, height); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func SplitWidths(framed int) (int, int) {
+	left := frame.SplitColumn(framed)
+	return left, framed - 1 - left
+}
+
+func (e *Engine) ShowStage(l *Layout, stage string) error {
+	if l.Stage == stage {
+		return nil
+	}
+	if err := e.HideStage(l); err != nil {
+		return err
+	}
+	width, _, err := e.SlotSize(*l)
+	if err != nil {
+		return err
+	}
+	_, stageWidth := SplitWidths(width)
+	if err := e.TM.Join(stage, tmux.Split{Target: l.Slot, Horizontal: true, Size: stageWidth}); err != nil {
+		return err
+	}
+	l.Stage = stage
+	return e.FitParking(*l)
+}
+
+func (e *Engine) HideStage(l *Layout) error {
+	if l.Stage == "" {
+		return nil
+	}
+	panes, err := e.TM.Panes()
+	if err != nil {
+		return err
+	}
+	p, found := byID(panes, l.Stage)
+	l.Stage = ""
+	if !found || p.WindowID != l.Window {
+		return nil
+	}
+	if err := e.TM.Break(p.ID, e.Session, StageParkName(p.StageOf, p.Stage)); err != nil {
+		return err
+	}
+	return e.FitParking(*l)
 }
 
 func (e *Engine) fit(window string, width, height int) error {
@@ -407,7 +466,7 @@ func (e *Engine) fit(window string, width, height int) error {
 }
 
 func parked(p tmux.Pane) bool {
-	return p.WindowName == SlotParking || strings.HasPrefix(p.WindowName, "p-")
+	return p.WindowName == SlotParking || strings.HasPrefix(p.WindowName, "p-") || strings.HasPrefix(p.WindowName, StageParking)
 }
 
 func byID(panes []tmux.Pane, id string) (tmux.Pane, bool) {

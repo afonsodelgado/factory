@@ -22,16 +22,20 @@ type Removal struct {
 	Marker    string
 	Activity  string
 	Drafts    string
+	StageRuns string
+	Delivered string
 }
 
-func PlanRemoval(f Factory, activityDir, draftsDir string) Removal {
+func PlanRemoval(f Factory, cfg *state.Config) Removal {
 	r := Removal{
-		Repo:     f.Repo,
-		Slug:     f.Slug,
-		Worktree: f.Worktree,
-		Marker:   filepath.Join(WorktreesDir(f.Repo), "."+f.Slug+".ready"),
-		Activity: state.ActivityPath(activityDir, f.Repo, f.Slug),
-		Drafts:   filepath.Join(draftsDir, state.FileStem(f.Repo, f.Slug)),
+		Repo:      f.Repo,
+		Slug:      f.Slug,
+		Worktree:  f.Worktree,
+		Marker:    filepath.Join(WorktreesDir(f.Repo), "."+f.Slug+".ready"),
+		Activity:  state.ActivityPath(cfg.ActivityDir(), f.Repo, f.Slug),
+		Drafts:    filepath.Join(cfg.DraftsDir(), state.FileStem(f.Repo, f.Slug)),
+		StageRuns: state.StageRunsPath(cfg.StateDir, f.Repo, f.Slug),
+		Delivered: filepath.Join(cfg.StateDir, "delivered", state.FileStem(f.Repo, f.Slug)+".json"),
 	}
 	branch := worktreeBranch(f)
 	r.Branches = append(r.Branches, branch)
@@ -177,6 +181,8 @@ func Run(r Removal, registry func(func(*state.Registry)) error) []RemovalStep {
 		removePath("remove marker", r.Marker),
 		removePath("remove activity log", r.Activity),
 		removePath("remove drafts", r.Drafts),
+		removePath("remove stage runs", r.StageRuns),
+		removePath("remove delivered messages", r.Delivered),
 	)
 	if _, stopped := FirstFailure(steps); stopped {
 		return append(steps, keepEntry(r, registry))

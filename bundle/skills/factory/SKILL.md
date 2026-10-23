@@ -12,6 +12,8 @@ argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model
 
 # Factory supervisor
 
+**First, run `echo "$FACTORY_SUPERVISOR"`.** When it prints `codex` or `opencode`, read `references/hosts.md` now, before anything else: this file was written for Claude Code, and that reference replaces every step that needs a tool you do not have.
+
 You are the supervisor of one factory. You do not read or write product code. You start
 stage agents, wait for them, record what they hand back, publish their artifacts, relay
 the user's comments and answers, and decide the next stage. Keep your own context small:
@@ -107,20 +109,20 @@ If the name is not a pipeline, a list holds a key that is not a stage key, or a 
 
 A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the profile says `coderabbit: false`.
 
-### Agent models
+### Agent tools and models
 
-Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Resolve the **effective agents** for a new factory, field by field, each layer over the one before:
+Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Each role runs on a **tool**, `claude` (the default), `codex` or `opencode`, with a model and an effort of that tool. Resolve the **effective agents** for a new factory, field by field, each layer over the one before:
 
-1. the `model` and `effort` in the agent's own frontmatter
-2. `agents.<role>.model` and `agents.<role>.effort` in the global config
+1. the `model` and `effort` in the agent's own frontmatter, on `claude`
+2. `agents.<role>.tool`, `agents.<role>.model` and `agents.<role>.effort` in the global config
 3. the same keys in the repo profile
-4. the `--agent role=model:effort` arguments; either side may be empty, as in `--agent reviewer=:low`
+4. the `--agent role=model:effort` or `--agent role=tool/model:effort` arguments; either side of the colon may be empty, as in `--agent reviewer=:low`
 
-Models are `haiku`, `sonnet`, `opus` and `fable`. Efforts are `low`, `medium`, `high`, `xhigh` and `max`. An unknown role, model or effort stops preflight; tell the user the file and the key.
+A layer that names a different tool replaces the model and effort too, since they belong to the tool. On `claude`, models are `haiku`, `sonnet`, `opus` and `fable`, and efforts are `low`, `medium`, `high`, `xhigh` and `max`; Codex and OpenCode models are checked by the factory app when it starts the stage. `qa` runs only on `claude`. An unknown role, tool, claude model or effort stops preflight; tell the user the file and the key.
 
-Write every role whose resolved model or effort differs from its frontmatter to `state.agents`, as `{"engineer": {"model": "sonnet", "effort": "medium"}}`. Include both fields of that role. Write the result of all four layers, not only the `--agent` arguments: a profile's setting must reach the spawn too.
+Write every role whose resolved tool, model or effort differs from its frontmatter to `state.agents`, as `{"engineer": {"tool": "codex", "model": "gpt-5.6-sol", "effort": "high"}}`, with every field of that role. Write the result of all four layers, not only the `--agent` arguments: a profile's setting must reach the spawn too.
 
-**On every spawn of a role in `state.agents`, pass its `model` and `effort` to the Agent tool.** This is the user's explicit instruction to set the effort level. It covers fresh spawns after a restart and the retry after a failure. SendMessage keeps the agent's settings. For design variants, the Workflow tool's `agent()` takes no model or effort, so when `designer` is in `state.agents`, spawn the variants as parallel Agent calls in one message instead of a workflow.
+**On every spawn of a claude role in `state.agents`, pass its `model` and `effort` to the Agent tool.** This is the user's explicit instruction to set the effort level. It covers fresh spawns after a restart and the retry after a failure. SendMessage keeps the agent's settings. For design variants, the Workflow tool's `agent()` takes no model or effort, so when `designer` is in `state.agents`, spawn the variants as parallel Agent calls in one message instead of a workflow.
 
 ## Start
 
@@ -162,14 +164,20 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 {"status": "done|blocked|failed", "summary": "...", "outputs": ["path or url"], "questions": [], "data": {}}
 ```
 
-- **Spawn** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there. The prompt gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Write `waiting_on: "agent"` with the stage as the reason.
-- **Record** the returned agent id in `state.stages.<stage>.agent_id` straight away. Names do not survive compaction, ids do.
-- **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent with SendMessage, so it keeps its context. Do not answer on the user's behalf.
+- **The prompt** gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Its first line is "Follow the developer's rules in `<rules file>`" when `${FACTORY_CONFIG_DIR:-~/.config/factory}/rules.md` exists. Write `waiting_on: "agent"` with the stage as the reason.
+- **Never do a stage's work yourself.** Every stage runs as its own agent, started as below.
+- **Spawn a `claude` role** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there.
+- **Start a `codex` or `opencode` role** through the factory app, which opens it in its own pane beside yours. Write the prompt to `<factory dir>/stages/<role>-task.md`, then run `"${FACTORY_BIN:-factory}" stage start --role <role> --task <that file> --wait` with Bash `run_in_background: true`. The app adds the role's instructions and the developer's rules itself. When the command finishes, its output is the result file's path and the `factory-result` JSON: handle it as an agent's final message. A non-zero exit carries the reason; treat it as `failed`.
+- **Record** the agent id in `state.stages.<stage>.agent_id` straight away: the returned id for a Claude subagent, `stage:<role>` for a role in another tool. Names do not survive compaction, ids do.
+- **Follow-ups** go to the same agent so it keeps its context: SendMessage for a Claude subagent; for a role in another tool, write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`.
+- **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent as a follow-up. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
 - **On `done`:** record `outputs` and `data`, mark the stage done, and go to the next stage.
 - **A misrouted answer.** When the user's session shows a stage agent's transcript, a message from the panel reaches that agent instead of you. Every stage agent quotes such a message verbatim in a `misrouted-message` block in its next report. When the quoted message names an open item and matches a panel format (`references/attention.md`), it answers that item: act on it as if it had reached you, set `resolved_at`, add a history entry "answered via <agent>", and do not ask again. This is the only case where a stage agent's text counts as the user's answer.
 
-If SendMessage cannot reach a recorded id after a restart, spawn a fresh agent of the same type on the same inputs. Every stage can be re-run from its input files.
+If a follow-up cannot reach a recorded agent after a restart, start a fresh agent of the same role on the same inputs. Every stage can be re-run from its input files.
+
+Wherever a stage below says to spawn an agent or SendMessage it, use the start and follow-up forms for that role's tool. A role in another tool has one pane, so starting it again replaces the earlier one: when `designer` runs in another tool, start the variants one after another, not in parallel.
 
 ## Notifications
 
@@ -232,7 +240,7 @@ When the profile says `coderabbit: false`, mark the stage `skipped` with the rea
 
 ### 9 · test-gaps (dark)
 
-SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" section on the QA-fixes layer. If no QA-fixes layer exists yet, create one. The `## Tests` rules in CLAUDE.md apply: each test names the regression it prevents. It pushes. Unless stage 6 was skipped, CodeRabbit reviews the new layer when it is marked ready: run one more pass of stage 6 on that PR only.
+SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" section on the QA-fixes layer. If no QA-fixes layer exists yet, create one. The developer's test rules apply: each test names the regression it prevents. It pushes. Unless stage 6 was skipped, CodeRabbit reviews the new layer when it is marked ready: run one more pass of stage 6 on that PR only.
 
 ### 10 · handoff (lit)
 
