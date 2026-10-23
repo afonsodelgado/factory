@@ -4,14 +4,16 @@
 
 ## Install
 
-Download the binary for your machine from the private repo's releases (`darwin_arm64`, `darwin_amd64`, `linux_amd64` or `linux_arm64`):
+Every merge to `main` publishes a release: the patch version goes up by one from the latest `v*` tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that release is published instead.
+
+Download the binary for your machine from the private repo's latest release:
 
 ```sh
 gh release download --repo afonsodelgado/factory --pattern 'factory_darwin_arm64' --output ~/.local/bin/factory
 chmod +x ~/.local/bin/factory
 ```
 
-Or build it with Go 1.26 or later:
+Or build it with Go 1.26 or later. A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
 
 ```sh
 GOPRIVATE=github.com/afonsodelgado/* go install github.com/afonsodelgado/factory/cmd/factory@latest
@@ -25,6 +27,15 @@ factory bootstrap
 ```
 
 `bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
+
+## Update
+
+```sh
+factory version    # what is running, and the latest release
+factory update     # install the latest release, then run its bootstrap
+```
+
+`factory version` asks GitHub through `gh`. Without `gh`, or when `gh` is not logged in, it prints only the running version. `factory update` downloads the release binary for your machine next to the running one and replaces it. Then it runs the new binary's `bootstrap`, so the skills, agents and hooks match it. It changes nothing when you already run the latest release, and it refuses when it cannot write to the binary's directory. A running hub keeps the old version: quit it with `q` and run `factory` again.
 
 ## Add a repo
 
