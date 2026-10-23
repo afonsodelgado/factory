@@ -20,7 +20,7 @@ import (
 )
 
 var popupSizes = map[string][2]int{
-	"new":     {88, 24},
+	"new":     {88, 27},
 	"switch":  {112, 14},
 	"kill":    {68, 9},
 	"archive": {80, 12},
@@ -137,6 +137,11 @@ func (m *Model) newContext() dialog.NewContext {
 	for i, repo := range m.Config.Repos {
 		profile, _ := state.ReadProfile(repo)
 		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), CodeRabbit: profile.CodeRabbit == nil || *profile.CodeRabbit}
+		if pipelines, err := m.Config.PipelinesFor(repo); err != nil {
+			option.PipelineProblem = err.Error()
+		} else {
+			option.Pipelines, option.DefaultPipeline = pipelines.List, pipelines.Default
+		}
 		for _, it := range m.snap.Items {
 			if it.Factory.Repo != repo {
 				continue
@@ -251,13 +256,21 @@ func (m *Model) create(r dialog.NewResult) error {
 	if m.Loader == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
+	pipelines, err := m.Config.PipelinesFor(r.Repo)
+	if err != nil {
+		return err
+	}
+	pipeline, err := pipelines.Find(r.Pipeline)
+	if err != nil {
+		return err
+	}
 	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
 	title := firstLine(r.Prompt)
 	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
-	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
+	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		pinDirs(reg, earlier)
 		reg.Upsert(entry)
 	})

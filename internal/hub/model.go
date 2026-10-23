@@ -63,6 +63,7 @@ type Model struct {
 	dialog       string
 	notice       string
 	wakes        map[string]Wake
+	pipelines    map[string]string
 }
 
 type snapshotMsg Snapshot
@@ -221,6 +222,7 @@ func (m *Model) apply(s Snapshot) {
 		m.statuses[it.Factory.Key()] = it.Status
 	}
 	m.planWakes()
+	m.notePipelines()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		topRow := ""
@@ -276,6 +278,25 @@ func (m *Model) ensureSlot() {
 	if layout, err := m.Engine.Build(m.Layout.Selector, m.shape(width, height)); err == nil {
 		m.Layout = layout
 		m.arranged = Shape{}
+	}
+}
+
+func (m *Model) notePipelines() {
+	m.pipelines = map[string]string{}
+	defaults := map[string]string{}
+	for _, it := range m.snap.Items {
+		st := it.Factory.State
+		if st == nil || st.Pipeline == "" {
+			continue
+		}
+		repo := it.Factory.Repo
+		if _, ok := defaults[repo]; !ok {
+			pipelines, _ := m.Config.PipelinesFor(repo)
+			defaults[repo] = pipelines.Default
+		}
+		if st.Pipeline != defaults[repo] {
+			m.pipelines[it.Factory.Key()] = st.Pipeline
+		}
 	}
 }
 
@@ -699,6 +720,9 @@ func (m *Model) row(it Item) selector.Row {
 		Status: it.Status,
 		Track:  factory.Track(f.State),
 		Stage:  stageOf(f),
+	}
+	if name := m.pipelines[f.Key()]; name != "" {
+		row.Stage += " · " + name
 	}
 	if f.State != nil {
 		row.Items = len(f.State.OpenAttention())

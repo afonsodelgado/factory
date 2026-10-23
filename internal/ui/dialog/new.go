@@ -2,25 +2,28 @@ package dialog
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
 type NewFactoryModel struct {
-	Context NewContext
-	repo    int
-	name    string
-	prompt  string
-	step    int
-	problem string
-	result  *NewResult
-	width   int
-	height  int
+	Context  NewContext
+	repo     int
+	name     string
+	prompt   string
+	pipeline string
+	step     int
+	problem  string
+	result   *NewResult
+	width    int
+	height   int
 }
 
 func NewFactory(c NewContext) *NewFactoryModel {
@@ -84,7 +87,28 @@ func (m *NewFactoryModel) slug() string {
 
 func (m *NewFactoryModel) launch() factory.Launch {
 	repo := m.selectedRepo()
-	return factory.Launch{Repo: repo.Path, Slug: m.slug(), SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: m.pipelineName(), SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+}
+
+func (m *NewFactoryModel) pipelineName() string {
+	repo := m.selectedRepo()
+	for _, p := range repo.Pipelines {
+		if p.Name == m.pipeline {
+			return m.pipeline
+		}
+	}
+	return repo.DefaultPipeline
+}
+
+func (m *NewFactoryModel) nextPipeline() {
+	list := m.selectedRepo().Pipelines
+	current := m.pipelineName()
+	for i, p := range list {
+		if p.Name == current {
+			m.pipeline = list[(i+1)%len(list)].Name
+			return
+		}
+	}
 }
 
 func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -159,12 +183,18 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.step = 1
 	case "ctrl+c":
 		return tea.Quit
+	case "tab":
+		m.nextPipeline()
 	case "ctrl+s":
 		if strings.TrimSpace(m.prompt) == "" {
 			m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
 			return nil
 		}
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt}
+		if problem := m.selectedRepo().PipelineProblem; problem != "" {
+			m.problem = problem
+			return nil
+		}
+		m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: m.pipelineName()}
 		return tea.Quit
 	case "enter":
 		m.prompt += "\n"
@@ -303,6 +333,7 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 		c.Put(1, y, l, theme.Text)
 		y++
 	}
+	y = m.drawPipelines(c, y+1, w)
 	y++
 	var lines []string
 	for i, raw := range strings.Split(m.prompt, "\n") {
@@ -328,7 +359,48 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	}
 	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt, "\n")+1, uniseg.GraphemeClusterCount(m.prompt))
 	c.Put(1, c.H-1, count, theme.Muted)
-	c.Right(c.W-2, c.H-1, "ctrl+s start factory   esc back", theme.Text)
+	c.Right(c.W-2, c.H-1, "tab pipeline   ctrl+s start factory   esc back", theme.Text)
+}
+
+func (m *NewFactoryModel) drawPipelines(c *theme.Canvas, y, w int) int {
+	repo := m.selectedRepo()
+	c.Put(1, y, "Pipeline", theme.Bright.B())
+	y++
+	if repo.PipelineProblem != "" {
+		for _, l := range theme.Wrap("✗ "+repo.PipelineProblem, w) {
+			c.Put(1, y, l, theme.FgInk(theme.Red))
+			y++
+		}
+		return y
+	}
+	chosen := m.pipelineName()
+	for _, p := range repo.Pipelines {
+		mark, ink := "○ ", theme.Text
+		if p.Name == chosen {
+			c.Put(1, y, "❯", theme.Focused.B())
+			mark, ink = "● ", theme.Bright
+		}
+		x := c.Put(3, y, mark+p.Name, ink)
+		c.PutMax(max(x+2, 14), y, stageSummary(p.Stages), theme.Quiet, w-max(x+2, 14))
+		y++
+	}
+	return y
+}
+
+func stageSummary(stages []string) string {
+	var missing []string
+	for _, key := range state.StageKeys {
+		if !slices.Contains(stages, key) {
+			missing = append(missing, key)
+		}
+	}
+	switch {
+	case len(missing) == 0:
+		return "every stage"
+	case len(missing) <= 3:
+		return "every stage but " + strings.Join(missing, ", ")
+	}
+	return strings.Join(stages, " · ")
 }
 
 func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focused bool) {

@@ -42,6 +42,7 @@ type Options struct {
 	ConfigFile string
 	ConfigErr  error
 	Repos      []string
+	Config     *state.Config
 }
 
 func run(name string, args ...string) (string, error) {
@@ -102,10 +103,11 @@ func Doctor(o Options) []Check {
 	if o.ConfigErr != nil {
 		return append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
 	}
-	return append(checks, repoChecks(o.Repos)...)
+	return append(checks, repoChecks(o)...)
 }
 
-func repoChecks(repos []string) []Check {
+func repoChecks(o Options) []Check {
+	repos := o.Repos
 	if len(repos) == 0 {
 		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos configured, so there is nowhere to start a factory", Fix: "factory init <repo>"}}
 	}
@@ -113,6 +115,13 @@ func repoChecks(repos []string) []Check {
 	for _, repo := range repos {
 		if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
 			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": no factory profile", Fix: "factory init " + tilde(repo)})
+			continue
+		}
+		if o.Config == nil {
+			continue
+		}
+		if _, err := o.Config.PipelinesFor(repo); err != nil {
+			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": the profile does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks

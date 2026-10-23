@@ -36,6 +36,7 @@ type Launch struct {
 	Repo          string
 	Slug          string
 	Prompt        string
+	Pipeline      string
 	SessionID     string
 	Chrome        bool
 	RemoteControl bool
@@ -54,6 +55,9 @@ func (l Launch) flags() []string {
 
 func (l Launch) Message() string {
 	message := "/factory " + l.Slug
+	if l.Pipeline != "" {
+		message += " --pipeline " + l.Pipeline
+	}
 	if strings.TrimSpace(l.Prompt) != "" {
 		message += "\n" + strings.TrimRight(l.Prompt, "\n")
 	}

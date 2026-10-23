@@ -7,7 +7,7 @@ description: |
   handoff. This session is the supervisor; every stage runs as a factory-* subagent that
   hands off through files. Use when the user says "/factory <id>", "/factory status",
   "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
-argument-hint: "<id> [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
+argument-hint: "<id> [--pipeline <name>] [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
 ---
 
 # Factory supervisor
@@ -68,16 +68,33 @@ Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and
 | `qa.notes` | optional; a repo file with environment, seeding and port steps for QA |
 | `qa.api_port`, `qa.web_port`, `qa.start`, `qa.health` | browser mode only: how the local stack runs |
 | `coderabbit` | `false` skips stage 6 |
+| `pipelines`, `default_pipeline` | optional; add or override pipeline presets for this repo (see "The pipeline") |
 
 When it is missing in both places, stop at preflight and ask the user to run `factory init <main checkout>`.
 
 ## Commands
 
-- `/factory <id>`: start the factory if `state.json` does not exist, otherwise resume it. The lines after `/factory <id>` in the same message are the prompt.
+- `/factory <id> [--pipeline <name>]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` picks the pipeline a new factory runs (see "The pipeline"); on resume it is ignored, because `state.json` already records one. The lines after the first line of the message are the prompt.
 - `/factory resume`: find the factory from the current branch or the only open `state.json`, then resume.
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
 - `/factory approve <design|plan> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
 - `/factory skip <stage>`: record `skipped` with the user's reason and move on.
+
+### The pipeline
+
+A pipeline is a named list of stage keys (`references/state.md`). Resolve the pipeline for a new factory like this:
+
+1. Start from the built-ins:
+   - `full`: `[requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, handoff]`
+   - `quick`: `[requirements, plan, implement, review, handoff]`
+2. Read `pipelines` and `default_pipeline` from the global config, `${FACTORY_CONFIG_DIR:-~/.config/factory}/config.yml`, when it exists. An entry replaces the built-in of the same name.
+3. Read `pipelines` and `default_pipeline` from the repo profile. Its entries and its `default_pipeline` win over the global config.
+4. The name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
+5. Add `requirements` and `handoff` when the list omits them. When the profile says `coderabbit: false`, remove `coderabbit`. Put the stages in the order of the stage keys.
+
+If the name is not a pipeline, or a list holds a key that is not a stage key, stop at preflight and tell the user the file and the key.
+
+A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the profile says `coderabbit: false`.
 
 ## Start
 
@@ -88,8 +105,9 @@ When it is missing in both places, stop at preflight and ask the user to run `fa
    - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
-   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` (`$CLAUDE_CODE_SESSION_ID`) and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once.
-3. Tell the user the plan in three lines: which gates need them, and that everything after the plan runs unattended until handoff.
+   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` (`$CLAUDE_CODE_SESSION_ID`) and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
+   - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead. When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
+3. Tell the user the plan in three lines: the pipeline and the stages it skips, which gates need them, and that everything after the plan runs unattended until handoff.
 
 ## Asking the user
 
@@ -134,6 +152,8 @@ Send a PushNotification only when the user has to act: a question, a lit gate, a
 Every published artifact is an object in `state.stages.<stage>.artifacts`: `{url, title, open_threads, threads_checked_at}`. When the comment watch tells you about threads, or when you check them with ArtifactComments, write the count of unresolved `@Claude` threads to `open_threads` and the time to `threads_checked_at`. The app has no claude.ai access; these counts are all it shows. A thread you cannot handle at once becomes a `comment` item.
 
 ## Stages
+
+Run the stages in order. Pass over every stage marked `skipped`, and go to the next one. When the pipeline skips `qa`, stages 7 to 9 are all skipped and the handoff says QA was not run.
 
 ### 1 · requirements (lit)
 
@@ -191,7 +211,7 @@ SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" sec
 Write `handoff.md` and post it to the user. Include:
 
 - the PRs in merge order, with links
-- what QA verified, with the report path
+- what QA verified, with the report path; when the pipeline skipped `qa`, say that QA was not run
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 
 Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.

@@ -9,9 +9,9 @@ func TestCreateCommand(t *testing.T) {
 		t.Errorf("factory without a prompt runs =\n%s\nwant\n%s", got, want)
 	}
 
-	promptInTerminalRepo := Launch{Repo: "/r/factory", Slug: "csv-export", Prompt: "Export contacts as CSV.\nIt's for ops, who'd rather not wait.\n", SessionID: "2b7e4c1a", RemoteControl: true}
-	want = "claude --worktree csv-export --session-id 2b7e4c1a --remote-control csv-export '/factory csv-export\nExport contacts as CSV.\nIt'\\''s for ops, who'\\''d rather not wait.'; cd '/r/factory/.claude/worktrees/csv-export'"
+	promptInTerminalRepo := Launch{Repo: "/r/factory", Slug: "csv-export", Prompt: "Export contacts as CSV.\nIt's for ops, who'd rather not wait.\n", Pipeline: "quick", SessionID: "2b7e4c1a", RemoteControl: true}
+	want = "claude --worktree csv-export --session-id 2b7e4c1a --remote-control csv-export '/factory csv-export --pipeline quick\nExport contacts as CSV.\nIt'\\''s for ops, who'\\''d rather not wait.'; cd '/r/factory/.claude/worktrees/csv-export'"
 	if got := promptInTerminalRepo.CreateCommand(); got != want {
-		t.Errorf("factory with a prompt runs =\n%s\nwant\n%s", got, want)
+		t.Errorf("factory with a prompt and the quick pipeline runs =\n%s\nwant\n%s", got, want)
 	}
 }

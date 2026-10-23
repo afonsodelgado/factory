@@ -63,7 +63,7 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: factory <command> [arguments]
 
 commands:
-  open [<id>] [--prompt text | <prompt…>] [--repo path]
+  open [<id>] [--prompt text | <prompt…>] [--repo path] [--pipeline name]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
   init [path] add a repo (default: the one you are in): write its factory

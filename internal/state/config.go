@@ -21,6 +21,9 @@ type Config struct {
 	Claude       Claude   `yaml:"claude"`
 	Tmux         Tmux     `yaml:"tmux"`
 
+	Pipelines       map[string][]string `yaml:"pipelines"`
+	DefaultPipeline string              `yaml:"default_pipeline"`
+
 	ConfigDir string `yaml:"-"`
 	StateDir  string `yaml:"-"`
 }
@@ -48,7 +51,7 @@ func LoadConfig() (*Config, error) {
 		ConfigDir: ConfigDir(),
 		StateDir:  StateDir(),
 	}
-	path := filepath.Join(cfg.ConfigDir, "config.yml")
+	path := cfg.ConfigFile()
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
@@ -61,9 +64,22 @@ func LoadConfig() (*Config, error) {
 	if cfg.StalledAfter != "" && !positiveDuration(cfg.StalledAfter) {
 		return nil, fmt.Errorf("%s: stalled_after %q is not a duration; write it with a unit, such as 30m", path, cfg.StalledAfter)
 	}
+	if err := cfg.validatePipelines(path); err != nil {
+		return nil, err
+	}
 	cfg.applyDefaults()
 	return cfg, nil
 }
+
+func (c *Config) validatePipelines(path string) error {
+	if err := validatePipelines(path, c.Pipelines); err != nil {
+		return err
+	}
+	_, err := ResolvePipelines(c, Profile{}, "")
+	return err
+}
+
+func (c *Config) ConfigFile() string { return filepath.Join(c.ConfigDir, "config.yml") }
 
 func (c *Config) applyDefaults() {
 	for i, repo := range c.Repos {

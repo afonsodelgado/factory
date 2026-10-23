@@ -26,6 +26,7 @@ func runOpen(args []string) int {
 	flags := flag.NewFlagSet("open", flag.ContinueOnError)
 	repo := flags.String("repo", "", "repo to create the factory in")
 	prompt := flags.String("prompt", "", "what the factory should do; written to brief.md")
+	pipeline := flags.String("pipeline", "", "the pipeline of stages to run; default_pipeline when omitted")
 	if err := flags.Parse(reorder(args)); err != nil {
 		return 2
 	}
@@ -36,7 +37,7 @@ func runOpen(args []string) int {
 	if *prompt == "" {
 		*prompt = strings.Join(rest, " ")
 	}
-	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt}); err != nil {
+	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
@@ -47,7 +48,7 @@ func reorder(args []string) []string {
 	var named, positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
-		case (args[i] == "--repo" || args[i] == "--prompt") && i+1 < len(args):
+		case (args[i] == "--repo" || args[i] == "--prompt" || args[i] == "--pipeline") && i+1 < len(args):
 			named = append(named, args[i], args[i+1])
 			i++
 		case strings.HasPrefix(args[i], "-"):
@@ -86,7 +87,7 @@ func openMain(r hub.OpenRequest) error {
 		return err
 	}
 	if name != "" {
-		if err := request(cfg.SocketPath(), hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt}); err != nil {
+		if err := request(cfg.SocketPath(), hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline}); err != nil {
 			return err
 		}
 	}

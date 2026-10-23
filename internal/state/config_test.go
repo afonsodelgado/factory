@@ -3,6 +3,8 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -15,5 +17,54 @@ func TestStalledAfterWithoutAUnitIsRefused(t *testing.T) {
 	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 	if cfg, err := LoadConfig(); err == nil {
 		t.Errorf("stalled_after: 30 loaded as %v; want it refused, since the user meant 30 of something and silently got the default", cfg.Stalled())
+	}
+}
+
+func TestPipelineResolution(t *testing.T) {
+	cases := []struct {
+		name, config, profile, pick string
+		want                        []string
+		refused                     string
+	}{
+		{name: "built-in quick works with no config", pick: "quick", want: []string{"requirements", "plan", "implement", "review", "handoff"}},
+		{name: "global config overrides a built-in", config: "pipelines:\n  quick: [requirements, implement, handoff]\n", pick: "quick", want: []string{"requirements", "implement", "handoff"}},
+		{name: "profile wins over the global config, also for the default", config: "pipelines:\n  tiny: [plan]\ndefault_pipeline: quick\n", profile: "pipelines:\n  tiny: [implement]\ndefault_pipeline: tiny\n", want: []string{"requirements", "implement", "handoff"}},
+		{name: "coderabbit false in the profile removes the stage", profile: "coderabbit: false\n", pick: "full", want: []string{"requirements", "design", "plan", "implement", "review", "qa", "qa_fixes", "test_gaps", "handoff"}},
+		{name: "requirements and handoff are always kept", config: "pipelines:\n  bare: [implement]\n", pick: "bare", want: []string{"requirements", "implement", "handoff"}},
+		{name: "unknown stage in the profile is refused with the file and key", profile: "pipelines:\n  quick: [requirements, qa_fix]\n", refused: `factory.yml: pipelines.quick has the unknown stage "qa_fix"`},
+		{name: "unknown stage in the config is refused with the file and key", config: "pipelines:\n  quick: [tests]\n", refused: `config.yml: pipelines.quick has the unknown stage "tests"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir, repo := t.TempDir(), t.TempDir()
+			if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(c.config), 0o644)
+			os.WriteFile(ProfilePath(repo), []byte(c.profile), 0o644)
+			t.Setenv("FACTORY_CONFIG_DIR", dir)
+			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+			cfg, err := LoadConfig()
+			var ps Pipelines
+			if err == nil {
+				ps, err = cfg.PipelinesFor(repo)
+			}
+			if c.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), c.refused) {
+					t.Fatalf("got error %v; want one containing %q, so the user can find the bad key", err, c.refused)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := ps.Find(c.pick)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(p.Stages, c.want) {
+				t.Errorf("pipeline %q runs %v; want %v", p.Name, p.Stages, c.want)
+			}
+		})
 	}
 }
