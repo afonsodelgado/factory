@@ -10,3 +10,6 @@ node_modules/
 /packages/*/build/
 /apps/*/coverage/
 /packages/*/coverage/
+/apps/*/.astro/
+/apps/*/test-results/
+/apps/*/playwright-report/

@@ -1,0 +1,45 @@
+:root {
+  color-scheme: dark;
+  --bg: #16161e;
+  --term: #1a1b26;
+  --raise: #1f2335;
+  --line: #292e42;
+  --line-strong: #3b4261;
+  --ink: #c0caf5;
+  --text: #a9b1d6;
+  --mute: #828bb8;
+  --accent: #7aa2f7;
+  --accent-ink: #15161e;
+  --mono:
+    "JetBrainsMono Nerd Font", "JetBrainsMono NF", "JetBrains Mono",
+    ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.75;
+  margin: 0;
+}
+
+h1 {
+  color: var(--ink);
+  margin: 0;
+  font-weight: 400;
+}
+
+.brand {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.h1-sub {
+  display: block;
+  color: var(--accent);
+}

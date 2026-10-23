@@ -83,6 +83,7 @@ jobs:
         with:
           run_install: false
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @factory/web exec playwright install --with-deps chromium
       - run: make web-lint
       - run: make web-typecheck
       - run: make web-test
