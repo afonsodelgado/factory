@@ -27,6 +27,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	cfg := &state.Config{ConfigDir: t.TempDir(), StateDir: t.TempDir()}
 	os.WriteFile(cfg.RulesPath(), []byte("Write no comments."), 0o644)
 	repo, worktree := t.TempDir(), t.TempDir()
+	cfg.Agents = map[string]state.AgentSetting{"engineer": {Model: "sonnet", Effort: "medium"}}
 	atCreation := &state.Entry{Agents: state.ResolveAgents(cfg, state.Profile{}, nil)}
 	cfg.Agents = map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}}
 	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
@@ -44,7 +45,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	}
 
 	prompt := filepath.Join(f.Dir, "stages", "engineer-1.prompt.md")
-	want := "--model opus --effort xhigh Read " + prompt + " and follow it.\n"
+	want := "--model sonnet --effort medium Read " + prompt + " and follow it.\n"
 	if args := waitForFile(t, calls, want); args != want {
 		t.Errorf("the stage pane ran claude %q; want %q, the engineer as resolved when the factory was created, not the config changed to codex since", args, want)
 	}

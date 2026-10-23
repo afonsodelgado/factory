@@ -115,7 +115,7 @@ func TestAgentResolution(t *testing.T) {
 	}
 }
 
-func TestSwitchingAnAgentsToolDropsTheOtherToolsModel(t *testing.T) {
+func TestSwitchingAnAgentsToolBackToClaudeTakesItsFrontmatter(t *testing.T) {
 	cfg := &Config{Agents: map[string]AgentSetting{"engineer": {Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "ultra"}, "reviewer": {Model: "sonnet"}}}
 	profile := Profile{Agents: map[string]AgentSetting{"reviewer": {Tool: ToolOpenCode}}}
 	agents := ResolveAgents(cfg, profile, map[string]AgentSetting{"engineer": {Tool: ToolClaude}})
