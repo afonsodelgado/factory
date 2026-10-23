@@ -272,7 +272,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			y++
 		}
 	}
-	if _, matched := m.existing(); !matched && m.id() != "" {
+	if _, matched := m.existing(); !matched && m.id() != "" && !factory.IsReservedID(m.name) {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
@@ -307,7 +307,7 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	switch {
 	case m.name == "":
 		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
-	case m.id() != "":
+	case m.id() != "" && !factory.IsReservedID(m.name):
 		add(fmt.Sprintf("%s is a new factory. You'll write its prompt next.", m.id()), theme.Muted)
 	}
 	return spans
