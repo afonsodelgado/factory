@@ -128,47 +128,47 @@ func (s *Switch) View() tea.View {
 	return view(c)
 }
 
-type Kill struct {
-	Context KillContext
+type Pause struct {
+	Context PauseContext
 	size
 	result *KeyResult
 }
 
-func (k *Kill) Init() tea.Cmd { return nil }
+func (p *Pause) Init() tea.Cmd { return nil }
 
-func (k *Kill) Result() (any, bool) {
-	if k.result == nil {
+func (p *Pause) Result() (any, bool) {
+	if p.result == nil {
 		return nil, false
 	}
-	return *k.result, true
+	return *p.result, true
 }
 
-func (k *Kill) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	k.resize(msg)
+func (p *Pause) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	p.resize(msg)
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "y":
-			k.result = &KeyResult{Key: k.Context.Key}
-			return k, tea.Quit
+			p.result = &KeyResult{Key: p.Context.Key}
+			return p, tea.Quit
 		case "n", "esc", "ctrl+c", "enter":
-			return k, tea.Quit
+			return p, tea.Quit
 		}
 	}
-	return k, nil
+	return p, nil
 }
 
-func (k *Kill) View() tea.View {
-	c := theme.NewCanvas(k.width, k.height)
-	name := k.Context.Label
-	if k.Context.Title != "" {
-		name += " · " + strings.TrimRight(k.Context.Title, ".")
+func (p *Pause) View() tea.View {
+	c := theme.NewCanvas(p.width, p.height)
+	name := p.Context.Label
+	if p.Context.Title != "" {
+		name += " · " + strings.TrimRight(p.Context.Title, ".")
 	}
 	y := 0
-	for _, l := range theme.Wrap("Stops Claude Code and closes the pane for "+name+". The worktree, its branch and "+k.Context.FactoryDir+" stay. Wake brings it back later.", c.W-2) {
+	for _, l := range theme.Wrap("Stops Claude Code and closes the pane for "+name+". The worktree, its branch and "+p.Context.FactoryDir+" stay. Wake brings it back.", c.W-2) {
 		c.Put(1, y, l, theme.Text)
 		y++
 	}
-	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  kill " + k.Context.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  pause " + p.Context.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
 	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
 	return view(c)
 }
@@ -310,7 +310,7 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 var keyColumns = [][][2]string{
 	{{"+Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
-	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"x", "kill (asks first)"}, {"a", "archive (asks first)"}, {"H", "show archived"}},
+	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"a", "archive (asks first)"}, {"H", "show archived"}},
 	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "prev or next item"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
 	{{"+Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
 }

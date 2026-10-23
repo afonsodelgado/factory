@@ -18,7 +18,7 @@ import (
 
 func runDialog(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|switch|kill|archive|keys> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|switch|pause|archive|keys> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)

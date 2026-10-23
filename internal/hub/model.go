@@ -453,8 +453,8 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.openDialog("switch", m.switchContext())
 	case "?":
 		return m.openDialog("keys", nil)
-	case "x":
-		return m.askKill()
+	case "p":
+		return m.askPause()
 	case "a":
 		return m.askArchive()
 	case "w":
@@ -522,16 +522,16 @@ func (m *Model) report(err error) {
 	}
 }
 
-func (m *Model) askKill() tea.Cmd {
+func (m *Model) askPause() tea.Cmd {
 	it, ok := m.selectedItem()
 	switch {
 	case !ok:
 		return nil
 	case it.Pane == nil:
-		m.notice = it.Factory.Label() + " has no pane to kill."
+		m.notice = it.Factory.Label() + " has no pane to pause."
 		return nil
 	}
-	return m.openDialog("kill", m.killContext(it))
+	return m.openDialog("pause", m.pauseContext(it))
 }
 
 func (m *Model) askArchive() tea.Cmd {
@@ -543,7 +543,7 @@ func (m *Model) askArchive() tea.Cmd {
 		m.report(m.unarchive(it))
 		return m.load()
 	case !archivable(it):
-		m.notice = "Only done, gone or exited factories can be archived. Kill " + it.Factory.Label() + " first."
+		m.notice = "Only done, gone or exited factories can be archived. Pause " + it.Factory.Label() + " first."
 		return nil
 	}
 	return m.openDialog("archive", m.archiveContext(it))
@@ -890,8 +890,8 @@ func dialogHints(kind string) []footer.Hint {
 		return hints("⏎", "next", "↑↓", "repo", "esc", "cancel")
 	case "switch":
 		return hints("⏎", "select", "ctrl+j/k", "move", "ctrl+g", "next needing you", "esc", "close")
-	case "kill":
-		return hints("y", "kill", "n", "cancel", "esc", "cancel")
+	case "pause":
+		return hints("y", "pause", "n", "cancel", "esc", "cancel")
 	case "archive":
 		return hints("a", "archive", "r", "archive and remove the worktree", "esc", "cancel")
 	}
@@ -906,13 +906,13 @@ func (m *Model) selectorHints() []footer.Hint {
 	case it.Factory.Archived():
 		return hints("a", "unarchive "+it.Factory.Label(), "H", "hide archived", "⏎", "session", "j/k", "move", "/", "find", "n", "new")
 	case factory.PermissionPrompt(it.Hook):
-		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "x", "kill")
+		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "p", "pause")
 	case it.Status.Asleep():
-		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "x", "kill", "a", "archive")
+		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "p", "pause", "a", "archive")
 	case it.Status == factory.Done:
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "x", "kill", "a", "archive")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive")
 }
 
 func (m *Model) panelHints() []footer.Hint {

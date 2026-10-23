@@ -22,7 +22,7 @@ import (
 var popupSizes = map[string][2]int{
 	"new":     {88, 27},
 	"switch":  {112, 14},
-	"kill":    {68, 9},
+	"pause":   {68, 9},
 	"archive": {80, 12},
 	"keys":    {116, 14},
 }
@@ -30,7 +30,7 @@ var popupSizes = map[string][2]int{
 var popupTitles = map[string]string{
 	"new":     " + New factory ",
 	"switch":  " ⌕ Factories ",
-	"kill":    " ■ Kill ",
+	"pause":   " ‖ Pause ",
 	"archive": " ▭ Archive ",
 	"keys":    " Keys ",
 }
@@ -54,7 +54,7 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 	size := popupSizes[kind]
 	width, height := min(size[0], max(m.window[0]-4, 20)), min(size[1], max(m.window[1]-4, 6))
 	title := popupTitles[kind]
-	if kind == "kill" || kind == "archive" {
+	if kind == "pause" || kind == "archive" {
 		if it, ok := m.selectedItem(); ok {
 			title = strings.TrimRight(title, " ") + " " + it.Factory.Label() + "? "
 		}
@@ -108,10 +108,10 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			m.choose(r.Key)
 		}
-	case "kill":
+	case "pause":
 		var r dialog.KeyResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
-			err = m.kill(r.Key)
+			err = m.pause(r.Key)
 		}
 	case "archive":
 		var r dialog.ArchiveResult
@@ -186,8 +186,8 @@ func factoryDir(f factory.Factory) string {
 	return tilde(f.Dir)
 }
 
-func (m *Model) killContext(it Item) dialog.KillContext {
-	return dialog.KillContext{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), FactoryDir: factoryDir(it.Factory)}
+func (m *Model) pauseContext(it Item) dialog.PauseContext {
+	return dialog.PauseContext{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), FactoryDir: factoryDir(it.Factory)}
 }
 
 func (m *Model) archiveContext(it Item) dialog.ArchiveContext {
@@ -430,16 +430,16 @@ func (m *Model) wakeAll() error {
 	return nil
 }
 
-func (m *Model) kill(key string) error {
+func (m *Model) pause(key string) error {
 	it, ok := m.snap.Find(key)
 	if !ok || m.Engine == nil {
 		return nil
 	}
-	if err := m.Engine.Kill(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
+	if err := m.Engine.Pause(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
 		return err
 	}
 	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "killed from factory")
+		m.Loader.Note(it.Factory, "paused from factory")
 	}
 	return nil
 }

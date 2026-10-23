@@ -66,7 +66,7 @@ type KeyResult struct {
 	Key string `json:"key"`
 }
 
-type KillContext struct {
+type PauseContext struct {
 	Key        string `json:"key"`
 	Label      string `json:"label"`
 	Title      string `json:"title"`
@@ -108,10 +108,10 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		var c SwitchContext
 		json.Unmarshal(context, &c)
 		return &Switch{Context: c}, true
-	case "kill":
-		var c KillContext
+	case "pause":
+		var c PauseContext
 		json.Unmarshal(context, &c)
-		return &Kill{Context: c}, true
+		return &Pause{Context: c}, true
 	case "archive":
 		var c ArchiveContext
 		json.Unmarshal(context, &c)

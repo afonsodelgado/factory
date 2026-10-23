@@ -214,7 +214,7 @@ func bufferName(pane string) string {
 	return "factory-" + strings.TrimPrefix(pane, "%")
 }
 
-func (e *Engine) Kill(l *Layout, repo, slug string) error {
+func (e *Engine) Pause(l *Layout, repo, slug string) error {
 	panes, err := e.TM.Panes()
 	if err != nil {
 		return err
