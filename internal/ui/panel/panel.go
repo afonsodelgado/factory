@@ -254,7 +254,7 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 0
+		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 1 + v.Draft.Artifact
 	case it.Kind == "comment":
 		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
 	case it.Kind == "cap":
