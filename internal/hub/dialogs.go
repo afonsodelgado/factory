@@ -305,7 +305,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if m.Engine == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(r.Slug + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: []string{"FACTORY=1"}})
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func (m *Model) wake(key string) error {
 		if !dirExists(dir) {
 			return fmt.Errorf("the worktree %s is gone", tilde(dir))
 		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY=1"}})
+		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: []string{"FACTORY=1"}})
 		if err != nil {
 			return err
 		}

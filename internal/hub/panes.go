@@ -15,8 +15,8 @@ import (
 
 const pasteSettle = 150 * time.Millisecond
 
-func (e *Engine) Tag(pane, repo, slug, title string) error {
-	for name, value := range map[string]string{"@factory_repo": repo, "@factory_slug": slug, "@factory_title": title} {
+func (e *Engine) Tag(pane, repo, slug string) error {
+	for name, value := range map[string]string{"@factory_repo": repo, "@factory_slug": slug} {
 		if err := e.TM.SetPaneOption(pane, name, value); err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 		if _, tagged := FactoryPane(panes, repo, session); tagged {
 			continue
 		}
-		if err := e.Tag(pane.ID, repo, session, ""); err != nil {
+		if err := e.Tag(pane.ID, repo, session); err != nil {
 			return adopted, err
 		}
 		if err := e.TM.Break(pane.ID, e.Session, ParkName(session)); err != nil {
@@ -171,11 +171,10 @@ func firstPane(panes []tmux.Pane, session string) (tmux.Pane, bool) {
 }
 
 type NewPane struct {
-	Repo  string
-	Slug  string
-	Title string
-	Dir   string
-	Env   []string
+	Repo string
+	Slug string
+	Dir  string
+	Env  []string
 }
 
 func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
@@ -185,7 +184,7 @@ func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := e.Tag(pane, n.Repo, n.Slug, n.Title); err != nil {
+	if err := e.Tag(pane, n.Repo, n.Slug); err != nil {
 		return pane, err
 	}
 	if err := e.TM.SetPaneOption(pane, "@factory_token", token); err != nil {

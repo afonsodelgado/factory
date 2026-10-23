@@ -15,6 +15,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
+	"github.com/afonsodelgado/factory/internal/ui/frame"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/selector"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -234,7 +235,6 @@ func (m *Model) apply(s Snapshot) {
 	} else if m.itemArrived(m.selected, shownBefore) {
 		m.panel.tab = panel.Attention
 	}
-	m.syncTitles()
 	m.ensureSlot()
 	m.showSelected()
 	m.arrange()
@@ -325,20 +325,6 @@ func containsKey(rows []selector.Row, key string) bool {
 	return false
 }
 
-func (m *Model) syncTitles() {
-	if m.Engine == nil {
-		return
-	}
-	for _, it := range m.snap.Items {
-		if it.Pane == nil {
-			continue
-		}
-		if want := paneTitle(it.Factory); it.Pane.Title != want {
-			m.Engine.TM.SetPaneOption(it.Pane.ID, "@factory_title", want)
-		}
-	}
-}
-
 func paneTitle(f factory.Factory) string {
 	if f.Title() == "" {
 		return f.Label()
@@ -360,17 +346,9 @@ func (m *Model) showSelected() {
 		return
 	}
 	it, ok := m.snap.Find(m.selected)
-	viewer := m.slotViewer()
-	target, title, path := viewer, "", ""
-	switch {
-	case ok && it.Pane != nil && !it.Pane.Dead:
+	target := m.slotViewer()
+	if ok && it.Pane != nil && !it.Pane.Dead {
 		target = it.Pane.ID
-	case ok:
-		title, path = paneTitle(it.Factory), tilde(it.Factory.Worktree)
-	}
-	if viewer != "" {
-		m.Engine.TM.SetPaneOption(viewer, "@factory_title", title)
-		m.Engine.TM.SetPaneOption(viewer, "@factory_path", path)
 	}
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
@@ -414,6 +392,8 @@ func (m *Model) focusFromPane(id string) {
 		m.focus = footer.Factories
 	case id == m.Layout.Panel:
 		m.focus = footer.Panel
+	case m.Layout.Frame.Has(id):
+		m.focusSlot()
 	case id == m.Layout.Slot && id != m.slotViewer():
 		m.focus = footer.Session
 	}
@@ -494,6 +474,10 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 	case "paste":
 		if e.Pane == "panel" {
 			m.paste(e.Text)
+		}
+	case "mouse":
+		if strings.HasPrefix(e.Pane, "frame-") {
+			m.focusSlot()
 		}
 	}
 	return nil
@@ -666,6 +650,16 @@ func (m *Model) focusSession() {
 	m.focus = footer.Session
 }
 
+func (m *Model) focusSlot() {
+	if m.Engine == nil {
+		return
+	}
+	m.Engine.TM.SelectPane(m.Layout.Slot)
+	if m.Layout.Slot != m.slotViewer() {
+		m.focus = footer.Session
+	}
+}
+
 func (m *Model) focusPanel() {
 	if m.Engine != nil {
 		m.Engine.TM.SelectPane(m.Layout.Panel)
@@ -765,8 +759,25 @@ func (m *Model) publish() {
 		m.push("footer", m.FooterView(m.size("footer")))
 		m.push("panel", m.PanelView(m.size("panel")))
 		m.push("slot", m.SlotView(m.size("slot")))
+		m.pushFrame()
 	}
 	m.updateHeader()
+}
+
+func (m *Model) pushFrame() {
+	title, path := "", ""
+	if it, ok := m.snap.Find(m.selected); ok {
+		title, path = paneTitle(it.Factory), it.Factory.Worktree
+		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
+			path = it.Pane.Path
+		}
+	}
+	focused := m.focus == footer.Session
+	for _, side := range FrameSides {
+		pane := "frame-" + side
+		width, height := m.size(pane)
+		m.push(pane, frame.Render(side, width, height, title, tilde(path), focused))
+	}
 }
 
 func (m *Model) size(pane string) (int, int) {

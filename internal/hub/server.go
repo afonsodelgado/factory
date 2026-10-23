@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -111,7 +112,7 @@ func (s *Server) serve(c *Conn) {
 }
 
 func isViewer(pane string) bool {
-	return pane == "panel" || pane == "footer" || pane == "slot"
+	return pane == "panel" || pane == "footer" || pane == "slot" || strings.HasPrefix(pane, "frame-")
 }
 
 func (s *Server) Send(pane string, m Message) {
