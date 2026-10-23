@@ -45,7 +45,7 @@ All state for a factory lives in the worktree the session runs in:
   .heartbeat         touched by scripts/wait-for-review.sh on every poll
 ```
 
-`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the factory id: the argument of `/factory <id>`, letters a–z, digits and dashes. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it.
+`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the factory id: the argument of `/factory <id>`, letters a–z, digits and dashes. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it. That fallback reads `<main repo>/.claude/factory/<id>/` only, never `<main repo>/.claude/factory-archive/`: archiving a factory and removing its worktree moves its directory there, and archived state is history, not a factory to resume. A new factory with the id of an archived one starts fresh.
 
 QA briefs and reports stay where the QA skills put them, under `.claude/qa/`.
 

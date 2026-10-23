@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/afonsodelgado/factory/internal/factory"
 )
 
 type RemovalCheck struct {
@@ -67,7 +69,7 @@ func FactoryDirRescue(repo, worktree, dir string) (string, bool) {
 	if err != nil || !strings.HasPrefix(realDir, realWorktree+string(filepath.Separator)) {
 		return "", false
 	}
-	return filepath.Join(repo, ".claude", "factory", filepath.Base(realDir)), true
+	return filepath.Join(factory.ArchiveDir(repo), filepath.Base(realDir)), true
 }
 
 func RemoveWorktree(repo, worktree, factoryDir string) (string, error) {
