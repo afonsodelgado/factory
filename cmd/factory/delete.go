@@ -75,10 +75,10 @@ func findFactory(cfg *state.Config, repoFlag, id string) (factory.Factory, error
 	if repoFlag != "" {
 		configured, ok := configuredRepo(cfg.Repos, repoFlag)
 		if !ok {
-			return factory.Factory{}, fmt.Errorf("%s is not a configured repo (configured: %s)", repoFlag, strings.Join(cfg.Repos, ", "))
+			return factory.Factory{}, fmt.Errorf("the hub has no repo at %s (its repos: %s)", repoFlag, strings.Join(cfg.Repos, ", "))
 		}
 		repos = []string{configured}
-	} else if repo := repoOf(cfg, id); repo != "" {
+	} else if repo := repoOf(cfg, id, cwdRepo(cfg)); repo != "" {
 		repos = []string{repo}
 	}
 	registry, err := state.LoadRegistry(cfg.RegistryPath())

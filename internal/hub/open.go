@@ -24,6 +24,13 @@ type OpenRequest struct {
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 }
 
+type RepoRequest struct {
+	Repo   string `json:"repo"`
+	Here   bool   `json:"here,omitempty"`
+	Forget bool   `json:"forget,omitempty"`
+	Notice string `json:"notice,omitempty"`
+}
+
 type DeleteRequest struct {
 	Repo string `json:"repo"`
 	Slug string `json:"slug"`
@@ -43,6 +50,54 @@ func (m *Model) deleteRequest(e Event) tea.Cmd {
 	}
 	e.From.Send(reply)
 	return m.load()
+}
+
+func (m *Model) repoRequest(e Event) tea.Cmd {
+	var r RepoRequest
+	err := json.Unmarshal(e.Data, &r)
+	if err == nil {
+		m.addRepo(r)
+	}
+	reply := Message{T: "done"}
+	if err != nil {
+		reply = Message{T: "error", Error: err.Error()}
+	}
+	e.From.Send(reply)
+	return m.load()
+}
+
+func (m *Model) addRepo(r RepoRequest) {
+	if r.Forget {
+		m.forgetRepo(r.Repo)
+		return
+	}
+	if r.Here {
+		m.here = r.Repo
+	}
+	if r.Notice != "" {
+		m.notice = r.Notice
+	}
+	if r.Repo == "" || slices.Contains(m.Config.Repos, r.Repo) {
+		return
+	}
+	added := append(slices.Clip(m.Config.Repos), r.Repo)
+	if m.Loader != nil {
+		m.Loader.SetRepos(added)
+		return
+	}
+	m.Config.Repos = added
+}
+
+func (m *Model) forgetRepo(repo string) {
+	if m.here == repo {
+		m.here = ""
+	}
+	kept := slices.DeleteFunc(slices.Clone(m.Config.Repos), func(r string) bool { return r == repo })
+	if m.Loader != nil {
+		m.Loader.SetRepos(kept)
+		return
+	}
+	m.Config.Repos = kept
 }
 
 func (m *Model) openRequest(e Event) tea.Cmd {
@@ -73,7 +128,7 @@ func (m *Model) open(r OpenRequest) error {
 	repos := m.Config.Repos
 	if r.Repo != "" {
 		if !slices.Contains(m.Config.Repos, r.Repo) {
-			return fmt.Errorf("the running hub does not list %s; quit it with q and run factory open again to reload the config", r.Repo)
+			return fmt.Errorf("the running hub does not list %s; run factory open again from inside that repo to add it", r.Repo)
 		}
 		repos = []string{r.Repo}
 	}
@@ -83,7 +138,7 @@ func (m *Model) open(r OpenRequest) error {
 		}
 	}
 	if len(repos) == 0 {
-		return errors.New("no repos configured; add one with factory init <repo>, then quit the hub with q and run factory again")
+		return errors.New("no repos yet; run factory open again from inside a repo to add it")
 	}
 	repo := repos[0]
 	if earlier, ok := m.retiredMatch(repos, id); ok {

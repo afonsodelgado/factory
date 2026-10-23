@@ -46,6 +46,7 @@ func toolsInUse(o Options) map[string][]string {
 	}
 	for _, repo := range o.Repos {
 		profile, _ := state.ReadProfile(repo)
+		note(profile.Supervisor, repo)
 		for _, setting := range profile.Agents {
 			note(setting, repo)
 		}
@@ -79,7 +80,7 @@ func agentValueChecks(o Options) []Check {
 	}
 	for _, repo := range o.Repos {
 		profile, _ := state.ReadProfile(repo)
-		results = append(results, catalogs.ValidateAgents(tilde(state.ProfilePath(repo)), profile.Agents))
+		results = append(results, catalogs.ValidateAgents(tilde(state.ProfilePath(repo)), profile.Agents), catalogs.Validate(tilde(state.ProfilePath(repo)), "supervisor", profile.Supervisor))
 	}
 	var checks []Check
 	for _, err := range results {

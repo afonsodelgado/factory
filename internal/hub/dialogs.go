@@ -140,14 +140,14 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 }
 
 func (m *Model) newContext() dialog.NewContext {
-	c := dialog.NewContext{RemoteControl: m.Config.RemoteControl(), Supervisor: m.Config.Supervisor, Tools: m.toolOptions()}
-	selectedRepo := ""
-	if it, ok := m.selectedItem(); ok {
+	c := dialog.NewContext{Tools: m.toolOptions()}
+	selectedRepo := m.here
+	if it, ok := m.selectedItem(); ok && !slices.Contains(m.Config.Repos, m.here) {
 		selectedRepo = it.Factory.Repo
 	}
 	for i, repo := range m.Config.Repos {
-		profile, _ := state.ReadProfile(repo)
-		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), CodeRabbit: profile.CodeRabbit == nil || *profile.CodeRabbit}
+		cfg, profile := m.repoConfig(repo)
+		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), CodeRabbit: profile.CodeRabbit == nil || *profile.CodeRabbit, RemoteControl: cfg.RemoteControl(), Supervisor: cfg.Supervisor}
 		if pipelines, err := m.Config.PipelinesFor(repo); err != nil {
 			option.PipelineProblem = err.Error()
 		} else {
@@ -171,7 +171,7 @@ func (m *Model) newContext() dialog.NewContext {
 			option.Existing = append(option.Existing, dialog.Existing{Key: it.Factory.Key(), Worktree: it.Factory.Slug, Label: it.Factory.Label(), Status: it.Status.String(), Stage: stage, Archived: it.Factory.Archived(), Retired: retired(it.Factory)})
 		}
 		if repo == selectedRepo {
-			c.Repo = i
+			c.Repo, c.Here = i, repo == m.here
 		}
 		c.Repos = append(c.Repos, option)
 	}
@@ -300,7 +300,11 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err := state.ValidateAgents("--agent", r.Agents); err != nil {
 		return err
 	}
-	supervisor := r.Supervisor.Over(m.Config.Supervisor)
+	if _, err := m.Config.AgentsFor(r.Repo); err != nil {
+		return err
+	}
+	cfg, profile := m.repoConfig(r.Repo)
+	supervisor := r.Supervisor.Over(cfg.Supervisor)
 	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
 		return err
 	}
@@ -314,8 +318,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
-	profile, _ := state.ReadProfile(r.Repo)
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl(), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, Chrome: profile.BrowserQA(), RemoteControl: cfg.RemoteControl(), Supervisor: supervisor}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
@@ -437,9 +440,9 @@ func (m *Model) wake(key string) error {
 	if !ok || !it.Status.Asleep() || m.Engine == nil {
 		return nil
 	}
-	profile, _ := state.ReadProfile(it.Factory.Repo)
+	cfg, profile := m.repoConfig(it.Factory.Repo)
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, profile, m.Config.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
+	plan := PlanWake(it, profile, cfg.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree

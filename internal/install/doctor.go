@@ -142,19 +142,21 @@ func Doctor(o Options) []Check {
 func repoChecks(o Options) []Check {
 	repos := o.Repos
 	if len(repos) == 0 {
-		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos configured, so there is nowhere to start a factory", Fix: "factory init <repo>"}}
+		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos set up, so there is nowhere to start a factory", Fix: "run factory inside a repo, or factory init <repo>"}}
 	}
 	var checks []Check
 	for _, repo := range repos {
 		if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
-			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": no factory profile", Fix: "factory init " + tilde(repo)})
+			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": no repo config", Fix: "factory init " + tilde(repo)})
 			continue
 		}
 		if o.Config == nil {
 			continue
 		}
 		if err := profileProblem(o.Config, repo); err != nil {
-			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": the profile does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
+			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": the repo config does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
+		} else if err := state.CheckProfileKeys(repo); err != nil {
+			checks = append(checks, Check{Name: "repo config", Mark: Warn, Detail: tilde(repo) + ": the repo config sets a value the factory ignores there", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks
@@ -260,11 +262,11 @@ func revmux(o Options) Check {
 }
 
 func chrome(o Options) Check {
-	detail := "can't be detected from here. Only repos whose profile uses browser QA need it"
+	detail := "can't be detected from here. Only repos whose repo config uses browser QA need it"
 	if len(o.Browser) > 0 {
 		detail += " (" + strings.Join(o.Browser, ", ") + ")"
 	}
-	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per profile"}
+	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per repo config"}
 }
 
 func nerdFont(o Options) Check {

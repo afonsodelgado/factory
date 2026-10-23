@@ -44,6 +44,8 @@ func run(args []string) int {
 		return runDelete(args[1:], os.Stdin, os.Stdout)
 	case "init":
 		return runInit(args[1:])
+	case "forget":
+		return runForget(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "bootstrap":
@@ -81,9 +83,13 @@ commands:
               activity log, drafts and registry entry, so the id can be used
               again; pushed PRs and remote branches stay. --yes skips the first
               confirmation, never the one for unpushed or uncommitted work
-  init [path] add a repo (default: the one you are in): write its factory
-              profile, ignore the factory's files in .git/info/exclude and
-              list it in config.yml; nothing is committed
+  init [path] add a repo (default: the one you are in) without opening the
+              hub: write its .factory/config.yml, ignore the factory's files
+              in .git/info/exclude and list it in the hub; nothing is
+              committed. factory and factory open do this by themselves
+              in a repo the hub does not list yet
+  forget <path>
+              stop listing a repo in the hub; its files stay
   doctor      check what the factory needs and print the fix commands
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed

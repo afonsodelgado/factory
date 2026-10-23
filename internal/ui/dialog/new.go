@@ -126,7 +126,7 @@ func (m *NewFactoryModel) launch() factory.Launch {
 	name, stages := m.chosenPipeline()
 	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
 	if launch.Supervisor.OnClaude() {
-		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, m.Context.RemoteControl
+		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, repo.RemoteControl
 	}
 	return launch
 }
@@ -188,7 +188,7 @@ func (m *NewFactoryModel) toggle(stage string) {
 
 func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
 	if role == supervisorRole {
-		return m.Context.Supervisor
+		return m.selectedRepo().Supervisor
 	}
 	for _, a := range m.selectedRepo().Agents {
 		if a.Role == role {
@@ -417,9 +417,11 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Quit
 	case "up":
 		m.repo = max(m.repo-1, 0)
+		m.Context.Here = false
 		m.resetChoices()
 	case "down", "tab":
 		m.repo = (m.repo + 1) % max(len(m.Context.Repos), 1)
+		m.Context.Here = false
 		m.resetChoices()
 	case "backspace":
 		m.name = dropLast(m.name)
@@ -567,6 +569,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	c.Right(c.W-2, 0, "1 of 3", theme.Muted)
 	y := 1
 	for i, r := range m.Context.Repos {
+		if m.Context.Here && i != m.repo {
+			continue
+		}
 		mark, ink := "○ ", theme.Text
 		if i == m.repo {
 			c.Put(1, y, "❯", theme.Focused.B())
@@ -604,6 +609,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		m.drawPreview(c, 1, y, w)
 	}
 	hints := "⏎ next: pipeline   ↑↓ repo   esc cancel"
+	if m.Context.Here && len(m.Context.Repos) > 1 {
+		hints = "⏎ next: pipeline   ↑↓ another repo   esc cancel"
+	}
 	if e, matched := m.existing(); matched && e.Archived {
 		hints = "esc cancel"
 	} else if matched {
@@ -653,12 +661,12 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
-	reason := "no --chrome: the " + repo.Name + " profile uses terminal QA."
+	reason := "no --chrome: " + repo.Name + "'s repo config uses terminal QA."
 	switch {
 	case !launch.Supervisor.OnClaude():
 		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
 	case repo.Browser:
-		reason = "--chrome because the " + repo.Name + " profile uses browser QA."
+		reason = "--chrome because " + repo.Name + "'s repo config uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
 }

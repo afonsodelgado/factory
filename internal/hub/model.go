@@ -69,6 +69,7 @@ type Model struct {
 	typeQueue    []queuedType
 	typedAt      map[string]time.Time
 	inboxQueued  map[string]bool
+	here         string
 }
 
 type snapshotMsg Snapshot
@@ -106,10 +107,10 @@ func (m *Model) load() tea.Cmd {
 	if m.Loader == nil {
 		return nil
 	}
-	layout := m.Layout
+	layout, repos := m.Layout, m.Config.Repos
 	return func() tea.Msg {
 		if m.Engine != nil {
-			m.Engine.Adopt(layout, m.Config.Repos)
+			m.Engine.Adopt(layout, repos)
 		}
 		return snapshotMsg(m.Loader.Load())
 	}
@@ -328,9 +329,14 @@ func (m *Model) planWakes() {
 		if !it.Status.Asleep() {
 			continue
 		}
-		profile, _ := state.ReadProfile(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
+		cfg, profile := m.repoConfig(it.Factory.Repo)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	}
+}
+
+func (m *Model) repoConfig(repo string) (*state.Config, state.Profile) {
+	profile, _ := state.ReadProfile(repo)
+	return m.Config.WithProfile(profile), profile
 }
 
 func containsKey(rows []selector.Row, key string) bool {
@@ -502,6 +508,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.dialogResult(e)
 	case "open":
 		return m.openRequest(e)
+	case "repo":
+		return m.repoRequest(e)
 	case "stage":
 		return m.stageRequest(e)
 	case "delete":
@@ -748,7 +756,6 @@ func (m *Model) data() selector.Data {
 		Selected:     m.selected,
 		Focused:      m.focus == footer.Factories,
 		Icons:        m.Icons,
-		ConfigFile:   tilde(filepath.Join(m.Config.ConfigDir, "config.yml")),
 		Dim:          m.focus == footer.Dialog,
 	}
 }

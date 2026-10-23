@@ -33,6 +33,9 @@ type RepoOption struct {
 	DefaultPipeline string           `json:"default_pipeline"`
 	PipelineProblem string           `json:"pipeline_problem,omitempty"`
 	Agents          []AgentOption    `json:"agents"`
+
+	RemoteControl bool               `json:"remote_control"`
+	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
 }
 
 type AgentOption struct {
@@ -41,11 +44,10 @@ type AgentOption struct {
 }
 
 type NewContext struct {
-	Repos         []RepoOption       `json:"repos"`
-	Repo          int                `json:"repo"`
-	RemoteControl bool               `json:"remote_control"`
-	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
-	Tools         []ToolOption       `json:"tools,omitempty"`
+	Repos []RepoOption `json:"repos"`
+	Repo  int          `json:"repo"`
+	Here  bool         `json:"here,omitempty"`
+	Tools []ToolOption `json:"tools,omitempty"`
 }
 
 type ToolOption struct {

@@ -18,9 +18,8 @@ import (
 
 func TestNewFactorySelectsTheFactoryWithTheTypedID(t *testing.T) {
 	context := NewContext{
-		RemoteControl: true,
 		Repos: []RepoOption{
-			{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Browser: true, CodeRabbit: true, Existing: []Existing{{Key: "/r/cowork:eng-7450-ssrf-guard", Worktree: "eng-7450-ssrf-guard", Label: "ENG-7450", Status: "stalled", Stage: "review"}}},
+			{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Browser: true, CodeRabbit: true, RemoteControl: true, Existing: []Existing{{Key: "/r/cowork:eng-7450-ssrf-guard", Worktree: "eng-7450-ssrf-guard", Label: "ENG-7450", Status: "stalled", Stage: "review"}}},
 			{Name: "factory", Path: "/r/factory", Display: "~/dev/factory"},
 		},
 	}

@@ -33,7 +33,7 @@ Shortcuts taken, paths not exercised, decisions that could be wrong,
 doors to the same action that may not share the gate.
 
 ## Setup
-The QA mode from `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none), and what the environment needs: flags,
+The QA mode from the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`), and what the environment needs: flags,
 migrations, seed data, principals, stub tools, terminal sizes, environment variables.
 
 ## Out of scope

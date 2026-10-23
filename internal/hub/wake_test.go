@@ -180,10 +180,16 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	}
 }
 
-func TestOpenRefusesARepoTheRunningHubDoesNotList(t *testing.T) {
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}})
+func TestOpenRefusesARepoTheRunningHubDoesNotListUntilFactoryRunsThere(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}})
 	err := model.open(OpenRequest{Name: "ENG-1", Repo: "/r/added-later"})
 	if err == nil || !strings.Contains(err.Error(), "does not list /r/added-later") {
 		t.Errorf("open in a repo the hub never discovers = %v; the factory would get no row", err)
+	}
+	model.addRepo(RepoRequest{Repo: "/r/added-later", Here: true})
+	c := model.newContext()
+	if len(c.Repos) != 2 || c.Repos[c.Repo].Path != "/r/added-later" || !c.Here {
+		t.Errorf("after factory ran in /r/added-later the n dialog offers %d repos with %q picked (here %v); want it listed without a restart and picked, so no list to choose from", len(c.Repos), c.Repos[c.Repo].Path, c.Here)
 	}
 }

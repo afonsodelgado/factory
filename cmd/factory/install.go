@@ -128,7 +128,7 @@ func count(n int, noun string) string {
 func printToolFixes(o install.Options) {
 	var missing []install.Check
 	for _, c := range install.Doctor(o) {
-		if c.Mark == install.Fail && c.Name != "bundle" && c.Name != "hooks" && c.Name != "repos" && c.Name != "profile" {
+		if c.Mark == install.Fail && c.Name != "bundle" && c.Name != "hooks" && c.Name != "repos" && c.Name != "repo config" {
 			missing = append(missing, c)
 		}
 	}
