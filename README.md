@@ -1,6 +1,6 @@
 # factory
 
-`factory` runs every factory in one tmux session. A factory is a Claude Code session running `/factory` in its own worktree, identified by an id you choose and driven by a prompt you write: the prompt is the spec. The app lists factories on the left, shows the selected one's live session on the right, and puts a "Needs attention" panel under it for questions, gates and the rest.
+`factory` runs every factory in one tmux session. A factory is a supervisor session (Claude Code, Codex or OpenCode) running `/factory` in its own worktree, identified by an id you choose and driven by a prompt you write: the prompt is the spec. The app lists factories on the left, shows the selected one's live session on the right, and puts a "Needs attention" panel under it for questions, gates and the rest.
 
 ## Install
 
@@ -128,3 +128,26 @@ agents:
 Each layer overrides the one before it, one field at a time: the agent file, then `config.yml`, then the repo profile, then the factory. Models are `haiku`, `sonnet`, `opus` and `fable`. Efforts are `low`, `medium`, `high`, `xhigh` and `max`. `factory doctor` reports an unknown role, model or effort, naming the file and the key.
 
 For one factory, press `m` (model) or `e` (effort) on a stage's row in the dialog's "Stages & agents" step, or pass `--agent role=model:effort` to `factory open`. Either side can be empty, as in `--agent reviewer=:low`. A value set for this factory alone is shown in bold. The supervisor writes the result to `state.json`, so a resumed factory keeps its models. It passes them to the Agent tool on every spawn, and the files in `~/.claude/agents` stay as the bundle installed them.
+
+## Codex and OpenCode
+
+Every role, and the supervisor itself, can run on `claude`, `codex` or `opencode`. Set a `tool` with the model and effort:
+
+```yaml
+supervisor: {tool: claude}
+agents:
+  engineer: {tool: codex, model: gpt-5.6-sol, effort: high}
+  reviewer: {tool: opencode, model: big-pickle}
+codex:
+  writable_dirs: [~/.cargo]   # extra dirs a Codex stage may write, beside the repo's git dir and the Go and npm caches
+```
+
+In the dialog's "Stages & agents" step, `t` cycles a row's tool, and the top row is the supervisor; `factory open` takes `--agent engineer=codex/gpt-5.6-sol:high` and `--supervisor codex/gpt-5.6-sol:high`. A layer that changes the tool drops the model and effort of the tool before it. No API key is used anywhere: Codex offers the models your ChatGPT login lists (an API-key login is refused), OpenCode offers only its free models, and `qa` always runs on `claude`, because it drives Chrome.
+
+A role on another tool runs in its own pane, and while it works the hub splits the session view and shows it beside the supervisor; the split closes when the stage writes its result. The supervisor starts and follows up with these roles through `factory stage`. Codex runs each stage unattended, in a sandbox that may write the worktree, the repo's git dir and the caches above, and reach the network.
+
+With a Claude supervisor nothing else changes: `claude` roles are still subagents, and designs and plans are still artifacts you comment on. With a Codex or OpenCode supervisor, designs and plans stay as HTML files in the factory directory, listed in the panel's Artifacts tab, and you give feedback in the session or from the panel.
+
+Your coding rules go in `~/.config/factory/rules.md` (or `$FACTORY_CONFIG_DIR/rules.md`). Every stage agent receives them, on every tool, before the repo's own `AGENTS.md` and `CLAUDE.md`.
+
+Before the first factory on Codex, run `factory bootstrap`, then `codex` once in each repo: choose "Trust and continue" and "Trust all" for the factory hooks, or Codex stops at those prompts. `factory doctor` checks the Codex login, that trust, and that a sandboxed commit, push and `gh` work.

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -277,7 +277,7 @@ func runnable(repo, role string, setting state.AgentSetting) error {
 		return errors.New("QA drives Chrome and runs only on claude")
 	case setting.ToolName() == state.ToolOpenCode && setting.Model == "":
 		return fmt.Errorf("%s on opencode needs a model; pick one of the free models", role)
-	case setting.ToolName() == state.ToolCodex && !CodexTrusts(state.CodexHome(), repo):
+	case setting.ToolName() == state.ToolCodex && !catalog.CodexTrusts(state.CodexHome(), repo):
 		return fmt.Errorf("Codex would stop at a trust prompt: run codex once in %s, choose Trust and continue, then Trust all for the hooks, and start the stage again", repo)
 	}
 	return nil
@@ -472,16 +472,6 @@ func sessionOfToken(token string, hooks []*state.HookFile) string {
 		return h.SessionID
 	}
 	return ""
-}
-
-func CodexTrusts(home, repo string) bool {
-	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
-	if err != nil {
-		return false
-	}
-	trustedRepo := regexp.MustCompile(`\[projects\."` + regexp.QuoteMeta(repo) + `"\]\s*\n\s*trust_level\s*=\s*"trusted"`)
-	trustedHooks := strings.Contains(string(data), filepath.Join(home, "hooks.json")+":stop:")
-	return trustedHooks && trustedRepo.Match(data)
 }
 
 func codexWritableDirs(worktree string, extra []string) []string {

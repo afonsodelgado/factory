@@ -65,6 +65,16 @@ func Codex(home string) ([]Model, error) {
 	return models, nil
 }
 
+func CodexTrusts(home, repo string) bool {
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return false
+	}
+	trustedRepo := regexp.MustCompile(`\[projects\."` + regexp.QuoteMeta(repo) + `"\]\s*\n\s*trust_level\s*=\s*"trusted"`)
+	trustedHooks := strings.Contains(string(data), filepath.Join(home, "hooks.json")+":stop:")
+	return trustedHooks && trustedRepo.Match(data)
+}
+
 func OpenCodeCachePath(stateDir string) string {
 	return filepath.Join(stateDir, "catalog", "opencode.json")
 }
