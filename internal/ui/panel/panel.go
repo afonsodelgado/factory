@@ -209,13 +209,7 @@ func renderList(c *theme.Canvas, v View, ic theme.Icons, x, y, h int) {
 		r += 2
 		if it.Kind == "question" && on {
 			for qi, q := range it.Questions {
-				mark, markInk := "✓", theme.FgInk(theme.Green)
-				switch {
-				case v.Draft.Typing(q, qi):
-					mark, markInk = "✎", theme.FgInk(theme.Cyan)
-				case !v.Draft.Answered(q, qi):
-					mark, markInk = "○", theme.FgInk(theme.Orange)
-				}
+				mark, markInk := questionMark(v.Draft, q, qi)
 				c.Put(x+4, r, mark, markInk)
 				c.PutMax(x+6, r, fmt.Sprintf("%d %s", qi+1, q.Text), theme.Text, ListWidth-7)
 				r++
@@ -287,18 +281,22 @@ func limitFor(stage string) string {
 }
 
 func questionForm(v View, it Item, w int) ([]line, int) {
-	var lines []line
+	lines := []line{blank()}
 	focus := 0
 	d := v.Draft
 	for qi, q := range it.Questions {
-		lines = append(lines, blank())
-		number := theme.Bright
-		if qi == d.Question && v.Focused {
-			number = theme.Focused.B()
-			focus = len(lines)
+		if qi != d.Question {
+			lines = append(lines, foldedQuestion(d, q, qi, w))
+			continue
 		}
-		qlines := theme.Wrap(q.Text, w-3)
-		for i, ql := range qlines {
+		if qi > 0 {
+			lines = append(lines, blank())
+		}
+		number := theme.Bright
+		if v.Focused {
+			number = theme.Focused.B()
+		}
+		for i, ql := range theme.Wrap(q.Text, w-3) {
 			lead := "   "
 			if i == 0 {
 				lead = fmt.Sprintf("%-3d", qi+1)
@@ -312,32 +310,94 @@ func questionForm(v View, it Item, w int) ([]line, int) {
 		if current < 0 {
 			current = q.RecommendedIndex()
 		}
+		if q.TopRow() < 0 {
+			mark, ink := "○ ", theme.Text
+			if current < 0 {
+				mark, ink = "● ", theme.Bright
+			}
+			if d.Cursor < 0 {
+				focus = len(lines)
+			}
+			lines = append(lines, line{cursor(v, d.Cursor < 0), {Text: mark + q.Recommended, Ink: ink}, {Text: "  recommended", Ink: theme.Muted}})
+		}
 		for oi, o := range q.Options {
 			mark, ink := "○ ", theme.Text
 			if oi == current {
 				mark, ink = "● ", theme.Bright
 			}
-			l := line{{Text: "   " + mark + o, Ink: ink}}
+			if oi == d.Cursor {
+				focus = len(lines)
+			}
+			l := line{cursor(v, oi == d.Cursor), {Text: mark + o, Ink: ink}}
 			if o == q.Recommended {
 				l = append(l, theme.Span{Text: "  recommended", Ink: theme.Muted})
 			}
 			lines = append(lines, l)
 		}
-		if len(q.Options) == 0 && q.Recommended != "" {
-			lines = append(lines, text("   recommended: "+q.Recommended, theme.Muted))
+		onTypeRow := d.Cursor == len(q.Options)
+		if onTypeRow {
+			focus = len(lines)
 		}
 		if d.Typing(q, qi) {
 			box := d
 			box.Text = d.Typed[qi]
-			box.Editing = d.Editing && qi == d.Question
-			for _, bl := range textBox("your answer", box, w-3) {
-				lines = append(lines, append(line{{Text: "   "}}, bl...))
+			box.Editing = d.Editing
+			for i, bl := range textBox("your answer", box, w-3) {
+				lines = append(lines, append(line{cursor(v, onTypeRow && i == 0)}, bl...))
 			}
-			continue
+		} else {
+			lines = append(lines, line{cursor(v, onTypeRow), {Text: "○ type an answer", Ink: theme.Muted}})
 		}
-		lines = append(lines, text("   ○ type an answer", theme.Muted))
+		lines = append(lines, blank())
 	}
+	onSend := d.Question == len(it.Questions)
+	if d.Question != len(it.Questions)-1 {
+		lines = append(lines, blank())
+	}
+	send := theme.Muted
+	if onSend {
+		focus = len(lines)
+		send = theme.Bright.B()
+	}
+	lines = append(lines, line{cursor(v, onSend), {Text: "send answers", Ink: send}})
 	return lines, focus
+}
+
+func cursor(v View, on bool) theme.Span {
+	if on && v.Focused {
+		return theme.Span{Text: " ❯ ", Ink: theme.Focused.B()}
+	}
+	return theme.Span{Text: "   "}
+}
+
+func foldedQuestion(d Draft, q Question, qi, w int) line {
+	mark, ink := questionMark(d, q, qi)
+	answer := ""
+	if shown := shownAnswer(d, q, qi); shown != "" {
+		answer = "  → " + shown
+	}
+	room := max(w-5-theme.Width(answer), (w-5)/2)
+	return line{{Text: fmt.Sprintf("%-3d", qi+1), Ink: theme.Text}, {Text: mark + " ", Ink: ink}, {Text: theme.Truncate(q.Text, room), Ink: theme.Text}, {Text: answer, Ink: theme.Muted}}
+}
+
+func questionMark(d Draft, q Question, qi int) (string, theme.Ink) {
+	switch {
+	case d.Typing(q, qi):
+		return "✎", theme.FgInk(theme.Cyan)
+	case !d.Answered(q, qi):
+		return "○", theme.FgInk(theme.Orange)
+	}
+	return "✓", theme.FgInk(theme.Green)
+}
+
+func shownAnswer(d Draft, q Question, qi int) string {
+	switch {
+	case d.Typing(q, qi):
+		return d.Typed[qi]
+	case qi < len(d.Choice) && d.Choice[qi] >= 0:
+		return q.Options[d.Choice[qi]]
+	}
+	return q.Recommended
 }
 
 func textBox(title string, d Draft, w int) []line {

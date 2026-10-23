@@ -35,6 +35,13 @@ func (q Question) RecommendedIndex() int {
 	return -1
 }
 
+func (q Question) TopRow() int {
+	if q.Recommended != "" && q.RecommendedIndex() < 0 {
+		return -1
+	}
+	return 0
+}
+
 type Item struct {
 	ID          string
 	Kind        string
@@ -66,6 +73,7 @@ type Draft struct {
 	Text     string   `json:"text"`
 	Artifact int      `json:"artifact"`
 	Editing  bool     `json:"-"`
+	Cursor   int      `json:"-"`
 }
 
 func (d *Draft) Fit(questions int) {
@@ -75,7 +83,14 @@ func (d *Draft) Fit(questions int) {
 	for len(d.Typed) < questions {
 		d.Typed = append(d.Typed, "")
 	}
-	d.Question = max(0, min(d.Question, questions-1))
+	d.Question = max(0, min(d.Question, questions))
+}
+
+func (d Draft) Picked(q Question, i int) int {
+	if i < len(d.Choice) && d.Choice[i] >= 0 {
+		return d.Choice[i]
+	}
+	return max(q.RecommendedIndex(), q.TopRow())
 }
 
 func (d Draft) Typing(q Question, i int) bool {

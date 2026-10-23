@@ -1010,8 +1010,12 @@ func (m *Model) panelHints() []footer.Hint {
 	}
 	approving := item.Answerable() && !editing && onApproveRow(item, m.draft(it.Factory, item))
 	switch {
+	case item.Kind == "question" && editing:
+		return hints("⏎", "confirm", "ctrl+s", "send", "esc", back)
+	case onSendRow(item, m.draft(it.Factory, item)):
+		return hints("⏎", "send", "↑", "back to the questions", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "question":
-		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+		return hints("↑↓", "move", "⏎", "pick", "←→", "question", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case approving:
 		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "gate":
