@@ -12,7 +12,8 @@ export default defineConfig({
   use: { baseURL: origin },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm exec astro preview --host 127.0.0.1 --port 4322",
+    command:
+      "pnpm exec astro preview --host 127.0.0.1 --port 4322 --ignore-lock",
     url: `${origin}/`,
     reuseExistingServer: false,
     timeout: 30_000,
