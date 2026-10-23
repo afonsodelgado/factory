@@ -118,7 +118,7 @@ Each stage agent has a role, its name without `factory-`: `analyst`, `designer`,
 3. the same keys in the repo profile
 4. the `--agent role=model:effort` or `--agent role=tool/model:effort` arguments; either side of the colon may be empty, as in `--agent reviewer=:low`
 
-A layer that names a different tool replaces the model and effort too, since they belong to the tool. On `claude`, models are `haiku`, `sonnet`, `opus` and `fable`, and efforts are `low`, `medium`, `high`, `xhigh` and `max`; Codex and OpenCode models are checked by the factory app when it starts the stage. `qa` runs only on `claude`. An unknown role, tool, claude model or effort stops preflight; tell the user the file and the key.
+A layer that names a different tool replaces the model and effort too, since they belong to the tool. When that layer switches to `claude` without naming a model or effort, they come from the agent's frontmatter; when it switches to `codex` or `opencode` without them, leave them empty and the factory app uses that tool's default when it starts the stage. On `claude`, models are `haiku`, `sonnet`, `opus` and `fable`, and efforts are `low`, `medium`, `high`, `xhigh` and `max`; Codex and OpenCode models are checked by the factory app when it starts the stage. `qa` runs only on `claude`. An unknown role, tool, claude model or effort stops preflight; tell the user the file and the key.
 
 Write every role whose resolved tool, model or effort differs from its frontmatter to `state.agents`, as `{"engineer": {"tool": "codex", "model": "gpt-5.6-sol", "effort": "high"}}`, with every field of that role. Write the result of all four layers, not only the `--agent` arguments: a profile's setting must reach the spawn too.
 

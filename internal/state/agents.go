@@ -65,8 +65,19 @@ func (s AgentSetting) ToolName() string {
 func (s AgentSetting) OnClaude() bool { return s.ToolName() == ToolClaude }
 
 func (s AgentSetting) Over(base AgentSetting) AgentSetting {
+	return s.over(base, AgentSetting{})
+}
+
+func (s AgentSetting) OverRole(role string, base AgentSetting) AgentSetting {
+	return s.over(base, DefaultAgents[role])
+}
+
+func (s AgentSetting) over(base, onClaude AgentSetting) AgentSetting {
 	if s.Tool != "" && s.ToolName() != base.ToolName() {
 		base = AgentSetting{Tool: s.Tool}
+		if s.OnClaude() {
+			base.Model, base.Effort = onClaude.Model, onClaude.Effort
+		}
 	}
 	if s.Model != "" {
 		base.Model = s.Model
@@ -79,7 +90,7 @@ func (s AgentSetting) Over(base AgentSetting) AgentSetting {
 
 func (s AgentSetting) Value() string {
 	value := s.Model + ":" + s.Effort
-	if s.OnClaude() {
+	if s.Tool == "" {
 		return value
 	}
 	return s.Tool + "/" + value
@@ -103,7 +114,7 @@ func ResolveAgents(cfg *Config, profile Profile, overrides map[string]AgentSetti
 	for _, role := range AgentRoles {
 		setting := DefaultAgents[role]
 		for _, layer := range []map[string]AgentSetting{cfg.Agents, profile.Agents, overrides} {
-			setting = layer[role].Over(setting)
+			setting = layer[role].OverRole(role, setting)
 		}
 		resolved[role] = setting
 	}

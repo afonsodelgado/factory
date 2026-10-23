@@ -199,7 +199,7 @@ func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
 }
 
 func (m *NewFactoryModel) agent(role string) state.AgentSetting {
-	return m.overrides[role].Over(m.defaultAgent(role))
+	return m.overrides[role].OverRole(role, m.defaultAgent(role))
 }
 
 func (m *NewFactoryModel) tool(name string) ToolOption {
