@@ -29,7 +29,6 @@ jobs:
               - 'cmd/**'
               - 'internal/**'
               - 'bundle/**'
-              - 'profiles/**'
               - 'go.mod'
               - 'go.sum'
               - 'Makefile'
