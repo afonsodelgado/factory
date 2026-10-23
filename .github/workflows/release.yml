@@ -9,7 +9,6 @@ on:
       - 'cmd/**'
       - 'internal/**'
       - 'bundle/**'
-      - 'profiles/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/release.yml'

@@ -4,7 +4,7 @@
 
 ## Install
 
-Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `profiles/`, `go.mod`, `go.sum` or the release workflow. Site, JavaScript tooling, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
+Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `go.mod`, `go.sum` or the release workflow. Site, JavaScript tooling, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
 
 For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that exact release is published instead. A `v*` tag push releases regardless of changed paths, including tags on site-only commits.
 
@@ -44,7 +44,7 @@ factory update     # install the latest release, then run its bootstrap
 
 ## Develop
 
-The Go module stays at the repository root: `cmd/`, `internal/`, `bundle/` and `profiles/` keep their existing paths. The pnpm workspace reserves `apps/web` for the future website and `packages/*` for shared JavaScript packages. Neither directory exists until it has real code.
+The Go module stays at the repository root: `cmd/`, `internal/` and `bundle/` keep their existing paths. The pnpm workspace reserves `apps/web` for the future website and `packages/*` for shared JavaScript packages. Neither directory exists until it has real code.
 
 Go development needs Go 1.26 or later, Make, tmux and jq. JavaScript tooling uses Node 24 (`.nvmrc` pins 24.22.1), pnpm 10.33.0 (`packageManager` in `package.json`) and Turbo 2.11.10. With nvm installed, set up the pinned tools from the repository root:
 
@@ -76,7 +76,7 @@ Pull requests and pushes to `main` always start CI. Changed paths select the Go 
 
 | Changed paths | Validation |
 |---|---|
-| Root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum`, release workflow | Go |
+| Root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `go.mod`, `go.sum`, release workflow | Go |
 | `apps/**`, `packages/**`, root pnpm manifests and lockfile, `turbo.json`, `.nvmrc` | Web |
 | `Makefile`, `.gitignore`, CI workflow | Go and web |
 | Root README, CLAUDE and ordinary docs outside Go-owned directories | Neither workload |
@@ -95,7 +95,7 @@ factory init            # or: factory init ~/dev/some-repo
 
 `init` writes the repo's factory profile, `.claude/factory.yml`, from the bundled template, with build, lint and test commands detected from `go.mod` or `package.json`. It adds the factory's files to the repo's `.git/info/exclude` and lists the repo in the config. Nothing is committed to the repo. Edit the profile to match the repo, and you are done; set `coderabbit: true` only if CodeRabbit reviews the repo. Running `init` again changes nothing. A running hub reads the config only when it starts, so quit it with `q` and run `factory` again.
 
-Worktrees have no copy of the profile, so the skill and its agents read it from the main checkout. `profiles/cowork/` has cowork's profile.
+Worktrees have no copy of the profile, so the skill and its agents read it from the main checkout.
 
 ## Use
 

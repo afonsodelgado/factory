@@ -2,7 +2,7 @@
 
 One Go binary, `factory`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
 
-The Go module, `cmd/`, `internal/`, `bundle/` and `profiles/` stay at the root. The pnpm workspace includes `apps/*` and `packages/*`: reserve `apps/web` for the future website and add shared packages only when needed. Do not create placeholder directories or packages.
+The Go module, `cmd/`, `internal/` and `bundle/` stay at the root. Repo profiles live in each repo's `.claude/factory.yml`, never in this repository. The pnpm workspace includes `apps/*` and `packages/*`: reserve `apps/web` for the future website and add shared packages only when needed. Do not create placeholder directories or packages.
 
 ## Commands
 
@@ -27,13 +27,13 @@ After a package exists, `pnpm turbo run build` is the advanced direct command. T
 
 CI starts on every pull request and push to `main`, without workflow-level path filters. The `changes` job uses the PR changed-files API or the previous pushed head for main pushes. Go changes run `make go-build`, `make go-lint` and `make go-test` on Ubuntu and macOS with tmux/jq and no Node. Web changes install the pinned Node/pnpm tooling and frozen lockfile on Ubuntu, then run `make web-lint`, `make web-typecheck`, `make web-test` and `make web-build`; absent site tasks skip after installation.
 
-Go owns root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum` and the release workflow. Web owns `apps/**`, `packages/**`, root pnpm manifests/lockfile, `turbo.json` and `.nvmrc`. `Makefile`, `.gitignore` and the CI workflow select both. Root docs select neither. Include all data in owned directories; add new build inputs to the inline CI filters and README ownership table together.
+Go owns root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `go.mod`, `go.sum` and the release workflow. Web owns `apps/**`, `packages/**`, root pnpm manifests/lockfile, `turbo.json` and `.nvmrc`. `Makefile`, `.gitignore` and the CI workflow select both. Root docs select neither. Include all data in owned directories; add new build inputs to the inline CI filters and README ownership table together.
 
 The final `ci` job always evaluates detection and both workload results. Detection must succeed; workloads may succeed or skip, but failures, cancellations and unknown outcomes fail the aggregate. Require `ci` in branch protection and manually remove old matrix requirements when adopting it. No workflow can guarantee reporting through platform outages, manual cancellation or commit-level CI-skip directives.
 
 ## Releases
 
-Automatic main releases select root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum` and `.github/workflows/release.yml`. All files in owned directories count, including embedded Markdown and fixtures. Site, shared JavaScript packages, JS tooling, Makefile, CI-only and root documentation changes alone do not release. Pushes of `v*` tags bypass path filtering and preserve the explicit tag.
+Automatic main releases select root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `go.mod`, `go.sum` and `.github/workflows/release.yml`. All files in owned directories count, including embedded Markdown and fixtures. Site, shared JavaScript packages, JS tooling, Makefile, CI-only and root documentation changes alone do not release. Pushes of `v*` tags bypass path filtering and preserve the explicit tag.
 
 Version selection skips an already-tagged main HEAD, otherwise increments the highest stable semantic-version tag's patch, starting at `v0.1.0`. Keep the existing four release binaries, asset names and `main.version` linker variable unchanged. No website deployment is configured.
 
