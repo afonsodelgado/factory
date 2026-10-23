@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,8 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
+var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent"}
+
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
 func runOpen(args []string) int {
@@ -27,7 +30,14 @@ func runOpen(args []string) int {
 	repo := flags.String("repo", "", "repo to create the factory in")
 	prompt := flags.String("prompt", "", "what the factory should do; written to brief.md")
 	pipeline := flags.String("pipeline", "", "the pipeline of stages to run; default_pipeline when omitted")
+	stages := flags.String("stages", "", "the exact stages to run, comma-separated; instead of --pipeline")
+	agents := agentFlags{}
+	flags.Var(agents, "agent", "role=model:effort for one agent of this factory; repeatable")
 	if err := flags.Parse(reorder(args)); err != nil {
+		return 2
+	}
+	if *pipeline != "" && *stages != "" {
+		fmt.Fprintln(os.Stderr, "factory open: give --pipeline or --stages, not both")
 		return 2
 	}
 	id, rest := "", flags.Args()
@@ -37,18 +47,41 @@ func runOpen(args []string) int {
 	if *prompt == "" {
 		*prompt = strings.Join(rest, " ")
 	}
-	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline}); err != nil {
+	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0
 }
 
+type agentFlags map[string]state.AgentSetting
+
+func (a agentFlags) String() string { return "" }
+
+func (a agentFlags) Set(flag string) error {
+	role, setting, err := state.ParseAgentFlag(flag)
+	if err != nil {
+		return err
+	}
+	a[role] = setting
+	return nil
+}
+
+func splitStages(list string) []string {
+	var stages []string
+	for _, stage := range strings.Split(list, ",") {
+		if stage = strings.TrimSpace(stage); stage != "" {
+			stages = append(stages, stage)
+		}
+	}
+	return stages
+}
+
 func reorder(args []string) []string {
 	var named, positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
-		case (args[i] == "--repo" || args[i] == "--prompt" || args[i] == "--pipeline") && i+1 < len(args):
+		case slices.Contains(valueFlags, args[i]) && i+1 < len(args):
 			named = append(named, args[i], args[i+1])
 			i++
 		case strings.HasPrefix(args[i], "-"):
@@ -87,7 +120,7 @@ func openMain(r hub.OpenRequest) error {
 		return err
 	}
 	if name != "" {
-		if err := request(cfg.SocketPath(), hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline}); err != nil {
+		if err := request(cfg.SocketPath(), hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents}); err != nil {
 			return err
 		}
 	}

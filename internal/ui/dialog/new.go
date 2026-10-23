@@ -14,16 +14,19 @@ import (
 )
 
 type NewFactoryModel struct {
-	Context  NewContext
-	repo     int
-	name     string
-	prompt   string
-	pipeline string
-	step     int
-	problem  string
-	result   *NewResult
-	width    int
-	height   int
+	Context   NewContext
+	repo      int
+	name      string
+	prompt    string
+	pipeline  string
+	chosen    []string
+	overrides map[string]state.AgentSetting
+	row       int
+	step      int
+	problem   string
+	result    *NewResult
+	width     int
+	height    int
 }
 
 func NewFactory(c NewContext) *NewFactoryModel {
@@ -87,7 +90,119 @@ func (m *NewFactoryModel) slug() string {
 
 func (m *NewFactoryModel) launch() factory.Launch {
 	repo := m.selectedRepo()
-	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: m.pipelineName(), SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+	name, stages := m.chosenPipeline()
+	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.overrides, SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+}
+
+func (m *NewFactoryModel) presetStages(name string) []string {
+	for _, p := range m.selectedRepo().Pipelines {
+		if p.Name == name {
+			return p.Stages
+		}
+	}
+	return nil
+}
+
+func (m *NewFactoryModel) runStages() []string {
+	if m.chosen == nil {
+		return m.presetStages(m.pipelineName())
+	}
+	return state.EffectiveStages(m.chosen, !m.selectedRepo().CodeRabbit)
+}
+
+func (m *NewFactoryModel) chosenPipeline() (string, []string) {
+	stages := m.runStages()
+	if m.chosen == nil || slices.Equal(stages, m.presetStages(m.pipelineName())) {
+		return m.pipelineName(), nil
+	}
+	for _, p := range m.selectedRepo().Pipelines {
+		if slices.Equal(stages, p.Stages) {
+			return p.Name, nil
+		}
+	}
+	return state.CustomPipeline, stages
+}
+
+func (m *NewFactoryModel) resetChoices() {
+	m.pipeline, m.chosen, m.overrides, m.row = "", nil, nil, 0
+}
+
+func (m *NewFactoryModel) locked(stage string) bool {
+	codeRabbitOff := stage == "coderabbit" && !m.selectedRepo().CodeRabbit
+	qaSkipped := state.DependsOnQA(stage) && !slices.Contains(m.runStages(), "qa")
+	return state.AlwaysRuns(stage) || codeRabbitOff || qaSkipped
+}
+
+func (m *NewFactoryModel) toggle(stage string) {
+	if m.locked(stage) {
+		return
+	}
+	stages := slices.Clone(m.runStages())
+	if i := slices.Index(stages, stage); i >= 0 {
+		stages = slices.Delete(stages, i, i+1)
+	} else {
+		stages = append(stages, stage)
+		if stage == "qa" {
+			stages = append(stages, "qa_fixes", "test_gaps")
+		}
+	}
+	m.chosen = stages
+}
+
+func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
+	for _, a := range m.selectedRepo().Agents {
+		if a.Role == role {
+			return a.AgentSetting
+		}
+	}
+	return state.DefaultAgents[role]
+}
+
+func (m *NewFactoryModel) agent(role string) state.AgentSetting {
+	setting := m.defaultAgent(role)
+	if o := m.overrides[role]; o.Model != "" {
+		setting.Model = o.Model
+	}
+	if o := m.overrides[role]; o.Effort != "" {
+		setting.Effort = o.Effort
+	}
+	return setting
+}
+
+func (m *NewFactoryModel) cycleModel(role string) {
+	m.setOverride(role, func(o *state.AgentSetting) {
+		o.Model = nextOverride(state.AgentModels, m.agent(role).Model, m.defaultAgent(role).Model)
+	})
+}
+
+func (m *NewFactoryModel) cycleEffort(role string) {
+	m.setOverride(role, func(o *state.AgentSetting) {
+		o.Effort = nextOverride(state.AgentEfforts, m.agent(role).Effort, m.defaultAgent(role).Effort)
+	})
+}
+
+func (m *NewFactoryModel) setOverride(role string, change func(*state.AgentSetting)) {
+	if role == "" {
+		return
+	}
+	if m.overrides == nil {
+		m.overrides = map[string]state.AgentSetting{}
+	}
+	o := m.overrides[role]
+	change(&o)
+	if o == (state.AgentSetting{}) {
+		delete(m.overrides, role)
+		return
+	}
+	m.overrides[role] = o
+}
+
+func nextOverride(values []string, current, inherited string) string {
+	next := values[(slices.Index(values, current)+1)%len(values)]
+	if next == inherited {
+		return ""
+	}
+	return next
 }
 
 func (m *NewFactoryModel) pipelineName() string {
@@ -102,7 +217,8 @@ func (m *NewFactoryModel) pipelineName() string {
 
 func (m *NewFactoryModel) nextPipeline() {
 	list := m.selectedRepo().Pipelines
-	current := m.pipelineName()
+	current, _ := m.chosenPipeline()
+	m.chosen = nil
 	for i, p := range list {
 		if p.Name == current {
 			m.pipeline = list[(i+1)%len(list)].Name
@@ -118,20 +234,24 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.typeText(msg.Content)
 	case tea.KeyPressMsg:
-		if m.step == 1 {
+		switch m.step {
+		case 1:
 			return m, m.nameKey(msg)
+		case 2:
+			return m, m.promptKey(msg)
 		}
-		return m, m.promptKey(msg)
+		return m, m.stagesKey(msg)
 	}
 	return m, nil
 }
 
 func (m *NewFactoryModel) typeText(text string) {
-	if m.step == 1 {
+	switch m.step {
+	case 1:
 		m.name += strings.ReplaceAll(text, "\n", " ")
-		return
+	case 2:
+		m.prompt += text
 	}
-	m.prompt += text
 }
 
 func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -141,8 +261,10 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Quit
 	case "up":
 		m.repo = max(m.repo-1, 0)
+		m.resetChoices()
 	case "down", "tab":
 		m.repo = (m.repo + 1) % max(len(m.Context.Repos), 1)
+		m.resetChoices()
 	case "backspace":
 		m.name = dropLast(m.name)
 	case "ctrl+u":
@@ -184,18 +306,13 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+c":
 		return tea.Quit
 	case "tab":
-		m.nextPipeline()
-	case "ctrl+s":
-		if strings.TrimSpace(m.prompt) == "" {
-			m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
-			return nil
-		}
 		if problem := m.selectedRepo().PipelineProblem; problem != "" {
 			m.problem = problem
 			return nil
 		}
-		m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: m.pipelineName()}
-		return tea.Quit
+		m.step = 3
+	case "ctrl+s":
+		return m.start()
 	case "enter":
 		m.prompt += "\n"
 	case "backspace":
@@ -206,6 +323,49 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.prompt += msg.Text
 	}
 	return nil
+}
+
+func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
+	m.problem = ""
+	stage := state.StageKeys[m.row]
+	switch msg.String() {
+	case "esc":
+		m.step = 2
+	case "ctrl+c":
+		return tea.Quit
+	case "up":
+		m.row = max(m.row-1, 0)
+	case "down":
+		m.row = min(m.row+1, len(state.StageKeys)-1)
+	case "tab":
+		m.nextPipeline()
+	case "space":
+		m.toggle(stage)
+	case "m":
+		m.cycleModel(state.RoleOf(stage))
+	case "e":
+		m.cycleEffort(state.RoleOf(stage))
+	case "ctrl+s":
+		return m.start()
+	}
+	return nil
+}
+
+func (m *NewFactoryModel) start() tea.Cmd {
+	if strings.TrimSpace(m.prompt) == "" {
+		m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
+		return nil
+	}
+	if problem := m.selectedRepo().PipelineProblem; problem != "" {
+		m.problem = problem
+		return nil
+	}
+	name, stages := m.chosenPipeline()
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: name, Stages: stages}
+	if len(m.overrides) > 0 {
+		m.result.Agents = m.overrides
+	}
+	return tea.Quit
 }
 
 func dropLast(s string) string {
@@ -220,10 +380,13 @@ func dropLast(s string) string {
 
 func (m *NewFactoryModel) View() tea.View {
 	c := theme.NewCanvas(m.width, m.height)
-	if m.step == 1 {
+	switch m.step {
+	case 1:
 		m.drawName(c)
-	} else {
+	case 2:
 		m.drawPrompt(c)
+	default:
+		m.drawStages(c)
 	}
 	v := tea.NewView(c.Render())
 	v.AltScreen = true
@@ -233,7 +396,7 @@ func (m *NewFactoryModel) View() tea.View {
 func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "Repo", theme.Bright.B())
-	c.Right(c.W-2, 0, "1 of 2", theme.Muted)
+	c.Right(c.W-2, 0, "1 of 3", theme.Muted)
 	y := 1
 	for i, r := range m.Context.Repos {
 		mark, ink := "○ ", theme.Text
@@ -327,7 +490,7 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "New factory · "+m.slug(), theme.Bright.B())
-	c.Right(c.W-2, 0, "2 of 2", theme.Muted)
+	c.Right(c.W-2, 0, "2 of 3", theme.Muted)
 	y := 2
 	for _, l := range theme.Wrap("Describe what this factory should do: the change, for whom, and anything you already know you want. The supervisor writes it to brief.md word for word, and every stage reads it as the spec. The factory reads a tracker issue only if you ask it to here.", w) {
 		c.Put(1, y, l, theme.Text)
@@ -359,32 +522,109 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	}
 	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt, "\n")+1, uniseg.GraphemeClusterCount(m.prompt))
 	c.Put(1, c.H-1, count, theme.Muted)
-	c.Right(c.W-2, c.H-1, "tab pipeline   ctrl+s start factory   esc back", theme.Text)
+	c.Right(c.W-2, c.H-1, "tab stages & agents   ctrl+s start factory   esc back", theme.Text)
 }
 
 func (m *NewFactoryModel) drawPipelines(c *theme.Canvas, y, w int) int {
 	repo := m.selectedRepo()
-	c.Put(1, y, "Pipeline", theme.Bright.B())
-	y++
+	x := c.Put(1, y, "Pipeline", theme.Bright.B())
 	if repo.PipelineProblem != "" {
 		for _, l := range theme.Wrap("✗ "+repo.PipelineProblem, w) {
-			c.Put(1, y, l, theme.FgInk(theme.Red))
 			y++
+			c.Put(1, y, l, theme.FgInk(theme.Red))
 		}
-		return y
+		return y + 1
 	}
-	chosen := m.pipelineName()
-	for _, p := range repo.Pipelines {
-		mark, ink := "○ ", theme.Text
-		if p.Name == chosen {
-			c.Put(1, y, "❯", theme.Focused.B())
-			mark, ink = "● ", theme.Bright
-		}
-		x := c.Put(3, y, mark+p.Name, ink)
-		c.PutMax(max(x+2, 14), y, stageSummary(p.Stages), theme.Quiet, w-max(x+2, 14))
+	name, _ := m.chosenPipeline()
+	summary := name + " · " + stageSummary(m.runStages())
+	if n := len(m.overrides); n > 0 {
+		summary += fmt.Sprintf(" · %d %s changed", n, plural(n, "agent", "agents"))
+	}
+	c.PutMax(x+2, y, summary, theme.Quiet, w-x-2)
+	return y + 1
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
+	w := c.W - 2
+	c.Put(1, 0, "Stages & agents · "+m.slug(), theme.Bright.B())
+	c.Right(c.W-2, 0, "3 of 3", theme.Muted)
+	y := m.drawPresets(c, 2)
+	y++
+	running := m.runStages()
+	for i, stage := range state.StageKeys {
+		m.drawStageRow(c, y, i, stage, slices.Contains(running, stage))
 		y++
 	}
-	return y
+	y++
+	m.drawPreview(c, 1, y, w)
+	if m.problem != "" {
+		for _, l := range theme.Wrap("✗ "+m.problem, w) {
+			c.Put(1, c.H-3, l, theme.FgInk(theme.Red))
+		}
+	}
+	c.Put(1, c.H-1, "space stage   m model   e effort   tab preset   ctrl+s start   esc back", theme.Text)
+}
+
+func (m *NewFactoryModel) drawPresets(c *theme.Canvas, y int) int {
+	x := c.Put(1, y, "Pipeline", theme.Bright.B()) + 2
+	chosen, _ := m.chosenPipeline()
+	names := m.selectedRepo().Pipelines
+	options := make([]string, 0, len(names)+1)
+	for _, p := range names {
+		options = append(options, p.Name)
+	}
+	if chosen == state.CustomPipeline {
+		options = append(options, chosen)
+	}
+	for _, name := range options {
+		mark, ink := "○ ", theme.Text
+		if name == chosen {
+			mark, ink = "● ", theme.Bright
+		}
+		x = c.Put(x, y, mark+name, ink) + 2
+	}
+	return y + 1
+}
+
+func (m *NewFactoryModel) drawStageRow(c *theme.Canvas, y, i int, stage string, running bool) {
+	if i == m.row {
+		c.Put(1, y, "❯", theme.Focused.B())
+	}
+	check, ink := "·", theme.Muted
+	if running {
+		check, ink = "✓", theme.Bright
+	}
+	if m.locked(stage) {
+		ink = theme.Quiet
+	}
+	c.Put(3, y, check, ink)
+	c.Put(5, y, stage, ink)
+	role := state.RoleOf(stage)
+	switch {
+	case stage == "coderabbit" && !m.selectedRepo().CodeRabbit:
+		c.Put(19, y, "off in this repo", theme.Quiet)
+	case role == "":
+		c.Put(19, y, "—", theme.Quiet)
+	default:
+		setting, override := m.agent(role), m.overrides[role]
+		c.Put(19, y, role, theme.Text)
+		c.Put(31, y, setting.Model, overrideInk(override.Model))
+		c.Put(39, y, setting.Effort, overrideInk(override.Effort))
+	}
+}
+
+func overrideInk(value string) theme.Ink {
+	if value != "" {
+		return theme.Bright.B()
+	}
+	return theme.Muted
 }
 
 func stageSummary(stages []string) string {

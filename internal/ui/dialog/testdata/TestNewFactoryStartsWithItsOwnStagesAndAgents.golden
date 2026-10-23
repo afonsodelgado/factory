@@ -1,0 +1,30 @@
+ [1;38;2;192;202;245mStages & agents · csv-export[m                                                    [38;2;86;95;137m3 of 3[m 
+                                                                                        
+ [1;38;2;192;202;245mPipeline[m  [38;2;169;177;214m○ full[m  [38;2;169;177;214m○ quick[m  [38;2;192;202;245m● custom[m                                                    
+                                                                                        
+   [38;2;115;122;162m✓[m [38;2;115;122;162mrequirements[m  [38;2;169;177;214manalyst[m     [38;2;86;95;137mopus[m    [38;2;86;95;137mhigh[m                                             
+   [38;2;86;95;137m·[m [38;2;86;95;137mdesign[m        [38;2;169;177;214mdesigner[m    [38;2;86;95;137mopus[m    [38;2;86;95;137mxhigh[m                                            
+   [38;2;192;202;245m✓[m [38;2;192;202;245mplan[m          [38;2;169;177;214marchitect[m   [38;2;86;95;137mfable[m   [38;2;86;95;137mhigh[m                                             
+ [1;38;2;122;162;247m❯[m [38;2;192;202;245m✓[m [38;2;192;202;245mimplement[m     [38;2;169;177;214mengineer[m    [1;38;2;192;202;245mfable[m   [38;2;86;95;137mxhigh[m                                            
+   [38;2;192;202;245m✓[m [38;2;192;202;245mreview[m        [38;2;169;177;214mreviewer[m    [38;2;86;95;137mopus[m    [38;2;86;95;137mlow[m                                              
+   [38;2;192;202;245m✓[m [38;2;192;202;245mcoderabbit[m    [38;2;169;177;214mshepherd[m    [38;2;86;95;137mopus[m    [38;2;86;95;137mhigh[m                                             
+   [38;2;192;202;245m✓[m [38;2;192;202;245mqa[m            [38;2;169;177;214mqa[m          [38;2;86;95;137mopus[m    [38;2;86;95;137mhigh[m                                             
+   [38;2;192;202;245m✓[m [38;2;192;202;245mqa_fixes[m      [38;2;169;177;214mfixer[m       [38;2;86;95;137mopus[m    [38;2;86;95;137mxhigh[m                                            
+   [38;2;192;202;245m✓[m [38;2;192;202;245mtest_gaps[m     [38;2;169;177;214mfixer[m       [38;2;86;95;137mopus[m    [38;2;86;95;137mxhigh[m                                            
+   [38;2;115;122;162m✓[m [38;2;115;122;162mhandoff[m       [38;2;115;122;162m—[m                                                                    
+                                                                                        
+ [38;2;115;122;162mWill run, from ~/dev/cowork[m                                                            
+   [38;2;169;177;214mclaude --worktree csv-export --session-id <uuid> '/factory csv-export --stages[m       
+   [38;2;169;177;214mrequirements,plan,implement,review,coderabbit,qa,qa_fixes,test_gaps,handoff[m          
+   [38;2;169;177;214m--agent engineer=fable:'[m                                                             
+ [38;2;86;95;137mno --chrome: the cowork profile uses terminal QA.[m                                      
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;169;177;214mspace stage   m model   e effort   tab preset   ctrl+s start   esc back[m                
