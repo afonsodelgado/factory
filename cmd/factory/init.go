@@ -24,7 +24,10 @@ func runInit(args []string) int {
 	if r.Repo != "" {
 		fmt.Printf("factory init · %s\n\n", install.HomeRelative(r.Repo))
 	}
-	if r.ProfileWritten {
+	switch {
+	case r.CopiedFrom != "":
+		fmt.Printf("  copied     %s to %s; delete the old file once the factories running there finish\n", install.HomeRelative(r.CopiedFrom), install.HomeRelative(r.Profile))
+	case r.ProfileWritten:
 		fmt.Println("  wrote      " + install.HomeRelative(r.Profile))
 	}
 	for _, p := range r.Excluded {
@@ -40,8 +43,8 @@ func runInit(args []string) int {
 	if !r.Changed() {
 		fmt.Println("Nothing changed.")
 	}
-	fmt.Printf("\nThe profile is %s. Edit it to match the repo; nothing in the repo is committed.\n", install.HomeRelative(r.Profile))
-	if r.ProfileWritten {
+	fmt.Printf("\nThe repo config is %s. Edit it to match the repo; nothing in the repo is committed.\n", install.HomeRelative(r.Profile))
+	if r.ProfileWritten && r.CopiedFrom == "" {
 		fmt.Println("CodeRabbit is off in it. Set coderabbit: true only if CodeRabbit reviews this repo's pull requests.")
 	}
 	if cfg, err := state.LoadConfig(); r.ConfigAdded && err == nil && hubRunning(cfg) {

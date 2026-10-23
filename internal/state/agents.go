@@ -185,5 +185,8 @@ func (c *Config) AgentsFor(repo string) (map[string]AgentSetting, error) {
 	if err := ValidateAgents(ProfilePath(repo), profile.Agents); err != nil {
 		return nil, err
 	}
+	if err := ValidateSupervisor(ProfilePath(repo), profile.Supervisor); err != nil {
+		return nil, err
+	}
 	return ResolveAgents(c, profile, nil), nil
 }

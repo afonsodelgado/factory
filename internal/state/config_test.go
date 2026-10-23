@@ -31,19 +31,19 @@ func TestPipelineResolution(t *testing.T) {
 		{name: "profile wins over the global config, also for the default", config: "pipelines:\n  tiny: [plan]\ndefault_pipeline: quick\n", profile: "pipelines:\n  tiny: [implement]\ndefault_pipeline: tiny\n", want: []string{"requirements", "implement", "handoff"}},
 		{name: "coderabbit false in the profile removes the stage", profile: "coderabbit: false\n", pick: "full", want: []string{"requirements", "design", "plan", "implement", "review", "qa", "qa_fixes", "test_gaps", "handoff"}},
 		{name: "requirements and handoff are always kept", config: "pipelines:\n  bare: [implement]\n", pick: "bare", want: []string{"requirements", "implement", "handoff"}},
-		{name: "unknown stage in the profile is refused with the file and key", profile: "pipelines:\n  quick: [requirements, qa_fix]\n", refused: `factory.yml: pipelines.quick has the unknown stage "qa_fix"`},
+		{name: "unknown stage in the profile is refused with the file and key", profile: "pipelines:\n  quick: [requirements, qa_fix]\n", refused: `.factory/config.yml: pipelines.quick has the unknown stage "qa_fix"`},
 		{name: "unknown stage in the config is refused with the file and key", config: "pipelines:\n  quick: [tests]\n", refused: `config.yml: pipelines.quick has the unknown stage "tests"`},
 		{name: "without qa there is nothing for qa_fixes and test_gaps to fix", config: "pipelines:\n  noqa: [implement, qa_fixes, test_gaps]\n", pick: "noqa", want: []string{"requirements", "implement", "handoff"}},
-		{name: "custom is reserved for a factory's own list", profile: "pipelines:\n  custom: [plan]\n", refused: "factory.yml: pipelines.custom is reserved"},
+		{name: "custom is reserved for a factory's own list", profile: "pipelines:\n  custom: [plan]\n", refused: ".factory/config.yml: pipelines.custom is reserved"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir, repo := t.TempDir(), t.TempDir()
-			if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
+			if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(c.config), 0o644)
-			os.WriteFile(ProfilePath(repo), []byte(c.profile), 0o644)
+			os.WriteFile(RepoConfigPath(repo), []byte(c.profile), 0o644)
 			t.Setenv("FACTORY_CONFIG_DIR", dir)
 			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 			cfg, err := LoadConfig()
@@ -78,18 +78,18 @@ func TestAgentResolution(t *testing.T) {
 		refused               string
 	}{
 		{name: "a profile effort keeps the config's model", config: "agents:\n  engineer: {model: sonnet, effort: medium}\n", profile: "agents:\n  engineer: {effort: low}\n", want: map[string]AgentSetting{"engineer": {Model: "sonnet", Effort: "low"}, "analyst": DefaultAgents["analyst"]}},
-		{name: "unknown model in the profile is refused with the file and key", profile: "agents:\n  engineer: {model: gpt}\n", refused: `factory.yml: agents.engineer.model "gpt" is not a model`},
+		{name: "unknown model in the profile is refused with the file and key", profile: "agents:\n  engineer: {model: gpt}\n", refused: `.factory/config.yml: agents.engineer.model "gpt" is not a model`},
 		{name: "unknown agent in the config is refused with the file and key", config: "agents:\n  coder: {model: opus}\n", refused: "config.yml: agents.coder is not an agent"},
-		{name: "qa on another tool is refused with the file and key", profile: "agents:\n  qa: {tool: codex}\n", refused: `factory.yml: agents.qa.tool "codex" is refused`},
+		{name: "qa on another tool is refused with the file and key", profile: "agents:\n  qa: {tool: codex}\n", refused: `.factory/config.yml: agents.qa.tool "codex" is refused`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir, repo := t.TempDir(), t.TempDir()
-			if err := os.MkdirAll(filepath.Join(repo, ".claude"), 0o755); err != nil {
+			if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(c.config), 0o644)
-			os.WriteFile(ProfilePath(repo), []byte(c.profile), 0o644)
+			os.WriteFile(RepoConfigPath(repo), []byte(c.profile), 0o644)
 			t.Setenv("FACTORY_CONFIG_DIR", dir)
 			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 			cfg, err := LoadConfig()
@@ -127,5 +127,35 @@ func TestSwitchingAnAgentsToolBackToClaudeTakesItsFrontmatter(t *testing.T) {
 	}
 	if got := agents["engineer"].Flag("engineer"); got != "engineer=claude/opus:xhigh" {
 		t.Errorf("the engineer reaches the supervisor as %q; want the claude tool named, or the supervisor keeps the codex layer's tool", got)
+	}
+}
+
+func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.T) {
+	dir, repo := t.TempDir(), t.TempDir()
+	global := "supervisor: {tool: codex, model: gpt-5.6-sol}\nstalled_after: 20m\nclaude: {remote_control: true}\ncodex: {writable_dirs: [/global]}\n"
+	os.WriteFile(filepath.Join(dir, "config.yml"), []byte(global), 0o644)
+	t.Setenv("FACTORY_CONFIG_DIR", dir)
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	os.MkdirAll(filepath.Dir(LegacyProfilePath(repo)), 0o755)
+	os.WriteFile(LegacyProfilePath(repo), []byte("supervisor: {effort: low}\nstalled_after: 2h\nclaude: {remote_control: false}\ncodex: {writable_dirs: [/repo]}\n"), 0o644)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := ReadProfile(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := cfg.WithProfile(profile)
+	if want := (AgentSetting{Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "low"}); merged.Supervisor != want {
+		t.Errorf("supervisor = %+v; want %+v, the repo's effort over the global tool and model", merged.Supervisor, want)
+	}
+	if merged.Stalled().String() != "2h0m0s" || merged.RemoteControl() || !slices.Equal(merged.Codex.WritableDirs, []string{"/global", "/repo"}) {
+		t.Errorf("stalled %v, remote control %v, writable dirs %v; want the repo's 2h and false, and both dirs", merged.Stalled(), merged.RemoteControl(), merged.Codex.WritableDirs)
+	}
+	os.MkdirAll(RepoDir(repo), 0o755)
+	os.WriteFile(RepoConfigPath(repo), []byte("stalled_after: 45m\n"), 0o644)
+	if profile, _ := ReadProfile(repo); profile.StalledAfter != "45m" {
+		t.Errorf("with both files present the repo config reads stalled_after %q; want .factory/config.yml's 45m, or edits there are ignored", profile.StalledAfter)
 	}
 }

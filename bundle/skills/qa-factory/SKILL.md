@@ -2,7 +2,7 @@
 name: qa-factory
 description: |
   Act as a QA engineer on the feature in the current branch of any repo with a
-  factory profile: work out what it is meant to do from the user's prompt, the
+  factory repo config: work out what it is meant to do from the user's prompt, the
   diff and the handoff brief, test the expected scenarios by hand (in the browser
   against the local stack, or in a scratch tmux server for terminal apps), attack it
   with edge cases, and report bugs plus the gaps in test automation worth closing.
@@ -17,7 +17,7 @@ breaks, not to confirm that it works. Build your understanding from the user's p
 the diff, not from the implementer's explanation. Where the two disagree, the gap
 is a finding.
 
-Read the repo's profile, `.claude/factory.yml`, first: the worktree's, or the main checkout's (`dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`) when the worktree has none. Its `qa.mode` picks the
+Read the repo config, `.factory/config.yml`, first: the worktree's, or the main checkout's (`dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`) when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`. Its `qa.mode` picks the
 environment: `browser` or `terminal`. Its `qa.notes`, when set, names a repo file
 with the environment, seeding and port steps that only that repo knows. Follow that
 file wherever this skill says "the notes"; where the notes and this skill disagree,
@@ -29,7 +29,7 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 
 - **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
 - **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing.
-- **Phase 2:** the environment must run this worktree's code. In browser mode, check which process serves the profile's ports and from which directory (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If it is another checkout, leave it running and start this worktree's stack on free ports, as the notes describe. In terminal mode, build the binary from this worktree into a temporary directory.
+- **Phase 2:** the environment must run this worktree's code. In browser mode, check which process serves the repo config's ports and from which directory (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If it is another checkout, leave it running and start this worktree's stack on free ports, as the notes describe. In terminal mode, build the binary from this worktree into a temporary directory.
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
 
@@ -74,7 +74,7 @@ Wait for the user to confirm or adjust the charter. Don't start testing before t
 
 ### Terminal mode
 
-1. **Build** this worktree's binary into a temporary directory with the profile's build command, or `go build -o <tmp>/<name> ./cmd/<name>` for a Go repo.
+1. **Build** this worktree's binary into a temporary directory with the repo config's build command, or `go build -o <tmp>/<name> ./cmd/<name>` for a Go repo.
 2. **Isolate.** Create temporary directories for HOME-like state and point every config, state and socket variable the app reads at them (the notes or the repo's `CLAUDE.md` name them). Put stub binaries for external tools (`gh`, `claude`, anything that would reach the network) first on a temporary `PATH`.
 3. **Scratch tmux.** Start a server with `tmux -L qa-<slug> -f /dev/null new-session -d -s qa -x <cols> -y <rows>`. Drive it with `tmux -L qa-<slug> send-keys -t <pane> …` and read it with `tmux -L qa-<slug> capture-pane -p -e -t <pane>` (`-e` keeps colours, so you can check styles). Popups need an attached client: attach one with `script -q /dev/null tmux -L qa-<slug> attach -t qa` in the background.
 4. **Sizes.** Test at the size the design was drawn at and at the narrow sizes it names; `tmux -L qa-<slug> resize-window -t qa -x <cols> -y <rows>`.

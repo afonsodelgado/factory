@@ -2,7 +2,7 @@
 
 One Go binary, `factory`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
 
-The Go module, `cmd/`, `internal/` and `bundle/` stay at the root. Repo profiles live in each repo's `.claude/factory.yml`, never in this repository. The pnpm workspace includes `apps/*` and `packages/*`: reserve `apps/web` for the future website and add shared packages only when needed. Do not create placeholder directories or packages.
+The Go module, `cmd/`, `internal/` and `bundle/` stay at the root. Repo configs live in each repo's `.factory/config.yml`, never in this repository. The pnpm workspace includes `apps/*` and `packages/*`: reserve `apps/web` for the future website and add shared packages only when needed. Do not create placeholder directories or packages.
 
 ## Commands
 
@@ -23,7 +23,7 @@ go run ./cmd/factory --version
 
 Use Go 1.26 or later. For JavaScript, `.nvmrc` pins Node 24.22.1, `engines.node` supports 24.x, `packageManager` pins pnpm 10.33.0 and the root development dependency pins Turbo 2.11.10. Run `nvm install`, `nvm use`, `npm install --global pnpm@10.33.0`, then `pnpm install`. CI installations should use `pnpm install --frozen-lockfile`.
 
-After a package exists, `pnpm turbo run build` is the advanced direct command. Turbo caches generic `dist/**` and `build/**` outputs and lint/typecheck/test results; dev is persistent and uncached. The future website must add framework outputs, generated-type prerequisites, environment inputs and coverage declarations. No remote cache is configured. Factory profile autodetection still prefers `go.mod` and selects the Go commands.
+After a package exists, `pnpm turbo run build` is the advanced direct command. Turbo caches generic `dist/**` and `build/**` outputs and lint/typecheck/test results; dev is persistent and uncached. The future website must add framework outputs, generated-type prerequisites, environment inputs and coverage declarations. No remote cache is configured. Repo config autodetection still prefers `go.mod` and selects the Go commands.
 
 CI starts on every pull request and push to `main`, without workflow-level path filters. The `changes` job uses the PR changed-files API or the previous pushed head for main pushes. Go changes run `make go-build`, `make go-lint` and `make go-test` on Ubuntu and macOS with tmux/jq and no Node. Web changes install the pinned Node/pnpm tooling and frozen lockfile on Ubuntu, then run `make web-lint`, `make web-typecheck`, `make web-test` and `make web-build`; absent site tasks skip after installation.
 

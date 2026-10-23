@@ -18,12 +18,13 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-var IgnoredPaths = []string{".claude/worktrees/", ".claude/factory/", ".claude/factory-archive/", ".claude/qa/", ".claude/factory.yml"}
+var IgnoredPaths = []string{".factory/", ".claude/worktrees/", ".claude/factory/", ".claude/factory-archive/", ".claude/qa/"}
 
 type InitResult struct {
 	Repo           string
 	Profile        string
 	ProfileWritten bool
+	CopiedFrom     string
 	Excluded       []string
 	ExcludeFile    string
 	ConfigAdded    bool
@@ -41,8 +42,8 @@ func Init(path, configFile string) (InitResult, error) {
 		return r, err
 	}
 	r.Repo = repo
-	r.Profile = state.ProfilePath(repo)
-	if r.ProfileWritten, err = writeProfile(repo); err != nil {
+	r.Profile = state.RepoConfigPath(repo)
+	if r.CopiedFrom, r.ProfileWritten, err = writeProfile(repo); err != nil {
 		return r, err
 	}
 	r.ExcludeFile = filepath.Join(commonDir, "info", "exclude")
@@ -62,21 +63,29 @@ func MainCheckout(path string) (repo, commonDir string, err error) {
 	return filepath.Dir(commonDir), commonDir, nil
 }
 
-func writeProfile(repo string) (bool, error) {
-	target := state.ProfilePath(repo)
+func writeProfile(repo string) (copiedFrom string, written bool, err error) {
+	target := state.RepoConfigPath(repo)
 	if _, err := os.Stat(target); err == nil {
-		return false, nil
+		return "", false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, err
+		return "", false, err
 	}
-	profile, err := detectProfile(repo)
-	if err != nil {
-		return false, err
+	legacy := state.LegacyProfilePath(repo)
+	profile, err := os.ReadFile(legacy)
+	switch {
+	case err == nil:
+		copiedFrom = legacy
+	case errors.Is(err, fs.ErrNotExist):
+		if profile, err = detectProfile(repo); err != nil {
+			return "", false, err
+		}
+	default:
+		return "", false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return false, err
+		return "", false, err
 	}
-	return true, os.WriteFile(target, profile, 0o644)
+	return copiedFrom, true, os.WriteFile(target, profile, 0o644)
 }
 
 func detectProfile(repo string) ([]byte, error) {

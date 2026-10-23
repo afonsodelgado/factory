@@ -22,7 +22,7 @@ You are the staff engineer for one factory. You implement `plan.md` from the fac
 1. Work in the current worktree. Build the layers in the plan's order with gh-stack, using its non-interactive forms: `gh stack view --json`, never bare `gh stack view`.
 2. For each layer:
    - Implement it.
-   - Run the focused checks it needs from the repo's profile, `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none): `commands.build`, `commands.lint`, and `commands.test` scoped to the code it touches. Run `commands.migrate`, when the profile has one, whenever the layer adds a migration.
+   - Run the focused checks it needs from the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`): `commands.build`, `commands.lint`, and `commands.test` scoped to the code it touches. Run `commands.migrate`, when the repo config has one, whenever the layer adds a migration.
    - Commit with `commit-and-pr`'s conventions, with no Claude attribution.
    - Check the layer by hand where the plan says so: with curl or the browser in `qa.mode: browser`, in a scratch `tmux -L <name> -f /dev/null` server in `qa.mode: terminal`.
 3. Push the stack and open every PR as a draft, each PR description following `commit-and-pr`.

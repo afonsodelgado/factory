@@ -71,6 +71,13 @@ func (l *Loader) Load() Snapshot {
 		}
 	}
 	supervisorHooks := withoutTokens(hooks, tokens)
+	stalledAfter := map[string]time.Duration{}
+	for _, f := range found {
+		if _, read := stalledAfter[f.Repo]; !read {
+			profile, _ := state.ReadProfile(f.Repo)
+			stalledAfter[f.Repo] = l.Config.WithProfile(profile).Stalled()
+		}
+	}
 	snap := Snapshot{At: now, Panes: panes, Hooks: hooks, StageTokens: tokens}
 	for _, f := range found {
 		f = l.keepLastGood(f)
@@ -82,7 +89,7 @@ func (l *Loader) Load() Snapshot {
 		l.rememberSession(f, paneHook(tokenOf(pane), hooks))
 		stage := runningStage(f, runs[f.Key()], panes, hooks)
 		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.hook()}
-		status := factory.StatusOf(f, live, now, l.Config.Stalled())
+		status := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		l.logHook(f, hook)
 		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Hook: hook, Pane: pane, Stage: stage})
 	}

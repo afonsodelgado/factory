@@ -126,7 +126,7 @@ func (m *NewFactoryModel) launch() factory.Launch {
 	name, stages := m.chosenPipeline()
 	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
 	if launch.Supervisor.OnClaude() {
-		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, m.Context.RemoteControl
+		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, repo.RemoteControl
 	}
 	return launch
 }
@@ -188,7 +188,7 @@ func (m *NewFactoryModel) toggle(stage string) {
 
 func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
 	if role == supervisorRole {
-		return m.Context.Supervisor
+		return m.selectedRepo().Supervisor
 	}
 	for _, a := range m.selectedRepo().Agents {
 		if a.Role == role {
@@ -653,12 +653,12 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
-	reason := "no --chrome: the " + repo.Name + " profile uses terminal QA."
+	reason := "no --chrome: " + repo.Name + "'s repo config uses terminal QA."
 	switch {
 	case !launch.Supervisor.OnClaude():
 		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
 	case repo.Browser:
-		reason = "--chrome because the " + repo.Name + " profile uses browser QA."
+		reason = "--chrome because " + repo.Name + "'s repo config uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
 }

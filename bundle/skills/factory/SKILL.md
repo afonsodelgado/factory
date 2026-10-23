@@ -66,9 +66,9 @@ the app reads the time in stage and the stall clock from these values. Remote co
 move the session to a new id in the middle of a session, so refresh `session_id` on every
 write, not only on start and resume.
 
-### The repo profile
+### The repo config
 
-Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and the stage agents read it; nothing else configures the pipeline. Read it in the current worktree; when it is absent there, read it from the main checkout, `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`. `factory init` writes it there without committing it, so worktrees usually do not have it.
+Each repo has `.factory/config.yml` (template: `templates/factory.yml`). You and the stage agents read it; nothing else configures the pipeline. Read it in the current worktree; when it is absent there, read it from the main checkout, `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`. The factory app writes it there the first time it runs in the repo, and `.factory/` is kept out of git, so worktrees usually do not have it. A repo set up before `.factory/` existed may have only `.claude/factory.yml`; read that when no `.factory/config.yml` exists.
 
 | Key | Meaning |
 |---|---|
@@ -82,8 +82,10 @@ Each repo has `.claude/factory.yml` (template: `templates/factory.yml`). You and
 | `qa.api_port`, `qa.web_port`, `qa.start`, `qa.health` | browser mode only: how the local stack runs |
 | `coderabbit` | `false` skips stage 6 |
 | `pipelines`, `default_pipeline` | optional; add or override pipeline presets for this repo (see "The pipeline") |
+| `agents` | optional; override the global agent settings for this repo (see "Agent tools and models") |
+| `supervisor`, `stalled_after`, `claude.remote_control`, `codex.writable_dirs` | optional; override the global config for this repo. The factory app reads them, not you |
 
-When it is missing in both places, stop at preflight and ask the user to run `factory init <main checkout>`.
+When it is missing everywhere, stop at preflight and ask the user to run `factory init <main checkout>`.
 
 ## Commands
 
@@ -101,13 +103,13 @@ A pipeline is a named list of stage keys (`references/state.md`). Resolve the pi
    - `full`: `[requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, handoff]`
    - `quick`: `[requirements, plan, implement, review, handoff]`
 2. Read `pipelines` and `default_pipeline` from the global config, `${FACTORY_CONFIG_DIR:-~/.config/factory}/config.yml`, when it exists. An entry replaces the built-in of the same name.
-3. Read `pipelines` and `default_pipeline` from the repo profile. Its entries and its `default_pipeline` win over the global config.
+3. Read `pipelines` and `default_pipeline` from the repo config. Its entries and its `default_pipeline` win over the global config.
 4. With `--stages a,b,c`, the list is those keys and the name is `custom`. Otherwise the name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
-5. Add `requirements` and `handoff` when the list omits them. When the profile says `coderabbit: false`, remove `coderabbit`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
+5. Add `requirements` and `handoff` when the list omits them. When the repo config says `coderabbit: false`, remove `coderabbit`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
 
 If the name is not a pipeline, a list holds a key that is not a stage key, or a config names a pipeline `custom`, stop at preflight and tell the user the file and the key.
 
-A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the profile says `coderabbit: false`.
+A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the repo config says `coderabbit: false`.
 
 ### Agent tools and models
 
@@ -115,25 +117,25 @@ Each stage agent has a role, its name without `factory-`: `analyst`, `designer`,
 
 1. the `model` and `effort` in the agent's own frontmatter, on `claude`
 2. `agents.<role>.tool`, `agents.<role>.model` and `agents.<role>.effort` in the global config
-3. the same keys in the repo profile
+3. the same keys in the repo config
 4. the `--agent role=model:effort` or `--agent role=tool/model:effort` arguments; either side of the colon may be empty, as in `--agent reviewer=:low`
 
 A layer that names a different tool replaces the model and effort too, since they belong to the tool. When that layer switches to `claude` without naming a model or effort, they come from the agent's frontmatter; when it switches to `codex` or `opencode` without them, leave them empty and the factory app uses that tool's default when it starts the stage. On `claude`, models are `haiku`, `sonnet`, `opus` and `fable`, and efforts are `low`, `medium`, `high`, `xhigh` and `max`; Codex and OpenCode models are checked by the factory app when it starts the stage. `qa` runs only on `claude`. An unknown role, tool, claude model or effort stops preflight; tell the user the file and the key.
 
-Write every role to `state.agents`, including the ones that run on their frontmatter, as `{"engineer": {"tool": "codex", "model": "gpt-5.6-sol", "effort": "high"}, "reviewer": {"tool": "claude", "model": "opus", "effort": "high"}, …}`, with every field of each role. Write the result of all four layers, not only the `--agent` arguments: a profile's setting must reach the spawn too. The factory app starts `codex` and `opencode` roles from `state.agents`; a role missing there runs as the app resolved it when the factory was created, never as the config says today.
+Write every role to `state.agents`, including the ones that run on their frontmatter, as `{"engineer": {"tool": "codex", "model": "gpt-5.6-sol", "effort": "high"}, "reviewer": {"tool": "claude", "model": "opus", "effort": "high"}, …}`, with every field of each role. Write the result of all four layers, not only the `--agent` arguments: a repo config's setting must reach the spawn too. The factory app starts `codex` and `opencode` roles from `state.agents`; a role missing there runs as the app resolved it when the factory was created, never as the config says today.
 
 **On every spawn of a claude role, pass its `model` and `effort` to the Agent tool.** This is the user's explicit instruction to set the effort level. It covers fresh spawns after a restart and the retry after a failure. SendMessage keeps the agent's settings. For design variants, the Workflow tool's `agent()` takes no model or effort, so when the designer's model or effort in `state.agents` differs from its frontmatter, spawn the variants as parallel Agent calls in one message instead of a workflow.
 
 ## Start
 
-1. **Preflight.** Read the profile, then run these checks and stop with a clear message if one fails:
+1. **Preflight.** Read the repo config, then run these checks and stop with a clear message if one fails:
    - `gh auth status` succeeds.
    - The working tree is clean. Untracked tool caches do not count: ignore `?? .impeccable/` and `?? .revmux/` lines in `git status --porcelain`.
    - In `qa.mode: browser` only: browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome --remote-control` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
    - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
-   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
+   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the repo config's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
    - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead. When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
    - **The agents.** Resolve them (see "Agent models") and write `agents`.
 3. Tell the user the plan in three lines: the pipeline and the stages it skips, the agents that do not run on their defaults, which gates need them, and that everything after the plan runs unattended until handoff.
@@ -218,7 +220,7 @@ Spawn `factory-reviewer` with the PR list. It runs revmux in loop mode and pushe
 
 ### 6 · coderabbit (dark, bounded at `limits.coderabbit_rounds`)
 
-When the profile says `coderabbit: false`, mark the stage `skipped` with the reason "no CodeRabbit on this repo" and go to stage 7.
+When the repo config says `coderabbit: false`, mark the stage `skipped` with the reason "no CodeRabbit on this repo" and go to stage 7.
 
 1. Mark the PRs ready, bottom first: `gh pr ready <n>`.
 2. Wait without spending model turns. Write `waiting_on: "ci"`, then run `scripts/wait-for-review.sh --dir <factory dir> <pr numbers…>` with Bash `run_in_background: true`. It exits once CodeRabbit and CI have finished on every PR, or on its timeout, and touches `<factory dir>/.heartbeat` on every poll so the app does not read the wait as a stall. You get one notification.
@@ -229,7 +231,7 @@ When the profile says `coderabbit: false`, mark the stage `skipped` with the rea
 ### 7 · qa (dark)
 
 1. **Brief.** SendMessage the engineer from stage 4, using its recorded id, to run `/qa-brief-factory`: it still holds what it verified by hand. If it cannot be reached, spawn a fresh `factory-engineer` in brief-only mode on the state files.
-2. **Test.** Spawn `factory-qa`. It runs the `qa-factory` skill in factory mode, in the profile's `qa.mode`: the charter goes to the report and testing starts without waiting. It returns the report path, and `data.findings` counts blockers, majors and minors.
+2. **Test.** Spawn `factory-qa`. It runs the `qa-factory` skill in factory mode, in the repo config's `qa.mode`: the charter goes to the report and testing starts without waiting. It returns the report path, and `data.findings` counts blockers, majors and minors.
 3. **No findings:** go to stage 9. **Findings:** go to stage 8.
 
 ### 8 · qa-fixes (dark, bounded at `limits.qa_rounds`)

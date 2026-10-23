@@ -212,11 +212,12 @@ func (m *Model) sendStage(it Item, runs *state.StageRuns, r StageRequest) (Stage
 	return m.record(it, runs, run, "resumed")
 }
 
-func (m *Model) writableDirs(dir string, setting state.AgentSetting) []string {
+func (m *Model) writableDirs(repo string, setting state.AgentSetting) []string {
 	if setting.ToolName() != state.ToolCodex {
 		return nil
 	}
-	return codexWritableDirs(dir, m.Config.Codex.WritableDirs)
+	cfg, _ := m.repoConfig(repo)
+	return codexWritableDirs(repo, cfg.Codex.WritableDirs)
 }
 
 func supervisorEnv(supervisor state.AgentSetting) []string {
@@ -289,12 +290,12 @@ func (m *Model) record(it Item, runs *state.StageRuns, run state.StageRun, verb 
 
 func (m *Model) stageLaunch(it Item, run state.StageRun, sessionID string) factory.StageLaunch {
 	launch := factory.StageLaunch{Setting: run.Setting, Kickoff: kickoffFor(run), SessionID: sessionID}
+	cfg, profile := m.repoConfig(it.Factory.Repo)
 	if run.Role == "qa" {
-		profile, _ := state.ReadProfile(it.Factory.Repo)
 		launch.Chrome = profile.BrowserQA()
 	}
 	if run.Setting.ToolName() == state.ToolCodex {
-		launch.AddDirs = codexWritableDirs(it.Factory.Worktree, m.Config.Codex.WritableDirs)
+		launch.AddDirs = codexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)
 	}
 	return launch
 }

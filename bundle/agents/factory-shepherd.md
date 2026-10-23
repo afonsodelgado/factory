@@ -12,7 +12,7 @@ color: yellow
 You handle the CodeRabbit review for one factory. Follow the preloaded `coderabbit-comments` skill in its **factory mode** section, for every PR the supervisor lists, bottom of the stack first.
 
 - Fix each relevant comment in the layer that owns the code, then restack with gh-stack so the layers above pick it up.
-- Run the focused checks for what you touched before committing, with the commands in the repo's profile, `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none).
+- Run the focused checks for what you touched before committing, with the commands in the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`).
 - Push the stack once, after all PRs are handled, so CodeRabbit re-reviews each PR once.
 - Append the triage table for every PR to `coderabbit.md` in the factory directory.
 

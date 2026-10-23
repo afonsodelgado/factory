@@ -328,9 +328,14 @@ func (m *Model) planWakes() {
 		if !it.Status.Asleep() {
 			continue
 		}
-		profile, _ := state.ReadProfile(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
+		cfg, profile := m.repoConfig(it.Factory.Repo)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	}
+}
+
+func (m *Model) repoConfig(repo string) (*state.Config, state.Profile) {
+	profile, _ := state.ReadProfile(repo)
+	return m.Config.WithProfile(profile), profile
 }
 
 func containsKey(rows []selector.Row, key string) bool {

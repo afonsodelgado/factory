@@ -265,7 +265,7 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	if err != nil || profile.Commands.Build != "go build ./..." || profile.QA.Mode != "terminal" || profile.CodeRabbit == nil || *profile.CodeRabbit {
 		t.Errorf("profile for a go.mod repo reads as %+v, %v; want go commands, terminal QA and CodeRabbit off", profile, err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".claude", "factory.yml"), []byte("edited\n"), 0o644); err != nil {
+	if err := os.WriteFile(state.RepoConfigPath(repo), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,7 +278,7 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	if second.Changed() {
 		t.Errorf("second init from a worktree changed %+v; want nothing changed", second)
 	}
-	if profile, _ := os.ReadFile(filepath.Join(repo, ".claude", "factory.yml")); string(profile) != "edited\n" {
+	if profile, _ := os.ReadFile(state.RepoConfigPath(repo)); string(profile) != "edited\n" {
 		t.Errorf("second init overwrote the edited profile with:\n%s", profile)
 	}
 	exclude, _ := os.ReadFile(filepath.Join(repo, ".git", "info", "exclude"))
@@ -291,5 +291,25 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	}
 	if out, _ := exec.Command("git", "-C", repo, "status", "--porcelain").Output(); len(out) != 0 {
 		t.Errorf("init left the repo dirty, so the factory's clean-tree preflight fails:\n%s", out)
+	}
+}
+
+func TestInitCarriesARepoConfigFromBeforeTheFactoryDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+	git(t, repo, "init", "-q")
+	os.MkdirAll(filepath.Dir(state.LegacyProfilePath(repo)), 0o755)
+	os.WriteFile(state.LegacyProfilePath(repo), []byte("commands: {build: make build}\nqa: {mode: browser}\n"), 0o644)
+
+	r, err := Init(repo, filepath.Join(t.TempDir(), "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, _ := state.ReadProfile(repo)
+	if r.CopiedFrom == "" || profile.Commands.Build != "make build" || !profile.BrowserQA() {
+		t.Errorf("init over .claude/factory.yml gave %+v and reads %+v; want it copied, or a generic config replaces the repo's commands and QA mode", r, profile)
+	}
+	if _, err := os.Stat(state.LegacyProfilePath(repo)); err != nil {
+		t.Errorf("init removed .claude/factory.yml (%v); factories already running there still read it", err)
 	}
 }
