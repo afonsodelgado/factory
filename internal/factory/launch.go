@@ -72,9 +72,14 @@ func (l Launch) flags() []string {
 	return flags
 }
 
+const openCodeSkillCommand = "Use the factory skill for: /factory"
+
 func SkillCommand(tool string) string {
-	if tool == state.ToolCodex {
+	switch tool {
+	case state.ToolCodex:
 		return "$factory"
+	case state.ToolOpenCode:
+		return openCodeSkillCommand
 	}
 	return "/factory"
 }

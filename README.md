@@ -146,7 +146,7 @@ In the dialog's "Stages & agents" step, `t` cycles a row's tool, and the top row
 
 A role on another tool runs in its own pane, and while it works the hub splits the session view and shows it beside the supervisor; the split closes when the stage writes its result. The supervisor starts and follows up with these roles through `factory stage`. Codex runs each stage unattended, in a sandbox that may write the worktree, the repo's git dir and the caches above, and reach the network.
 
-With a Claude supervisor nothing else changes: `claude` roles are still subagents, and designs and plans are still artifacts you comment on. With a Codex or OpenCode supervisor, designs and plans stay as HTML files in the factory directory, listed in the panel's Artifacts tab, and you give feedback in the session or from the panel.
+With a Claude supervisor nothing else changes: `claude` roles are still subagents, and designs and plans are still artifacts you comment on. With a Codex or OpenCode supervisor, designs and plans stay as HTML files in the factory directory, listed in the panel's Artifacts tab, and you give feedback in the session or from the panel. OpenCode has no `/factory` command: it reads the factory skill from `~/.claude/skills`, so the app sends it `Use the factory skill for: /factory …` instead.
 
 Your coding rules go in `~/.config/factory/rules.md` (or `$FACTORY_CONFIG_DIR/rules.md`). Every stage agent receives them, on every tool, before the repo's own `AGENTS.md` and `CLAUDE.md`.
 
