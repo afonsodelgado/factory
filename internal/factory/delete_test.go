@@ -105,11 +105,17 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 		t.Errorf("work = %+v; want notes.md uncommitted and stack-1 and stack-2 unpushed, or delete skips the second confirmation and loses them", work)
 	}
 
-	gitRun(t, repo, "worktree", "lock", worktree)
-	if _, stopped := FirstFailure(Run(r, update)); !stopped || registry.Find(repo, "eng-5-x") == nil {
-		t.Fatal("a delete that failed on a locked worktree left no registry entry, so nothing can find the factory to finish it")
+	gitRun(t, repo, "worktree", "lock", "--reason", "claude session eng-5-x (pid 1)", worktree)
+	if err := os.Chmod(cfg.ActivityDir(), 0o500); err != nil {
+		t.Fatal(err)
 	}
-	gitRun(t, repo, "worktree", "unlock", worktree)
+	t.Cleanup(func() { os.Chmod(cfg.ActivityDir(), 0o755) })
+	if _, stopped := FirstFailure(Run(r, update)); !stopped || registry.Find(repo, "eng-5-x") == nil {
+		t.Fatal("a delete that failed on an undeletable activity log left no registry entry, so nothing can find the factory to finish it")
+	}
+	if err := os.Chmod(cfg.ActivityDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	steps := Run(r, update)
 	if failed, ok := FirstFailure(steps); ok {

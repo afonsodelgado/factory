@@ -209,7 +209,7 @@ func removeWorktree(r Removal) RemovalStep {
 	step := RemovalStep{Name: "remove worktree", Detail: r.Worktree, State: Skipped}
 	if dirExists(r.Worktree) {
 		step.State = Ran
-		if out, err := git(r.Repo, "worktree", "remove", "--force", r.Worktree); err != nil {
+		if out, err := git(r.Repo, "worktree", "remove", "--force", "--force", r.Worktree); err != nil {
 			step.State, step.Err = Failed, fmt.Errorf("git worktree remove: %s", out)
 		}
 	}
