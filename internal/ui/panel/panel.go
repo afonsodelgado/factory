@@ -381,10 +381,13 @@ func sendStatus(v View, w int) []line {
 	lines := []line{text(strings.Repeat("─", max(w, 0)), theme.Line)}
 	switch {
 	case v.Send.Refused != "":
-		return append(lines, warning("Not sent. "+v.Send.Refused+" Draft kept.", w)...)
+		return append(lines, warning(v.Send.Refused+" Draft kept.", w)...)
+	case !v.Send.ReceivedAt.IsZero():
+		received := text("✓ Received by the supervisor at "+v.Send.ReceivedAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
+		return append(lines, received, hints("ctrl+d", "clear and answer again"))
 	case !v.Send.SentAt.IsZero():
-		sent := text("✓ Sent at "+v.Send.SentAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
-		return append(lines, sent, hints("ctrl+d", "clear and answer again"))
+		waiting := text("Sent at "+v.Send.SentAt.Local().Format("15:04")+", waiting for the supervisor to receive it…", theme.Muted)
+		return append(lines, waiting, hints("ctrl+d", "clear and answer again"))
 	case v.Send.Ready:
 		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
 	}

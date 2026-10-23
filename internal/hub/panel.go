@@ -33,7 +33,16 @@ type panelState struct {
 type sentMark struct {
 	at        time.Time
 	itemSince time.Time
+	factory   string
+	itemID    string
+	head      string
+	draft     string
+	received  time.Time
 }
+
+const receiptWait = 10 * time.Second
+
+const notReceived = "Not received by the supervisor. The session is probably showing a stage agent's transcript: open the session (esc, then ⏎), leave that view, then send again."
 
 func (m *Model) forgetClosedItems() {
 	open := map[string]time.Time{}
@@ -48,6 +57,7 @@ func (m *Model) forgetClosedItems() {
 		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.itemSince) {
 			delete(m.panel.sent, key)
 			delete(m.panel.drafts, key)
+			os.Remove(mark.draft)
 		}
 	}
 	for key := range m.panel.refused {
@@ -55,6 +65,42 @@ func (m *Model) forgetClosedItems() {
 			delete(m.panel.refused, key)
 		}
 	}
+}
+
+func (m *Model) checkReceipts() {
+	for key, mark := range m.panel.sent {
+		if !mark.received.IsZero() {
+			continue
+		}
+		var submit *state.HookEvent
+		if it, ok := m.snap.Find(mark.factory); ok && it.Hook != nil {
+			submit = it.Hook.Submit
+		}
+		switch {
+		case mark.receivedIn(submit):
+			mark.received = submit.At
+			m.panel.sent[key] = mark
+			os.Remove(mark.draft)
+		case mark.misroutedIn(submit) || m.snap.At.Sub(mark.at) > receiptWait:
+			delete(m.panel.sent, key)
+			m.panel.refused[key] = notReceived
+			if it, ok := m.snap.Find(mark.factory); ok && m.Loader != nil {
+				m.Loader.Note(it.Factory, "answer to "+mark.itemID+" did not reach the supervisor")
+			}
+		}
+	}
+}
+
+func (s sentMark) receivedIn(submit *state.HookEvent) bool {
+	if submit == nil || submit.AgentID != "" || submit.At.Before(s.at) {
+		return false
+	}
+	headIsText := submit.PromptHead != "" && !strings.HasPrefix(submit.PromptHead, "[Pasted text")
+	return !headIsText || submit.PromptHead == s.head
+}
+
+func (s sentMark) misroutedIn(submit *state.HookEvent) bool {
+	return submit != nil && submit.AgentID != "" && !submit.At.Before(s.at)
 }
 
 func (m *Model) isSent(f factory.Factory, item panel.Item) bool {
@@ -333,18 +379,20 @@ func (m *Model) deliver(action string) {
 	if unanswered(item, d) != "" {
 		return
 	}
-	reason, err := Deliver(m.Typist, m.freshTarget(it), m.message(item, d, action))
+	sentAt := m.Now()
+	text := m.message(item, d, action)
+	reason, err := Deliver(m.Typist, m.freshTarget(it), text)
 	if err != nil {
 		reason = err.Error()
 	}
 	if reason != "" {
-		m.panel.refused[key] = reason
+		m.panel.refused[key] = "Not sent. " + reason
 		m.saveDraft()
 		return
 	}
 	delete(m.panel.refused, key)
-	m.panel.sent[key] = sentMark{at: m.Now(), itemSince: item.Since}
-	os.Remove(m.draftPath(it.Factory, item.ID))
+	m.saveDraft()
+	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID)}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
@@ -405,7 +453,8 @@ func (m *Model) panelView() panel.View {
 
 func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	key := draftKey(it.Factory, item.ID)
-	s := panel.Send{Refused: m.panel.refused[key], SentAt: m.panel.sent[key].at}
+	mark := m.panel.sent[key]
+	s := panel.Send{Refused: m.panel.refused[key], SentAt: mark.at, ReceivedAt: mark.received}
 	if missing := unanswered(item, d); missing != "" {
 		s.Reason = missing
 		return s

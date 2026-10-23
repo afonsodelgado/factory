@@ -47,6 +47,9 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 		t.Fatalf("bundled agents = %d, want 8", len(agents))
 	}
 	for _, agent := range agents {
+		if body, _ := fs.ReadFile(Files, agent); !bytes.Contains(body, []byte("in a `misrouted-message` fenced block")) {
+			t.Errorf("%s has no misrouted-message rule: a panel answer that reaches it instead of the supervisor is lost", agent)
+		}
 		for _, skill := range readFrontmatter(t, agent).Skills {
 			path := "skills/" + skill + "/SKILL.md"
 			if _, err := fs.Stat(Files, path); err != nil {

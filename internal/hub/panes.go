@@ -3,8 +3,11 @@ package hub
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -176,11 +179,16 @@ type NewPane struct {
 }
 
 func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
-	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: n.Env, Command: loginShell()})
+	token := uuid.NewString()
+	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token})
+	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
 	}
 	if err := e.Tag(pane, n.Repo, n.Slug, n.Title); err != nil {
+		return pane, err
+	}
+	if err := e.TM.SetPaneOption(pane, "@factory_token", token); err != nil {
 		return pane, err
 	}
 	return pane, e.FitParking(l)

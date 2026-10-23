@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -13,10 +14,14 @@ type HookFile struct {
 	SessionID      string         `json:"session_id"`
 	CWD            string         `json:"cwd"`
 	TranscriptPath string         `json:"transcript_path"`
+	Token          string         `json:"token,omitempty"`
 	Main           *HookEvent     `json:"main,omitempty"`
 	Last           HookEvent      `json:"last"`
+	Submit         *HookEvent     `json:"submit,omitempty"`
 	Prompt         *PendingPrompt `json:"prompt,omitempty"`
 }
+
+const promptHeadLength = 120
 
 type PendingPrompt struct {
 	At      time.Time `json:"at"`
@@ -25,11 +30,12 @@ type PendingPrompt struct {
 }
 
 type HookEvent struct {
-	Event     string    `json:"event"`
-	Matcher   string    `json:"matcher,omitempty"`
-	At        time.Time `json:"at"`
-	AgentID   string    `json:"agent_id,omitempty"`
-	AgentType string    `json:"agent_type,omitempty"`
+	Event      string    `json:"event"`
+	Matcher    string    `json:"matcher,omitempty"`
+	At         time.Time `json:"at"`
+	AgentID    string    `json:"agent_id,omitempty"`
+	AgentType  string    `json:"agent_type,omitempty"`
+	PromptHead string    `json:"prompt_head,omitempty"`
 }
 
 type hookPayload struct {
@@ -43,6 +49,7 @@ type hookPayload struct {
 	NotificationType string `json:"notification_type"`
 	ToolName         string `json:"tool_name"`
 	Reason           string `json:"reason"`
+	Prompt           string `json:"prompt"`
 }
 
 func (p hookPayload) matcher() string {
@@ -93,6 +100,18 @@ func nextPrompt(pending *PendingPrompt, p hookPayload, now time.Time) *PendingPr
 	return pending
 }
 
+var pastedMarker = regexp.MustCompile(`</?pasted_content[^>]*>`)
+
+func PromptHead(prompt string) string {
+	unwrapped := pastedMarker.ReplaceAllString(prompt, "\n")
+	for _, line := range strings.Split(unwrapped, "\n") {
+		if runes := []rune(strings.TrimSpace(line)); len(runes) > 0 {
+			return string(runes[:min(len(runes), promptHeadLength)])
+		}
+	}
+	return ""
+}
+
 func IsFactoryDir(cwd string) bool {
 	if strings.Contains(cwd, string(filepath.Separator)+filepath.Join(".claude", "worktrees")+string(filepath.Separator)) {
 		return true
@@ -101,7 +120,7 @@ func IsFactoryDir(cwd string) bool {
 	return err == nil && info.IsDir()
 }
 
-func RecordHook(stateDir string, payload []byte, now time.Time) error {
+func RecordHook(stateDir string, payload []byte, token string, now time.Time) error {
 	var p hookPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
@@ -125,6 +144,13 @@ func RecordHook(stateDir string, payload []byte, now time.Time) error {
 		file = &HookFile{}
 	}
 	event := HookEvent{Event: p.HookEventName, Matcher: p.matcher(), At: now, AgentID: p.AgentID, AgentType: p.AgentType}
+	if p.HookEventName == "UserPromptSubmit" {
+		event.PromptHead = PromptHead(p.Prompt)
+		file.Submit = &event
+	}
+	if token != "" {
+		file.Token = token
+	}
 	file.SessionID = p.SessionID
 	file.CWD = p.CWD
 	file.TranscriptPath = p.TranscriptPath

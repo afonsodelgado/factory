@@ -97,21 +97,33 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	gate := state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 	unrecommended := state.Attention{ID: "q-7452-2", Kind: "question", Title: "1 question", Questions: []string{"Which region?"}, CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 
+	type later struct {
+		after  time.Duration
+		submit *state.HookEvent
+		keys   []string
+	}
+	received := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
+	misrouted := &state.HookEvent{Event: "UserPromptSubmit", AgentID: "a1", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
+
 	cases := []struct {
 		name  string
 		item  *state.Attention
 		hook  string
 		keys  []string
+		later []later
 		typed int
 		shows string
 		hides string
 	}{
-		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, 0, "Not sent.", ""},
-		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, 1, "Sent at", ""},
-		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), 0, "change the colour", ""},
-		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, 1, "Sent at", ""},
-		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, 1, "Sent at", "xxx"},
-		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, 0, "Question 1 has no recommended answer", ""},
+		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Not sent.", ""},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sent at", ""},
+		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", ""},
+		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", ""},
+		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx"},
+		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", ""},
+		{"the supervisor's own submit confirms the answer", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil}}, 1, "Received by the supervisor", "waiting"},
+		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil}}, 1, "Not received by the supervisor", "Received"},
+		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}}}, 2, "waiting for the supervisor", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -124,6 +136,13 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 			model.SetSnapshot(snap)
 			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
 			panelKeys(tm, c.keys...)
+			for _, l := range c.later {
+				next := questionFactory(c.hook, now)
+				next.At = now.Add(l.after)
+				next.Items[0].Hook.Submit = l.submit
+				tm.Send(snapshotMsg(next))
+				panelKeys(tm, l.keys...)
+			}
 			if err := tm.Quit(); err != nil {
 				t.Fatal(err)
 			}

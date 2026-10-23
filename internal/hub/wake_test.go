@@ -13,6 +13,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
@@ -49,6 +50,27 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), state.Profile{}, false, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
+	}
+}
+
+func TestThePanesOwnSessionIsLiveAfterTheBridgeContinuesIt(t *testing.T) {
+	worktree := "/r/factory/.claude/worktrees/release-0-2"
+	at := time.Date(2026, 10, 23, 10, 22, 0, 0, time.UTC)
+	frozen := &state.HookFile{SessionID: "57bcd935", CWD: worktree, Main: &state.HookEvent{Event: "Stop", At: at.Add(-10 * time.Minute)}, Last: state.HookEvent{Event: "Stop", At: at.Add(-10 * time.Minute)}}
+	live := &state.HookFile{SessionID: "06c7ff87", CWD: worktree, Token: "t1", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}
+	hooks := []*state.HookFile{frozen, live}
+	pane := &tmux.Pane{ID: "%5", Command: "claude", Token: "t1"}
+	f := factory.Factory{Repo: "/r/factory", Slug: "release-0-2", Worktree: worktree, Entry: &state.Entry{SessionID: "57bcd935"}, State: &state.State{SessionID: "57bcd935"}}
+
+	hook := hookFor(f, pane.Token, hooks)
+	if hook != live {
+		t.Fatalf("hookFor read session %s; want the pane's own 06c7ff87, or status and delivery read a file frozen since remote control continued the session", hook.SessionID)
+	}
+	if reason := Refusal(Target{Label: "release-0-2", Pane: pane, Hook: hook}); !strings.Contains(reason, "busy") {
+		t.Errorf("refusal = %q; want busy, because the live session is working on a prompt", reason)
+	}
+	if id, _ := SessionFor(f, pane.Token, hooks); id != "06c7ff87" {
+		t.Errorf("wake resumes %s; want the live 06c7ff87, not the transcript from before the bridge continued it", id)
 	}
 }
 

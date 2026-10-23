@@ -216,6 +216,7 @@ func (m *Model) apply(s Snapshot) {
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
 	m.forgetClosedItems()
+	m.checkReceipts()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {

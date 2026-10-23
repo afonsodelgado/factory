@@ -54,7 +54,7 @@ func run(args []string) int {
 func runHook(stdin io.Reader) int {
 	payload, err := io.ReadAll(stdin)
 	if err == nil {
-		state.RecordHook(state.StateDir(), payload, time.Now())
+		state.RecordHook(state.StateDir(), payload, os.Getenv("FACTORY_PANE_TOKEN"), time.Now())
 	}
 	return 0
 }

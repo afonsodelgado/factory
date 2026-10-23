@@ -18,7 +18,7 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 
 	record := func(payload string, now time.Time) {
 		t.Helper()
-		if err := RecordHook(stateDir, []byte(payload), now); err != nil {
+		if err := RecordHook(stateDir, []byte(payload), "", now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,6 +65,16 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 		if pending := file.Prompt != nil; pending != step.pending {
 			t.Errorf("after step %d (%s) a prompt is pending = %v, want %v: %s", i+1, step.event, pending, step.pending, step.regression)
 		}
+	}
+
+	pasted := `{"session_id":"s1","cwd":"` + worktree + `","hook_event_name":"UserPromptSubmit","prompt":"<pasted_content id=\"1\">\nq-1-1 answers:\n1) recommended\n</pasted_content id=\"1\">"}`
+	record(pasted, at.Add(time.Hour))
+	file, err = ReadHookFile(filepath.Join(SessionsDir(stateDir), "s1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Submit == nil || file.Submit.PromptHead != "q-1-1 answers:" {
+		t.Errorf("submit = %+v; want the head of the pasted answer, or the panel never sees the supervisor receive it", file.Submit)
 	}
 }
 
