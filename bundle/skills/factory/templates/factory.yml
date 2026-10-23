@@ -1,0 +1,17 @@
+commands:
+  build: npm run build
+  lint: npm run lint
+  test: npm run test
+  migrate: npm run db:migrate
+codebase_skill: ""
+design:
+  source: web
+  files: [DESIGN.md]
+qa:
+  mode: browser
+  notes: ""
+  api_port: 3000
+  web_port: 3001
+  start: npm run dev
+  health: http://localhost:3000/api/health
+coderabbit: true
