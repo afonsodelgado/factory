@@ -49,9 +49,10 @@ type NewContext struct {
 }
 
 type ToolOption struct {
-	Name    string          `json:"name"`
-	Models  []catalog.Model `json:"models,omitempty"`
-	Problem string          `json:"problem,omitempty"`
+	Name    string             `json:"name"`
+	Models  []catalog.Model    `json:"models,omitempty"`
+	Default state.AgentSetting `json:"default,omitzero"`
+	Problem string             `json:"problem,omitempty"`
 }
 
 type NewResult struct {

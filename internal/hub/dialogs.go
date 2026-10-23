@@ -311,6 +311,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err := catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor)); err != nil {
 		return err
 	}
+	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)

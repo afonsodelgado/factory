@@ -171,6 +171,7 @@ func (m *Model) startStage(it Item, runs *state.StageRuns, r StageRequest) (Stag
 	if err != nil {
 		return StageReply{}, err
 	}
+	setting = catalog.Local(m.Config.StateDir).WithDefault(setting)
 	if err := runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
 	}

@@ -115,10 +115,45 @@ func TestNewFactorySwitchesRolesToCodexButKeepsQAOnClaude(t *testing.T) {
 
 	r, _ := m.Result()
 	want := NewResult{Repo: "/r/cowork", Slug: "csv", Prompt: "Export contacts.", Pipeline: m.pipelineName(),
-		Agents:     map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}},
+		Agents:     map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol", Effort: "high"}},
 		Supervisor: state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-5.6-sol", Effort: "low"},
 	}
 	if !reflect.DeepEqual(r, want) {
 		t.Errorf("switching the engineer and supervisor to codex and pressing t on qa started\n%+v\nwant\n%+v\nQA drives Chrome and must stay on claude, and a tool that is not installed must never be picked", r, want)
+	}
+}
+
+func TestCyclingARolesToolPicksThatToolsDefaultModelAndEffort(t *testing.T) {
+	codex := ToolOption{Name: state.ToolCodex, Default: state.AgentSetting{Model: "gpt-6-luna", Effort: "xhigh"}, Models: []catalog.Model{
+		{ID: "gpt-5.6-sol", Efforts: []string{"low", "high"}},
+		{ID: "gpt-6-luna", Efforts: []string{"low", "medium", "max"}},
+	}}
+	openCode := ToolOption{Name: state.ToolOpenCode, Models: []catalog.Model{{ID: "flint-40b-free", Efforts: []string{"low", "high", "max"}}}}
+	agents := state.ResolveAgents(&state.Config{Agents: map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex}}}, state.Profile{}, nil)
+	repo := RepoOption{Name: "cowork", Path: "/r/cowork"}
+	for _, role := range state.AgentRoles {
+		repo.Agents = append(repo.Agents, AgentOption{Role: role, AgentSetting: agents[role]})
+	}
+	m := NewFactory(NewContext{Repos: []RepoOption{repo}, Tools: []ToolOption{{Name: state.ToolClaude, Models: catalog.Claude()}, codex, openCode}})
+	m.step = 2
+	tool := func(stage string) state.AgentSetting {
+		m.row = firstStageRow + slices.Index(state.StageKeys, stage)
+		m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+		return m.agent(state.RoleOf(stage))
+	}
+
+	steps := []struct {
+		stage, why string
+		want       state.AgentSetting
+	}{
+		{"review", "codex's configured model, at its highest effort up to high", state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-6-luna", Effort: "medium"}},
+		{"review", "the first free model, at its highest variant up to high", state.AgentSetting{Tool: state.ToolOpenCode, Model: "flint-40b-free", Effort: "high"}},
+		{"implement", "the same, from a codex default", state.AgentSetting{Tool: state.ToolOpenCode, Model: "flint-40b-free", Effort: "high"}},
+		{"implement", "the engineer's frontmatter, not the first claude model", state.AgentSetting{Tool: state.ToolClaude, Model: "opus", Effort: "xhigh"}},
+	}
+	for _, s := range steps {
+		if got := tool(s.stage); got != s.want {
+			t.Errorf("t on %s gave %+v; want %+v: %s", s.stage, got, s.want, s.why)
+		}
 	}
 }

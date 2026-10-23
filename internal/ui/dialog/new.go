@@ -272,7 +272,7 @@ func (m *NewFactoryModel) agentProblem() string {
 		if tool.Problem != "" {
 			continue
 		}
-		if err := catalog.Check("this factory", role, setting, tool.Models, state.AgentSetting{}); err != nil {
+		if err := catalog.Check("this factory", role, setting, tool.Models, tool.Default); err != nil {
 			return err.Error()
 		}
 	}
@@ -294,11 +294,17 @@ func (m *NewFactoryModel) cycleTool(role string) {
 		m.setOverride(role, func(o *state.AgentSetting) { *o = state.AgentSetting{} })
 		return
 	}
-	switched := state.AgentSetting{Tool: next}
-	if models := m.models(next); len(models) > 0 {
-		switched.Model = models[0]
-	}
+	switched := m.switchedTo(role, next)
 	m.setOverride(role, func(o *state.AgentSetting) { *o = switched })
+}
+
+func (m *NewFactoryModel) switchedTo(role, tool string) state.AgentSetting {
+	fallback := state.DefaultAgents[role]
+	if tool != state.ToolClaude {
+		option := m.tool(tool)
+		fallback = catalog.ToolDefault(option.Models, option.Default)
+	}
+	return state.AgentSetting{Tool: tool, Model: fallback.Model, Effort: fallback.Effort}
 }
 
 func (m *NewFactoryModel) cycleModel(role string) {
