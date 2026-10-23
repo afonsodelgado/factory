@@ -21,8 +21,9 @@ func run(args []string) int {
 	}
 	switch args[0] {
 	case "--version", "version":
-		fmt.Println(version)
-		return 0
+		return runVersion()
+	case "update":
+		return runUpdate(args[1:])
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return 0
@@ -72,10 +73,11 @@ commands:
   bootstrap   install the bundled skills, agents and hooks into the Claude config
   install-hooks [--remove]
               add (or remove) only the factory hooks in settings.json
+  version     print the version and the latest release (also --version)
+  update      install the latest release, then run its bootstrap
   hub         run the hub in the factory tmux session
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a Claude Code hook event (run by Claude Code)
-  --version   print the version
 `)
 }
