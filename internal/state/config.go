@@ -21,8 +21,9 @@ type Config struct {
 	Claude       Claude   `yaml:"claude"`
 	Tmux         Tmux     `yaml:"tmux"`
 
-	Pipelines       map[string][]string `yaml:"pipelines"`
-	DefaultPipeline string              `yaml:"default_pipeline"`
+	Pipelines       map[string][]string     `yaml:"pipelines"`
+	DefaultPipeline string                  `yaml:"default_pipeline"`
+	Agents          map[string]AgentSetting `yaml:"agents"`
 
 	ConfigDir string `yaml:"-"`
 	StateDir  string `yaml:"-"`
@@ -65,6 +66,9 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("%s: stalled_after %q is not a duration; write it with a unit, such as 30m", path, cfg.StalledAfter)
 	}
 	if err := cfg.validatePipelines(path); err != nil {
+		return nil, err
+	}
+	if err := ValidateAgents(path, cfg.Agents); err != nil {
 		return nil, err
 	}
 	cfg.applyDefaults()

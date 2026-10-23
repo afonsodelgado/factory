@@ -120,11 +120,19 @@ func repoChecks(o Options) []Check {
 		if o.Config == nil {
 			continue
 		}
-		if _, err := o.Config.PipelinesFor(repo); err != nil {
+		if err := profileProblem(o.Config, repo); err != nil {
 			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": the profile does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks
+}
+
+func profileProblem(cfg *state.Config, repo string) error {
+	if _, err := cfg.PipelinesFor(repo); err != nil {
+		return err
+	}
+	_, err := cfg.AgentsFor(repo)
+	return err
 }
 
 func tool(name, minimum, command string, args []string, fix string) Check {
