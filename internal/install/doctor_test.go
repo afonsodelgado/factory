@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -82,6 +83,18 @@ func TestDoctorReportsWhatIsMissingWithTheFix(t *testing.T) {
 	}
 	if problems < 9 || !strings.Contains(out.String(), "fix  gh extension install github/gh-stack") {
 		t.Errorf("report:\n%s", out.String())
+	}
+
+	if runtime.GOOS != "darwin" {
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "pacman"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin)
+		if fix := find(Doctor(o), "gh").Fix; !strings.HasPrefix(fix, "sudo pacman -S --needed --noconfirm github-cli") {
+			t.Errorf("gh fix on Arch = %q; want pacman installing github-cli, not apt-get", fix)
+		}
+		t.Setenv("PATH", "")
 	}
 
 	plan, err := NewPlan(dir, o.Binary)
