@@ -4,9 +4,6 @@ import {
   REPOS,
   TOOLS,
   findFactory,
-  heroStateAt,
-  hubStateAt,
-  HUB_STATIC,
   type DemoState,
   type Factory,
   type Focus,
@@ -831,14 +828,4 @@ export function renderAgents() {
   const label = " bold: this factory only ";
   g.put(w - 1 - len(label), h - 1, label, "cm");
   return g.html();
-}
-
-export function staticFrames() {
-  const hub = hubStateAt(HUB_STATIC);
-  return {
-    hero: renderHero(heroStateAt(0)),
-    agents: renderAgents(),
-    hubWide: renderHub(hub, COLS.hubWide),
-    hubNarrow: renderHub(hub, COLS.hubNarrow),
-  };
 }
