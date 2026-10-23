@@ -6,12 +6,11 @@ Browser QA follows cowork's own `.claude/skills/qa/SKILL.md` for the environment
 
 ## Install
 
-From the cowork repo:
+The profile lives only in your local checkout; nothing is committed to cowork.
 
 ```sh
-cp ~/dev/factory/profiles/cowork/factory.yml .claude/factory.yml
-git add .claude/factory.yml
-git commit -m "chore: add the factory profile"
+factory init ~/dev/cowork
+cp ~/dev/factory/profiles/cowork/factory.yml ~/dev/cowork/.claude/factory.yml
 ```
 
-Nothing else in cowork changes. The file is tracked, so every new worktree has it; factories on branches cut before the commit need it merged or copied in.
+`init` adds cowork to the factory config and keeps the factory's files out of git through `.git/info/exclude`. It writes a generic profile only when none exists, so copy this file over it afterwards (or before: `init` never overwrites a profile). Worktrees have no copy of the profile; the factory reads it from the main checkout, so every factory picks it up, including those on branches cut earlier.
