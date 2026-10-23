@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -301,6 +302,13 @@ func (m *Model) create(r dialog.NewResult) error {
 	}
 	supervisor := r.Supervisor.Over(m.Config.Supervisor)
 	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
+		return err
+	}
+	catalogs := catalog.Local(m.Config.StateDir)
+	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", r.Agents)); err != nil {
+		return err
+	}
+	if err := catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor)); err != nil {
 		return err
 	}
 	earlier := m.retiredFactories(r.Repo, r.Slug)

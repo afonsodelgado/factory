@@ -2,10 +2,54 @@ package install
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/afonsodelgado/factory/internal/catalog"
+	"github.com/afonsodelgado/factory/internal/state"
 )
+
+func TestDoctorChecksCodexAndOpenCodeValuesAgainstTheirCatalogs(t *testing.T) {
+	codexHome, stateDir := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt"}`), 0o600)
+	os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(`{"models":[{"slug":"gpt-5.6-sol","visibility":"list","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]}]}`), 0o644)
+	freeModels := `[{"id":"big-pickle"},{"id":"flint-40b-free","efforts":["low","high"]}]`
+	cases := []struct {
+		name    string
+		setting state.AgentSetting
+		cached  bool
+		want    Mark
+	}{
+		{name: "a listed codex model and effort", setting: state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-5.6-sol", Effort: "high"}, cached: true},
+		{name: "a codex model typo", setting: state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-5.6-soul"}, cached: true, want: Fail},
+		{name: "an opencode variant the model lacks", setting: state.AgentSetting{Tool: state.ToolOpenCode, Model: "flint-40b-free", Effort: "max"}, cached: true, want: Fail},
+		{name: "a paid zen model", setting: state.AgentSetting{Tool: state.ToolOpenCode, Model: "paid-pro"}, cached: true, want: Fail},
+		{name: "no opencode catalog yet", setting: state.AgentSetting{Tool: state.ToolOpenCode, Model: "big-pickle"}, want: Warn},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cache := catalog.OpenCodeCachePath(stateDir)
+			os.RemoveAll(cache)
+			if c.cached {
+				os.MkdirAll(filepath.Dir(cache), 0o755)
+				os.WriteFile(cache, []byte(freeModels), 0o644)
+			}
+			cfg := &state.Config{StateDir: stateDir, Agents: map[string]state.AgentSetting{"engineer": c.setting}}
+			checks := agentValueChecks(Options{Config: cfg, ConfigFile: "config.yml"})
+			got := Mark("")
+			if len(checks) > 0 {
+				got = checks[0].Mark
+			}
+			if got != c.want {
+				t.Errorf("doctor marks %+v as %q %+v; want %q, or the value passes doctor and open and fails only inside the pane", c.setting, got, checks, c.want)
+			}
+		})
+	}
+}
 
 func TestDoctorReportsWhatIsMissingWithTheFix(t *testing.T) {
 	t.Setenv("PATH", "")
