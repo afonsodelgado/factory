@@ -1,6 +1,7 @@
 package install
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,11 +80,42 @@ func atLeast(have, want string) bool {
 	return true
 }
 
+var linuxPackageManagers = []struct {
+	binary  string
+	install string
+	renamed map[string]string
+}{
+	{"pacman", "sudo pacman -S --needed --noconfirm ", map[string]string{"gh": "github-cli"}},
+	{"apt-get", "sudo apt-get install -y ", nil},
+	{"dnf", "sudo dnf install -y ", nil},
+	{"zypper", "sudo zypper install -y ", nil},
+}
+
 func installCommand(pkg string) string {
 	if runtime.GOOS == "darwin" {
 		return "brew install " + pkg
 	}
-	return "sudo apt-get install -y " + pkg
+	for _, m := range linuxPackageManagers {
+		if hasCommand(m.binary) {
+			return m.install + cmp.Or(m.renamed[pkg], pkg)
+		}
+	}
+	return "install " + pkg + " with your package manager"
+}
+
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func nerdFontInstallCommand() string {
+	switch {
+	case runtime.GOOS == "darwin":
+		return "brew install --cask font-jetbrains-mono-nerd-font"
+	case hasCommand("pacman"):
+		return installCommand("ttf-jetbrains-mono-nerd")
+	}
+	return "install JetBrainsMono Nerd Font from https://www.nerdfonts.com/font-downloads"
 }
 
 func Doctor(o Options) []Check {
@@ -236,7 +268,7 @@ func chrome(o Options) Check {
 }
 
 func nerdFont(o Options) Check {
-	fix := "brew install --cask font-jetbrains-mono-nerd-font"
+	fix := nerdFontInstallCommand()
 	var found []string
 	if runtime.GOOS == "darwin" {
 		for _, dir := range []string{filepath.Join(o.Home, "Library", "Fonts"), "/Library/Fonts"} {
