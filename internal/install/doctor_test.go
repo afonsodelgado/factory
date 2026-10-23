@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,21 @@ import (
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/state"
 )
+
+func TestDoctorChecksToolsPickedOnlyForOneFactory(t *testing.T) {
+	cfg := &state.Config{StateDir: t.TempDir()}
+	registry := `{"factories":[
+		{"repo":"/r/cowork","slug":"csv","supervisor":{"tool":"codex"}},
+		{"repo":"/r/cowork","slug":"old","archived":true,"agents":{"reviewer":{"tool":"opencode","model":"big-pickle"}}}]}`
+	os.WriteFile(cfg.RegistryPath(), []byte(registry), 0o644)
+	used := toolsInUse(Options{Config: cfg})
+	if !slices.Equal(used[state.ToolCodex], []string{"/r/cowork"}) {
+		t.Errorf("tools in use = %v; want codex in /r/cowork, or a Codex supervisor picked in the dialog gets no login, trust or sandbox check", used)
+	}
+	if _, ok := used[state.ToolOpenCode]; ok {
+		t.Errorf("tools in use = %v; an archived factory's pick must not add OpenCode checks", used)
+	}
+}
 
 func TestDoctorChecksCodexAndOpenCodeValuesAgainstTheirCatalogs(t *testing.T) {
 	codexHome, stateDir := t.TempDir(), t.TempDir()

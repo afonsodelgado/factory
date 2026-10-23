@@ -50,11 +50,25 @@ func toolsInUse(o Options) map[string][]string {
 			note(setting, repo)
 		}
 	}
+	for _, entry := range liveEntries(o.Config) {
+		note(entry.Supervisor, entry.Repo)
+		for _, setting := range entry.Agents {
+			note(setting, entry.Repo)
+		}
+	}
 	for tool, repos := range used {
 		slices.Sort(repos)
 		used[tool] = slices.Compact(repos)
 	}
 	return used
+}
+
+func liveEntries(cfg *state.Config) []state.Entry {
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		return nil
+	}
+	return slices.DeleteFunc(registry.Factories, func(e state.Entry) bool { return e.Archived })
 }
 
 func agentValueChecks(o Options) []Check {

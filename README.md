@@ -150,4 +150,4 @@ With a Claude supervisor nothing else changes: `claude` roles are still subagent
 
 Your coding rules go in `~/.config/factory/rules.md` (or `$FACTORY_CONFIG_DIR/rules.md`). Every stage agent receives them, on every tool, before the repo's own `AGENTS.md` and `CLAUDE.md`.
 
-Before the first factory on Codex, run `factory bootstrap`, then `codex` once in each repo: choose "Trust and continue" and "Trust all" for the factory hooks, or Codex stops at those prompts. `factory doctor` checks the Codex login, that trust, and that a sandboxed commit, push and `gh` work.
+Before the first factory on Codex, run `factory bootstrap`, then `codex` once in each repo: choose "Trust and continue" and "Trust all" for the factory hooks, or Codex stops at those prompts. `factory doctor` checks the Codex login, that trust, and that a sandboxed commit, push and `gh` work. It runs the Codex and OpenCode checks whenever the config, a repo profile or a factory that is not archived uses that tool, so a pick made only in the dialog is checked too.
