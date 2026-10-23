@@ -40,6 +40,34 @@ factory update     # install the latest release, then run its bootstrap
 
 `factory version` asks GitHub through `gh`. Without `gh`, or when `gh` is not logged in, it prints only the running version. `factory update` downloads the release binary for your machine next to the running one and replaces it. Then it runs the new binary's `bootstrap`, so the skills, agents and hooks match it. It changes nothing when you already run the latest release, and it refuses when it cannot write to the binary's directory. A running hub keeps the old version: quit it with `q` and run `factory` again.
 
+## Develop
+
+The Go module stays at the repository root: `cmd/`, `internal/`, `bundle/` and `profiles/` keep their existing paths. The pnpm workspace reserves `apps/web` for the future website and `packages/*` for shared JavaScript packages. Neither directory exists until it has real code.
+
+Go development needs Go 1.26 or later, Make, tmux and jq. JavaScript tooling uses Node 24 (`.nvmrc` pins 24.22.1), pnpm 10.33.0 (`packageManager` in `package.json`) and Turbo 2.11.10. With nvm installed, set up the pinned tools from the repository root:
+
+```sh
+nvm install
+nvm use
+npm install --global pnpm@10.33.0
+pnpm install
+```
+
+| Command | Does |
+|---|---|
+| `make` or `make build` | Build Go and the web packages |
+| `make test` | Test Go and the web packages |
+| `make lint` | Run Go vet, web lint and web typecheck |
+| `make dev` | Build Go, then start web development |
+| `make go-build`, `make go-test`, `make go-lint` | Run `go build ./...`, `go test ./...`, `go vet ./...` |
+| `make web-build`, `make web-test`, `make web-lint`, `make web-typecheck`, `make web-dev` | Run the corresponding Turbo task |
+
+When `apps/web/package.json` is absent, each web target prints a skip message and succeeds before looking for pnpm. Go-only contributors can run every Make target without Node or pnpm installed. `make dev` builds Go first even with `-j`; it does not start the interactive CLI. Run `go run ./cmd/factory` separately when you intend to open the hub.
+
+Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` call the guarded web targets. Once a package exists, `pnpm turbo run build` is the direct advanced entry point. Turbo runs only scripts defined by workspace packages; it caches build outputs in `dist/` and `build/`, and caches lint, typecheck and test results. Development tasks are persistent and uncached. The future website must declare its framework outputs, generated-type prerequisites, environment inputs and coverage files. Remote caching is not configured.
+
+Factory profile autodetection still chooses Go commands because `go.mod` takes precedence over `package.json`. The workspace does not change the factory profile.
+
 ## Add a repo
 
 The factory works in any git repo. From anywhere inside it, or one of its worktrees:
