@@ -5,6 +5,8 @@
   "session_id": "",
   "authorized": true,
   "needs_design": false,
+  "pipeline": "",
+  "pipeline_stages": [],
   "worktree": "",
   "branch": "",
   "start_commit": "",

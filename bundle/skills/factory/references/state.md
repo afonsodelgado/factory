@@ -9,6 +9,8 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, updated on every start and resume |
 | `authorized` | `true` once `/factory` started; the per-factory commit/push/PR authorisation |
 | `needs_design` | whether stage 2 runs |
+| `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick` |
+| `pipeline_stages` | the resolved stage keys of that pipeline, in stage order; every other stage is `skipped` with the note "not in the <name> pipeline" |
 | `worktree`, `branch`, `start_commit` | where the work happens and where it started |
 | `stage` | current stage key |
 | `waiting_on` | `null`, `"user"`, `"agent"` or `"ci"` |
@@ -22,5 +24,7 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `history` | append-only list of `{at, stage, event, detail}` |
 
 Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `handoff`.
+
+Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does.
 
 Older files have `ticket` (a string or `null`) instead of `id`, and no `updated_at`, `repo`, `session_id` or `attention`, history entries without `at`, and artifacts as bare URL strings. Readers accept both forms; the supervisor writes the new form from its next write on.

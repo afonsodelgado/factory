@@ -58,6 +58,7 @@ Worktrees have no copy of the profile, so the skill and its agents read it from 
 | `factory open csv-export Export contacts as CSV for ops.` | the same: the words after the id are the prompt |
 | `factory open csv-export` | without a prompt, a new factory's supervisor asks for one |
 | `factory open csv-export --repo ~/dev/factory` | in a given repo instead of the one holding the factory or the current directory |
+| `factory open csv-export --pipeline quick` | creates it with the `quick` pipeline instead of the default one |
 
 An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
@@ -86,3 +87,21 @@ claude:
 `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every other value above is the default.
 
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`. Each repo's main checkout carries its factory profile in `.claude/factory.yml`.
+
+## Pipelines
+
+A pipeline is the list of stages a factory runs. Two are built in, so they work with no config:
+
+```yaml
+pipelines:
+  full:  [requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, handoff]
+  quick: [requirements, plan, implement, review, handoff]
+default_pipeline: full
+```
+
+Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.claude/factory.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
+
+Pick a pipeline when you create a factory: in the `n` dialog, `tab` cycles the presets on the prompt step, starting at `default_pipeline`. From the shell, use `factory open <id> --pipeline <name>`; an unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
+
+A pipeline only removes stages. The gates stay: `quick` still publishes the plan and waits for your approval before any code is written. `coderabbit: false` in the repo profile still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
+
