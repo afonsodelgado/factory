@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -30,8 +31,39 @@ type NewFactoryModel struct {
 	height    int
 }
 
+const supervisorRole = "supervisor"
+
 func NewFactory(c NewContext) *NewFactoryModel {
-	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1}
+	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow}
+}
+
+const firstStageRow = 1
+
+func (m *NewFactoryModel) rowStage() string {
+	if m.row < firstStageRow {
+		return ""
+	}
+	return state.StageKeys[m.row-firstStageRow]
+}
+
+func (m *NewFactoryModel) rowRole() string {
+	if m.row < firstStageRow {
+		return supervisorRole
+	}
+	return state.RoleOf(m.rowStage())
+}
+
+func (m *NewFactoryModel) stageAgents() map[string]state.AgentSetting {
+	agents := map[string]state.AgentSetting{}
+	for role, o := range m.overrides {
+		if role != supervisorRole {
+			agents[role] = o
+		}
+	}
+	if len(agents) == 0 {
+		return nil
+	}
+	return agents
 }
 
 func (m *NewFactoryModel) Init() tea.Cmd { return nil }
@@ -92,7 +124,11 @@ func (m *NewFactoryModel) slug() string {
 func (m *NewFactoryModel) launch() factory.Launch {
 	repo := m.selectedRepo()
 	name, stages := m.chosenPipeline()
-	return factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.overrides, SessionID: "<uuid>", Chrome: repo.Browser, RemoteControl: m.Context.RemoteControl}
+	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
+	if launch.Supervisor.OnClaude() {
+		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, m.Context.RemoteControl
+	}
+	return launch
 }
 
 func (m *NewFactoryModel) presetStages(name string) []string {
@@ -125,7 +161,7 @@ func (m *NewFactoryModel) chosenPipeline() (string, []string) {
 }
 
 func (m *NewFactoryModel) resetChoices() {
-	m.pipeline, m.chosen, m.overrides, m.row = "", nil, nil, 0
+	m.pipeline, m.chosen, m.overrides, m.row = "", nil, nil, firstStageRow
 }
 
 func (m *NewFactoryModel) locked(stage string) bool {
@@ -151,6 +187,9 @@ func (m *NewFactoryModel) toggle(stage string) {
 }
 
 func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
+	if role == supervisorRole {
+		return m.Context.Supervisor
+	}
 	for _, a := range m.selectedRepo().Agents {
 		if a.Role == role {
 			return a.AgentSetting
@@ -160,25 +199,114 @@ func (m *NewFactoryModel) defaultAgent(role string) state.AgentSetting {
 }
 
 func (m *NewFactoryModel) agent(role string) state.AgentSetting {
-	setting := m.defaultAgent(role)
-	if o := m.overrides[role]; o.Model != "" {
-		setting.Model = o.Model
+	return m.overrides[role].Over(m.defaultAgent(role))
+}
+
+func (m *NewFactoryModel) tool(name string) ToolOption {
+	for _, t := range m.Context.Tools {
+		if t.Name == name {
+			return t
+		}
 	}
-	if o := m.overrides[role]; o.Effort != "" {
-		setting.Effort = o.Effort
+	if name == state.ToolClaude {
+		return ToolOption{Name: name, Models: catalog.Claude()}
 	}
-	return setting
+	return ToolOption{Name: name, Problem: name + " is not available"}
+}
+
+func (m *NewFactoryModel) pickableTools() []string {
+	var tools []string
+	for _, name := range state.Tools {
+		if t := m.tool(name); t.Problem == "" && len(t.Models) > 0 {
+			tools = append(tools, name)
+		}
+	}
+	return tools
+}
+
+func (m *NewFactoryModel) unavailableTools() string {
+	var problems []string
+	for _, name := range state.Tools {
+		if t := m.tool(name); t.Problem != "" {
+			problems = append(problems, t.Problem)
+		}
+	}
+	return strings.Join(problems, " ")
+}
+
+func (m *NewFactoryModel) models(tool string) []string {
+	var ids []string
+	for _, model := range m.tool(tool).Models {
+		ids = append(ids, model.ID)
+	}
+	return ids
+}
+
+func (m *NewFactoryModel) efforts(setting state.AgentSetting) []string {
+	for _, model := range m.tool(setting.ToolName()).Models {
+		if model.ID == setting.Model {
+			return model.Efforts
+		}
+	}
+	if setting.OnClaude() {
+		return state.AgentEfforts
+	}
+	return nil
+}
+
+func (m *NewFactoryModel) onDefaultTool(role string) bool {
+	return m.agent(role).ToolName() == m.defaultAgent(role).ToolName()
+}
+
+func (m *NewFactoryModel) cycleTool(role string) {
+	tools := m.pickableTools()
+	if role == "qa" {
+		m.problem = "QA drives Chrome, so it runs only on claude."
+		return
+	}
+	m.problem = m.unavailableTools()
+	if len(tools) == 0 {
+		return
+	}
+	next := tools[(slices.Index(tools, m.agent(role).ToolName())+1)%len(tools)]
+	if next == m.defaultAgent(role).ToolName() {
+		m.setOverride(role, func(o *state.AgentSetting) { *o = state.AgentSetting{} })
+		return
+	}
+	switched := state.AgentSetting{Tool: next}
+	if models := m.models(next); len(models) > 0 {
+		switched.Model = models[0]
+	}
+	m.setOverride(role, func(o *state.AgentSetting) { *o = switched })
 }
 
 func (m *NewFactoryModel) cycleModel(role string) {
+	models := m.models(m.agent(role).ToolName())
+	if len(models) == 0 {
+		return
+	}
+	if !m.onDefaultTool(role) {
+		next := models[(slices.Index(models, m.agent(role).Model)+1)%len(models)]
+		m.setOverride(role, func(o *state.AgentSetting) { o.Model, o.Effort = next, "" })
+		return
+	}
 	m.setOverride(role, func(o *state.AgentSetting) {
-		o.Model = nextOverride(state.AgentModels, m.agent(role).Model, m.defaultAgent(role).Model)
+		o.Model = nextOverride(models, m.agent(role).Model, m.defaultAgent(role).Model)
 	})
 }
 
 func (m *NewFactoryModel) cycleEffort(role string) {
+	efforts := m.efforts(m.agent(role))
+	if len(efforts) == 0 {
+		return
+	}
+	if !m.onDefaultTool(role) {
+		next := efforts[(slices.Index(efforts, m.agent(role).Effort)+1)%len(efforts)]
+		m.setOverride(role, func(o *state.AgentSetting) { o.Effort = next })
+		return
+	}
 	m.setOverride(role, func(o *state.AgentSetting) {
-		o.Effort = nextOverride(state.AgentEfforts, m.agent(role).Effort, m.defaultAgent(role).Effort)
+		o.Effort = nextOverride(efforts, m.agent(role).Effort, m.defaultAgent(role).Effort)
 	})
 }
 
@@ -327,7 +455,7 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.problem = ""
-	stage := state.StageKeys[m.row]
+	stage, role := m.rowStage(), m.rowRole()
 	switch msg.String() {
 	case "esc":
 		m.step = 1
@@ -342,15 +470,19 @@ func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "up":
 		m.row = max(m.row-1, 0)
 	case "down":
-		m.row = min(m.row+1, len(state.StageKeys)-1)
+		m.row = min(m.row+1, len(state.StageKeys))
 	case "tab":
 		m.nextPipeline()
 	case "space":
-		m.toggle(stage)
+		if stage != "" {
+			m.toggle(stage)
+		}
+	case "t":
+		m.cycleTool(role)
 	case "m":
-		m.cycleModel(state.RoleOf(stage))
+		m.cycleModel(role)
 	case "e":
-		m.cycleEffort(state.RoleOf(stage))
+		m.cycleEffort(role)
 	}
 	return nil
 }
@@ -365,10 +497,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: name, Stages: stages}
-	if len(m.overrides) > 0 {
-		m.result.Agents = m.overrides
-	}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole]}
 	return tea.Quit
 }
 
@@ -488,12 +617,20 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	repo := m.selectedRepo()
 	c.Put(x, y, "Will run, from "+repo.Display, theme.Quiet)
 	y++
-	for _, l := range theme.Wrap(strings.SplitN(m.launch().CreateCommand(), "; cd ", 2)[0], w-4) {
+	launch := m.launch()
+	command := strings.SplitN(launch.CreateCommand(), "; cd ", 2)[0]
+	if !launch.Supervisor.OnClaude() {
+		_, command, _ = strings.Cut(launch.CreateCommand(), "\n")
+	}
+	for _, l := range theme.Wrap(command, w-4) {
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
 	reason := "no --chrome: the " + repo.Name + " profile uses terminal QA."
-	if repo.Browser {
+	switch {
+	case !launch.Supervisor.OnClaude():
+		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
+	case repo.Browser:
 		reason = "--chrome because the " + repo.Name + " profile uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
@@ -541,7 +678,7 @@ func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "Stages & agents · "+m.slug(), theme.Bright.B())
 	c.Right(c.W-2, 0, "2 of 3", theme.Muted)
-	hints := "⏎ next: prompt   space stage   m model   e effort   tab preset   esc back"
+	hints := "⏎ next   space stage   t tool   m model   e effort   tab preset   esc back"
 	if problem := m.selectedRepo().PipelineProblem; problem != "" {
 		for i, l := range theme.Wrap("✗ "+problem, w) {
 			c.Put(1, 2+i, l, theme.FgInk(theme.Red))
@@ -551,9 +688,11 @@ func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
 	}
 	y := m.drawPresets(c, 2)
 	y++
+	m.drawSupervisorRow(c, y)
+	y++
 	running := m.runStages()
 	for i, stage := range state.StageKeys {
-		m.drawStageRow(c, y, i, stage, slices.Contains(running, stage))
+		m.drawStageRow(c, y, i+firstStageRow, stage, slices.Contains(running, stage))
 		y++
 	}
 	y++
@@ -607,11 +746,28 @@ func (m *NewFactoryModel) drawStageRow(c *theme.Canvas, y, i int, stage string, 
 	case role == "":
 		c.Put(19, y, "—", theme.Quiet)
 	default:
-		setting, override := m.agent(role), m.overrides[role]
 		c.Put(19, y, role, theme.Text)
-		c.Put(31, y, setting.Model, overrideInk(override.Model))
-		c.Put(39, y, setting.Effort, overrideInk(override.Effort))
+		m.drawSetting(c, y, role)
 	}
+}
+
+func (m *NewFactoryModel) drawSupervisorRow(c *theme.Canvas, y int) {
+	if m.row < firstStageRow {
+		c.Put(1, y, "❯", theme.Focused.B())
+	}
+	c.Put(5, y, supervisorRole, theme.Bright)
+	m.drawSetting(c, y, supervisorRole)
+}
+
+func (m *NewFactoryModel) drawSetting(c *theme.Canvas, y int, role string) {
+	setting, override := m.agent(role), m.overrides[role]
+	c.Put(31, y, setting.ToolName(), overrideInk(override.Tool))
+	model := setting.Model
+	if model == "" {
+		model = "default"
+	}
+	c.PutMax(41, y, model, overrideInk(override.Model), c.W-41-9)
+	c.Put(c.W-9, y, setting.Effort, overrideInk(override.Effort))
 }
 
 func overrideInk(value string) theme.Ink {

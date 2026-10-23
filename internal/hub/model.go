@@ -98,7 +98,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll(), m.refreshCatalog())
 }
 
 func (m *Model) load() tea.Cmd {

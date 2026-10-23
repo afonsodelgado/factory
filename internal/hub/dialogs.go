@@ -139,7 +139,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 }
 
 func (m *Model) newContext() dialog.NewContext {
-	c := dialog.NewContext{RemoteControl: m.Config.RemoteControl()}
+	c := dialog.NewContext{RemoteControl: m.Config.RemoteControl(), Supervisor: m.Config.Supervisor, Tools: m.toolOptions()}
 	selectedRepo := ""
 	if it, ok := m.selectedItem(); ok {
 		selectedRepo = it.Factory.Repo

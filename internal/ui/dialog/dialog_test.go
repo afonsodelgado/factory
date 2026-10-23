@@ -3,6 +3,7 @@ package dialog
 import (
 	"bytes"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -91,5 +93,32 @@ func TestNewFactoryStartsWithItsOwnStagesAndAgents(t *testing.T) {
 	}
 	if !reflect.DeepEqual(r, want) {
 		t.Errorf("unchecking design and changing the engineer's model started\n%+v\nwant\n%+v\nonly this factory's choices may travel, never the repo's own defaults", r, want)
+	}
+}
+
+func TestNewFactorySwitchesRolesToCodexButKeepsQAOnClaude(t *testing.T) {
+	codex := ToolOption{Name: state.ToolCodex, Models: []catalog.Model{{ID: "gpt-5.6-sol", Efforts: []string{"low", "high"}}}}
+	notInstalled := ToolOption{Name: state.ToolOpenCode, Problem: "opencode is not installed."}
+	m := NewFactory(NewContext{Repos: []RepoOption{{Name: "cowork", Path: "/r/cowork"}}, Tools: []ToolOption{{Name: state.ToolClaude, Models: catalog.Claude()}, codex, notInstalled}})
+	m.name, m.prompt, m.step = "csv", "Export contacts.", 2
+	press := func(row int, key string) {
+		m.row = row
+		m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+	}
+	rowOf := func(stage string) int { return firstStageRow + slices.Index(state.StageKeys, stage) }
+
+	press(rowOf("implement"), "t")
+	press(rowOf("qa"), "t")
+	press(0, "t")
+	press(0, "e")
+	m.start()
+
+	r, _ := m.Result()
+	want := NewResult{Repo: "/r/cowork", Slug: "csv", Prompt: "Export contacts.", Pipeline: m.pipelineName(),
+		Agents:     map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}},
+		Supervisor: state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-5.6-sol", Effort: "low"},
+	}
+	if !reflect.DeepEqual(r, want) {
+		t.Errorf("switching the engineer and supervisor to codex and pressing t on qa started\n%+v\nwant\n%+v\nQA drives Chrome and must stay on claude, and a tool that is not installed must never be picked", r, want)
 	}
 }

@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -40,9 +41,17 @@ type AgentOption struct {
 }
 
 type NewContext struct {
-	Repos         []RepoOption `json:"repos"`
-	Repo          int          `json:"repo"`
-	RemoteControl bool         `json:"remote_control"`
+	Repos         []RepoOption       `json:"repos"`
+	Repo          int                `json:"repo"`
+	RemoteControl bool               `json:"remote_control"`
+	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
+	Tools         []ToolOption       `json:"tools,omitempty"`
+}
+
+type ToolOption struct {
+	Name    string          `json:"name"`
+	Models  []catalog.Model `json:"models,omitempty"`
+	Problem string          `json:"problem,omitempty"`
 }
 
 type NewResult struct {
