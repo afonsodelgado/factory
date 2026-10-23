@@ -11,7 +11,7 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `needs_design` | whether stage 2 runs |
 | `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick`, or `custom` when it was started with `--stages` |
 | `pipeline_stages` | the resolved stage keys of that pipeline, in stage order; every other stage is `skipped` with the note "not in the <name> pipeline" |
-| `agents` | the effective model and effort of every agent role that does not run on its frontmatter, such as `{"engineer": {"model": "sonnet", "effort": "medium"}}`; passed to the Agent tool on every spawn of that role |
+| `agents` | the effective tool, model and effort of every agent role, such as `{"engineer": {"tool": "claude", "model": "sonnet", "effort": "medium"}, …}`, one entry per role; passed to the Agent tool on every spawn of a claude role, and read by the factory app to start a role on another tool |
 | `worktree`, `branch`, `start_commit` | where the work happens and where it started |
 | `stage` | current stage key |
 | `waiting_on` | `null`, `"user"`, `"agent"` or `"ci"` |
@@ -26,6 +26,6 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 
 Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `handoff`.
 
-Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does. Factories started before agent models have no `agents`; every agent runs on its frontmatter.
+Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does. Factories started before agent models have no `agents`; every agent runs on its frontmatter. Factories started before every role was written list only the roles that differ from their frontmatter; the factory app runs a missing role as it resolved it when the factory was created, or on its frontmatter when it has no record of that.
 
 Older files have `ticket` (a string or `null`) instead of `id`, and no `updated_at`, `repo`, `session_id` or `attention`, history entries without `at`, and artifacts as bare URL strings. Readers accept both forms; the supervisor writes the new form from its next write on.

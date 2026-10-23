@@ -25,6 +25,8 @@ type Entry struct {
 	Archived   bool         `json:"archived,omitempty"`
 	Dir        string       `json:"dir,omitempty"`
 	Supervisor AgentSetting `json:"supervisor,omitzero"`
+
+	Agents map[string]AgentSetting `json:"agents,omitempty"`
 }
 
 func (e Entry) Key() string {

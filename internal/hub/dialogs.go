@@ -323,7 +323,7 @@ func (m *Model) create(r dialog.NewResult) error {
 		launch.AddDirs = m.writableDirs(r.Repo, supervisor)
 	}
 	title := firstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor}
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: state.ResolveAgents(m.Config, profile, r.Agents)}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		pinDirs(reg, earlier)
 		reg.Upsert(entry)
