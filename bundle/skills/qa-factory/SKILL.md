@@ -2,22 +2,22 @@
 name: qa-factory
 description: |
   Act as a QA engineer on the feature in the current branch of any repo with a
-  factory profile: work out what it is meant to do from the ticket or brief, the
+  factory profile: work out what it is meant to do from the user's prompt, the
   diff and the handoff brief, test the expected scenarios by hand (in the browser
   against the local stack, or in a scratch tmux server for terminal apps), attack it
   with edge cases, and report bugs plus the gaps in test automation worth closing.
   Use when the factory-qa agent runs, or the user says "/qa-factory". Runs locally only.
-argument-hint: "[ticket id or focus area] [--factory]"
+argument-hint: "[factory id or focus area] [--factory]"
 ---
 
 # QA pass on the current branch
 
 You are testing someone else's work. Your job is to find out where the feature
-breaks, not to confirm that it works. Build your understanding from the ticket and
+breaks, not to confirm that it works. Build your understanding from the user's prompt and
 the diff, not from the implementer's explanation. Where the two disagree, the gap
 is a finding.
 
-Read the repo's profile, `.claude/factory.yml`, first. Its `qa.mode` picks the
+Read the repo's profile, `.claude/factory.yml`, first: the worktree's, or the main checkout's (`dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`) when the worktree has none. Its `qa.mode` picks the
 environment: `browser` or `terminal`. Its `qa.notes`, when set, names a repo file
 with the environment, seeding and port steps that only that repo knows. Follow that
 file wherever this skill says "the notes"; where the notes and this skill disagree,
@@ -27,7 +27,7 @@ the notes win, because they know the repo.
 
 Applies when the `factory-qa` agent runs you, or the argument contains `--factory`. Everything below holds, with these changes:
 
-- **Spec:** the factory directory's `requirements.md` is the spec, ahead of the ticket. With no ticket, it and `brief.md` are the whole spec.
+- **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
 - **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing. Read a clearly relevant vault entry without asking.
 - **Phase 2:** the environment must run this worktree's code. In browser mode, check which process serves the profile's ports and from which directory (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If it is another checkout, leave it running and start this worktree's stack on free ports, as the notes describe. In terminal mode, build the binary from this worktree into a temporary directory.
 - **Report:** do not offer to publish it. The supervisor reads it.
@@ -36,7 +36,7 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 ## Ground rules
 
 - **Local only.** Never prod, never staging, never a production database, even read-only.
-- **No real contact.** Anything that can send, dial or post for real uses reserved test numbers, `@example.com` addresses and unconfigured connectors, unless the brief says otherwise.
+- **No real contact.** Anything that can send, dial or post for real uses reserved test numbers, `@example.com` addresses and unconfigured connectors, unless the prompt says otherwise.
 - **Don't change the code under test.** No edits to app code, no commits. If a fix is obvious, put it in the report.
 - **Evidence or it didn't happen.** Every finding needs a repro and what you saw: the request and response, a screenshot, a `capture-pane` excerpt, a file or a DB row. Mark anything you couldn't reproduce twice as *suspected*.
 - **Destructive operations** only on data you created in this session.
@@ -46,7 +46,7 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 
 Read these sources in order:
 
-1. **Branch and ticket.** `git branch --show-current`. Take the ticket id from it (or from the argument) and read the issue and its comments through Linear (`mcp__linear__get_issue`, `list_comments`). The ticket is the spec.
+1. **Branch and spec.** `git branch --show-current`. The spec is the user's prompt: `.claude/factory/<id>/brief.md` (with `requirements.md` beside it), or what the user tells you. Read an external tracker or link only when the prompt itself asks you to (for example "read Linear issue X"), using whatever tools the session has. Never fetch one on your own.
 2. **What was built.** `git log --oneline main..HEAD`, `git diff main...HEAD --stat`, then the diff itself. Include uncommitted work too (`git diff`, `git status`). Read every entry point the change reaches. Don't read only the diff hunks: a guard on one path often has a sibling path without it.
 3. **PR**, if there is one: `gh pr view --json title,body,url`.
 4. **Handoff brief**: `.claude/qa/<branch with / replaced by ->.md`, written by `/qa-brief-factory`. It says what the developer already checked and where they are unsure. Spend less time on what they checked and more on what they're unsure about.
@@ -130,7 +130,7 @@ Stop each probe once you have a finding or a clean result. Don't spend more on o
 Write the report to `.claude/qa/<branch-slug>-report.md`. In chat, give a short summary with the path. Offer to publish the report as an artifact if the user wants to share it.
 
 ```markdown
-# QA — <ticket>: <title>
+# QA — <factory id>: <title>
 Branch, commit, date, mode, environment, principals used.
 
 ## Verdict

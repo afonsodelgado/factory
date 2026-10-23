@@ -1,13 +1,13 @@
 # state.json
 
-One file per ticket at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer; the factory app only reads it.
+One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer; the factory app only reads it.
 
 | Field | Meaning |
 |---|---|
-| `ticket`, `title` | Linear id (or `null` without a ticket) and title |
+| `id`, `title` | the factory id and a short title taken from the prompt |
 | `repo` | the main checkout's absolute path |
 | `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, updated on every start and resume |
-| `authorized` | `true` once `/factory` started; the per-ticket commit/push/PR authorisation |
+| `authorized` | `true` once `/factory` started; the per-factory commit/push/PR authorisation |
 | `needs_design` | whether stage 2 runs |
 | `worktree`, `branch`, `start_commit` | where the work happens and where it started |
 | `stage` | current stage key |
@@ -23,4 +23,4 @@ One file per ticket at `<worktree>/.claude/factory/<id>/state.json`. The supervi
 
 Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `handoff`.
 
-Older files have no `updated_at`, `repo`, `session_id` or `attention`, history entries without `at`, and artifacts as bare URL strings. Readers accept both forms; the supervisor writes the new form from its next write on.
+Older files have `ticket` (a string or `null`) instead of `id`, and no `updated_at`, `repo`, `session_id` or `attention`, history entries without `at`, and artifacts as bare URL strings. Readers accept both forms; the supervisor writes the new form from its next write on.

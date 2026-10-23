@@ -66,9 +66,6 @@ func LoadConfig() (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if len(c.Repos) == 0 {
-		c.Repos = []string{"~/dev/cowork", "~/dev/factory"}
-	}
 	for i, repo := range c.Repos {
 		c.Repos[i] = ExpandHome(repo)
 	}

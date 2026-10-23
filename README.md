@@ -1,6 +1,6 @@
 # factory
 
-`factory` runs every factory in one tmux session. A factory is a Claude Code session running `/factory` in its own worktree; the app lists them on the left, shows the selected one's live session on the right, and puts a "Needs attention" panel under it for questions, gates and the rest.
+`factory` runs every factory in one tmux session. A factory is a Claude Code session running `/factory` in its own worktree, identified by an id you choose and driven by a prompt you write: the prompt is the spec. The app lists factories on the left, shows the selected one's live session on the right, and puts a "Needs attention" panel under it for questions, gates and the rest.
 
 ## Install
 
@@ -26,19 +26,29 @@ factory bootstrap
 
 `bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
 
-Each repo needs a factory profile at `.claude/factory.yml`; the bundled skill's `templates/factory.yml` is the template, and `profiles/cowork/` has cowork's.
+## Add a repo
+
+The factory works in any git repo. From anywhere inside it, or one of its worktrees:
+
+```sh
+factory init            # or: factory init ~/dev/some-repo
+```
+
+`init` writes the repo's factory profile, `.claude/factory.yml`, from the bundled template, with build, lint and test commands detected from `go.mod` or `package.json`. It adds the factory's files to the repo's `.git/info/exclude` and lists the repo in the config. Nothing is committed to the repo. Edit the profile to match the repo, and you are done; set `coderabbit: true` only if CodeRabbit reviews the repo. Running `init` again changes nothing. A running hub reads the config only when it starts, so quit it with `q` and run `factory` again.
+
+Worktrees have no copy of the profile, so the skill and its agents read it from the main checkout. `profiles/cowork/` has cowork's profile.
 
 ## Use
 
 | Command | Does |
 |---|---|
 | `factory open` | attaches to the hub, starting it if needed |
-| `factory open ENG-1234` | selects ENG-1234's factory, or creates it |
-| `factory open ENG-1234/cors-fix` | the same, for a ticket with a feature name |
-| `factory open csv-export` | a feature with no ticket; the supervisor asks for its brief |
-| `factory open ENG-1234 --repo ~/dev/factory` | in a given repo instead of the one holding the ticket or the current directory |
+| `factory open csv-export --prompt "Export contacts as CSV for ops."` | selects the factory `csv-export`, or creates it with that prompt |
+| `factory open csv-export Export contacts as CSV for ops.` | the same: the words after the id are the prompt |
+| `factory open csv-export` | without a prompt, a new factory's supervisor asks for one |
+| `factory open csv-export --repo ~/dev/factory` | in a given repo instead of the one holding the factory or the current directory |
 
-Tickets match exactly: `ENG-740` never opens `eng-7400-…`. An existing factory is selected, never duplicated.
+An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
@@ -49,7 +59,7 @@ Inside the hub, `?` lists every key. `M-0` returns to the factory list from any 
 `~/.config/factory/config.yml` (or `$FACTORY_CONFIG_DIR/config.yml`):
 
 ```yaml
-repos: [~/dev/cowork, ~/dev/factory]
+repos: [~/dev/cowork, ~/dev/factory]  # added by factory init; empty by default
 hub:
   session: factory
   return_key: M-0
@@ -62,6 +72,6 @@ claude:
   remote_control: true
 ```
 
-`return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every value above is the default.
+`return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every other value above is the default.
 
-State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`. Each repo carries its factory profile in `.claude/factory.yml`.
+State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`. Each repo's main checkout carries its factory profile in `.claude/factory.yml`.

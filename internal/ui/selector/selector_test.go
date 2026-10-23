@@ -22,7 +22,7 @@ var now = time.Date(2026, 10, 22, 15, 0, 0, 0, time.UTC)
 func fleet() hub.Snapshot {
 	at := func(d time.Duration) state.Time { return state.Time{Time: now.Add(-d)} }
 	item := func(repo, label, stage string, status factory.Status, since time.Duration) hub.Item {
-		st := &state.State{Ticket: label, Stage: stage, Stages: map[string]state.Stage{"design": {Status: "skipped"}}}
+		st := &state.State{ID: label, Stage: stage, Stages: map[string]state.Stage{"design": {Status: "skipped"}}}
 		for _, key := range state.StageKeys {
 			if key == stage {
 				break

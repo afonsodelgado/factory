@@ -36,7 +36,7 @@ func questionFactory(hookEvent string, at time.Time) Snapshot {
 		Recommended: state.Strings{"10 per minute per IP", "429 with Retry-After, and no detail in the body", "10,000 entries, 60 s TTL, LRU"},
 		CreatedAt:   state.Time{Time: at.Add(-4 * time.Minute)},
 	}
-	f := factory.Factory{Repo: "/r/cowork", Slug: "eng-7452-auth-limits", State: &state.State{Ticket: "ENG-7452", Stage: "requirements", WaitingOn: "user", Attention: []state.Attention{batch}}}
+	f := factory.Factory{Repo: "/r/cowork", Slug: "eng-7452-auth-limits", State: &state.State{ID: "ENG-7452", Stage: "requirements", WaitingOn: "user", Attention: []state.Attention{batch}}}
 	hook := &state.HookFile{Main: &state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}, Last: state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}}
 	return Snapshot{At: at, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &tmux.Pane{ID: "%9", Command: "claude"}}}}
 }
@@ -166,7 +166,7 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	asking := questionFactory("Stop", now).Items[0]
-	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{Ticket: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
+	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
 	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd})
 	model.SetSnapshot(Snapshot{At: now, Items: []Item{quiet, asking}})
 
@@ -177,7 +177,7 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	opened = append(opened, model.panel.tab)
 
 	nowAsking := quiet
-	nowAsking.Factory.State = &state.State{Ticket: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
+	nowAsking.Factory.State = &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
 	model.SetSnapshot(Snapshot{At: now.Add(time.Second), Items: []Item{nowAsking, asking}})
 	opened = append(opened, model.panel.tab)
 	model.switchTab(1)

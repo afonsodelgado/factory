@@ -2,25 +2,25 @@
 name: requirements-interview
 description: |
   Interview the developer about a feature before any design or planning, so the
-  requirements are complete: read the ticket and the code it touches, find the gaps,
-  ask about them in short batches, and write a requirements document. Use when the
+  requirements are complete: read the user's prompt and the code it touches, find the
+  gaps, ask about them in short batches, and write a requirements document. Use when the
   user says "interview me about this feature", "ask me questions about the
-  requirements", "/requirements-interview", or hands over a ticket and asks what is
+  requirements", "/requirements-interview", or describes a change and asks what is
   missing. Also used by the factory-analyst agent.
-argument-hint: "<ticket id or description> [--out <path>]"
+argument-hint: "<description or brief path> [--out <path>]"
 ---
 
 # Requirements interview
 
-Your job is to find what the ticket does not say, before anyone designs or plans. The
-ticket is the starting point, not the spec. A question is worth asking only if different
+Your job is to find what the prompt does not say, before anyone designs or plans. The
+prompt is the starting point, not the finished spec. A question is worth asking only if different
 answers would lead to different work.
 
 ## 1 · Read before you ask
 
-1. Read the ticket and its comments (`mcp__linear__get_issue`, `list_comments`), plus any linked docs or designs. Without a ticket, read the brief you were given, or ask the user for a short description first. A brief is usually thinner than a ticket, so expect more gaps.
+1. Read the user's prompt: `brief.md` in the factory directory, the description you were given, or ask the user for a short one first. It is the spec. Read an external tracker or link only when the prompt itself asks you to (for example "read Linear issue X"), using whatever tools the session has. Never fetch one on your own.
 2. Find the code the feature touches: the routes, pages, schemas, Copilot tools and jobs. Read enough to know what exists today and what the change would collide with. Never ask the user something the code can answer.
-3. If a knowledge vault INDEX entry is clearly about this area, name it. Read it only after the user agrees, or when you are running inside the factory, where the vault counts as a ticket input.
+3. If a knowledge vault INDEX entry is clearly about this area, name it. Read it only after the user agrees, or when you are running inside the factory, where the vault counts as an input.
 
 ## 2 · Find the gaps
 
@@ -48,10 +48,10 @@ Check each dimension. Skip the ones that clearly do not apply:
 
 ## 4 · Write the document
 
-Write to `--out` when given, otherwise to `.claude/factory/<TICKET>/requirements.md`. Keep it to what the next stage needs:
+Write to `--out` when given, otherwise to `.claude/factory/<id>/requirements.md`. Keep it to what the next stage needs:
 
 ```markdown
-# <TICKET>: <title>
+# <id>: <title>
 
 ## Goal
 2–3 sentences in product terms: who can now do what.

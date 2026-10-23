@@ -14,8 +14,9 @@ import (
 )
 
 type OpenRequest struct {
-	Name string `json:"name"`
-	Repo string `json:"repo"`
+	Name   string `json:"name"`
+	Repo   string `json:"repo"`
+	Prompt string `json:"prompt,omitempty"`
 }
 
 func (m *Model) openRequest(e Event) tea.Cmd {
@@ -36,10 +37,9 @@ func (m *Model) open(r OpenRequest) error {
 	if strings.TrimSpace(r.Name) == "" {
 		return nil
 	}
-	ticket, feature := factory.ParseName(r.Name)
-	slug := factory.SlugFor(ticket, feature)
-	if slug == "" {
-		return fmt.Errorf("%q has none of the letters a–z or digits 0–9 a factory name is made of. Type a ticket id, such as ENG-1234, or a feature name", r.Name)
+	id := factory.Slugify(r.Name)
+	if id == "" {
+		return fmt.Errorf("%q has none of the letters a–z or digits 0–9 a factory id is made of. Type an id such as csv-export", r.Name)
 	}
 	repos := m.Config.Repos
 	if r.Repo != "" {
@@ -49,16 +49,16 @@ func (m *Model) open(r OpenRequest) error {
 		repos = []string{r.Repo}
 	}
 	for _, repo := range repos {
-		if key, ok := m.existingFactory(repo, ticket, slug); ok {
+		if key, ok := m.existingFactory(repo, id); ok {
 			return m.selectExisting(key)
 		}
 	}
 	if len(repos) == 0 {
-		return errors.New("no repos configured")
+		return errors.New("no repos configured; add one with factory init <repo>, then quit the hub with q and run factory again")
 	}
 	repo := repos[0]
-	if earlier, ok := m.retiredMatch(repos, ticket, slug); ok {
+	if earlier, ok := m.retiredMatch(repos, id); ok {
 		repo = earlier
 	}
-	return m.create(dialog.NewResult{Repo: repo, Ticket: ticket, Feature: feature, Slug: slug})
+	return m.create(dialog.NewResult{Repo: repo, Slug: id, Prompt: r.Prompt})
 }

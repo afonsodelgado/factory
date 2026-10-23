@@ -3,28 +3,8 @@ package factory
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
-
-var ticketPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-[0-9]+$`)
-
-func IsTicket(s string) bool {
-	return ticketPattern.MatchString(s)
-}
-
-func ParseName(input string) (ticket, feature string) {
-	input = strings.TrimSpace(input)
-	head, tail, found := strings.Cut(input, "/")
-	if IsTicket(head) {
-		ticket = strings.ToUpper(head)
-		if found {
-			feature = Slugify(tail)
-		}
-		return ticket, feature
-	}
-	return "", Slugify(input)
-}
 
 func Slugify(s string) string {
 	var b strings.Builder
@@ -44,16 +24,6 @@ func Slugify(s string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-func SlugFor(ticket, feature string) string {
-	switch {
-	case ticket != "" && feature != "":
-		return strings.ToLower(ticket) + "-" + feature
-	case ticket != "":
-		return strings.ToLower(ticket)
-	}
-	return feature
-}
-
 func FreshSlug(slug string, taken func(string) bool) string {
 	fresh := slug
 	for n := 2; taken(fresh); n++ {
@@ -65,8 +35,7 @@ func FreshSlug(slug string, taken func(string) bool) string {
 type Launch struct {
 	Repo          string
 	Slug          string
-	Ticket        string
-	Brief         string
+	Prompt        string
 	SessionID     string
 	Chrome        bool
 	RemoteControl bool
@@ -83,22 +52,18 @@ func (l Launch) flags() []string {
 	return flags
 }
 
-func (l Launch) Prompt() string {
-	id := l.Ticket
-	if id == "" {
-		id = l.Slug
+func (l Launch) Message() string {
+	message := "/factory " + l.Slug
+	if strings.TrimSpace(l.Prompt) != "" {
+		message += "\n" + strings.TrimRight(l.Prompt, "\n")
 	}
-	prompt := "/factory " + id
-	if l.Ticket == "" && strings.TrimSpace(l.Brief) != "" {
-		prompt += "\n" + strings.TrimRight(l.Brief, "\n")
-	}
-	return prompt
+	return message
 }
 
 func (l Launch) CreateCommand() string {
 	parts := append([]string{"claude", "--worktree", l.Slug, "--session-id", l.SessionID}, l.flags()...)
 	worktree := filepath.Join(l.Repo, ".claude", "worktrees", l.Slug)
-	return strings.Join(parts, " ") + " " + ShellQuote(l.Prompt()) + "; cd " + ShellQuote(worktree)
+	return strings.Join(parts, " ") + " " + ShellQuote(l.Message()) + "; cd " + ShellQuote(worktree)
 }
 
 func (l Launch) ResumeCommand() string {

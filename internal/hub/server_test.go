@@ -32,7 +32,7 @@ func TestViewerReceivesFramesAtItsNewSizeAfterAResize(t *testing.T) {
 	t.Cleanup(func() { server.Close() })
 
 	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r"}}, Server: server, Events: events})
-	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: factory.Factory{Repo: "/r", Slug: "eng-1", State: &state.State{Ticket: "ENG-1"}}, Status: factory.Running}}})
+	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: factory.Factory{Repo: "/r", Slug: "eng-1", State: &state.State{ID: "ENG-1"}}, Status: factory.Running}}})
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 20))
 	t.Cleanup(func() { tm.Quit() })
 

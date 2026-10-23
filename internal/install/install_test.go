@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const vaultSettings = `{
@@ -152,5 +154,75 @@ func TestHooksFromASpacedBinaryPathAreReplacedAndRemovedWithoutTouchingSharedGro
 	}
 	if len(commands) != 1 || len(commands["SessionStart"]) != 1 {
 		t.Errorf("removal took the vault hook that shared a group with ours: %v", commands)
+	}
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(home, "dev", "svc")
+	subdir := filepath.Join(repo, "internal", "api")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module svc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "init", "-q")
+	git(t, repo, "add", "go.mod")
+	git(t, repo, "commit", "-q", "-m", "init")
+	configFile := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(configFile, []byte("# my repos\nrepos: [~/dev/other] # keep me\nicons: unicode\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := Init(subdir, configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.ProfileWritten || len(first.Excluded) != len(IgnoredPaths) || !first.ConfigAdded {
+		t.Fatalf("first init from a subdirectory = %+v; want the profile, the exclude lines and the config entry written for the repo", first)
+	}
+	if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
+		t.Fatalf("init from a subdirectory wrote the profile in the wrong place: %v", err)
+	}
+	profile, err := state.ReadProfile(repo)
+	if err != nil || profile.Commands.Build != "go build ./..." || profile.QA.Mode != "terminal" || profile.CodeRabbit == nil || *profile.CodeRabbit {
+		t.Errorf("profile for a go.mod repo reads as %+v, %v; want go commands, terminal QA and CodeRabbit off", profile, err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".claude", "factory.yml"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	worktree := filepath.Join(repo, ".claude", "worktrees", "x")
+	git(t, repo, "worktree", "add", "-q", worktree)
+	second, err := Init(worktree, configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Changed() {
+		t.Errorf("second init from a worktree changed %+v; want nothing changed", second)
+	}
+	if profile, _ := os.ReadFile(filepath.Join(repo, ".claude", "factory.yml")); string(profile) != "edited\n" {
+		t.Errorf("second init overwrote the edited profile with:\n%s", profile)
+	}
+	exclude, _ := os.ReadFile(filepath.Join(repo, ".git", "info", "exclude"))
+	if n := strings.Count(string(exclude), ".claude/worktrees/"); n != 1 {
+		t.Errorf("exclude lists .claude/worktrees/ %d times:\n%s", n, exclude)
+	}
+	config, _ := os.ReadFile(configFile)
+	if want := "# my repos\nrepos: [~/dev/other, ~/dev/svc] # keep me\nicons: unicode\n"; string(config) != want {
+		t.Errorf("config =\n%s\nwant\n%s", config, want)
+	}
+	if out, _ := exec.Command("git", "-C", repo, "status", "--porcelain").Output(); len(out) != 0 {
+		t.Errorf("init left the repo dirty, so the factory's clean-tree preflight fails:\n%s", out)
 	}
 }

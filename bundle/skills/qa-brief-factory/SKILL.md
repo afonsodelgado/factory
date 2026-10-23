@@ -16,7 +16,7 @@ Give QA what only this session knows. Do **not** explain how the code works: QA 
 Keep the brief to 30 lines at most:
 
 ```markdown
-# <ticket>: <title>
+# <factory id>: <title>
 
 ## Intent
 2–3 sentences in product terms: who can now do what, and what must not happen.
@@ -33,7 +33,7 @@ Shortcuts taken, paths not exercised, decisions that could be wrong,
 doors to the same action that may not share the gate.
 
 ## Setup
-The QA mode from `.claude/factory.yml`, and what the environment needs: flags,
+The QA mode from `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none), and what the environment needs: flags,
 migrations, seed data, principals, stub tools, terminal sizes, environment variables.
 
 ## Out of scope

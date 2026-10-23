@@ -1014,7 +1014,7 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 func noPaneReason(it Item) string {
 	switch {
 	case it.Status == factory.Done && retired(it.Factory):
-		return "This factory is done and its worktree was removed. n or factory open with the same ticket starts a new factory; this row stays as history."
+		return "This factory is done and its worktree was removed. n or factory open with the same id starts a new factory; this row stays as history."
 	case it.Status == factory.Done:
 		return "This factory is done and its tmux pane is closed. Archive it to hide the row."
 	}

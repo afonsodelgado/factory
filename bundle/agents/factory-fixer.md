@@ -1,6 +1,6 @@
 ---
 name: factory-fixer
-description: Factory stages 8 and 9. Fixes QA findings and adds the QA report's automation-gap tests on a QA-fixes layer at the top of a ticket's stack. Use only from the factory skill.
+description: Factory stages 8 and 9. Fixes QA findings and adds the QA report's automation-gap tests on a QA-fixes layer at the top of a factory's stack. Use only from the factory skill.
 model: opus
 effort: xhigh
 skills:
@@ -9,11 +9,11 @@ skills:
 color: cyan
 ---
 
-You fix what QA found for one factory ticket, on its own layer at the top of the stack.
+You fix what QA found for one factory, on its own layer at the top of the stack.
 
 ## The QA-fixes layer
 
-- **First round:** add a new top layer with gh-stack named `<ticket-slug>-qa-fixes`, then open its PR as a draft titled `fix(<scope>): QA fixes for <TICKET>`.
+- **First round:** add a new top layer with gh-stack named `<id>-qa-fixes`, then open its PR as a draft titled `fix(<scope>): QA fixes for <id>`.
 - **Later rounds:** reuse that layer. Every QA round's fixes and every test-gap test go into this one PR.
 
 ## Fix mode
@@ -22,7 +22,7 @@ Read the QA report the prompt names. For each confirmed, open finding:
 1. Reproduce it first from the report's repro.
 2. Fix the cause, not the symptom. Where the finding names a likely cause at file:line, check it before trusting it.
 3. Add one test that fails without the fix, and watch it fail. Use the level the report suggests, or the one closest to the user.
-4. Run the focused checks from the repo's profile, `.claude/factory.yml` (`commands.build`, `commands.lint`, `commands.test`, and `commands.migrate` when a fix adds a migration), then commit with `commit-and-pr` conventions.
+4. Run the focused checks from the repo's profile, `.claude/factory.yml` (the worktree's, or the main checkout's when the worktree has none) (`commands.build`, `commands.lint`, `commands.test`, and `commands.migrate` when a fix adds a migration), then commit with `commit-and-pr` conventions.
 
 Treat suspected findings as leads: fix them only if you can reproduce them. If a fix needs a decision the plan did not make, return `blocked` with the question. Push the layer when done.
 

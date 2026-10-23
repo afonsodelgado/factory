@@ -31,6 +31,7 @@ func doctorOptions() install.Options {
 		o.ConfigErr = err
 		return o
 	}
+	o.Repos = cfg.Repos
 	for _, repo := range cfg.Repos {
 		if profile, err := state.ReadProfile(repo); err == nil && profile.BrowserQA() {
 			o.Browser = append(o.Browser, filepath.Base(repo))
@@ -91,7 +92,7 @@ func count(n int, noun string) string {
 func printToolFixes(o install.Options) {
 	var missing []install.Check
 	for _, c := range install.Doctor(o) {
-		if c.Mark == install.Fail && c.Name != "bundle" && c.Name != "hooks" {
+		if c.Mark == install.Fail && c.Name != "bundle" && c.Name != "hooks" && c.Name != "repos" && c.Name != "profile" {
 			missing = append(missing, c)
 		}
 	}

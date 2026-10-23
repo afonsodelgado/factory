@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 )
 
-func TestNewFactoryNamesTheExactTicketMatch(t *testing.T) {
+func TestNewFactorySelectsTheFactoryWithTheTypedID(t *testing.T) {
 	context := NewContext{
 		RemoteControl: true,
 		Repos: []RepoOption{
@@ -19,13 +20,12 @@ func TestNewFactoryNamesTheExactTicketMatch(t *testing.T) {
 		},
 	}
 	tm := teatest.NewTestModel(t, NewFactory(context), teatest.WithInitialTermSize(84, 22), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
-	tm.Type("ENG-745")
-	if err := tm.Quit(); err != nil {
-		t.Fatal(err)
-	}
+	tm.Type("eng-7450")
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("select it")) }, teatest.WithDuration(5*time.Second))
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*NewFactoryModel)
-	if _, ok := final.Result(); ok {
-		t.Fatal("typing a name must not start a factory")
-	}
 	golden.RequireEqual(t, final.View().Content)
+	if r, _ := final.Result(); r != (NewResult{Select: "/r/cowork:eng-7450-ssrf-guard"}) {
+		t.Errorf("typing an existing factory's id gave %+v; want that factory selected, never a second one", r)
+	}
 }

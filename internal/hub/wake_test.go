@@ -64,7 +64,7 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true})
-	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{Ticket: "ENG-9"}, Entry: entry}}
+	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{ID: "ENG-9"}, Entry: entry}}
 	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
 	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived"} {
@@ -77,11 +77,11 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	model.choose(archived.Factory.Key())
 	model.selectorKey("a")
 	if registry.Find(repo, "eng-9-clean").Archived {
-		t.Error("a on the archived ENG-9 row left it archived; the ticket could never get its factory back")
+		t.Error("a on the archived ENG-9 row left it archived; the id could never get its factory back")
 	}
 }
 
-func TestATicketWhoseFactoryIsDoneAndRemovedGetsANewOne(t *testing.T) {
+func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	repo := t.TempDir()
 	legacy := filepath.Join(repo, ".claude", "factory", "ENG-9")
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
@@ -102,21 +102,28 @@ func TestATicketWhoseFactoryIsDoneAndRemovedGetsANewOne(t *testing.T) {
 	tm := teatest.NewTestModel(t, dialog.NewFactory(model.newContext()), teatest.WithInitialTermSize(84, 22))
 	tm.Type("ENG-9")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Type("Retry the export.")
+	tm.Send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	result, _ := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*dialog.NewFactoryModel).Result()
-	if r, _ := result.(dialog.NewResult); r.Select != "" || r.Slug != "eng-9-2" {
-		t.Errorf("n ENG-9 gave %+v; want a new factory under a slug the old row does not hold", result)
+	if r, _ := result.(dialog.NewResult); r.Select != "" || r.Slug != "eng-9-2" || r.Prompt != "Retry the export." {
+		t.Errorf("n ENG-9 gave %+v; want a new factory with its prompt, under an id the done row does not hold", result)
 	}
 
-	model.open(OpenRequest{Name: "ENG-9"})
+	model.open(OpenRequest{Name: "ENG-9", Prompt: "Retry the export."})
 	if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(repo), "eng-9-2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	model.SetSnapshot(loader.Load())
+	model.open(OpenRequest{Name: "eng-9-2"})
 	var keys []string
 	for _, it := range loader.Load().Items {
 		keys = append(keys, it.Factory.Slug)
 	}
 	if !slices.Equal(keys, []string{"eng-9", "eng-9-2"}) {
-		t.Errorf("after open ENG-9 and claude creating its worktree, the rows are %v; want the done eng-9 kept as history and the new eng-9-2", keys)
+		t.Errorf("after open ENG-9 and then open eng-9-2, the rows are %v; want the done eng-9 kept as history and eng-9-2 created once, never duplicated", keys)
+	}
+	if want := state.Key(repo, "eng-9-2"); model.selected != want {
+		t.Errorf("open eng-9-2 selected %q, want the existing %q", model.selected, want)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type Mark string
@@ -39,6 +41,7 @@ type Options struct {
 	Home       string
 	ConfigFile string
 	ConfigErr  error
+	Repos      []string
 }
 
 func run(name string, args ...string) (string, error) {
@@ -85,7 +88,7 @@ func installCommand(pkg string) string {
 func Doctor(o Options) []Check {
 	checks := []Check{
 		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
-		tool("git", "", "git", []string{"--version"}, installCommand("git")),
+		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
 		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
 		ghCheck(),
 		ghStack(),
@@ -97,7 +100,20 @@ func Doctor(o Options) []Check {
 		hooksCheck(o),
 	}
 	if o.ConfigErr != nil {
-		checks = append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
+		return append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
+	}
+	return append(checks, repoChecks(o.Repos)...)
+}
+
+func repoChecks(repos []string) []Check {
+	if len(repos) == 0 {
+		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos configured, so there is nowhere to start a factory", Fix: "factory init <repo>"}}
+	}
+	var checks []Check
+	for _, repo := range repos {
+		if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
+			checks = append(checks, Check{Name: "profile", Mark: Fail, Detail: tilde(repo) + ": no factory profile", Fix: "factory init " + tilde(repo)})
+		}
 	}
 	return checks
 }
