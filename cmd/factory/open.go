@@ -87,8 +87,12 @@ func openMain(r hub.OpenRequest) error {
 		return err
 	}
 	if name != "" {
-		if err := request(cfg.SocketPath(), hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline}); err != nil {
+		reply, err := request(cfg.SocketPath(), "open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline})
+		if err != nil {
 			return err
+		}
+		if reply.T == "error" {
+			return errors.New(reply.Error)
 		}
 	}
 	return attach(cfg, tm)
@@ -179,10 +183,10 @@ func loginShell() string {
 	return "/bin/sh -l"
 }
 
-func request(socket string, r hub.OpenRequest) error {
-	data, err := json.Marshal(r)
+func request(socket, kind string, payload any) (hub.Message, error) {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return hub.Message{}, err
 	}
 	var conn net.Conn
 	deadline := time.Now().Add(15 * time.Second)
@@ -192,29 +196,24 @@ func request(socket string, r hub.OpenRequest) error {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the hub did not start: %w", err)
+			return hub.Message{}, fmt.Errorf("the hub did not start: %w", err)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	defer conn.Close()
-	if err := json.NewEncoder(conn).Encode(hub.Message{T: "open", Pane: "cli", Data: data}); err != nil {
-		return err
+	if err := json.NewEncoder(conn).Encode(hub.Message{T: kind, Pane: "cli", Data: data}); err != nil {
+		return hub.Message{}, err
 	}
 	conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		var m hub.Message
-		if json.Unmarshal(scanner.Bytes(), &m) != nil {
-			continue
-		}
-		switch m.T {
-		case "done":
-			return nil
-		case "error":
-			return errors.New(m.Error)
+		if json.Unmarshal(scanner.Bytes(), &m) == nil && (m.T == "done" || m.T == "error") {
+			return m, nil
 		}
 	}
-	return errors.New("the hub did not answer")
+	return hub.Message{}, errors.New("the hub did not answer")
 }
 
 func attach(cfg *state.Config, tm tmux.Client) error {

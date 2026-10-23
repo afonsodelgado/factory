@@ -103,6 +103,33 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	}
 }
 
+func TestDeleteSelectsTheNextRowAndFreesTheId(t *testing.T) {
+	repo := t.TempDir()
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-1-x", Created: true})
+	next := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-2-y", Created: true})
+	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{
+		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-1-x", Entry: failed}},
+		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-2-y", Entry: next}},
+	}})
+	model.choose(state.Key(repo, "eng-1-x"))
+
+	if _, err := model.delete(state.Key(repo, "eng-1-x")); err != nil {
+		t.Fatal(err)
+	}
+	if model.selected != state.Key(repo, "eng-2-y") {
+		t.Errorf("after deleting the selected row, %q is selected; want the next row", model.selected)
+	}
+	if registry.Find(repo, "eng-1-x") != nil {
+		t.Error("the registry entry survived delete, so a new factory with the id would get eng-1-x-2")
+	}
+}
+
 func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	repo := t.TempDir()
 	legacy := filepath.Join(repo, ".claude", "factory", "ENG-9")

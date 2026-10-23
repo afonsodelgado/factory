@@ -37,6 +37,8 @@ func run(args []string) int {
 		return runDialog(args[1:])
 	case "open":
 		return runOpen(args[1:])
+	case "delete":
+		return runDelete(args[1:], os.Stdin, os.Stdout)
 	case "init":
 		return runInit(args[1:])
 	case "doctor":
@@ -66,6 +68,11 @@ commands:
   open [<id>] [--prompt text | <prompt…>] [--repo path] [--pipeline name]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
+  delete <id> [--repo path] [--yes]
+              delete a factory: its pane, worktree, local branches, state,
+              activity log, drafts and registry entry, so the id can be used
+              again; pushed PRs and remote branches stay. --yes skips the first
+              confirmation, never the one for unpushed or uncommitted work
   init [path] add a repo (default: the one you are in): write its factory
               profile, ignore the factory's files in .git/info/exclude and
               list it in config.yml; nothing is committed

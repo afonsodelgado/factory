@@ -61,12 +61,15 @@ Worktrees have no copy of the profile, so the skill and its agents read it from 
 | `factory open csv-export` | without a prompt, a new factory's supervisor asks for one |
 | `factory open csv-export --repo ~/dev/factory` | in a given repo instead of the one holding the factory or the current directory |
 | `factory open csv-export --pipeline quick` | creates it with the `quick` pipeline instead of the default one |
+| `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
 
 An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
 Inside the hub, `?` lists every key. `M-0` returns to the factory list from any pane of the hub; `q` quits the UI and leaves every factory running. `p` pauses the selected factory: Claude stops and its pane closes, while the worktree, branch and state stay, and `w` wakes it again. `a` archives a done, gone or exited factory and can remove its worktree; the factory directory then moves to `.claude/factory-archive/<id>` in the main checkout. It stays listed as archived history (`H` shows it), and a new factory with the same id starts fresh.
+
+`d` deletes the selected factory in any status, and `factory delete <id> [--repo path]` does the same from the shell. Delete closes the factory's pane, force-removes its worktree, force-deletes its local branch and every local branch of its PR stack, and removes its factory and QA directories (in the worktree, the main checkout and `.claude/factory-archive`), its `.ready` marker, activity log, drafts and registry entry. A new factory with the same id then gets that id and starts empty. Pushed PRs and remote branches are never touched. Delete always asks first; when the worktree has uncommitted changes or a branch has commits no remote branch has, it lists them and asks a second time, and `factory delete` refuses that second question when stdin is not a terminal. `--yes` skips only the first question. A delete that fails part way says which step failed; running it again finishes the job.
 
 ## Configuration
 

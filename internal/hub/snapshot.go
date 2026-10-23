@@ -181,6 +181,13 @@ func (l *Loader) logHook(f factory.Factory, hook *state.HookFile) {
 	state.AppendActivity(state.ActivityPath(l.Config.ActivityDir(), f.Repo, f.Slug), state.ActivityEntry{At: main.At, Source: "hook", Text: text})
 }
 
+func (l *Loader) Forget(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.lastGood, key)
+	delete(l.lastMain, key)
+}
+
 func (l *Loader) Known(repo, slug string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

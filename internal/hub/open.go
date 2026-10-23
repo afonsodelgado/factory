@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
@@ -18,6 +19,27 @@ type OpenRequest struct {
 	Repo     string `json:"repo"`
 	Prompt   string `json:"prompt,omitempty"`
 	Pipeline string `json:"pipeline,omitempty"`
+}
+
+type DeleteRequest struct {
+	Repo string `json:"repo"`
+	Slug string `json:"slug"`
+}
+
+func (m *Model) deleteRequest(e Event) tea.Cmd {
+	var r DeleteRequest
+	var steps []factory.RemovalStep
+	err := json.Unmarshal(e.Data, &r)
+	if err == nil {
+		steps, err = m.delete(state.Key(r.Repo, r.Slug))
+	}
+	report, _ := json.Marshal(factory.Report(steps))
+	reply := Message{T: "done", Data: report}
+	if err != nil {
+		reply = Message{T: "error", Error: err.Error(), Data: report}
+	}
+	e.From.Send(reply)
+	return m.load()
 }
 
 func (m *Model) openRequest(e Event) tea.Cmd {
