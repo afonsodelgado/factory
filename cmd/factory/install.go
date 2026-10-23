@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -54,32 +55,67 @@ func runDoctor(args []string) int {
 	return 0
 }
 
+func installPlans(binary string) ([]install.Plan, error) {
+	plan, err := install.NewPlan(install.ClaudeDir(), binary)
+	if err != nil {
+		return nil, err
+	}
+	plans := []install.Plan{plan}
+	if onPath("codex") {
+		if plan, err = install.NewCodexPlan(state.CodexHome(), binary); err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	if onPath("opencode") {
+		if plan, err = install.NewOpenCodePlan(state.OpenCodeConfigDir(), binary); err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+func onPath(tool string) bool {
+	_, err := exec.LookPath(tool)
+	return err == nil
+}
+
 func runBootstrap(args []string) int {
 	o := doctorOptions()
-	plan, err := install.NewPlan(o.ClaudeDir, o.Binary)
+	plans, err := installPlans(o.Binary)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory bootstrap:", err)
 		return 1
 	}
-	fmt.Printf("factory bootstrap · installs the bundled skills, agents and hooks into %s\n\n", o.ClaudeDir)
-	if plan.Changes() == 0 {
-		fmt.Println("Everything is installed and current. Nothing changed.")
-	} else {
-		result, err := install.Apply(plan, time.Now())
-		for _, backup := range result.Backups {
-			fmt.Println("  backed up  " + backup)
-		}
-		for _, written := range result.Written {
-			fmt.Println("  wrote      " + written)
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "factory bootstrap:", err)
+	for _, plan := range plans {
+		if !applyPlan(plan) {
 			return 1
 		}
-		fmt.Printf("\n%s written, %d backed up. Restart running Claude Code sessions so they pick up the hooks.\n", count(len(result.Written), "file"), len(result.Backups))
 	}
 	printToolFixes(o)
 	return 0
+}
+
+func applyPlan(plan install.Plan) bool {
+	fmt.Printf("factory bootstrap · installs the bundled files for %s into %s\n", plan.Tool, plan.Dir)
+	if plan.Changes() == 0 {
+		fmt.Print("Everything is installed and current. Nothing changed.\n\n")
+		return true
+	}
+	result, err := install.Apply(plan, time.Now())
+	for _, backup := range result.Backups {
+		fmt.Println("  backed up  " + backup)
+	}
+	for _, written := range result.Written {
+		fmt.Println("  wrote      " + written)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory bootstrap:", err)
+		return false
+	}
+	fmt.Printf("%s written, %d backed up. Restart running %s sessions so they pick up the change.\n\n", count(len(result.Written), "file"), len(result.Backups), plan.Tool)
+	return true
 }
 
 func count(n int, noun string) string {
@@ -111,27 +147,37 @@ func runInstallHooks(args []string) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	dir := install.ClaudeDir()
 	stamp := time.Now().Format("20060102-150405")
-	var written, backup string
-	var err error
+	command := install.HookCommand(binaryPath())
+	rewrites := []func() (string, string, error){func() (string, string, error) { return install.MergeHooks(install.ClaudeDir(), command, stamp) }}
+	if onPath("codex") {
+		rewrites = append(rewrites, func() (string, string, error) { return install.MergeCodexHooks(state.CodexHome(), command, stamp) })
+	}
 	if *remove {
-		written, backup, err = install.RemoveHooks(dir, stamp)
-	} else {
-		written, backup, err = install.MergeHooks(dir, install.HookCommand(binaryPath()), stamp)
+		rewrites = []func() (string, string, error){
+			func() (string, string, error) { return install.RemoveHooks(install.ClaudeDir(), stamp) },
+			func() (string, string, error) { return install.RemoveCodexHooks(state.CodexHome(), stamp) },
+		}
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "factory install-hooks:", err)
-		return 1
+	changed := false
+	for _, rewrite := range rewrites {
+		written, backup, err := rewrite()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "factory install-hooks:", err)
+			return 1
+		}
+		if backup != "" {
+			fmt.Println("backed up  " + backup)
+		}
+		if written != "" {
+			fmt.Println("wrote      " + written)
+			changed = true
+		}
 	}
-	if written == "" {
-		fmt.Println("settings.json already up to date. Nothing changed.")
+	if !changed {
+		fmt.Println("The hooks are already up to date. Nothing changed.")
 		return 0
 	}
-	if backup != "" {
-		fmt.Println("backed up  " + backup)
-	}
-	fmt.Println("wrote      " + written)
-	fmt.Println("Restart running Claude Code sessions so they pick up the change.")
+	fmt.Println("Restart running Claude Code and Codex sessions so they pick up the change.")
 	return 0
 }

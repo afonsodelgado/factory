@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,72 @@ func TestHooksFromASpacedBinaryPathAreReplacedAndRemovedWithoutTouchingSharedGro
 	if len(commands) != 1 || len(commands["SessionStart"]) != 1 {
 		t.Errorf("removal took the vault hook that shared a group with ours: %v", commands)
 	}
+}
+
+func TestCodexAndOpenCodeInstallsKeepTheUsersHooksAndCallThisBinary(t *testing.T) {
+	codex, opencode := t.TempDir(), t.TempDir()
+	binary := "/My Apps/factory"
+	mine := `{"description": "mine", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify.sh"}]}]}}`
+	if err := os.WriteFile(filepath.Join(codex, "hooks.json"), []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codexPlan, err := NewCodexPlan(codex, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openCodePlan, err := NewOpenCodePlan(opencode, binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range []Plan{codexPlan, openCodePlan} {
+		if _, err := Apply(plan, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stop := codexHookCommands(t, codex)["Stop"]
+	if !slices.Contains(stop, "notify.sh") || !slices.Contains(stop, HookCommand(binary)) {
+		t.Errorf("Codex Stop hooks are %v; want the user's notify.sh kept beside %q", stop, HookCommand(binary))
+	}
+	if _, err := os.Stat(filepath.Join(codex, "skills", "factory", "SKILL.md")); err != nil {
+		t.Errorf("Codex cannot load the factory skill: %v", err)
+	}
+	plugin, err := os.ReadFile(filepath.Join(opencode, "plugins", "factory.js"))
+	if err != nil || !strings.Contains(string(plugin), `const FACTORY = "/My Apps/factory"`) {
+		t.Errorf("the OpenCode plugin does not call this binary, so OpenCode sessions report no status: %v", err)
+	}
+
+	if _, _, err := RemoveCodexHooks(codex, "20261023T190000"); err != nil {
+		t.Fatal(err)
+	}
+	if stop := codexHookCommands(t, codex)["Stop"]; !slices.Equal(stop, []string{"notify.sh"}) {
+		t.Errorf("after removal Codex Stop hooks are %v; want only the user's notify.sh", stop)
+	}
+}
+
+func codexHookCommands(t *testing.T, dir string) map[string][]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Description string                       `json:"description"`
+		Hooks       map[string][]json.RawMessage `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Description != "mine" {
+		t.Errorf("the user's description was lost: %q", file.Description)
+	}
+	commands := map[string][]string{}
+	for event, groups := range file.Hooks {
+		for _, g := range groups {
+			commands[event] = append(commands[event], commandsIn(g)...)
+		}
+	}
+	return commands
 }
 
 func git(t *testing.T, dir string, args ...string) {

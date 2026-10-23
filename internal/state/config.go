@@ -150,6 +150,18 @@ func StateDir() string {
 	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "factory")
 }
 
+func CodexHome() string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+func OpenCodeConfigDir() string {
+	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "opencode")
+}
+
 func xdg(env, fallback string) string {
 	if dir := os.Getenv(env); dir != "" {
 		return dir

@@ -32,14 +32,6 @@ func Claude() []Model {
 	return models
 }
 
-func CodexHome() string {
-	if dir := os.Getenv("CODEX_HOME"); dir != "" {
-		return dir
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".codex")
-}
-
 func Codex(home string) ([]Model, error) {
 	var auth struct {
 		Mode string `json:"auth_mode"`

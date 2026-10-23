@@ -29,14 +29,18 @@ type File struct {
 	Target string
 	State  FileState
 	Mode   fs.FileMode
+	Want   []byte
 }
 
 type Plan struct {
-	ClaudeDir string
-	Command   string
-	Files     []File
-	Hooks     []string
-	Stale     []string
+	Tool        string
+	Dir         string
+	Command     string
+	Files       []File
+	HooksFile   string
+	HooksSource string
+	Hooks       []string
+	Stale       []string
 }
 
 func (p Plan) Pending() []File {
@@ -72,49 +76,92 @@ func quoteIfNeeded(s string) string {
 	return s
 }
 
-func Bundled() ([]File, error) {
+const openCodePlugin = "opencode/factory.js"
+
+func Bundled(dirs ...string) ([]File, error) {
 	var files []File
-	err := fs.WalkDir(bundle.Files, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || p == "hooks.json" {
-			return err
+	for _, dir := range dirs {
+		err := fs.WalkDir(bundle.Files, dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			mode := fs.FileMode(0o644)
+			if path.Base(path.Dir(p)) == "scripts" {
+				mode = 0o755
+			}
+			files = append(files, File{Source: p, Mode: mode})
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		mode := fs.FileMode(0o644)
-		if path.Base(path.Dir(p)) == "scripts" {
-			mode = 0o755
-		}
-		files = append(files, File{Source: p, Mode: mode})
-		return nil
-	})
-	return files, err
+	}
+	return files, nil
 }
 
 func NewPlan(claudeDir, binary string) (Plan, error) {
-	plan := Plan{ClaudeDir: claudeDir, Command: HookCommand(binary)}
-	files, err := Bundled()
+	plan := Plan{Tool: "claude", Dir: claudeDir, Command: HookCommand(binary), HooksFile: filepath.Join(claudeDir, "settings.json"), HooksSource: "hooks.json"}
+	files, err := Bundled("skills", "agents")
 	if err != nil {
 		return plan, err
 	}
+	return plan.with(files, func(source string) string { return source })
+}
+
+func NewCodexPlan(codexDir, binary string) (Plan, error) {
+	plan := Plan{Tool: "codex", Dir: codexDir, Command: HookCommand(binary), HooksFile: filepath.Join(codexDir, "hooks.json"), HooksSource: "codex/hooks.json"}
+	files, err := Bundled("skills")
+	if err != nil {
+		return plan, err
+	}
+	return plan.with(files, func(source string) string { return source })
+}
+
+func NewOpenCodePlan(openCodeDir, binary string) (Plan, error) {
+	plan := Plan{Tool: "opencode", Dir: openCodeDir, Command: HookCommand(binary)}
+	files, err := Bundled(openCodePlugin)
+	if err != nil {
+		return plan, err
+	}
+	encoded, _ := json.Marshal(binary)
+	for i := range files {
+		files[i].Want = bytes.Replace(mustRead(files[i].Source), []byte(`const FACTORY = "factory"`), append([]byte("const FACTORY = "), encoded...), 1)
+	}
+	return plan.with(files, func(string) string { return "plugins/factory.js" })
+}
+
+func mustRead(source string) []byte {
+	data, _ := fs.ReadFile(bundle.Files, source)
+	return data
+}
+
+func (plan Plan) with(files []File, target func(source string) string) (Plan, error) {
 	for _, f := range files {
-		f.Target = filepath.Join(claudeDir, filepath.FromSlash(f.Source))
-		want, _ := fs.ReadFile(bundle.Files, f.Source)
+		f.Target = filepath.Join(plan.Dir, filepath.FromSlash(target(f.Source)))
+		if f.Want == nil {
+			f.Want = mustRead(f.Source)
+		}
 		have, err := os.ReadFile(f.Target)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			f.State = Missing
 		case err != nil:
 			return plan, err
-		case bytes.Equal(have, want):
+		case bytes.Equal(have, f.Want):
 			f.State = Same
 		default:
 			f.State = Changed
 		}
 		plan.Files = append(plan.Files, f)
 	}
-	settings, err := readSettings(filepath.Join(claudeDir, "settings.json"))
+	if plan.HooksFile == "" {
+		return plan, nil
+	}
+	settings, err := readSettings(plan.HooksFile)
 	if err != nil {
 		return plan, err
 	}
-	plan.Hooks, plan.Stale, err = missingHooks(settings, plan.Command)
+	plan.Hooks, plan.Stale, err = missingHooks(settings, plan.HooksSource, plan.Command)
 	return plan, err
 }
 
@@ -127,10 +174,6 @@ func Apply(plan Plan, now time.Time) (Result, error) {
 	var result Result
 	stamp := now.Format("20060102-150405")
 	for _, f := range plan.Pending() {
-		data, err := fs.ReadFile(bundle.Files, f.Source)
-		if err != nil {
-			return result, err
-		}
 		if f.State == Changed {
 			backup := backupPath(f.Target, stamp)
 			if err := os.Rename(f.Target, backup); err != nil {
@@ -141,7 +184,7 @@ func Apply(plan Plan, now time.Time) (Result, error) {
 		if err := os.MkdirAll(filepath.Dir(f.Target), 0o755); err != nil {
 			return result, err
 		}
-		if err := os.WriteFile(f.Target, data, f.Mode); err != nil {
+		if err := os.WriteFile(f.Target, f.Want, f.Mode); err != nil {
 			return result, err
 		}
 		result.Written = append(result.Written, f.Target)
@@ -149,7 +192,7 @@ func Apply(plan Plan, now time.Time) (Result, error) {
 	if len(plan.Hooks) == 0 && len(plan.Stale) == 0 {
 		return result, nil
 	}
-	written, backup, err := MergeHooks(plan.ClaudeDir, plan.Command, stamp)
+	written, backup, err := mergeHooks(plan.HooksFile, plan.HooksSource, plan.Command, stamp)
 	if backup != "" {
 		result.Backups = append(result.Backups, backup)
 	}
@@ -188,8 +231,8 @@ func hookBinary(command string) (string, bool) {
 	return rest, true
 }
 
-func bundledHooks(command string) (*object, error) {
-	data, err := fs.ReadFile(bundle.Files, "hooks.json")
+func bundledHooks(source, command string) (*object, error) {
+	data, err := fs.ReadFile(bundle.Files, source)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +261,8 @@ func commandsIn(raw json.RawMessage) []string {
 	return commands
 }
 
-func missingHooks(settings *object, command string) ([]string, []string, error) {
-	want, err := bundledHooks(command)
+func missingHooks(settings *object, source, command string) ([]string, []string, error) {
+	want, err := bundledHooks(source, command)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,8 +308,16 @@ func unique(items []string) []string {
 }
 
 func MergeHooks(claudeDir, command, stamp string) (string, string, error) {
-	return rewriteHooks(claudeDir, stamp, func(installed *object) error {
-		want, err := bundledHooks(command)
+	return mergeHooks(filepath.Join(claudeDir, "settings.json"), "hooks.json", command, stamp)
+}
+
+func MergeCodexHooks(codexDir, command, stamp string) (string, string, error) {
+	return mergeHooks(filepath.Join(codexDir, "hooks.json"), "codex/hooks.json", command, stamp)
+}
+
+func mergeHooks(file, source, command, stamp string) (string, string, error) {
+	return rewriteHooks(file, stamp, func(installed *object) error {
+		want, err := bundledHooks(source, command)
 		if err != nil {
 			return err
 		}
@@ -287,7 +338,18 @@ func MergeHooks(claudeDir, command, stamp string) (string, string, error) {
 }
 
 func RemoveHooks(claudeDir, stamp string) (string, string, error) {
-	return rewriteHooks(claudeDir, stamp, func(installed *object) error {
+	return removeHooks(filepath.Join(claudeDir, "settings.json"), stamp)
+}
+
+func RemoveCodexHooks(codexDir, stamp string) (string, string, error) {
+	return removeHooks(filepath.Join(codexDir, "hooks.json"), stamp)
+}
+
+func removeHooks(file, stamp string) (string, string, error) {
+	if !exists(file) {
+		return "", "", nil
+	}
+	return rewriteHooks(file, stamp, func(installed *object) error {
 		for _, event := range append([]string(nil), installed.keys...) {
 			groups, err := eventGroups(installed, event)
 			if err != nil {
@@ -350,8 +412,7 @@ func withoutOurHooks(raw json.RawMessage) (json.RawMessage, bool) {
 	return trimmed, true
 }
 
-func rewriteHooks(claudeDir, stamp string, change func(*object) error) (string, string, error) {
-	path := filepath.Join(claudeDir, "settings.json")
+func rewriteHooks(path, stamp string, change func(*object) error) (string, string, error) {
 	settings, err := readSettings(path)
 	if err != nil {
 		return "", "", err
@@ -390,7 +451,7 @@ func rewriteHooks(claudeDir, stamp string, change func(*object) error) (string, 
 			return "", "", err
 		}
 	}
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", backup, err
 	}
 	return path, backup, os.WriteFile(path, pretty.Bytes(), 0o644)
