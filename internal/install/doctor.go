@@ -88,7 +88,7 @@ func installCommand(pkg string) string {
 func Doctor(o Options) []Check {
 	checks := []Check{
 		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
-		tool("git", "", "git", []string{"--version"}, installCommand("git")),
+		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
 		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
 		ghCheck(),
 		ghStack(),

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const vaultSettings = `{
@@ -190,14 +191,12 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndKeepsTheConfigsComments(t *testin
 	if !first.ProfileWritten || len(first.Excluded) != len(IgnoredPaths) || !first.ConfigAdded {
 		t.Fatalf("first init from a subdirectory = %+v; want the profile, the exclude lines and the config entry written for the repo", first)
 	}
-	profile, err := os.ReadFile(filepath.Join(repo, ".claude", "factory.yml"))
-	if err != nil {
+	if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
 		t.Fatalf("init from a subdirectory wrote the profile in the wrong place: %v", err)
 	}
-	for _, want := range []string{"build: go build ./...", "mode: terminal", "coderabbit: false"} {
-		if !strings.Contains(string(profile), want) {
-			t.Errorf("profile for a go.mod repo lacks %q:\n%s", want, profile)
-		}
+	profile, err := state.ReadProfile(repo)
+	if err != nil || profile.Commands.Build != "go build ./..." || profile.QA.Mode != "terminal" || profile.CodeRabbit == nil || *profile.CodeRabbit {
+		t.Errorf("profile for a go.mod repo reads as %+v, %v; want go commands, terminal QA and CodeRabbit off", profile, err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".claude", "factory.yml"), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
