@@ -24,14 +24,18 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-const resumeSettle = 5 * time.Second
+const (
+	resumeSettle = 5 * time.Second
+	submitWait   = time.Minute
+)
 
 type StageRequest struct {
-	Action string `json:"action"`
-	Token  string `json:"token"`
-	Cwd    string `json:"cwd"`
-	Role   string `json:"role"`
-	Text   string `json:"text"`
+	Action string   `json:"action"`
+	Token  string   `json:"token"`
+	Cwd    string   `json:"cwd"`
+	Role   string   `json:"role"`
+	Text   string   `json:"text"`
+	PRs    []string `json:"prs,omitempty"`
 }
 
 type StageReply struct {
@@ -41,9 +45,12 @@ type StageReply struct {
 type queuedType struct {
 	Pane      string
 	Token     string
+	SessionID string
 	Label     string
 	Text      string
 	NotBefore time.Time
+	Delivers  string
+	Record    string
 }
 
 type StageView struct {
@@ -69,6 +76,9 @@ func (m *Model) stageRequest(e Event) tea.Cmd {
 }
 
 func (m *Model) stage(r StageRequest) (StageReply, error) {
+	if r.Action == "ci" {
+		return m.waitForCI(r)
+	}
 	if !slices.Contains(state.AgentRoles, r.Role) {
 		return StageReply{}, fmt.Errorf("%q is not a role; roles are %s", r.Role, strings.Join(state.AgentRoles, ", "))
 	}
@@ -87,6 +97,49 @@ func (m *Model) stage(r StageRequest) (StageReply, error) {
 		return m.sendStage(it, runs, r)
 	}
 	return m.startStage(it, runs, r)
+}
+
+func (m *Model) waitForCI(r StageRequest) (StageReply, error) {
+	it, ok := m.itemForStage(r.Token, r.Cwd)
+	if !ok || it.Factory.Dir == "" {
+		return StageReply{}, errors.New("no factory owns this session; run factory stage ci from a factory's supervisor pane")
+	}
+	if len(r.PRs) == 0 {
+		return StageReply{}, errors.New("name the pull requests to wait for")
+	}
+	script, err := m.ciScript()
+	if err != nil {
+		return StageReply{}, err
+	}
+	command := factory.ShellQuote(script) + " --dir " + factory.ShellQuote(it.Factory.Dir) + " --inbox"
+	for _, pr := range r.PRs {
+		command += " " + factory.ShellQuote(pr)
+	}
+	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "ci"); err != nil {
+		return StageReply{}, err
+	}
+	pane, err := m.Engine.TM.NewWindow(tmux.Window{Session: m.Engine.Session, Name: "c-" + it.Factory.Slug, Dir: it.Factory.Worktree, Command: command})
+	if err != nil {
+		return StageReply{}, err
+	}
+	for _, o := range [][2]string{{"@factory_ui", "ci"}, {"@factory_repo", it.Factory.Repo}, {"@factory_stage_of", it.Factory.Slug}, {"@factory_stage", "ci"}} {
+		if err := m.Engine.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
+			return StageReply{}, err
+		}
+	}
+	return StageReply{Result: filepath.Join(it.Factory.Dir, "inbox")}, nil
+}
+
+func (m *Model) ciScript() (string, error) {
+	data, err := fs.ReadFile(bundle.Files, "skills/factory/scripts/wait-for-review.sh")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(m.Config.StateDir, "bin", "wait-for-review.sh")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, data, 0o755)
 }
 
 func (m *Model) itemForStage(token, cwd string) (Item, bool) {
@@ -122,7 +175,7 @@ func (m *Model) startStage(it Item, runs *state.StageRuns, r StageRequest) (Stag
 		return StageReply{}, err
 	}
 	run := m.newRun(it, runs, r.Role, setting, uuid.NewString())
-	prompt, err := stagePrompt(r.Role, r.Text, run.Result, m.rules())
+	prompt, err := stagePrompt(r.Role, r.Text, run.Result, m.rules(), setting.OnClaude())
 	if err != nil {
 		return StageReply{}, err
 	}
@@ -170,6 +223,36 @@ func (m *Model) sendStage(it Item, runs *state.StageRuns, r StageRequest) (Stage
 		m.queueType(queuedType{Pane: pane.ID, Token: run.Token, Label: r.Role, Text: kickoff, NotBefore: m.Now().Add(resumeSettle)})
 	}
 	return m.record(it, runs, run, "resumed")
+}
+
+func (m *Model) writableDirs(dir string, setting state.AgentSetting) []string {
+	if setting.ToolName() != state.ToolCodex {
+		return nil
+	}
+	return codexWritableDirs(dir, m.Config.Codex.WritableDirs)
+}
+
+func supervisorEnv(supervisor state.AgentSetting) []string {
+	env := []string{"FACTORY=1", "FACTORY_SUPERVISOR=" + supervisor.ToolName(), factoryBin()}
+	if !supervisor.OnClaude() {
+		env = append(env, "CLAUDE_CODE_SESSION_ID=")
+	}
+	return env
+}
+
+func factoryBin() string {
+	self, err := os.Executable()
+	if err != nil {
+		return "FACTORY_BIN=factory"
+	}
+	return "FACTORY_BIN=" + self
+}
+
+func (m *Model) typeAfterStart(plan Wake, pane string, it Item) {
+	if plan.ThenType == "" {
+		return
+	}
+	m.queueType(queuedType{Pane: pane, SessionID: plan.Launch.SessionID, Label: it.Factory.Label(), Text: plan.ThenType, NotBefore: m.Now().Add(resumeSettle)})
 }
 
 func (m *Model) closeFinishedStages() {
@@ -234,7 +317,22 @@ func (m *Model) openStagePane(it Item, run state.StageRun, command string) error
 	if err != nil {
 		return err
 	}
-	return m.Engine.Type(pane, command)
+	return m.typeLaunch(pane, state.FileStem(it.Factory.Repo, it.Factory.Slug)+"-"+run.Role, command)
+}
+
+func (m *Model) typeSupervisor(pane string, f factory.Factory, command string) error {
+	if f.Supervisor().OnClaude() {
+		return m.Engine.Type(pane, command)
+	}
+	return m.typeLaunch(pane, state.FileStem(f.Repo, f.Slug)+"-supervisor", command)
+}
+
+func (m *Model) typeLaunch(pane, name, command string) error {
+	path := filepath.Join(m.Config.StateDir, "launch", name+".sh")
+	if err := writeFile(path, command+"\n"); err != nil {
+		return err
+	}
+	return m.Engine.Type(pane, ". "+factory.ShellQuote(path))
 }
 
 func (m *Model) rules() string {
@@ -271,17 +369,46 @@ func (m *Model) flushTypeQueue() {
 			m.notice = "The " + q.Label + " pane closed before its message was typed."
 			continue
 		}
-		target := Target{Label: q.Label, Pane: &pane, Hook: paneHook(q.Token, m.snap.Hooks)}
-		reason, err := Deliver(m.Typist, target, q.Text)
+		hook := queuedHook(q, m.snap.Hooks)
+		if m.awaitingSubmit(q.Pane, hook) {
+			waiting = append(waiting, q)
+			continue
+		}
+		reason, err := Deliver(m.Typist, Target{Label: q.Label, Pane: &pane, Hook: hook}, q.Text)
 		if err != nil {
 			m.notice = err.Error()
 			continue
 		}
 		if reason != "" {
 			waiting = append(waiting, q)
+			continue
+		}
+		m.typedAt[q.Pane] = m.Now()
+		if q.Delivers != "" {
+			markDelivered(q.Record, q.Delivers)
 		}
 	}
 	m.typeQueue = waiting
+}
+
+func (m *Model) awaitingSubmit(pane string, hook *state.HookFile) bool {
+	typed, ok := m.typedAt[pane]
+	if !ok || m.Now().Sub(typed) > submitWait {
+		return false
+	}
+	return hook == nil || hook.Submit == nil || hook.Submit.At.Before(typed)
+}
+
+func queuedHook(q queuedType, hooks []*state.HookFile) *state.HookFile {
+	if h := paneHook(q.Token, hooks); h != nil {
+		return h
+	}
+	for _, h := range hooks {
+		if q.SessionID != "" && h.SessionID == q.SessionID {
+			return h
+		}
+	}
+	return nil
 }
 
 func kickoffFor(run state.StageRun) string {
@@ -292,7 +419,9 @@ func resultContract(path string) string {
 	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file."
 }
 
-func stagePrompt(role, task, result, rules string) (string, error) {
+const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have, such as artifact-design or artifact-diagramming; for HTML, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the supervisor shows the files you write."
+
+func stagePrompt(role, task, result, rules string, onClaude bool) (string, error) {
 	data, err := fs.ReadFile(bundle.Files, "agents/factory-"+role+".md")
 	if err != nil {
 		return "", err
@@ -309,6 +438,9 @@ func stagePrompt(role, task, result, rules string) (string, error) {
 		b.WriteString("## The developer's rules\n\nThese rules apply to every line of code you write or review.\n\n" + rules + "\n\n")
 	}
 	b.WriteString(strings.TrimSpace(string(body)) + "\n")
+	if !onClaude {
+		b.WriteString("\n" + elsewhereNote + "\n")
+	}
 	if len(meta.Skills) > 0 {
 		b.WriteString("\nLoad these skills before you start: " + strings.Join(meta.Skills, ", ") + ".\n")
 	}

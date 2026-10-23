@@ -206,7 +206,7 @@ func StageParkName(slug, role string) string {
 }
 
 func (e *Engine) NewStagePane(l Layout, s StagePane) (string, error) {
-	env := []string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token}
+	env := []string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}
 	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: StageParkName(s.Slug, s.Role), Dir: s.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err

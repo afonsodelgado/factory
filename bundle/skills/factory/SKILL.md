@@ -12,6 +12,8 @@ argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model
 
 # Factory supervisor
 
+**First, run `echo "$FACTORY_SUPERVISOR"`.** When it prints `codex` or `opencode`, read `references/hosts.md` now, before anything else: this file was written for Claude Code, and that reference replaces every step that needs a tool you do not have.
+
 You are the supervisor of one factory. You do not read or write product code. You start
 stage agents, wait for them, record what they hand back, publish their artifacts, relay
 the user's comments and answers, and decide the next stage. Keep your own context small:
@@ -163,10 +165,11 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 ```
 
 - **The prompt** gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Its first line is "Follow the developer's rules in `<rules file>`" when `${FACTORY_CONFIG_DIR:-~/.config/factory}/rules.md` exists. Write `waiting_on: "agent"` with the stage as the reason.
+- **Never do a stage's work yourself.** Every stage runs as its own agent, started as below.
 - **Spawn a `claude` role** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there.
-- **Start a `codex` or `opencode` role** through the factory app, which opens it in its own pane beside yours. Write the prompt to `<factory dir>/stages/<role>-task.md`, then run `factory stage start --role <role> --task <that file> --wait` with Bash `run_in_background: true`. The app adds the role's instructions and the developer's rules itself. When the command finishes, its output is the result file's path and the `factory-result` JSON: handle it as an agent's final message. A non-zero exit carries the reason; treat it as `failed`.
+- **Start a `codex` or `opencode` role** through the factory app, which opens it in its own pane beside yours. Write the prompt to `<factory dir>/stages/<role>-task.md`, then run `"${FACTORY_BIN:-factory}" stage start --role <role> --task <that file> --wait` with Bash `run_in_background: true`. The app adds the role's instructions and the developer's rules itself. When the command finishes, its output is the result file's path and the `factory-result` JSON: handle it as an agent's final message. A non-zero exit carries the reason; treat it as `failed`.
 - **Record** the agent id in `state.stages.<stage>.agent_id` straight away: the returned id for a Claude subagent, `stage:<role>` for a role in another tool. Names do not survive compaction, ids do.
-- **Follow-ups** go to the same agent so it keeps its context: SendMessage for a Claude subagent; for a role in another tool, write the message to a file and run `factory stage send --role <role> --message <file> --wait` in the background, as for `start`.
+- **Follow-ups** go to the same agent so it keeps its context: SendMessage for a Claude subagent; for a role in another tool, write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`.
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent as a follow-up. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
 - **On `done`:** record `outputs` and `data`, mark the stage done, and go to the next stage.

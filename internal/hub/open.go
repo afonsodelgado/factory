@@ -15,12 +15,13 @@ import (
 )
 
 type OpenRequest struct {
-	Name     string                        `json:"name"`
-	Repo     string                        `json:"repo"`
-	Prompt   string                        `json:"prompt,omitempty"`
-	Pipeline string                        `json:"pipeline,omitempty"`
-	Stages   []string                      `json:"stages,omitempty"`
-	Agents   map[string]state.AgentSetting `json:"agents,omitempty"`
+	Name       string                        `json:"name"`
+	Repo       string                        `json:"repo"`
+	Prompt     string                        `json:"prompt,omitempty"`
+	Pipeline   string                        `json:"pipeline,omitempty"`
+	Stages     []string                      `json:"stages,omitempty"`
+	Agents     map[string]state.AgentSetting `json:"agents,omitempty"`
+	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 }
 
 type DeleteRequest struct {
@@ -88,5 +89,5 @@ func (m *Model) open(r OpenRequest) error {
 	if earlier, ok := m.retiredMatch(repos, id); ok {
 		repo = earlier
 	}
-	return m.create(dialog.NewResult{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents})
+	return m.create(dialog.NewResult{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
 }

@@ -66,6 +66,8 @@ type Model struct {
 	wakes        map[string]Wake
 	pipelines    map[string]string
 	typeQueue    []queuedType
+	typedAt      map[string]time.Time
+	inboxQueued  map[string]bool
 }
 
 type snapshotMsg Snapshot
@@ -83,6 +85,8 @@ func NewModel(m Model) *Model {
 	model.share = PanelShare
 	model.panel = newPanelState()
 	model.dialogs = map[string]json.RawMessage{}
+	model.typedAt = map[string]time.Time{}
+	model.inboxQueued = map[string]bool{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -133,6 +137,9 @@ func (m *Model) watchDirs() {
 		dirs = append(dirs, it.Factory.Dir)
 		if it.Stage != nil {
 			dirs = append(dirs, filepath.Dir(it.Stage.Run.Result))
+		}
+		if !it.Factory.Supervisor().OnClaude() && it.Factory.Dir != "" {
+			dirs = append(dirs, filepath.Join(it.Factory.Dir, "inbox"), filepath.Join(it.Factory.Dir, "stages"))
 		}
 	}
 	m.Watch.Watch(dirs)
@@ -222,6 +229,7 @@ func (m *Model) apply(s Snapshot) {
 	m.snap = s
 	m.forgetClosedItems()
 	m.checkReceipts()
+	m.queueInbox()
 	m.flushTypeQueue()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
@@ -319,7 +327,7 @@ func (m *Model) planWakes() {
 			continue
 		}
 		profile, _ := state.ReadProfile(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile, m.Config.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	}
 }
 

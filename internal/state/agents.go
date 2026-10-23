@@ -24,7 +24,7 @@ var Tools = []string{ToolClaude, ToolCodex, ToolOpenCode}
 
 var RoleTools = Tools
 
-var SupervisorTools = []string{ToolClaude}
+var SupervisorTools = Tools
 
 var AgentModels = []string{"haiku", "sonnet", "opus", "fable"}
 
@@ -64,7 +64,7 @@ func (s AgentSetting) ToolName() string {
 
 func (s AgentSetting) OnClaude() bool { return s.ToolName() == ToolClaude }
 
-func (s AgentSetting) over(base AgentSetting) AgentSetting {
+func (s AgentSetting) Over(base AgentSetting) AgentSetting {
 	if s.Tool != "" && s.ToolName() != base.ToolName() {
 		base = AgentSetting{Tool: s.Tool}
 	}
@@ -103,7 +103,7 @@ func ResolveAgents(cfg *Config, profile Profile, overrides map[string]AgentSetti
 	for _, role := range AgentRoles {
 		setting := DefaultAgents[role]
 		for _, layer := range []map[string]AgentSetting{cfg.Agents, profile.Agents, overrides} {
-			setting = layer[role].over(setting)
+			setting = layer[role].Over(setting)
 		}
 		resolved[role] = setting
 	}

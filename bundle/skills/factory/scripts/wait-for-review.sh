@@ -6,11 +6,33 @@ if [ "${1:-}" = "--dir" ]; then
   dir="${2:-}"
   shift 2
 fi
+inbox=""
+if [ "${1:-}" = "--inbox" ]; then
+  inbox="$dir/inbox"
+  shift
+fi
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: wait-for-review.sh [--dir <factory dir>] <pr-number>..." >&2
+  echo "usage: wait-for-review.sh [--dir <factory dir> [--inbox]] <pr-number>..." >&2
   exit 64
 fi
+
+report=""
+
+say() {
+  echo "$1"
+  report="$report$1
+"
+}
+
+finish() {
+  if [ -n "$inbox" ]; then
+    mkdir -p "$inbox"
+    jq -n --arg text "CI and CodeRabbit finished:
+$report" '{text: $text}' > "$inbox/ci-$(date +%s).json"
+  fi
+  exit "$1"
+}
 
 poll_seconds="${FACTORY_POLL_SECONDS:-60}"
 sleep_seconds="${FACTORY_SLEEP_SECONDS:-$poll_seconds}"
@@ -56,29 +78,29 @@ while :; do
     is_finished "$pr" && continue
     read -r total coderabbit ci <<<"$(pr_report "$pr")"
     if [ "$total" -eq 0 ] && [ "$elapsed_min" -ge "$no_checks_minutes" ]; then
-      echo "PR $pr: no-checks after ${elapsed_min}m"
+      say "PR $pr: no-checks after ${elapsed_min}m"
       finished="$finished$pr "
       continue
     fi
     if [ "$coderabbit" != "pending" ] && [ "$coderabbit" != "absent" ] && [ "$ci" != "pending" ]; then
-      echo "PR $pr: coderabbit=$coderabbit ci=$ci"
+      say "PR $pr: coderabbit=$coderabbit ci=$ci"
       finished="$finished$pr "
       continue
     fi
     if [ "$coderabbit" = "absent" ] && [ "$ci" != "pending" ] && [ "$elapsed_min" -ge "$no_checks_minutes" ]; then
-      echo "PR $pr: coderabbit=absent ci=$ci after ${elapsed_min}m"
+      say "PR $pr: coderabbit=absent ci=$ci after ${elapsed_min}m"
       finished="$finished$pr "
       continue
     fi
     pending="$pending $pr"
   done
   if [ -z "$pending" ]; then
-    echo "all done"
-    exit 0
+    say "all done"
+    finish 0
   fi
   if [ "$elapsed_min" -ge "$timeout_minutes" ]; then
-    echo "timeout after ${elapsed_min}m, still pending:$pending"
-    exit 3
+    say "timeout after ${elapsed_min}m, still pending:$pending"
+    finish 3
   fi
   sleep "$sleep_seconds"
   polls=$(( polls + 1 ))

@@ -299,12 +299,22 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err := state.ValidateAgents("--agent", r.Agents); err != nil {
 		return err
 	}
+	supervisor := r.Supervisor.Over(m.Config.Supervisor)
+	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
+		return err
+	}
 	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl(), Supervisor: supervisor}
+	if supervisor.OnClaude() {
+		launch.SessionID = uuid.NewString()
+	} else {
+		launch.Chrome, launch.RemoteControl = false, false
+		launch.AddDirs = m.writableDirs(r.Repo, supervisor)
+	}
 	title := firstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		pinDirs(reg, earlier)
 		reg.Upsert(entry)
@@ -315,11 +325,11 @@ func (m *Model) create(r dialog.NewResult) error {
 	if m.Engine == nil {
 		return errors.New("the hub is not attached to tmux")
 	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: []string{"FACTORY=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: supervisorEnv(supervisor)})
 	if err != nil {
 		return err
 	}
-	if err := m.Engine.Type(pane, launch.CreateCommand()); err != nil {
+	if err := m.typeSupervisor(pane, factory.Factory{Repo: r.Repo, Slug: r.Slug, Entry: &entry}, launch.CreateCommand()); err != nil {
 		return err
 	}
 	note := "created by factory"
@@ -420,27 +430,29 @@ func (m *Model) wake(key string) error {
 	}
 	profile, _ := state.ReadProfile(it.Factory.Repo)
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, profile, m.Config.RemoteControl(), hooks)
+	plan := PlanWake(it, profile, m.Config.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Supervisor()))
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree
 		if !dirExists(dir) {
 			return fmt.Errorf("the worktree %s is gone", tilde(dir))
 		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: []string{"FACTORY=1"}})
+		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: supervisorEnv(it.Factory.Supervisor())})
 		if err != nil {
 			return err
 		}
-		if err := m.Engine.Type(pane, plan.Command); err != nil {
+		if err := m.typeSupervisor(pane, it.Factory, plan.Command); err != nil {
 			return err
 		}
+		m.typeAfterStart(plan, pane, it)
 	case WakeShell:
 		if now := m.freshTarget(it).Pane; now == nil || !factory.IsShell(now.Command) {
 			return fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
 		}
-		if err := m.Engine.Type(it.Pane.ID, plan.Command); err != nil {
+		if err := m.typeSupervisor(it.Pane.ID, it.Factory, plan.Command); err != nil {
 			return err
 		}
+		m.typeAfterStart(plan, it.Pane.ID, it)
 	case WakeResume:
 		reason, err := Deliver(m.Engine, m.freshTarget(it), plan.Command)
 		if err != nil {

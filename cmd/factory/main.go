@@ -73,6 +73,7 @@ commands:
   open [<id>] [--prompt text | <prompt…>] [--repo path]
               [--pipeline name | --stages a,b,c]
               [--agent role=model:effort | role=tool/model:effort]
+              [--supervisor tool/model:effort]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
   delete <id> [--repo path] [--yes]
@@ -94,6 +95,9 @@ commands:
               run a stage agent on its own tool in a pane beside the
               supervisor, or send it a follow-up; prints the result file
               (run by the supervisor from its pane)
+  stage ci <pr number>...
+              wait for CI and CodeRabbit on these PRs, then type the
+              result into the supervisor (for Codex and OpenCode)
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap

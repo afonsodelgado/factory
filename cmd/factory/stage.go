@@ -14,9 +14,16 @@ import (
 
 const resultPoll = 2 * time.Second
 
+const stageUsage = `usage: factory stage start --role <role> --task <file> [--wait]
+       factory stage send --role <role> --message <file> [--wait]
+       factory stage ci <pr number>...`
+
 func runStage(args []string) int {
+	if len(args) > 0 && args[0] == "ci" {
+		return runStageCI(args[1:])
+	}
 	if len(args) == 0 || (args[0] != "start" && args[0] != "send") {
-		fmt.Fprintln(os.Stderr, "usage: factory stage start --role <role> --task <file> [--wait]\n       factory stage send --role <role> --message <file> [--wait]")
+		fmt.Fprintln(os.Stderr, stageUsage)
 		return 2
 	}
 	action := args[0]
@@ -41,6 +48,20 @@ func runStage(args []string) int {
 	return 0
 }
 
+func runStageCI(prs []string) int {
+	if len(prs) == 0 {
+		fmt.Fprintln(os.Stderr, stageUsage)
+		return 2
+	}
+	inbox, err := ask(hub.StageRequest{Action: "ci", PRs: prs})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory stage:", err)
+		return 1
+	}
+	fmt.Println("The factory app waits for CI and CodeRabbit and types the result into this session; the summary also lands in " + inbox)
+	return 0
+}
+
 func stage(action, role, textFile string) (string, error) {
 	if role == "" || textFile == "" {
 		return "", errors.New("give --role and the file with the task or message")
@@ -49,6 +70,10 @@ func stage(action, role, textFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return ask(hub.StageRequest{Action: action, Role: role, Text: string(text)})
+}
+
+func ask(r hub.StageRequest) (string, error) {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return "", err
@@ -56,19 +81,20 @@ func stage(action, role, textFile string) (string, error) {
 	if !hubRunning(cfg) {
 		return "", errors.New("the factory hub is not running; start it with factory open")
 	}
-	cwd, _ := os.Getwd()
-	reply, err := request(cfg.SocketPath(), "stage", hub.StageRequest{Action: action, Token: os.Getenv("FACTORY_PANE_TOKEN"), Cwd: cwd, Role: role, Text: string(text)})
+	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
+	r.Cwd, _ = os.Getwd()
+	reply, err := request(cfg.SocketPath(), "stage", r)
 	if err != nil {
 		return "", err
 	}
 	if reply.T == "error" {
 		return "", errors.New(reply.Error)
 	}
-	var r hub.StageReply
-	if err := json.Unmarshal(reply.Data, &r); err != nil {
+	var answer hub.StageReply
+	if err := json.Unmarshal(reply.Data, &answer); err != nil {
 		return "", err
 	}
-	return r.Result, nil
+	return answer.Result, nil
 }
 
 func waitForFile(path string) []byte {

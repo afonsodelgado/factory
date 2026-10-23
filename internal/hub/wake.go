@@ -40,10 +40,11 @@ func SessionFor(f factory.Factory, token string, hooks []*state.HookFile) (strin
 }
 
 type Wake struct {
-	Kind    WakeKind
-	Launch  factory.Launch
-	Source  SessionSource
-	Command string
+	Kind     WakeKind
+	Launch   factory.Launch
+	Source   SessionSource
+	Command  string
+	ThenType string
 }
 
 type WakeKind int
@@ -54,27 +55,39 @@ const (
 	WakeResume
 )
 
-func PlanWake(it Item, profile state.Profile, remoteControl bool, hooks []*state.HookFile) Wake {
+func PlanWake(it Item, profile state.Profile, remoteControl bool, hooks []*state.HookFile, writableDirs []string) Wake {
 	id, source := SessionFor(it.Factory, tokenOf(it.Pane), hooks)
-	launch := factory.Launch{Repo: it.Factory.Repo, Slug: it.Factory.Slug, SessionID: id, Chrome: profile.BrowserQA(), RemoteControl: remoteControl}
+	supervisor := it.Factory.Supervisor()
+	launch := factory.Launch{Repo: it.Factory.Repo, Slug: it.Factory.Slug, SessionID: id, Supervisor: supervisor}
+	if supervisor.OnClaude() {
+		launch.Chrome, launch.RemoteControl = profile.BrowserQA(), remoteControl
+	} else {
+		launch.AddDirs = writableDirs
+	}
 	w := Wake{Launch: launch, Source: source, Command: launch.ResumeCommand()}
+	if launch.TypesResumeAfterStart() {
+		w.ThenType = launch.ResumeMessage()
+	}
 	switch it.Status {
 	case factory.Gone:
 		w.Kind = WakeNewPane
 	case factory.Exited:
 		w.Kind = WakeShell
 	default:
-		w.Kind, w.Command = WakeResume, Retry()
+		w.Kind, w.Command, w.ThenType = WakeResume, factory.ForSupervisor(supervisor.ToolName(), Retry()), ""
 	}
 	return w
 }
 
 func (w Wake) Note() string {
 	if w.Kind == WakeResume {
-		return "woke with /factory resume typed into the session"
+		return "woke with " + w.Command + " typed into the session"
 	}
-	if w.Source == NoSession {
+	if w.Source == NoSession && w.Launch.Supervisor.OnClaude() {
 		return "woke with --continue: no session id in the registry, state.json or the hook files"
 	}
-	return "woke with --resume " + w.Launch.SessionID + " from " + string(w.Source)
+	if w.Source == NoSession {
+		return "woke a fresh " + w.Launch.Supervisor.ToolName() + " session: no session id in the registry, state.json or the hook files"
+	}
+	return "woke " + w.Launch.Supervisor.ToolName() + " session " + w.Launch.SessionID + " from " + string(w.Source)
 }

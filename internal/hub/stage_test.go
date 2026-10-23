@@ -3,12 +3,14 @@ package hub
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *testing.T) {
@@ -132,4 +134,39 @@ func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testi
 		t.Errorf("hidden stage is %q at %d wide; want %q at %d", parkedStage.WindowName, parkedStage.Width, StageParkName("csv", "engineer"), stageWidth)
 	}
 	framed(t, e, rebuilt, "after the split closed")
+}
+
+func TestACodexSupervisorHearsAboutAFinishedStageOnceAndOnlyWhenIdle(t *testing.T) {
+	stateDir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), ".claude", "factory", "csv")
+	result := filepath.Join(dir, "stages", "engineer-1.result.json")
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, "/r", "csv"))
+	runs.Runs = append(runs.Runs, state.StageRun{Role: "engineer", Round: 1, Token: "t-eng", Result: result})
+	runs.Save()
+	writeFile(result, `{"status":"done"}`)
+
+	at := time.Now()
+	busy := &state.HookFile{Token: "t-sup", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}
+	idle := &state.HookFile{Token: "t-sup", Main: &state.HookEvent{Event: "Stop", At: at}, Last: state.HookEvent{Event: "Stop", At: at}}
+	typist := &fakeTypist{}
+	m := NewModel(Model{Config: &state.Config{StateDir: stateDir}, Typist: typist})
+	supervisor := tmux.Pane{ID: "%3", Command: "codex", Token: "t-sup"}
+	f := factory.Factory{Repo: "/r", Slug: "csv", Dir: dir, Entry: &state.Entry{Supervisor: state.AgentSetting{Tool: state.ToolCodex}}}
+	snapshot := func(hook *state.HookFile, at time.Time) Snapshot {
+		return Snapshot{At: at, Items: []Item{{Factory: f, Pane: &supervisor, Hook: hook}}, Panes: []tmux.Pane{supervisor}, Hooks: []*state.HookFile{hook}}
+	}
+
+	m.apply(snapshot(busy, at))
+	if len(typist.typed) != 0 {
+		t.Fatalf("typed %q into a busy supervisor; want it held until the supervisor is at its prompt", typist.typed)
+	}
+	m.apply(snapshot(idle, at.Add(time.Second)))
+	m.apply(snapshot(idle, at.Add(2*time.Second)))
+	restarted := NewModel(Model{Config: &state.Config{StateDir: stateDir}, Typist: typist})
+	restarted.apply(snapshot(idle, at.Add(3*time.Second)))
+
+	want := []string{"%3: stage engineer done: " + result}
+	if !slices.Equal(typist.typed, want) {
+		t.Errorf("typed %q; want exactly %q, once, even after a hub restart forgets what it queued", typist.typed, want)
+	}
 }
