@@ -88,11 +88,9 @@ const HINTS: Record<Focus, [string, string][]> = {
   ],
 };
 
-const MODE_BG: Record<string, string> = {
+const MODE_BG: Record<Focus, string> = {
   FACTORIES: "on-blu",
-  SESSION: "on-grn",
   PANEL: "on-mag",
-  DIALOG: "on-yel",
 };
 
 type Part = [text: string, classes: string];
@@ -106,7 +104,7 @@ interface Cell {
 
 const cls = (c: string) => c.trim().replace(/\s+/g, " ");
 const len = (s: string) => Array.from(s).length;
-const esc = (s: string) =>
+export const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const plain = (ch: string) => {
   const cp = ch.codePointAt(0)!;
@@ -716,7 +714,7 @@ function prs(g: Grid, cx: number, cy: number, cw: number, ch: number) {
 function footer(
   g: Grid,
   y: number,
-  mode: string,
+  mode: Focus,
   ctx: string,
   hints: [string, string][],
   flash: string | null,
