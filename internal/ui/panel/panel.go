@@ -163,6 +163,11 @@ func ago(now, then time.Time) string {
 }
 
 func renderAttention(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
+	if len(v.Items) == 0 && len(v.Answered) > 0 {
+		c.Put(x, y, "✓ Answered "+strings.Join(v.Answered, ", ")+".", theme.FgInk(theme.Green))
+		c.Put(x, y+2, "The supervisor received the answer and is working on it.", theme.Muted)
+		return
+	}
 	if len(v.Items) == 0 {
 		c.Put(x, y, "Nothing needs you here.", theme.Bright)
 		c.Put(x, y+2, "Open items appear here when the supervisor asks, a gate lights, a cap trips,", theme.Muted)
@@ -382,9 +387,6 @@ func sendStatus(v View, w int) []line {
 	switch {
 	case v.Send.Refused != "":
 		return append(lines, warning(v.Send.Refused+" Draft kept.", w)...)
-	case !v.Send.ReceivedAt.IsZero():
-		received := text("✓ Received by the supervisor at "+v.Send.ReceivedAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
-		return append(lines, received, hints("ctrl+d", "clear and answer again"))
 	case !v.Send.SentAt.IsZero():
 		waiting := text("Sent at "+v.Send.SentAt.Local().Format("15:04")+", waiting for the supervisor to receive it…", theme.Muted)
 		return append(lines, waiting, hints("ctrl+d", "clear and answer again"))

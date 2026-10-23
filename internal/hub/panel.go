@@ -44,6 +44,8 @@ const receiptWait = 10 * time.Second
 
 const notReceived = "Not received by the supervisor. The session is probably showing a stage agent's transcript: open the session (esc, then ⏎), leave that view, then send again."
 
+const notResolved = "The supervisor received this answer but finished its turn without resolving the item. Send it again, or answer in the session."
+
 func (m *Model) forgetClosedItems() {
 	open := map[string]time.Time{}
 	for _, it := range m.snap.Items {
@@ -70,6 +72,10 @@ func (m *Model) forgetClosedItems() {
 func (m *Model) checkReceipts() {
 	for key, mark := range m.panel.sent {
 		if !mark.received.IsZero() {
+			if m.turnEndedSince(mark) {
+				delete(m.panel.sent, key)
+				m.panel.refused[key] = notResolved
+			}
 			continue
 		}
 		var submit *state.HookEvent
@@ -91,6 +97,11 @@ func (m *Model) checkReceipts() {
 	}
 }
 
+func (m *Model) turnEndedSince(mark sentMark) bool {
+	it, ok := m.snap.Find(mark.factory)
+	return ok && factory.IdleAtPrompt(it.Hook) && it.Hook.Main.At.After(mark.received)
+}
+
 func (s sentMark) receivedIn(submit *state.HookEvent) bool {
 	if submit == nil || submit.AgentID != "" || submit.At.Before(s.at) {
 		return false
@@ -106,6 +117,22 @@ func (s sentMark) misroutedIn(submit *state.HookEvent) bool {
 func (m *Model) isSent(f factory.Factory, item panel.Item) bool {
 	_, sent := m.panel.sent[draftKey(f, item.ID)]
 	return sent
+}
+
+func (m *Model) awaitingResolution(f factory.Factory, item panel.Item) bool {
+	mark, sent := m.panel.sent[draftKey(f, item.ID)]
+	return sent && !mark.received.IsZero()
+}
+
+func (m *Model) shownItems(it Item) (shown []panel.Item, answered []string) {
+	for _, item := range attentionItems(it, m.snap.At) {
+		if m.awaitingResolution(it.Factory, item) {
+			answered = append(answered, item.ID)
+		} else {
+			shown = append(shown, item)
+		}
+	}
+	return shown, answered
 }
 
 func newPanelState() panelState {
@@ -252,7 +279,7 @@ func (m *Model) currentAttention() (Item, panel.Item, bool) {
 	if !ok {
 		return Item{}, panel.Item{}, false
 	}
-	items := attentionItems(it, m.snap.At)
+	items, _ := m.shownItems(it)
 	if len(items) == 0 {
 		return it, panel.Item{}, false
 	}
@@ -435,7 +462,7 @@ func (m *Model) panelView() panel.View {
 	}
 	f := it.Factory
 	v.Label = f.Label()
-	v.Items = attentionItems(it, m.snap.At)
+	v.Items, v.Answered = m.shownItems(it)
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
@@ -465,7 +492,7 @@ func (m *Model) panelView() panel.View {
 func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	key := draftKey(it.Factory, item.ID)
 	mark := m.panel.sent[key]
-	s := panel.Send{Refused: m.panel.refused[key], SentAt: mark.at, ReceivedAt: mark.received}
+	s := panel.Send{Refused: m.panel.refused[key], SentAt: mark.at}
 	if missing := unanswered(item, d); missing != "" {
 		s.Reason = missing
 		return s

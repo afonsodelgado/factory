@@ -101,8 +101,10 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		after  time.Duration
 		submit *state.HookEvent
 		keys   []string
+		main   *state.HookEvent
 	}
 	received := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
+	turnEnded := &state.HookEvent{Event: "Stop", At: now.Add(3 * time.Second)}
 	misrouted := &state.HookEvent{Event: "UserPromptSubmit", AgentID: "a1", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
 
 	cases := []struct {
@@ -123,9 +125,10 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", "", nil, ""},
 		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx", nil, ""},
 		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", "", nil, ""},
-		{"the supervisor's own submit confirms the answer", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil}}, 1, "Received by the supervisor", "waiting", nil, ""},
-		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil}}, 1, "Not received by the supervisor", "Received", nil, ""},
-		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"a received answer leaves the panel before the supervisor resolves it", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, nil, nil}}, 1, "Answered q-7452-1", "How many failed auth", nil, ""},
+		{"a received answer the supervisor left open comes back to send again", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, []string{"ctrl+s"}, turnEnded}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil, nil}}, 1, "Not received by the supervisor", "Answered", nil, ""},
+		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}, nil}}, 2, "waiting for the supervisor", "", nil, ""},
 		{"enter on the Approve row approves with the notes", &gate, "Stop", append(keystrokes("ship it"), "esc", "down", "down", "enter"), nil, 1, "Sent at", "", nil, "/factory approve plan gate-7452-plan ship it"},
 		{"a bracket typed at a gate goes into its notes", &gate, "Stop", []string{"["}, nil, 0, "[█", "", nil, ""},
 		{"ctrl+n moves to the next item from inside a form", nil, "Stop", []string{"ctrl+n"}, nil, 0, "gate-7452-plan", "q-7452-1", &gate, ""},
@@ -150,6 +153,9 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 				next := questionFactory(c.hook, now)
 				next.At = now.Add(l.after)
 				next.Items[0].Hook.Submit = l.submit
+				if l.main != nil {
+					next.Items[0].Hook.Main = l.main
+				}
 				tm.Send(snapshotMsg(next))
 				panelKeys(tm, l.keys...)
 			}
