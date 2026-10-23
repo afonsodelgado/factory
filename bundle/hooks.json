@@ -1,26 +1,26 @@
 {
   "SessionStart": [
-    { "matcher": "startup|resume|clear|compact|fork", "hooks": [{ "type": "command", "command": "factory-tui hook" }] }
+    { "matcher": "startup|resume|clear|compact|fork", "hooks": [{ "type": "command", "command": "factory hook" }] }
   ],
   "UserPromptSubmit": [
-    { "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "PreToolUse": [
-    { "matcher": "*", "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "matcher": "*", "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "PermissionRequest": [
-    { "matcher": "*", "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "matcher": "*", "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "Notification": [
-    { "matcher": "permission_prompt|idle_prompt", "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "matcher": "permission_prompt|idle_prompt", "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "Stop": [
-    { "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "StopFailure": [
-    { "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ],
   "SessionEnd": [
-    { "hooks": [{ "type": "command", "command": "factory-tui hook", "async": true }] }
+    { "hooks": [{ "type": "command", "command": "factory hook", "async": true }] }
   ]
 }

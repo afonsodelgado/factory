@@ -78,7 +78,7 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		return Layout{}, fmt.Errorf("pane %s not found", self)
 	}
 	if me.Session != e.Session {
-		return Layout{}, fmt.Errorf("the hub runs in the %q tmux session, not %q: start it with factory-tui open", e.Session, me.Session)
+		return Layout{}, fmt.Errorf("the hub runs in the %q tmux session, not %q: start it with factory open", e.Session, me.Session)
 	}
 	l := Layout{Window: me.WindowID, Selector: self}
 	for _, p := range panes {

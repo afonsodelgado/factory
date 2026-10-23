@@ -43,7 +43,7 @@ func run(args []string) int {
 	case "install-hooks":
 		return runInstallHooks(args[1:])
 	}
-	fmt.Fprintf(os.Stderr, "factory-tui: unknown command %q\n\n", args[0])
+	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
 	return 2
 }
@@ -57,7 +57,7 @@ func runHook(stdin io.Reader) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `usage: factory-tui <command> [arguments]
+	fmt.Fprint(w, `usage: factory <command> [arguments]
 
 commands:
   open [<ticket|slug>] [--repo path]
@@ -65,7 +65,7 @@ commands:
   doctor      check what the factory needs and print the fix commands
   bootstrap   install the bundled skills, agents and hooks into the Claude config
   install-hooks [--remove]
-              add (or remove) only the factory-tui hooks in settings.json
+              add (or remove) only the factory hooks in settings.json
   hub         run the hub in the factory tmux session
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)

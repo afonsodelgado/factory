@@ -1,6 +1,6 @@
-# factory-tui
+# factory
 
-One Go binary, `factory-tui`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
+One Go binary, `factory`, that runs every factory in one tmux session and ships the factory skill, its agents and hooks in `bundle/`.
 
 ## Commands
 
@@ -8,7 +8,7 @@ One Go binary, `factory-tui`, that runs every factory in one tmux session and sh
 go build ./...
 go vet ./...
 go test ./...
-go run ./cmd/factory-tui --version
+go run ./cmd/factory --version
 ```
 
 CI runs the same three commands on ubuntu and macos for every pull request.
@@ -18,8 +18,8 @@ CI runs the same three commands on ubuntu and macos for every pull request.
 Tests, manual runs and QA never touch the real machine:
 
 - tmux: always `tmux -L <scratch name> -f /dev/null`. Never the default server, never the user's `tmux.conf`.
-- `FACTORY_TUI_CONFIG_DIR`, `FACTORY_TUI_STATE_DIR`, `FACTORY_TUI_TMUX_SOCKET` and `CLAUDE_CONFIG_DIR` point at temporary directories.
-- Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory-tui` or `~/.local/state/factory-tui`.
+- `FACTORY_CONFIG_DIR`, `FACTORY_STATE_DIR`, `FACTORY_TMUX_SOCKET` and `CLAUDE_CONFIG_DIR` point at temporary directories.
+- Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory` or `~/.local/state/factory`.
 
 Integration tests that need tmux start their own scratch server and kill it in `t.Cleanup`. They skip when `tmux` is missing only if `CI` is unset.
 

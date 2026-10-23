@@ -97,7 +97,7 @@ func Doctor(o Options) []Check {
 		hooksCheck(o),
 	}
 	if o.ConfigErr != nil {
-		checks = append(checks, Check{Name: "config", Mark: Fail, Detail: "factory-tui hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
+		checks = append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
 	}
 	return checks
 }
@@ -198,7 +198,7 @@ func chrome(o Options) Check {
 	if len(o.Browser) > 0 {
 		detail += " (" + strings.Join(o.Browser, ", ") + ")"
 	}
-	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory-tui passes --chrome per profile"}
+	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per profile"}
 }
 
 func nerdFont(o Options) Check {
@@ -229,7 +229,7 @@ func bundleCheck(o Options) Check {
 		return Check{Name: "bundle", Mark: Pass, Detail: fmt.Sprintf("all %d files match this binary", total)}
 	}
 	missing := 0
-	c := Check{Name: "bundle", Mark: Fail, Fix: "factory-tui bootstrap  backs up each changed file with a timestamp first"}
+	c := Check{Name: "bundle", Mark: Fail, Fix: "factory bootstrap  backs up each changed file with a timestamp first"}
 	for i, f := range pending {
 		if f.State == Missing {
 			missing++
@@ -243,7 +243,7 @@ func bundleCheck(o Options) Check {
 	}
 	c.Detail = fmt.Sprintf("%d of %d files differ from this binary", len(pending), total)
 	if missing == total {
-		c.Detail, c.Lines, c.Fix = fmt.Sprintf("not installed (0 of %d files)", total), nil, "factory-tui bootstrap"
+		c.Detail, c.Lines, c.Fix = fmt.Sprintf("not installed (0 of %d files)", total), nil, "factory bootstrap"
 	}
 	return c
 }
@@ -265,9 +265,9 @@ func hooksCheck(o Options) Check {
 	}
 	switch {
 	case len(moved) > 0:
-		return Check{Name: "hooks", Mark: Fail, Detail: "factory-tui hooks point at another binary", Lines: moved, Fix: "factory-tui install-hooks  then restart running Claude Code sessions"}
+		return Check{Name: "hooks", Mark: Fail, Detail: "factory hooks point at another binary", Lines: moved, Fix: "factory install-hooks  then restart running Claude Code sessions"}
 	case len(plan.Hooks) > 0:
-		return Check{Name: "hooks", Mark: Fail, Detail: fmt.Sprintf("factory-tui status hooks are missing from %s for %s", settings, strings.Join(plan.Hooks, ", ")), Fix: "factory-tui install-hooks  merges with your existing hooks"}
+		return Check{Name: "hooks", Mark: Fail, Detail: fmt.Sprintf("factory status hooks are missing from %s for %s", settings, strings.Join(plan.Hooks, ", ")), Fix: "factory install-hooks  merges with your existing hooks"}
 	}
 	return Check{Name: "hooks", Mark: Pass, Detail: "installed in " + settings, Note: "restart running sessions after changing them"}
 }

@@ -3,4 +3,4 @@
 .claude/factory/
 .claude/worktrees/
 dist/
-/factory-tui
+/factory

@@ -88,19 +88,19 @@ When the file is missing, stop at preflight and ask the user to add one from the
 
 ## Asking the user
 
-Every question, gate, tripped cap and second failure follows the same order, so the factory-tui app can show that the factory needs the user:
+Every question, gate, tripped cap and second failure follows the same order, so the factory app can show that the factory needs the user:
 
 1. Write `state.json` first: `waiting_on: "user"`, a one-sentence `waiting_reason`, and an open item in `attention` (format and ids: `references/attention.md`).
 2. Then ask, and send the push notification.
-3. When the answer arrives, whether it came from the factory-tui panel or was typed in the session, set the item's `resolved_at`, set `waiting_on` to what you wait on next (`"agent"`, `"ci"` or `null`), and only then act on it.
+3. When the answer arrives, whether it came from the factory panel or was typed in the session, set the item's `resolved_at`, set `waiting_on` to what you wait on next (`"agent"`, `"ci"` or `null`), and only then act on it.
 
-**Under factory-tui** (`FACTORY_TUI=1` in your environment; check with `echo $FACTORY_TUI`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
+**Under the factory app** (`FACTORY=1` in your environment; check with `echo $FACTORY`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
 
-> Answer here or from the factory-tui panel. Start your reply with `<item id>`.
+> Answer here or from the factory panel. Start your reply with `<item id>`.
 
 The panel delivers answers in the fixed formats of `references/attention.md`. Recognise them by the item id at the start of the message. A reply typed by hand without the id answers the oldest open item.
 
-**Without factory-tui:** use AskUserQuestion when you can offer real options, plain text otherwise. Write the attention item all the same.
+**Without the factory app:** use AskUserQuestion when you can offer real options, plain text otherwise. Write the attention item all the same.
 
 While a stage agent runs, `waiting_on` is `"agent"`. While `scripts/wait-for-review.sh` runs, it is `"ci"`. Update `session_id` from `$CLAUDE_CODE_SESSION_ID` on every start and resume, because a resumed factory can run in a new conversation.
 
@@ -189,7 +189,7 @@ Write `handoff.md` and post it to the user. Include:
 - what QA verified, with the report path
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 
-Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory-tui app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.
+Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.
 
 ## Limits
 

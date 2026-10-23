@@ -764,7 +764,7 @@ func appBadge(ic theme.Icons) string {
 const hostLabel = "#[fg=#3b4261]#H "
 
 func StoppedHeader(ic theme.Icons) (string, string) {
-	return appBadge(ic) + " #[fg=#737aa2]hub closed · factory-tui open brings it back", hostLabel
+	return appBadge(ic) + " #[fg=#737aa2]hub closed · factory open brings it back", hostLabel
 }
 
 func (m *Model) Header() (string, string) {
@@ -945,7 +945,7 @@ func (m *Model) drawIntro(c *theme.Canvas) {
 	ic := m.Icons
 	x := max((c.W-72)/2, 2)
 	y := max(c.H/2-5, 1)
-	c.Put(x, y, ic.Icon("app")+" factory-tui", theme.Focused.B())
+	c.Put(x, y, ic.Icon("app")+" factory", theme.Focused.B())
 	y += 2
 	for _, line := range theme.Wrap("The selected factory's Claude Code session appears here, with its Needs attention panel underneath.", min(68, c.W-x-2)) {
 		c.Put(x, y, line, theme.Text)
@@ -954,10 +954,10 @@ func (m *Model) drawIntro(c *theme.Canvas) {
 	y++
 	c.Put(x, y, "New machine?", theme.Bright)
 	y++
-	c.Put(x+2, y, "factory-tui doctor     ", theme.Key)
+	c.Put(x+2, y, "factory doctor     ", theme.Key)
 	c.Put(x+25, y, "checks claude, tmux, gh, gh-stack, revmux and the bundle", theme.Muted)
 	y++
-	c.Put(x+2, y, "factory-tui bootstrap  ", theme.Key)
+	c.Put(x+2, y, "factory bootstrap  ", theme.Key)
 	c.Put(x+25, y, "installs the bundled skill, agents and hooks", theme.Muted)
 }
 
@@ -1014,7 +1014,7 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 func noPaneReason(it Item) string {
 	switch {
 	case it.Status == factory.Done && retired(it.Factory):
-		return "This factory is done and its worktree was removed. n or factory-tui open with the same ticket starts a new factory; this row stays as history."
+		return "This factory is done and its worktree was removed. n or factory open with the same ticket starts a new factory; this row stays as history."
 	case it.Status == factory.Done:
 		return "This factory is done and its tmux pane is closed. Archive it to hide the row."
 	}

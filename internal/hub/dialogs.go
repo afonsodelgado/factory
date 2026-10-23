@@ -271,14 +271,14 @@ func (m *Model) create(r dialog.NewResult) error {
 	if label == "" {
 		label = r.Slug
 	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(label + "  " + title), Dir: r.Repo, Env: []string{"FACTORY_TUI=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(label + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
 	if err != nil {
 		return err
 	}
 	if err := m.Engine.Type(pane, launch.CreateCommand()); err != nil {
 		return err
 	}
-	note := "created by factory-tui"
+	note := "created by factory"
 	if r.Brief != "" {
 		note += fmt.Sprintf(" with a %d-line brief", strings.Count(strings.TrimRight(r.Brief, "\n"), "\n")+1)
 	}
@@ -373,7 +373,7 @@ func (m *Model) wake(key string) error {
 		if !dirExists(dir) {
 			return fmt.Errorf("the worktree %s is gone", tilde(dir))
 		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY_TUI=1"}})
+		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY=1"}})
 		if err != nil {
 			return err
 		}
@@ -434,7 +434,7 @@ func (m *Model) kill(key string) error {
 		return err
 	}
 	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "killed from factory-tui")
+		m.Loader.Note(it.Factory, "killed from factory")
 	}
 	return nil
 }

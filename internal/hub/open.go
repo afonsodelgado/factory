@@ -44,7 +44,7 @@ func (m *Model) open(r OpenRequest) error {
 	repos := m.Config.Repos
 	if r.Repo != "" {
 		if !slices.Contains(m.Config.Repos, r.Repo) {
-			return fmt.Errorf("the running hub does not list %s; quit it with q and run factory-tui open again to reload the config", r.Repo)
+			return fmt.Errorf("the running hub does not list %s; quit it with q and run factory open again to reload the config", r.Repo)
 		}
 		repos = []string{r.Repo}
 	}

@@ -24,7 +24,7 @@ jobs:
             arch=${target#*/}
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
               -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-              -o "dist/factory-tui_${os}_${arch}" ./cmd/factory-tui
+              -o "dist/factory_${os}_${arch}" ./cmd/factory
           done
       - name: Publish the release
         env:

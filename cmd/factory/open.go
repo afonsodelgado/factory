@@ -20,7 +20,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-var passedEnv = []string{"FACTORY_TUI_CONFIG_DIR", "FACTORY_TUI_STATE_DIR", "FACTORY_TUI_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
+var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
 func runOpen(args []string) int {
 	flags := flag.NewFlagSet("open", flag.ContinueOnError)
@@ -29,7 +29,7 @@ func runOpen(args []string) int {
 		return 2
 	}
 	if err := openMain(strings.Join(flags.Args(), " "), *repo); err != nil {
-		fmt.Fprintln(os.Stderr, "factory-tui open:", err)
+		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0
