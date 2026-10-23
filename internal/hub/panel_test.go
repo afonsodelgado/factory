@@ -106,6 +106,7 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	received := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
 	turnEnded := &state.HookEvent{Event: "Stop", At: now.Add(3 * time.Second)}
 	misrouted := &state.HookEvent{Event: "UserPromptSubmit", AgentID: "a1", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
+	changesReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "gate-7452-plan changes: darker header", At: now.Add(time.Second)}
 
 	cases := []struct {
 		name  string
@@ -130,28 +131,32 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		{"a received answer the supervisor left open comes back to send again", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, []string{"ctrl+s"}, turnEnded}}, 2, "waiting for the supervisor", "", nil, ""},
 		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil, nil}}, 1, "Not received by the supervisor", "Answered", nil, ""},
 		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}, nil}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"a received change request clears the gate's notes", &gate, "Stop", append(keystrokes("darker header"), "ctrl+s"), []later{{2 * time.Second, changesReceived, nil, nil}, {4 * time.Second, changesReceived, nil, turnEnded}}, 1, "✓ Approve", "darker header", nil, "gate-7452-plan changes: darker header"},
 		{"enter on the Approve row approves with the notes", &gate, "Stop", append(keystrokes("ship it"), "esc", "down", "down", "enter"), nil, 1, "Sent at", "", nil, "/factory approve plan gate-7452-plan ship it"},
 		{"a bracket typed at a gate goes into its notes", &gate, "Stop", []string{"["}, nil, 0, "[█", "", nil, ""},
 		{"ctrl+n moves to the next item from inside a form", nil, "Stop", []string{"ctrl+n"}, nil, 0, "gate-7452-plan", "q-7452-1", &gate, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			snap := questionFactory(c.hook, now)
-			st := snap.Items[0].Factory.State
-			if c.item != nil {
-				st.Attention[0] = *c.item
+			snapshot := func() Snapshot {
+				snap := questionFactory(c.hook, now)
+				st := snap.Items[0].Factory.State
+				if c.item != nil {
+					st.Attention[0] = *c.item
+				}
+				if c.also != nil {
+					st.Attention = append(st.Attention, *c.also)
+				}
+				st.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "https://claude.ai/artifact/p1", Title: "Plan"}, {URL: "https://claude.ai/artifact/s1", Title: "Schematic"}}}}
+				return snap
 			}
-			if c.also != nil {
-				st.Attention = append(st.Attention, *c.also)
-			}
-			st.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "https://claude.ai/artifact/p1", Title: "Plan"}, {URL: "https://claude.ai/artifact/s1", Title: "Schematic"}}}}
 			typist := &fakeTypist{}
 			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-			model.SetSnapshot(snap)
+			model.SetSnapshot(snapshot())
 			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
 			panelKeys(tm, c.keys...)
 			for _, l := range c.later {
-				next := questionFactory(c.hook, now)
+				next := snapshot()
 				next.At = now.Add(l.after)
 				next.Items[0].Hook.Submit = l.submit
 				if l.main != nil {

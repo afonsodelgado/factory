@@ -31,13 +31,14 @@ type panelState struct {
 }
 
 type sentMark struct {
-	at        time.Time
-	itemSince time.Time
-	factory   string
-	itemID    string
-	head      string
-	draft     string
-	received  time.Time
+	at         time.Time
+	itemSince  time.Time
+	factory    string
+	itemID     string
+	head       string
+	draft      string
+	received   time.Time
+	leavesOpen bool
 }
 
 const receiptWait = 10 * time.Second
@@ -57,9 +58,7 @@ func (m *Model) forgetClosedItems() {
 	}
 	for key, mark := range m.panel.sent {
 		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.itemSince) {
-			delete(m.panel.sent, key)
-			delete(m.panel.drafts, key)
-			os.Remove(mark.draft)
+			m.forgetSent(key, mark)
 		}
 	}
 	for key := range m.panel.refused {
@@ -83,6 +82,8 @@ func (m *Model) checkReceipts() {
 			submit = it.Hook.Submit
 		}
 		switch {
+		case mark.receivedIn(submit) && mark.leavesOpen:
+			m.forgetSent(key, mark)
 		case mark.receivedIn(submit):
 			mark.received = submit.At
 			m.panel.sent[key] = mark
@@ -95,6 +96,12 @@ func (m *Model) checkReceipts() {
 			}
 		}
 	}
+}
+
+func (m *Model) forgetSent(key string, mark sentMark) {
+	delete(m.panel.sent, key)
+	delete(m.panel.drafts, key)
+	os.Remove(mark.draft)
 }
 
 func (m *Model) turnEndedSince(mark sentMark) bool {
@@ -433,7 +440,7 @@ func (m *Model) deliver(action string) {
 	if it.Pane != nil {
 		m.typedAt[it.Pane.ID] = sentAt
 	}
-	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID)}
+	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID), leavesOpen: item.Kind == "gate" && action == "changes"}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
