@@ -943,27 +943,31 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("tab", "next tab", "esc", "back to factories")
 	}
 	if item.Answerable() && m.isSent(it.Factory, item) {
-		return hints("ctrl+d", "clear and answer again", "[ ]", "item", "esc", "back")
+		return hints("ctrl+d", "clear and answer again", "ctrl+n/p", "item", "esc", "back")
 	}
+	editing := item.Answerable() && m.draft(it.Factory, item).Editing
 	back := "back, keep draft"
-	if item.Answerable() && m.draft(it.Factory, item).Editing {
+	if editing {
 		back = "stop typing"
 	}
 	if item.Kind == "question" && len(item.Questions) == 0 {
 		return hints("type", "your answer", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
 	}
-	switch item.Kind {
-	case "question":
-		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
-	case "gate":
-		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "[ ]", "item", "esc", back)
-	case "comment":
-		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "[ ]", "item", "esc", back)
-	case "cap":
-		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
-	case "failure":
-		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "[ ]", "item", "esc", back)
-	case "permission":
+	approving := item.Answerable() && !editing && onApproveRow(item, m.draft(it.Factory, item))
+	switch {
+	case item.Kind == "question":
+		return hints("↑↓", "question", "←→", "option", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+	case approving:
+		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "gate":
+		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "comment":
+		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "cap":
+		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "failure":
+		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")

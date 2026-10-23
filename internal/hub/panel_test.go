@@ -114,23 +114,33 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		typed int
 		shows string
 		hides string
+		also  *state.Attention
+		sends string
 	}{
-		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Not sent.", ""},
-		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sent at", ""},
-		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", ""},
-		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", ""},
-		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx"},
-		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", ""},
-		{"the supervisor's own submit confirms the answer", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil}}, 1, "Received by the supervisor", "waiting"},
-		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil}}, 1, "Not received by the supervisor", "Received"},
-		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}}}, 2, "waiting for the supervisor", ""},
+		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Not sent.", "", nil, ""},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sent at", "", nil, ""},
+		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", "", nil, ""},
+		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", "", nil, ""},
+		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx", nil, ""},
+		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", "", nil, ""},
+		{"the supervisor's own submit confirms the answer", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil}}, 1, "Received by the supervisor", "waiting", nil, ""},
+		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil}}, 1, "Not received by the supervisor", "Received", nil, ""},
+		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"enter on the Approve row approves with the notes", &gate, "Stop", append(keystrokes("ship it"), "esc", "down", "down", "enter"), nil, 1, "Sent at", "", nil, "/factory approve plan gate-7452-plan ship it"},
+		{"a bracket typed at a gate goes into its notes", &gate, "Stop", []string{"["}, nil, 0, "[█", "", nil, ""},
+		{"ctrl+n moves to the next item from inside a form", nil, "Stop", []string{"ctrl+n"}, nil, 0, "gate-7452-plan", "q-7452-1", &gate, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			snap := questionFactory(c.hook, now)
+			st := snap.Items[0].Factory.State
 			if c.item != nil {
-				snap.Items[0].Factory.State.Attention[0] = *c.item
+				st.Attention[0] = *c.item
 			}
+			if c.also != nil {
+				st.Attention = append(st.Attention, *c.also)
+			}
+			st.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "https://claude.ai/artifact/p1", Title: "Plan"}, {URL: "https://claude.ai/artifact/s1", Title: "Schematic"}}}}
 			typist := &fakeTypist{}
 			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 			model.SetSnapshot(snap)
@@ -149,8 +159,9 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
 			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
 			hidden := c.hides == "" || !strings.Contains(view, c.hides)
-			if len(typist.typed) != c.typed || !strings.Contains(view, c.shows) || !hidden {
-				t.Errorf("typed %q, panel:\n%s\nwant %d message(s), %q shown and %q not shown", typist.typed, view, c.typed, c.shows, c.hides)
+			sent := strings.Contains(strings.Join(typist.typed, "\n"), c.sends)
+			if len(typist.typed) != c.typed || !strings.Contains(view, c.shows) || !hidden || !sent {
+				t.Errorf("typed %q, panel:\n%s\nwant %d message(s) with %q, %q shown and %q not shown", typist.typed, view, c.typed, c.sends, c.shows, c.hides)
 			}
 		})
 	}

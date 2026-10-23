@@ -279,8 +279,8 @@ func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
 		m.panel.drafts[key] = d
 	}
 	d.Fit(len(item.Questions))
-	if len(item.Artifacts) > 0 {
-		d.Artifact = max(0, min(d.Artifact, len(item.Artifacts)-1))
+	if item.Kind == "gate" {
+		d.Artifact = max(0, min(d.Artifact, approveRow(item)))
 	}
 	return d
 }
@@ -359,8 +359,16 @@ func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	return Instruction(item.ID, d.Text)
 }
 
+func approveRow(item panel.Item) int {
+	return len(item.Artifacts)
+}
+
+func onApproveRow(item panel.Item, d *panel.Draft) bool {
+	return item.Kind == "gate" && d.Artifact == approveRow(item)
+}
+
 func (m *Model) gateNotes(item panel.Item, d *panel.Draft) string {
-	if len(item.Artifacts) < 2 {
+	if len(item.Artifacts) < 2 || onApproveRow(item, d) {
 		return d.Text
 	}
 	return strings.TrimSpace("Approve " + item.Artifacts[d.Artifact].Title + ". " + d.Text)
@@ -507,6 +515,14 @@ func (m *Model) PanelView(width, height int) string {
 }
 
 func (m *Model) panelKey(key, text string) tea.Cmd {
+	switch key {
+	case "ctrl+n":
+		m.moveItem(1)
+		return nil
+	case "ctrl+p":
+		m.moveItem(-1)
+		return nil
+	}
 	it, item, hasItem := m.currentAttention()
 	answerFormShown := hasItem && item.Answerable() && m.panel.tab == panel.Attention
 	if answerFormShown {
@@ -535,12 +551,10 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 		m.share = max(m.share-1.0/6, 1.0/6)
 		return nil
 	case "[":
-		m.saveDraft()
-		m.panel.item = max(m.panel.item-1, 0)
+		m.moveItem(-1)
 		return nil
 	case "]":
-		m.saveDraft()
-		m.panel.item++
+		m.moveItem(1)
 		return nil
 	}
 	if m.panel.tab != panel.Attention {
@@ -552,6 +566,11 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	return nil
 }
 
+func (m *Model) moveItem(delta int) {
+	m.saveDraft()
+	m.panel.item = max(m.panel.item+delta, 0)
+}
+
 func (m *Model) switchTab(delta int) {
 	m.panel.tab = m.panel.tab.Next(delta)
 	m.panel.row = 0
@@ -559,8 +578,7 @@ func (m *Model) switchTab(delta int) {
 
 func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, bool) {
 	d := m.draft(it.Factory, item)
-	movingBetweenItems := !d.Editing && (key == "[" || key == "]")
-	if movingBetweenItems || key == "tab" || key == "shift+tab" {
+	if key == "tab" || key == "shift+tab" {
 		return nil, false
 	}
 	if m.isSent(it.Factory, item) {
@@ -577,6 +595,8 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 		return nil, false
 	case key == "enter" && d.Editing:
 		typeInto(item, d, "\n")
+	case key == "enter" && onApproveRow(item, d):
+		m.deliver("approve")
 	case key == "enter":
 		startTyping(item, d)
 	case key == "backspace":
@@ -717,7 +737,7 @@ func moveIn(item panel.Item, d *panel.Draft, key string) {
 		case "up":
 			d.Artifact = max(d.Artifact-1, 0)
 		case "down":
-			d.Artifact = min(d.Artifact+1, max(len(item.Artifacts)-1, 0))
+			d.Artifact = min(d.Artifact+1, approveRow(item))
 		}
 	}
 }

@@ -28,7 +28,7 @@ var popupSizes = map[string][2]int{
 	"pause":   {68, 9},
 	"archive": {80, 12},
 	"delete":  {84, 14},
-	"keys":    {116, 15},
+	"keys":    {116, 16},
 }
 
 var popupTitles = map[string]string{

@@ -430,6 +430,11 @@ func gateForm(v View, it Item, ic theme.Icons, w int) []line {
 		}
 		lines = append(lines, l)
 	}
+	cursor := "  "
+	if v.Draft.Artifact == len(it.Artifacts) {
+		cursor = "❯ "
+	}
+	lines = append(lines, line{{Text: cursor, Ink: theme.Focused.B()}, {Text: "✓ Approve", Ink: theme.FgInk(theme.Green).B()}, {Text: "  sends /factory approve " + it.Stage + " with the notes", Ink: theme.Muted}})
 	if checked := checkedAt(it.Artifacts); !checked.IsZero() {
 		lines = append(lines, blank(), line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})
 	}
@@ -455,8 +460,8 @@ func shortURL(url string) string {
 
 func gateHints(it Item, v View) []line {
 	pick := ""
-	if len(it.Artifacts) > 1 {
-		pick = " " + it.Artifacts[max(0, min(v.Draft.Artifact, len(it.Artifacts)-1))].Title
+	if len(it.Artifacts) > 1 && v.Draft.Artifact < len(it.Artifacts) {
+		pick = " " + it.Artifacts[v.Draft.Artifact].Title
 	}
 	return []line{
 		append(hints("ctrl+a", "approve"+pick), theme.Span{Text: "  sends /factory approve " + it.Stage + " with these notes", Ink: theme.Muted}),

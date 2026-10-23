@@ -423,7 +423,7 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 var keyColumns = [][][2]string{
 	{{"+Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
 	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
-	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "prev or next item"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
+	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
 	{{"+Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
 }
 
@@ -431,6 +431,8 @@ var answerKeys = [][2]string{
 	{"type", "into the box"},
 	{"ctrl+s", "send"},
 	{"ctrl+a", "approve"},
+	{"⏎", "approve, on the Approve row"},
+	{"ctrl+n/p", "next or previous item"},
 	{"ctrl+r", "retry / one more round"},
 	{"ctrl+x", "skip"},
 	{"ctrl+d", "discard"},
