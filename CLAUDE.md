@@ -31,6 +31,12 @@ Go owns root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mo
 
 The final `ci` job always evaluates detection and both workload results. Detection must succeed; workloads may succeed or skip, but failures, cancellations and unknown outcomes fail the aggregate. Require `ci` in branch protection and manually remove old matrix requirements when adopting it. No workflow can guarantee reporting through platform outages, manual cancellation or commit-level CI-skip directives.
 
+## Releases
+
+Automatic main releases select root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum` and `.github/workflows/release.yml`. All files in owned directories count, including embedded Markdown and fixtures. Site, shared JavaScript packages, JS tooling, Makefile, CI-only and root documentation changes alone do not release. Pushes of `v*` tags bypass path filtering and preserve the explicit tag.
+
+Version selection skips an already-tagged main HEAD, otherwise increments the highest stable semantic-version tag's patch, starting at `v0.1.0`. Keep the existing four release binaries, asset names and `main.version` linker variable unchanged. No website deployment is configured.
+
 ## Isolation
 
 Tests, manual runs and QA never touch the real machine:

@@ -4,7 +4,9 @@
 
 ## Install
 
-Every merge to `main` publishes a release: the patch version goes up by one from the latest `v*` tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that release is published instead.
+Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `profiles/`, `go.mod`, `go.sum` or the release workflow. Site, JavaScript tooling, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
+
+For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that exact release is published instead. A `v*` tag push releases regardless of changed paths, including tags on site-only commits.
 
 Download the binary for your machine from the private repo's latest release:
 
