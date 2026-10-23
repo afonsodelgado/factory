@@ -29,7 +29,9 @@ type Profile struct {
 		Start   string `yaml:"start"`
 		Health  string `yaml:"health"`
 	} `yaml:"qa"`
-	CodeRabbit *bool `yaml:"coderabbit"`
+	CodeRabbit      *bool               `yaml:"coderabbit"`
+	Pipelines       map[string][]string `yaml:"pipelines"`
+	DefaultPipeline string              `yaml:"default_pipeline"`
 }
 
 func ProfilePath(repo string) string {

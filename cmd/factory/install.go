@@ -31,7 +31,7 @@ func doctorOptions() install.Options {
 		o.ConfigErr = err
 		return o
 	}
-	o.Repos = cfg.Repos
+	o.Repos, o.Config = cfg.Repos, cfg
 	for _, repo := range cfg.Repos {
 		if profile, err := state.ReadProfile(repo); err == nil && profile.BrowserQA() {
 			o.Browser = append(o.Browser, filepath.Base(repo))
