@@ -1,3 +1,5 @@
+import { esc } from "./frames.ts";
+
 export const PLATFORMS = [
   { id: "darwin_arm64", label: "macOS, Apple silicon" },
   { id: "darwin_amd64", label: "macOS, Intel" },
@@ -92,9 +94,6 @@ function tokenText(token: Token): string {
 export function commandText(lines: Line[]): string {
   return lines.map((line) => line.tokens.map(tokenText).join("")).join("\n");
 }
-
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function tokenHtml(token: Token): string {
   if (typeof token === "string") return esc(token);

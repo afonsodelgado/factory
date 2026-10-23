@@ -1,4 +1,5 @@
 ---
+import CopyButton from "./CopyButton.astro";
 import {
   DEFAULT_PLATFORM,
   commandHtml,
@@ -29,31 +30,13 @@ const shell = cursor
         <i />
       </span>
       <span class="wt">{title}</span>
-      <button
-        class="copy"
-        type="button"
-        data-copy={command}
-        aria-label={label}
-        hidden
-      >
-        <i class="ic" data-n="&#xf0c5;" aria-hidden="true" />
-        <span class="copy-label">copy</span>
-      </button>
+      <CopyButton command={command} label={label} />
     </div>
     <pre class="shell" set:html={shell} />
   </div>
 ) : (
   <div class="cmd">
     <pre class="shell" set:html={shell} />
-    <button
-      class="copy"
-      type="button"
-      data-copy={command}
-      aria-label={label}
-      hidden
-    >
-      <i class="ic" data-n="&#xf0c5;" aria-hidden="true" />
-      <span class="copy-label">copy</span>
-    </button>
+    <CopyButton command={command} label={label} />
   </div>
 )}
