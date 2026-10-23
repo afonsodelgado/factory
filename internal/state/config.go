@@ -81,7 +81,7 @@ func (c *Config) applyDefaults() {
 	if c.Icons == "" {
 		c.Icons = "nerd"
 	}
-	if socket := os.Getenv("FACTORY_TUI_TMUX_SOCKET"); socket != "" {
+	if socket := os.Getenv("FACTORY_TMUX_SOCKET"); socket != "" {
 		c.Tmux.Socket = socket
 	}
 }
@@ -115,17 +115,17 @@ func SessionsDir(stateDir string) string {
 }
 
 func ConfigDir() string {
-	if dir := os.Getenv("FACTORY_TUI_CONFIG_DIR"); dir != "" {
+	if dir := os.Getenv("FACTORY_CONFIG_DIR"); dir != "" {
 		return dir
 	}
-	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "factory-tui")
+	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "factory")
 }
 
 func StateDir() string {
-	if dir := os.Getenv("FACTORY_TUI_STATE_DIR"); dir != "" {
+	if dir := os.Getenv("FACTORY_STATE_DIR"); dir != "" {
 		return dir
 	}
-	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "factory-tui")
+	return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "factory")
 }
 
 func xdg(env, fallback string) string {

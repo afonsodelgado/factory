@@ -20,7 +20,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-var passedEnv = []string{"FACTORY_TUI_CONFIG_DIR", "FACTORY_TUI_STATE_DIR", "FACTORY_TUI_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
+var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
 func runOpen(args []string) int {
 	flags := flag.NewFlagSet("open", flag.ContinueOnError)

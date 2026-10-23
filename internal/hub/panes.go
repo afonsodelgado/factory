@@ -203,7 +203,7 @@ func (e *Engine) Type(pane, text string) error {
 }
 
 func bufferName(pane string) string {
-	return "factory-tui-" + strings.TrimPrefix(pane, "%")
+	return "factory-" + strings.TrimPrefix(pane, "%")
 }
 
 func (e *Engine) Kill(l *Layout, repo, slug string) error {

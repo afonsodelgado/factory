@@ -46,7 +46,7 @@ Inside the hub, `?` lists every key. `M-0` returns to the factory list from any 
 
 ## Configuration
 
-`~/.config/factory-tui/config.yml` (or `$FACTORY_TUI_CONFIG_DIR/config.yml`):
+`~/.config/factory/config.yml` (or `$FACTORY_CONFIG_DIR/config.yml`):
 
 ```yaml
 repos: [~/dev/cowork, ~/dev/factory]
@@ -64,4 +64,4 @@ claude:
 
 `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every value above is the default.
 
-State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory-tui` or `$FACTORY_TUI_STATE_DIR`. Each repo carries its factory profile in `.claude/factory.yml`.
+State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`. Each repo carries its factory profile in `.claude/factory.yml`.

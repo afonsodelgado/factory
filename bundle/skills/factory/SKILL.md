@@ -94,13 +94,13 @@ Every question, gate, tripped cap and second failure follows the same order, so 
 2. Then ask, and send the push notification.
 3. When the answer arrives, whether it came from the factory panel or was typed in the session, set the item's `resolved_at`, set `waiting_on` to what you wait on next (`"agent"`, `"ci"` or `null`), and only then act on it.
 
-**Under factory** (`FACTORY_TUI=1` in your environment; check with `echo $FACTORY_TUI`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
+**Under the factory app** (`FACTORY=1` in your environment; check with `echo $FACTORY`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
 
 > Answer here or from the factory panel. Start your reply with `<item id>`.
 
 The panel delivers answers in the fixed formats of `references/attention.md`. Recognise them by the item id at the start of the message. A reply typed by hand without the id answers the oldest open item.
 
-**Without factory:** use AskUserQuestion when you can offer real options, plain text otherwise. Write the attention item all the same.
+**Without the factory app:** use AskUserQuestion when you can offer real options, plain text otherwise. Write the attention item all the same.
 
 While a stage agent runs, `waiting_on` is `"agent"`. While `scripts/wait-for-review.sh` runs, it is `"ci"`. Update `session_id` from `$CLAUDE_CODE_SESSION_ID` on every start and resume, because a resumed factory can run in a new conversation.
 

@@ -271,7 +271,7 @@ func (m *Model) create(r dialog.NewResult) error {
 	if label == "" {
 		label = r.Slug
 	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(label + "  " + title), Dir: r.Repo, Env: []string{"FACTORY_TUI=1"}})
+	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Title: strings.TrimSpace(label + "  " + title), Dir: r.Repo, Env: []string{"FACTORY=1"}})
 	if err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func (m *Model) wake(key string) error {
 		if !dirExists(dir) {
 			return fmt.Errorf("the worktree %s is gone", tilde(dir))
 		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY_TUI=1"}})
+		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Title: paneTitle(it.Factory), Dir: dir, Env: []string{"FACTORY=1"}})
 		if err != nil {
 			return err
 		}
