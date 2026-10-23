@@ -13,6 +13,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
@@ -52,6 +53,27 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	}
 }
 
+func TestThePanesOwnSessionIsLiveAfterTheBridgeContinuesIt(t *testing.T) {
+	worktree := "/r/factory/.claude/worktrees/release-0-2"
+	at := time.Date(2026, 10, 23, 10, 22, 0, 0, time.UTC)
+	frozen := &state.HookFile{SessionID: "57bcd935", CWD: worktree, Main: &state.HookEvent{Event: "Stop", At: at.Add(-10 * time.Minute)}, Last: state.HookEvent{Event: "Stop", At: at.Add(-10 * time.Minute)}}
+	live := &state.HookFile{SessionID: "06c7ff87", CWD: worktree, Token: "t1", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}
+	hooks := []*state.HookFile{frozen, live}
+	pane := &tmux.Pane{ID: "%5", Command: "claude", Token: "t1"}
+	f := factory.Factory{Repo: "/r/factory", Slug: "release-0-2", Worktree: worktree, Entry: &state.Entry{SessionID: "57bcd935"}, State: &state.State{SessionID: "57bcd935"}}
+
+	hook := hookFor(f, pane.Token, hooks)
+	if hook != live {
+		t.Fatalf("hookFor read session %s; want the pane's own 06c7ff87, or status and delivery read a file frozen since remote control continued the session", hook.SessionID)
+	}
+	if reason := Refusal(Target{Label: "release-0-2", Pane: pane, Hook: hook}); !strings.Contains(reason, "busy") {
+		t.Errorf("refusal = %q; want busy, because the live session is working on a prompt", reason)
+	}
+	if id, _ := SessionFor(f, pane.Token, hooks); id != "06c7ff87" {
+		t.Errorf("wake resumes %s; want the live 06c7ff87, not the transcript from before the bridge continued it", id)
+	}
+}
+
 func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	repo := t.TempDir()
 	worktree := filepath.Join(factory.WorktreesDir(repo), "eng-9-clean")
@@ -67,10 +89,13 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{ID: "ENG-9"}, Entry: entry}}
 	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
-	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived"} {
+	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived", "doctor": "`doctor` is a factory command"} {
 		if err := model.open(OpenRequest{Name: name}); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Errorf("open %q = %v; want it refused, naming %q", name, err, reason)
 		}
+	}
+	if registry.Find(repo, "doctor") != nil {
+		t.Error("open doctor registered a factory: a command word became a worktree, as on cowork")
 	}
 
 	model.selectorKey("H")
@@ -78,6 +103,33 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	model.selectorKey("a")
 	if registry.Find(repo, "eng-9-clean").Archived {
 		t.Error("a on the archived ENG-9 row left it archived; the id could never get its factory back")
+	}
+}
+
+func TestDeleteSelectsTheNextRowAndFreesTheId(t *testing.T) {
+	repo := t.TempDir()
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-1-x", Created: true})
+	next := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-2-y", Created: true})
+	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{
+		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-1-x", Entry: failed}},
+		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-2-y", Entry: next}},
+	}})
+	model.choose(state.Key(repo, "eng-1-x"))
+
+	if _, err := model.delete(state.Key(repo, "eng-1-x")); err != nil {
+		t.Fatal(err)
+	}
+	if model.selected != state.Key(repo, "eng-2-y") {
+		t.Errorf("after deleting the selected row, %q is selected; want the next row", model.selected)
+	}
+	if registry.Find(repo, "eng-1-x") != nil {
+		t.Error("the registry entry survived delete, so a new factory with the id would get eng-1-x-2")
 	}
 }
 
@@ -101,6 +153,7 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, dialog.NewFactory(model.newContext()), teatest.WithInitialTermSize(84, 22))
 	tm.Type("ENG-9")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	tm.Type("Retry the export.")
 	tm.Send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})

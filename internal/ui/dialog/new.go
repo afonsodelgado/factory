@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -100,15 +101,13 @@ func (m *NewFactoryModel) pipelineName() string {
 	return repo.DefaultPipeline
 }
 
-func (m *NewFactoryModel) nextPipeline() {
+func (m *NewFactoryModel) movePipeline(delta int) {
 	list := m.selectedRepo().Pipelines
-	current := m.pipelineName()
-	for i, p := range list {
-		if p.Name == current {
-			m.pipeline = list[(i+1)%len(list)].Name
-			return
-		}
+	current := slices.IndexFunc(list, func(p state.Pipeline) bool { return p.Name == m.pipelineName() })
+	if current < 0 {
+		return
 	}
+	m.pipeline = list[max(0, min(current+delta, len(list)-1))].Name
 }
 
 func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -116,10 +115,13 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.PasteMsg:
-		m.typeText(msg.Content)
+		m.typeText(DecodeKeys(msg.Content))
 	case tea.KeyPressMsg:
-		if m.step == 1 {
+		switch m.step {
+		case 1:
 			return m, m.nameKey(msg)
+		case 2:
+			return m, m.pipelineKey(msg)
 		}
 		return m, m.promptKey(msg)
 	}
@@ -127,11 +129,12 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *NewFactoryModel) typeText(text string) {
-	if m.step == 1 {
+	switch m.step {
+	case 1:
 		m.name += strings.ReplaceAll(text, "\n", " ")
-		return
+	case 3:
+		m.prompt += text
 	}
-	m.prompt += text
 }
 
 func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -155,7 +158,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.next()
 	default:
-		m.name += msg.Text
+		m.name += DecodeKeys(msg.Text)
 	}
 	return nil
 }
@@ -165,6 +168,10 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.problem = "Type an id made of letters a–z, digits 0–9 and dashes, such as csv-export."
 		return nil
 	}
+	if factory.IsReservedID(m.name) {
+		m.problem = factory.ReservedIDRefusal(m.name)
+		return nil
+	}
 	if e, ok := m.existing(); ok && e.Archived {
 		return nil
 	}
@@ -172,7 +179,29 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.result = &NewResult{Select: e.Key}
 		return tea.Quit
 	}
+	m.pipeline = m.pipelineName()
 	m.step = 2
+	return nil
+}
+
+func (m *NewFactoryModel) pipelineKey(msg tea.KeyPressMsg) tea.Cmd {
+	m.problem = ""
+	switch msg.String() {
+	case "esc":
+		m.step = 1
+	case "ctrl+c":
+		return tea.Quit
+	case "up":
+		m.movePipeline(-1)
+	case "down":
+		m.movePipeline(1)
+	case "enter":
+		if problem := m.selectedRepo().PipelineProblem; problem != "" {
+			m.problem = problem
+			return nil
+		}
+		m.step = 3
+	}
 	return nil
 }
 
@@ -180,32 +209,34 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.problem = ""
 	switch msg.String() {
 	case "esc":
-		m.step = 1
+		m.step = 2
 	case "ctrl+c":
 		return tea.Quit
-	case "tab":
-		m.nextPipeline()
 	case "ctrl+s":
 		if strings.TrimSpace(m.prompt) == "" {
 			m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
 			return nil
 		}
-		if problem := m.selectedRepo().PipelineProblem; problem != "" {
-			m.problem = problem
-			return nil
-		}
 		m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: m.pipelineName()}
 		return tea.Quit
-	case "enter":
+	case "enter", "ctrl+j":
 		m.prompt += "\n"
 	case "backspace":
 		m.prompt = dropLast(m.prompt)
 	case "ctrl+u":
 		m.prompt = ""
 	default:
-		m.prompt += msg.Text
+		m.prompt += DecodeKeys(msg.Text)
 	}
 	return nil
+}
+
+var newlineKeys = strings.NewReplacer("\x1b[106;5u", "\n", "\x1b[13;5u", "\n", "\x1b[13u", "\n", "\r\n", "\n", "\r", "\n")
+
+var escapeSequence = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])?`)
+
+func DecodeKeys(text string) string {
+	return escapeSequence.ReplaceAllString(newlineKeys.Replace(text), "")
 }
 
 func dropLast(s string) string {
@@ -220,9 +251,12 @@ func dropLast(s string) string {
 
 func (m *NewFactoryModel) View() tea.View {
 	c := theme.NewCanvas(m.width, m.height)
-	if m.step == 1 {
+	switch m.step {
+	case 1:
 		m.drawName(c)
-	} else {
+	case 2:
+		m.drawPipelineStep(c)
+	default:
 		m.drawPrompt(c)
 	}
 	v := tea.NewView(c.Render())
@@ -233,7 +267,7 @@ func (m *NewFactoryModel) View() tea.View {
 func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "Repo", theme.Bright.B())
-	c.Right(c.W-2, 0, "1 of 2", theme.Muted)
+	c.Right(c.W-2, 0, "1 of 3", theme.Muted)
 	y := 1
 	for i, r := range m.Context.Repos {
 		mark, ink := "○ ", theme.Text
@@ -268,11 +302,11 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			y++
 		}
 	}
-	if _, matched := m.existing(); !matched && m.id() != "" {
+	if _, matched := m.existing(); !matched && m.id() != "" && !factory.IsReservedID(m.name) {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
-	hints := "⏎ next: prompt   ↑↓ repo   esc cancel"
+	hints := "⏎ next: pipeline   ↑↓ repo   esc cancel"
 	if e, matched := m.existing(); matched && e.Archived {
 		hints = "esc cancel"
 	} else if matched {
@@ -303,7 +337,7 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	switch {
 	case m.name == "":
 		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
-	case m.id() != "":
+	case m.id() != "" && !factory.IsReservedID(m.name):
 		add(fmt.Sprintf("%s is a new factory. You'll write its prompt next.", m.id()), theme.Muted)
 	}
 	return spans
@@ -324,16 +358,34 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	c.Put(x, y, reason, theme.Muted)
 }
 
-func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
+func (m *NewFactoryModel) drawPipelineStep(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "New factory · "+m.slug(), theme.Bright.B())
-	c.Right(c.W-2, 0, "2 of 2", theme.Muted)
+	c.Right(c.W-2, 0, "2 of 3", theme.Muted)
+	y := 2
+	for _, l := range theme.Wrap("Pick the stages this factory runs. A pipeline only removes stages: the plan is still published and approved before any code is written.", w) {
+		c.Put(1, y, l, theme.Text)
+		y++
+	}
+	y = m.drawPipelines(c, y+1, w)
+	if m.problem != "" {
+		for _, l := range theme.Wrap("✗ "+m.problem, w) {
+			y++
+			c.Put(1, y, l, theme.FgInk(theme.Red))
+		}
+	}
+	c.Put(1, c.H-1, "⏎ next: prompt   ↑↓ pipeline   esc back", theme.Text)
+}
+
+func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
+	w := c.W - 2
+	c.PutMax(1, 0, "New factory · "+m.slug()+" · "+m.pipelineName(), theme.Bright.B(), w-8)
+	c.Right(c.W-2, 0, "3 of 3", theme.Muted)
 	y := 2
 	for _, l := range theme.Wrap("Describe what this factory should do: the change, for whom, and anything you already know you want. The supervisor writes it to brief.md word for word, and every stage reads it as the spec. The factory reads a tracker issue only if you ask it to here.", w) {
 		c.Put(1, y, l, theme.Text)
 		y++
 	}
-	y = m.drawPipelines(c, y+1, w)
 	y++
 	var lines []string
 	for i, raw := range strings.Split(m.prompt, "\n") {
@@ -359,7 +411,7 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	}
 	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt, "\n")+1, uniseg.GraphemeClusterCount(m.prompt))
 	c.Put(1, c.H-1, count, theme.Muted)
-	c.Right(c.W-2, c.H-1, "tab pipeline   ctrl+s start factory   esc back", theme.Text)
+	c.Right(c.W-2, c.H-1, "ctrl+s start factory   ctrl+j or ⏎ new line   esc back", theme.Text)
 }
 
 func (m *NewFactoryModel) drawPipelines(c *theme.Canvas, y, w int) int {

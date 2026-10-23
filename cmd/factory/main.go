@@ -20,7 +20,10 @@ func run(args []string) int {
 		return runOpen(nil)
 	}
 	switch args[0] {
-	case "--version", "version":
+	case "--version":
+		fmt.Println(versionLine())
+		return 0
+	case "version":
 		return runVersion()
 	case "update":
 		return runUpdate(args[1:])
@@ -37,6 +40,8 @@ func run(args []string) int {
 		return runDialog(args[1:])
 	case "open":
 		return runOpen(args[1:])
+	case "delete":
+		return runDelete(args[1:], os.Stdin, os.Stdout)
 	case "init":
 		return runInit(args[1:])
 	case "doctor":
@@ -54,7 +59,7 @@ func run(args []string) int {
 func runHook(stdin io.Reader) int {
 	payload, err := io.ReadAll(stdin)
 	if err == nil {
-		state.RecordHook(state.StateDir(), payload, time.Now())
+		state.RecordHook(state.StateDir(), payload, os.Getenv("FACTORY_PANE_TOKEN"), time.Now())
 	}
 	return 0
 }
@@ -66,6 +71,11 @@ commands:
   open [<id>] [--prompt text | <prompt…>] [--repo path] [--pipeline name]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
+  delete <id> [--repo path] [--yes]
+              delete a factory: its pane, worktree, local branches, state,
+              activity log, drafts and registry entry, so the id can be used
+              again; pushed PRs and remote branches stay. --yes skips the first
+              confirmation, never the one for unpushed or uncommitted work
   init [path] add a repo (default: the one you are in): write its factory
               profile, ignore the factory's files in .git/info/exclude and
               list it in config.yml; nothing is committed
@@ -73,7 +83,8 @@ commands:
   bootstrap   install the bundled skills, agents and hooks into the Claude config
   install-hooks [--remove]
               add (or remove) only the factory hooks in settings.json
-  version     print the version and the latest release (also --version)
+  version     print the version and check the latest release on GitHub;
+              --version prints only the local version
   update      install the latest release, then run its bootstrap
   hub         run the hub in the factory tmux session
   view        run a viewer pane of the hub (started by the hub)

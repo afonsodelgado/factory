@@ -44,7 +44,7 @@ var glyphs = map[string][2]string{
 	"term":      {"›", ""},
 	"plus":      {"+", ""},
 	"archive":   {"▭", ""},
-	"kill":      {"■", ""},
+	"pause":     {"‖", ""},
 	"warn":      {"!", ""},
 	"info":      {"i", ""},
 	"clock":     {"◷", ""},

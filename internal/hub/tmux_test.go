@@ -80,7 +80,9 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 		t.Errorf("footer height = %d, want 1", h)
 	}
 
-	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "eng-1-x", Title: "ENG-1  title", Dir: t.TempDir()})
+	framed(t, e, l, "after build")
+
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "eng-1-x", Dir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +103,7 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	selected := pane(t, e.TM, created)
-	if selected.WindowName != HubWindow || selected.Slug != "eng-1-x" || selected.Title != "ENG-1  title" {
+	if selected.WindowName != HubWindow || selected.Slug != "eng-1-x" {
 		t.Errorf("selected pane = %+v, want it in the hub window with its tags", selected)
 	}
 	sized("selected", created)
@@ -117,6 +119,45 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 		t.Errorf("deselected factory pane is in %q, want its own parking window", name)
 	}
 	sized("parked again", created)
+
+	for _, size := range [][2]int{{160, 44}, {120, 30}, {160, 44}} {
+		if err := e.TM.ResizeWindow(l.Window, size[0], size[1]); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Arrange(l, Shape{Width: size[0], Height: size[1]}); err != nil {
+			t.Fatal(err)
+		}
+		when := fmt.Sprintf("after resizing to %dx%d", size[0], size[1])
+		framed(t, e, l, when)
+		if slotW, slotH, err = e.SlotSize(l); err != nil {
+			t.Fatal(err)
+		}
+		sized(when, created)
+	}
+}
+
+type area struct{ x, y, w, h int }
+
+func areaOf(t *testing.T, tm tmux.Client, id string) area {
+	t.Helper()
+	out, err := tm.Display(id, "#{pane_left} #{pane_top} #{pane_width} #{pane_height}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a area
+	fmt.Sscan(out, &a.x, &a.y, &a.w, &a.h)
+	return a
+}
+
+func framed(t *testing.T, e *Engine, l Layout, when string) {
+	t.Helper()
+	slot, left, right, top, bottom := areaOf(t, e.TM, l.Slot), areaOf(t, e.TM, l.Frame.Left), areaOf(t, e.TM, l.Frame.Right), areaOf(t, e.TM, l.Frame.Top), areaOf(t, e.TM, l.Frame.Bottom)
+	thin := left.w == 1 && right.w == 1 && top.h == 1 && bottom.h == 1
+	inset := slot.x == left.x+2 && slot.y == top.y+2 && right.x == slot.x+slot.w+1 && bottom.y == slot.y+slot.h+1
+	spanning := left.y == top.y && left.h == slot.h+4 && right.h == left.h && top.w == slot.w && bottom.w == slot.w
+	if !thin || !inset || !spanning {
+		t.Errorf("%s: slot %+v, left %+v, right %+v, top %+v, bottom %+v; want one-cell strips around the slot, inset by two cells: grown strips reflow Claude", when, slot, left, right, top, bottom)
+	}
 }
 
 func TestRebuildPutsTheSlotBackAboveThePanelWhenTheSessionPaneCloses(t *testing.T) {
@@ -152,9 +193,10 @@ func TestRebuildPutsTheSlotBackAboveThePanelWhenTheSessionPaneCloses(t *testing.
 		fmt.Sscan(out, &y, &x)
 		return y*1000 + x
 	}
-	if top(slot.ID) >= top(panel.ID) || slot.Width != panel.Width {
-		t.Errorf("slot at %d (%dx%d), panel at %d (%dx%d): the slot must sit above the panel in the right column", top(slot.ID), slot.Width, slot.Height, top(panel.ID), panel.Width, panel.Height)
+	if top(slot.ID) >= top(panel.ID) || slot.Width != panel.Width-4 {
+		t.Errorf("slot at %d (%dx%d), panel at %d (%dx%d): the slot must sit above the panel in the right column, inside its frame", top(slot.ID), slot.Width, slot.Height, top(panel.ID), panel.Width, panel.Height)
 	}
+	framed(t, e, rebuilt, "after the rebuild")
 }
 
 func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
@@ -244,7 +286,7 @@ func TestWakeTypesNothingIntoAPaneThatLeftItsShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Tag(id, "/repo", "eng-3-z", ""); err != nil {
+	if err := e.Tag(id, "/repo", "eng-3-z"); err != nil {
 		t.Fatal(err)
 	}
 	waitForCommand(t, e.TM, id, "cat")
@@ -293,7 +335,7 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Tag(running, "/repo", "running", ""); err != nil {
+	if err := e.Tag(running, "/repo", "running"); err != nil {
 		t.Fatal(err)
 	}
 	waitForCommand(t, e.TM, running, "sleep")

@@ -45,13 +45,24 @@ All state for a factory lives in the worktree the session runs in:
   .heartbeat         touched by scripts/wait-for-review.sh on every poll
 ```
 
-`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the factory id: the argument of `/factory <id>`, letters a–z, digits and dashes. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it.
+`<worktree>` is `git rev-parse --show-toplevel`. `<id>` is the factory id: the argument of `/factory <id>`, letters a–z, digits and dashes. The app refuses the `factory` command words (`open`, `doctor`, `delete` and the rest) as ids in its `n` dialog and in `factory open`, but nothing guards a `/factory <id>` typed straight into Claude. A worktree-isolated session can always write here. Factories started before this layout keep their state in `<main repo>/.claude/factory/<id>/`; read it there when it exists and the worktree copy does not, and keep writing where you found it. That fallback reads `<main repo>/.claude/factory/<id>/` only, never `<main repo>/.claude/factory-archive/`: archiving a factory and removing its worktree moves its directory there, and archived state is history, not a factory to resume. A new factory with the id of an archived one starts fresh.
 
 QA briefs and reports stay where the QA skills put them, under `.claude/qa/`.
 
 Write `state.json` after every transition, before you do anything else. A crash between
-two stages must lose nothing. Every write sets `updated_at`, and every history entry
-carries `at` (ISO 8601, UTC).
+two stages must lose nothing.
+
+Every write takes its time and session id from one command, run just before the write:
+
+```sh
+date -u +%Y-%m-%dT%H:%M:%SZ; echo "$CLAUDE_CODE_SESSION_ID"
+```
+
+Write the first line to `updated_at` and to the `at` of every history entry you add, and the
+second to `session_id`. Never write a time by hand and never copy one from an earlier entry:
+the app reads the time in stage and the stall clock from these values. Remote control can
+move the session to a new id in the middle of a session, so refresh `session_id` on every
+write, not only on start and resume.
 
 ### The repo profile
 
@@ -105,7 +116,7 @@ A pipeline only removes stages. It never removes or changes a gate: the plan is 
    - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
-   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` (`$CLAUDE_CODE_SESSION_ID`) and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
+   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
    - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead. When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
 3. Tell the user the plan in three lines: the pipeline and the stages it skips, which gates need them, and that everything after the plan runs unattended until handoff.
 
@@ -125,7 +136,7 @@ The panel delivers answers in the fixed formats of `references/attention.md`. Re
 
 **Without the factory app:** use AskUserQuestion when you can offer real options, plain text otherwise. Write the attention item all the same.
 
-While a stage agent runs, `waiting_on` is `"agent"`. While `scripts/wait-for-review.sh` runs, it is `"ci"`. Update `session_id` from `$CLAUDE_CODE_SESSION_ID` on every start and resume, because a resumed factory can run in a new conversation.
+While a stage agent runs, `waiting_on` is `"agent"`. While `scripts/wait-for-review.sh` runs, it is `"ci"`.
 
 ## Running a stage agent
 
@@ -140,6 +151,7 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent with SendMessage, so it keeps its context. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
 - **On `done`:** record `outputs` and `data`, mark the stage done, and go to the next stage.
+- **A misrouted answer.** When the user's session shows a stage agent's transcript, a message from the panel reaches that agent instead of you. Every stage agent quotes such a message verbatim in a `misrouted-message` block in its next report. When the quoted message names an open item and matches a panel format (`references/attention.md`), it answers that item: act on it as if it had reached you, set `resolved_at`, add a history entry "answered via <agent>", and do not ask again. This is the only case where a stage agent's text counts as the user's answer.
 
 If SendMessage cannot reach a recorded id after a restart, spawn a fresh agent of the same type on the same inputs. Every stage can be re-run from its input files.
 

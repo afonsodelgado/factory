@@ -254,7 +254,7 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 0
+		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 1 + v.Draft.Artifact
 	case it.Kind == "comment":
 		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
 	case it.Kind == "cap":
@@ -381,10 +381,13 @@ func sendStatus(v View, w int) []line {
 	lines := []line{text(strings.Repeat("─", max(w, 0)), theme.Line)}
 	switch {
 	case v.Send.Refused != "":
-		return append(lines, warning("Not sent. "+v.Send.Refused+" Draft kept.", w)...)
+		return append(lines, warning(v.Send.Refused+" Draft kept.", w)...)
+	case !v.Send.ReceivedAt.IsZero():
+		received := text("✓ Received by the supervisor at "+v.Send.ReceivedAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
+		return append(lines, received, hints("ctrl+d", "clear and answer again"))
 	case !v.Send.SentAt.IsZero():
-		sent := text("✓ Sent at "+v.Send.SentAt.Local().Format("15:04")+". The item closes when the supervisor resolves it.", theme.FgInk(theme.Green))
-		return append(lines, sent, hints("ctrl+d", "clear and answer again"))
+		waiting := text("Sent at "+v.Send.SentAt.Local().Format("15:04")+", waiting for the supervisor to receive it…", theme.Muted)
+		return append(lines, waiting, hints("ctrl+d", "clear and answer again"))
 	case v.Send.Ready:
 		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
 	}
@@ -427,6 +430,11 @@ func gateForm(v View, it Item, ic theme.Icons, w int) []line {
 		}
 		lines = append(lines, l)
 	}
+	cursor := "  "
+	if v.Draft.Artifact == len(it.Artifacts) {
+		cursor = "❯ "
+	}
+	lines = append(lines, line{{Text: cursor, Ink: theme.Focused.B()}, {Text: "✓ Approve", Ink: theme.FgInk(theme.Green).B()}, {Text: "  sends /factory approve " + it.Stage + " with the notes", Ink: theme.Muted}})
 	if checked := checkedAt(it.Artifacts); !checked.IsZero() {
 		lines = append(lines, blank(), line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})
 	}
@@ -452,8 +460,8 @@ func shortURL(url string) string {
 
 func gateHints(it Item, v View) []line {
 	pick := ""
-	if len(it.Artifacts) > 1 {
-		pick = " " + it.Artifacts[max(0, min(v.Draft.Artifact, len(it.Artifacts)-1))].Title
+	if len(it.Artifacts) > 1 && v.Draft.Artifact < len(it.Artifacts) {
+		pick = " " + it.Artifacts[v.Draft.Artifact].Title
 	}
 	return []line{
 		append(hints("ctrl+a", "approve"+pick), theme.Span{Text: "  sends /factory approve " + it.Stage + " with these notes", Ink: theme.Muted}),

@@ -3,8 +3,11 @@ package hub
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -12,8 +15,8 @@ import (
 
 const pasteSettle = 150 * time.Millisecond
 
-func (e *Engine) Tag(pane, repo, slug, title string) error {
-	for name, value := range map[string]string{"@factory_repo": repo, "@factory_slug": slug, "@factory_title": title} {
+func (e *Engine) Tag(pane, repo, slug string) error {
+	for name, value := range map[string]string{"@factory_repo": repo, "@factory_slug": slug} {
 		if err := e.TM.SetPaneOption(pane, name, value); err != nil {
 			return err
 		}
@@ -108,7 +111,7 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 		if _, tagged := FactoryPane(panes, repo, session); tagged {
 			continue
 		}
-		if err := e.Tag(pane.ID, repo, session, ""); err != nil {
+		if err := e.Tag(pane.ID, repo, session); err != nil {
 			return adopted, err
 		}
 		if err := e.TM.Break(pane.ID, e.Session, ParkName(session)); err != nil {
@@ -168,19 +171,23 @@ func firstPane(panes []tmux.Pane, session string) (tmux.Pane, bool) {
 }
 
 type NewPane struct {
-	Repo  string
-	Slug  string
-	Title string
-	Dir   string
-	Env   []string
+	Repo string
+	Slug string
+	Dir  string
+	Env  []string
 }
 
 func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
-	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: n.Env, Command: loginShell()})
+	token := uuid.NewString()
+	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token})
+	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
 	}
-	if err := e.Tag(pane, n.Repo, n.Slug, n.Title); err != nil {
+	if err := e.Tag(pane, n.Repo, n.Slug); err != nil {
+		return pane, err
+	}
+	if err := e.TM.SetPaneOption(pane, "@factory_token", token); err != nil {
 		return pane, err
 	}
 	return pane, e.FitParking(l)
@@ -206,7 +213,7 @@ func bufferName(pane string) string {
 	return "factory-" + strings.TrimPrefix(pane, "%")
 }
 
-func (e *Engine) Kill(l *Layout, repo, slug string) error {
+func (e *Engine) Pause(l *Layout, repo, slug string) error {
 	panes, err := e.TM.Panes()
 	if err != nil {
 		return err

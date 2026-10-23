@@ -137,11 +137,5 @@ func IdleAtPrompt(hook *state.HookFile) bool {
 }
 
 func PermissionPrompt(hook *state.HookFile) bool {
-	if hook == nil {
-		return false
-	}
-	asks := func(e state.HookEvent) bool {
-		return e.Is("PermissionRequest") || e.Is("Notification", "permission_prompt")
-	}
-	return asks(hook.MainEvent()) || asks(hook.Last)
+	return hook != nil && hook.Prompt != nil
 }

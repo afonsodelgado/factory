@@ -141,11 +141,12 @@ type ActivityRow struct {
 }
 
 type Send struct {
-	Ready   bool
-	Reason  string
-	Preview string
-	Refused string
-	SentAt  time.Time
+	Ready      bool
+	Reason     string
+	Preview    string
+	Refused    string
+	SentAt     time.Time
+	ReceivedAt time.Time
 }
 
 type View struct {

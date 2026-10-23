@@ -22,6 +22,12 @@ func TestStatusOf(t *testing.T) {
 	}
 	openQuestion := state.Attention{ID: "q-1-1", Kind: "question"}
 	resolved := state.Attention{ID: "q-1-1", Kind: "question", ResolvedAt: state.Time{Time: ago(time.Hour)}}
+	prompting := hook("PermissionRequest", ago(time.Second))
+	prompting.Prompt = &state.PendingPrompt{At: ago(time.Second)}
+	approved := &state.HookFile{
+		Main: &state.HookEvent{Event: "Notification", Matcher: "permission_prompt", At: ago(5 * time.Minute)},
+		Last: state.HookEvent{Event: "PostToolUse", Matcher: "Bash", AgentID: "a1", At: ago(time.Minute)},
+	}
 	subagentBusy := &state.HookFile{
 		Main: &state.HookEvent{Event: "Stop", At: ago(2 * time.Hour)},
 		Last: state.HookEvent{Event: "PreToolUse", AgentID: "a1", At: ago(time.Minute)},
@@ -35,7 +41,8 @@ func TestStatusOf(t *testing.T) {
 	}{
 		{"open question", Factory{State: v2("user", openQuestion), StateMod: ago(time.Minute)}, Live{alive, hook("Stop", ago(time.Minute))}, NeedsYou},
 		{"answered question, stage agent working", Factory{State: v2("agent", resolved), StateMod: ago(time.Minute)}, Live{alive, hook("Stop", ago(time.Minute))}, WaitingAgent},
-		{"permission prompt", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{alive, hook("PermissionRequest", ago(time.Second))}, NeedsYou},
+		{"permission prompt", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{alive, prompting}, NeedsYou},
+		{"approved prompt, tool ran", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{alive, approved}, WaitingAgent},
 		{"old format, idle, waiting_on missing", Factory{State: v1(""), StateMod: ago(time.Minute)}, Live{alive, hook("Stop", ago(time.Minute))}, NeedsYou},
 		{"old format, no hook file at all", Factory{State: v1(""), StateMod: ago(time.Minute)}, Live{alive, nil}, NeedsYou},
 		{"old format, busy", Factory{State: v1(""), StateMod: ago(time.Minute)}, Live{alive, hook("PreToolUse", ago(time.Second))}, Running},

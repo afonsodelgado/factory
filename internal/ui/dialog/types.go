@@ -66,7 +66,7 @@ type KeyResult struct {
 	Key string `json:"key"`
 }
 
-type KillContext struct {
+type PauseContext struct {
 	Key        string `json:"key"`
 	Label      string `json:"label"`
 	Title      string `json:"title"`
@@ -93,6 +93,26 @@ type ArchiveResult struct {
 	Remove bool   `json:"remove"`
 }
 
+type DeleteContext struct {
+	Key          string              `json:"key"`
+	Label        string              `json:"label"`
+	Title        string              `json:"title"`
+	Worktree     string              `json:"worktree"`
+	WorktreeGone bool                `json:"worktree_gone"`
+	Branches     []string            `json:"branches"`
+	Dirty        []string            `json:"dirty"`
+	Unpushed     map[string][]string `json:"unpushed"`
+}
+
+func (c DeleteContext) HasWork() bool {
+	return len(c.Dirty) > 0 || len(c.Unpushed) > 0
+}
+
+type DeleteResult struct {
+	Key       string `json:"key"`
+	Confirmed bool   `json:"confirmed"`
+}
+
 type Dialog interface {
 	tea.Model
 	Result() (any, bool)
@@ -108,14 +128,18 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		var c SwitchContext
 		json.Unmarshal(context, &c)
 		return &Switch{Context: c}, true
-	case "kill":
-		var c KillContext
+	case "pause":
+		var c PauseContext
 		json.Unmarshal(context, &c)
-		return &Kill{Context: c}, true
+		return &Pause{Context: c}, true
 	case "archive":
 		var c ArchiveContext
 		json.Unmarshal(context, &c)
 		return &Archive{Context: c}, true
+	case "delete":
+		var c DeleteContext
+		json.Unmarshal(context, &c)
+		return &Delete{Context: c}, true
 	case "keys":
 		return &Keys{}, true
 	}

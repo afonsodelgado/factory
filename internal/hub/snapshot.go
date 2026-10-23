@@ -62,11 +62,11 @@ func (l *Loader) Load() Snapshot {
 	snap := Snapshot{At: now, Panes: panes}
 	for _, f := range found {
 		f = l.keepLastGood(f)
-		hook := hookFor(f, hooks)
 		var pane *tmux.Pane
 		if p, ok := FactoryPane(panes, f.Repo, f.Slug); ok {
 			pane = &p
 		}
+		hook := hookFor(f, tokenOf(pane), hooks)
 		status := factory.StatusOf(f, factory.Live{Pane: LivePane(panes, f), Hook: hook}, now, l.Config.Stalled())
 		l.logHook(f, hook)
 		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Hook: hook, Pane: pane})
@@ -104,7 +104,30 @@ func (l *Loader) keepLastGood(f factory.Factory) factory.Factory {
 	return f
 }
 
-func hookFor(f factory.Factory, hooks []*state.HookFile) *state.HookFile {
+func tokenOf(pane *tmux.Pane) string {
+	if pane == nil {
+		return ""
+	}
+	return pane.Token
+}
+
+func paneHook(token string, hooks []*state.HookFile) *state.HookFile {
+	if token == "" {
+		return nil
+	}
+	var newest *state.HookFile
+	for _, h := range hooks {
+		if h.Token == token && (newest == nil || h.Last.At.After(newest.Last.At)) {
+			newest = h
+		}
+	}
+	return newest
+}
+
+func hookFor(f factory.Factory, token string, hooks []*state.HookFile) *state.HookFile {
+	if h := paneHook(token, hooks); h != nil {
+		return h
+	}
 	ids := []string{}
 	if f.State != nil && f.State.SessionID != "" {
 		ids = append(ids, f.State.SessionID)
@@ -147,7 +170,8 @@ func (l *Loader) logHook(f factory.Factory, hook *state.HookFile) {
 	signature := main.Event + "|" + main.Matcher + "|" + main.At.String()
 	previous, seen := l.lastMain[f.Key()]
 	l.lastMain[f.Key()] = signature
-	if !seen || previous == signature || main.Is("PreToolUse") {
+	toolEvent := main.Is("PreToolUse") || main.Is("PostToolUse") || main.Is("PostToolUseFailure")
+	if !seen || previous == signature || toolEvent {
 		return
 	}
 	text := main.Event
@@ -155,6 +179,13 @@ func (l *Loader) logHook(f factory.Factory, hook *state.HookFile) {
 		text += " " + main.Matcher
 	}
 	state.AppendActivity(state.ActivityPath(l.Config.ActivityDir(), f.Repo, f.Slug), state.ActivityEntry{At: main.At, Source: "hook", Text: text})
+}
+
+func (l *Loader) Forget(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.lastGood, key)
+	delete(l.lastMain, key)
 }
 
 func (l *Loader) Known(repo, slug string) bool {

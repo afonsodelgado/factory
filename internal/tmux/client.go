@@ -27,8 +27,8 @@ type Pane struct {
 	Height     int
 	Slug       string
 	Repo       string
-	Title      string
 	UI         string
+	Token      string
 }
 
 const sep = "<|>"
@@ -36,7 +36,7 @@ const sep = "<|>"
 var paneFields = []string{
 	"#{pane_id}", "#{session_name}", "#{window_id}", "#{window_name}", "#{pane_current_command}",
 	"#{pane_current_path}", "#{pane_pid}", "#{pane_dead}", "#{pane_in_mode}", "#{pane_width}", "#{pane_height}",
-	"#{@factory_slug}", "#{@factory_repo}", "#{@factory_title}", "#{@factory_ui}",
+	"#{@factory_slug}", "#{@factory_repo}", "#{@factory_ui}", "#{@factory_token}",
 }
 
 func (c Client) args(args ...string) []string {
@@ -100,7 +100,7 @@ func (c Client) Panes() ([]Pane, error) {
 		panes = append(panes, Pane{
 			ID: f[0], Session: f[1], WindowID: f[2], WindowName: f[3], Command: f[4], Path: f[5], PID: pid,
 			Dead: f[7] == "1", InMode: f[8] == "1", Width: width, Height: height,
-			Slug: f[11], Repo: f[12], Title: f[13], UI: f[14],
+			Slug: f[11], Repo: f[12], UI: f[13], Token: f[14],
 		})
 	}
 	return panes, nil

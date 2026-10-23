@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -62,7 +63,9 @@ func (f Factory) Done() bool {
 }
 
 func (f Factory) Archived() bool {
-	return f.Entry != nil && f.Entry.Archived
+	markedArchived := f.Entry != nil && f.Entry.Archived
+	movedToArchive := f.Dir != "" && strings.HasPrefix(filepath.Clean(f.Dir), ArchiveDir(f.Repo)+string(filepath.Separator))
+	return markedArchived || movedToArchive
 }
 
 func (f Factory) CreatedAt() time.Time {
@@ -98,6 +101,10 @@ func (f Factory) WaitingOn() string {
 
 func WorktreesDir(repo string) string {
 	return filepath.Join(repo, ".claude", "worktrees")
+}
+
+func ArchiveDir(repo string) string {
+	return filepath.Join(repo, ".claude", "factory-archive")
 }
 
 func existingWorktree(repo, id string) (string, bool) {
@@ -155,7 +162,8 @@ func Discover(repos []string, reg *state.Registry) []Factory {
 func statePaths(repo string) []string {
 	inWorktrees, _ := filepath.Glob(filepath.Join(WorktreesDir(repo), "*", ".claude", "factory", "*", "state.json"))
 	legacy, _ := filepath.Glob(filepath.Join(repo, ".claude", "factory", "*", "state.json"))
-	return append(inWorktrees, legacy...)
+	archived, _ := filepath.Glob(filepath.Join(ArchiveDir(repo), "*", "state.json"))
+	return slices.Concat(inWorktrees, legacy, archived)
 }
 
 func load(repo, path, real string) Factory {
