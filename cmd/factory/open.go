@@ -32,7 +32,7 @@ func runOpen(args []string) int {
 	pipeline := flags.String("pipeline", "", "the pipeline of stages to run; default_pipeline when omitted")
 	stages := flags.String("stages", "", "the exact stages to run, comma-separated; instead of --pipeline")
 	agents := agentFlags{}
-	flags.Var(agents, "agent", "role=model:effort for one agent of this factory; repeatable")
+	flags.Var(agents, "agent", "role=model:effort or role=tool/model:effort for one agent of this factory; repeatable")
 	if err := flags.Parse(reorder(args)); err != nil {
 		return 2
 	}

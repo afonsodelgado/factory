@@ -16,14 +16,15 @@ type Registry struct {
 }
 
 type Entry struct {
-	Repo      string    `json:"repo"`
-	Slug      string    `json:"slug"`
-	Title     string    `json:"title,omitempty"`
-	SessionID string    `json:"session_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	Created   bool      `json:"created,omitempty"`
-	Archived  bool      `json:"archived,omitempty"`
-	Dir       string    `json:"dir,omitempty"`
+	Repo       string       `json:"repo"`
+	Slug       string       `json:"slug"`
+	Title      string       `json:"title,omitempty"`
+	SessionID  string       `json:"session_id,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	Created    bool         `json:"created,omitempty"`
+	Archived   bool         `json:"archived,omitempty"`
+	Dir        string       `json:"dir,omitempty"`
+	Supervisor AgentSetting `json:"supervisor,omitzero"`
 }
 
 func (e Entry) Key() string {
