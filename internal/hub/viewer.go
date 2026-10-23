@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -81,7 +82,11 @@ func (v *Viewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inboundMsg:
 		switch msg.T {
 		case "frame":
+			reshaped := strings.Count(msg.S, "\n") != strings.Count(v.frame, "\n")
 			v.frame = msg.S
+			if reshaped {
+				return v, tea.Batch(tea.ClearScreen, v.wait())
+			}
 		case "quit":
 			return v, tea.Quit
 		case "disconnected":
