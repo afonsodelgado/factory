@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -424,7 +425,7 @@ func (m *Model) focusFromPane(id string) {
 		m.focus = footer.Factories
 	case id == m.Layout.Panel:
 		m.focus = footer.Panel
-	case m.Layout.Frame.Has(id):
+	case m.Layout.Frame.Has(id), id == m.Layout.Split && id != "":
 		m.focusSlot()
 	case id == m.Layout.Slot && id != m.slotViewer(), id == m.Layout.Stage && id != "":
 		m.focus = footer.Session
@@ -812,7 +813,7 @@ func (m *Model) pushFrame() {
 		}
 	}
 	focused := m.focus == footer.Session
-	for _, side := range FrameSides {
+	for _, side := range slices.Concat(FrameSides, []string{"split"}) {
 		pane := "frame-" + side
 		width, height := m.size(pane)
 		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: tilde(path), Stage: stage}, focused))

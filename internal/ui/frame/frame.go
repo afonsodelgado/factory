@@ -26,6 +26,8 @@ func Render(side string, w, h int, labels Labels, focused bool) string {
 		drawSide(c, "╮", "╯", border)
 	case "top":
 		drawTop(c, labels, border, focused)
+	case "split":
+		c.VLine(0, 0, c.H, border)
 	case "bottom":
 		c.HLine(0, 0, c.W, border)
 		if split {

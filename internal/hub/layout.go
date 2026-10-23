@@ -23,6 +23,7 @@ const (
 	MinHeight           = 24
 	frameRows           = 5
 	frameColumns        = 4
+	splitGutter         = 3
 )
 
 var FrameSides = []string{"left", "right", "top", "bottom"}
@@ -42,6 +43,7 @@ type Layout struct {
 	Selector string
 	Slot     string
 	Stage    string
+	Split    string
 	Panel    string
 	Footer   string
 	Frame    Frame
@@ -141,6 +143,8 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		}
 		side, isFrame := strings.CutPrefix(p.UI, "frame-")
 		switch {
+		case p.UI == "frame-split":
+			l.Split = p.ID
 		case isFrame:
 			*l.Frame.pane(side) = p.ID
 		case p.UI == "panel":
@@ -154,10 +158,13 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		}
 	}
 	rebuildFrame := l.Slot == "" || l.Panel == "" || !l.Frame.Complete()
-	if rebuildFrame {
+	unpairedSplit := (l.Stage == "") != (l.Split == "")
+	if rebuildFrame || unpairedSplit {
 		if err := e.HideStage(&l); err != nil {
 			return l, err
 		}
+	}
+	if rebuildFrame {
 		if err := e.removeFrame(&l); err != nil {
 			return l, err
 		}
@@ -362,8 +369,12 @@ func (e *Engine) Arrange(l Layout, shape Shape) error {
 		{l.Panel, 0, shape.PanelHeight()},
 		{l.Frame.Top, 0, 1},
 		{l.Frame.Bottom, 0, 1},
+		{l.Split, 1, 0},
 	}
 	for _, s := range sizes {
+		if s.pane == "" {
+			continue
+		}
 		if err := e.TM.ResizePane(s.pane, s.width, s.height); err != nil {
 			return err
 		}
@@ -393,7 +404,7 @@ func (e *Engine) FitParking(l Layout) error {
 		return err
 	}
 	if stage, shown := byID(panes, l.Stage); shown && l.Stage != "" {
-		width += 1 + stage.Width
+		width += splitGutter + stage.Width
 	}
 	_, stageWidth := SplitWidths(width)
 	fitted := map[string]bool{}
@@ -414,8 +425,8 @@ func (e *Engine) FitParking(l Layout) error {
 }
 
 func SplitWidths(framed int) (int, int) {
-	left := frame.SplitColumn(framed)
-	return left, framed - 1 - left
+	left := frame.SplitColumn(framed) - 1
+	return left, framed - left - splitGutter
 }
 
 func (e *Engine) ShowStage(l *Layout, stage string) error {
@@ -434,10 +445,19 @@ func (e *Engine) ShowStage(l *Layout, stage string) error {
 		return err
 	}
 	l.Stage = stage
+	if l.Split, err = e.uiPane("frame-split", tmux.Split{Target: l.Slot, Horizontal: true, Size: 1}); err != nil {
+		return err
+	}
+	if err := e.TM.DisableInput(l.Split); err != nil {
+		return err
+	}
 	return e.FitParking(*l)
 }
 
 func (e *Engine) HideStage(l *Layout) error {
+	if err := e.removeSplit(l); err != nil {
+		return err
+	}
 	if l.Stage == "" {
 		return nil
 	}
@@ -454,6 +474,15 @@ func (e *Engine) HideStage(l *Layout) error {
 		return err
 	}
 	return e.FitParking(*l)
+}
+
+func (e *Engine) removeSplit(l *Layout) error {
+	if l.Split == "" {
+		return nil
+	}
+	split := l.Split
+	l.Split = ""
+	return e.TM.KillPane(split)
 }
 
 func (e *Engine) fit(window string, width, height int) error {

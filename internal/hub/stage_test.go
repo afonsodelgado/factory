@@ -11,6 +11,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/frame"
 )
 
 func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *testing.T) {
@@ -109,9 +110,10 @@ func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testi
 	if err := e.ShowStage(&l, stage); err != nil {
 		t.Fatal(err)
 	}
-	left, right, top := areaOf(t, e.TM, l.Slot), areaOf(t, e.TM, stage), areaOf(t, e.TM, l.Frame.Top)
-	if right.y != left.y || right.x != left.x+left.w+1 || right.w != stageWidth || top.w != framedWidth {
-		t.Errorf("supervisor %+v, stage %+v, top strip %+v; want them side by side under one %d-wide frame", left, right, top, framedWidth)
+	left, divider, right, top := areaOf(t, e.TM, l.Slot), areaOf(t, e.TM, l.Split), areaOf(t, e.TM, stage), areaOf(t, e.TM, l.Frame.Top)
+	underTheTee := divider.x == top.x+frame.SplitColumn(top.w) && divider.w == 1 && divider.h == left.h
+	if right.y != left.y || divider.x != left.x+left.w+1 || right.x != divider.x+2 || right.w != stageWidth || top.w != framedWidth || !underTheTee {
+		t.Errorf("supervisor %+v, divider %+v, stage %+v, top strip %+v; want them side by side under one %d-wide frame with the divider under its ┬", left, divider, right, top, framedWidth)
 	}
 	other, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "other", Dir: t.TempDir()})
 	if err != nil {
@@ -126,8 +128,8 @@ func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rebuilt.Stage != stage {
-		t.Errorf("after a hub restart the layout has stage %q; want %s, or the split could never close", rebuilt.Stage, stage)
+	if rebuilt.Stage != stage || rebuilt.Split != l.Split {
+		t.Errorf("after a hub restart the layout has stage %q and divider %q; want %s and %s, or the split could never close", rebuilt.Stage, rebuilt.Split, stage, l.Split)
 	}
 
 	if err := e.HideStage(&rebuilt); err != nil {
@@ -136,6 +138,9 @@ func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testi
 	parkedStage := pane(t, e.TM, stage)
 	if parkedStage.WindowName != StageParkName("csv", "engineer") || parkedStage.Width != stageWidth {
 		t.Errorf("hidden stage is %q at %d wide; want %q at %d", parkedStage.WindowName, parkedStage.Width, StageParkName("csv", "engineer"), stageWidth)
+	}
+	if panes, _ := e.TM.Panes(); slices.ContainsFunc(panes, func(p tmux.Pane) bool { return p.ID == l.Split }) {
+		t.Errorf("the divider %s outlived the split it separated", l.Split)
 	}
 	framed(t, e, rebuilt, "after the split closed")
 }
