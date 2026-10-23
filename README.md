@@ -13,7 +13,7 @@ gh release download --repo afonsodelgado/factory --pattern 'factory_darwin_arm64
 chmod +x ~/.local/bin/factory
 ```
 
-Or build it with Go 1.26 or later. A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`.
+Or build it with Go 1.26 or later. A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
 
 ```sh
 GOPRIVATE=github.com/afonsodelgado/* go install github.com/afonsodelgado/factory/cmd/factory@latest
