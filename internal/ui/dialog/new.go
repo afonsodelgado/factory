@@ -165,6 +165,10 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.problem = "Type an id made of letters a–z, digits 0–9 and dashes, such as csv-export."
 		return nil
 	}
+	if factory.IsReservedID(m.name) {
+		m.problem = factory.ReservedIDRefusal(m.name)
+		return nil
+	}
 	if e, ok := m.existing(); ok && e.Archived {
 		return nil
 	}

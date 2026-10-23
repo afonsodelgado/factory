@@ -89,10 +89,13 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{ID: "ENG-9"}, Entry: entry}}
 	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
-	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived"} {
+	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived", "doctor": "`doctor` is a factory command"} {
 		if err := model.open(OpenRequest{Name: name}); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Errorf("open %q = %v; want it refused, naming %q", name, err, reason)
 		}
+	}
+	if registry.Find(repo, "doctor") != nil {
+		t.Error("open doctor registered a factory: a command word became a worktree, as on cowork")
 	}
 
 	model.selectorKey("H")

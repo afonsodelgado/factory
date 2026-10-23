@@ -60,6 +60,9 @@ func (m *Model) open(r OpenRequest) error {
 	if strings.TrimSpace(r.Name) == "" {
 		return nil
 	}
+	if factory.IsReservedID(r.Name) {
+		return errors.New(factory.ReservedIDRefusal(r.Name))
+	}
 	id := factory.Slugify(r.Name)
 	if id == "" {
 		return fmt.Errorf("%q has none of the letters a–z or digits 0–9 a factory id is made of. Type an id such as csv-export", r.Name)

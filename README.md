@@ -34,6 +34,7 @@ A permission prompt marks its factory "needs you" until the approved tool has ru
 
 ```sh
 factory version    # what is running, and the latest release
+factory --version  # only what is running, with no network call
 factory update     # install the latest release, then run its bootstrap
 ```
 
@@ -63,7 +64,7 @@ Worktrees have no copy of the profile, so the skill and its agents read it from 
 | `factory open csv-export --pipeline quick` | creates it with the `quick` pipeline instead of the default one |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
 
-An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
+An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
