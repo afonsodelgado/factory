@@ -261,7 +261,8 @@ func (m *Model) apply(s Snapshot) {
 func (m *Model) itemsOf(key string) map[string]bool {
 	items := map[string]bool{}
 	if it, ok := m.snap.Find(key); ok {
-		for _, item := range attentionItems(it, m.snap.At) {
+		shown, _ := m.shownItems(it)
+		for _, item := range shown {
 			items[item.Kind+"|"+item.ID] = true
 		}
 	}
@@ -619,7 +620,8 @@ func (m *Model) choose(key string) {
 }
 
 func (m *Model) openingTab(it Item) panel.Tab {
-	somethingOpen := len(attentionItems(it, m.snap.At)) > 0
+	shown, _ := m.shownItems(it)
+	somethingOpen := len(shown) > 0
 	userPickedAnotherTab := m.panel.tab == panel.Artifacts || m.panel.tab == panel.Activity
 	switch {
 	case somethingOpen:
@@ -765,7 +767,8 @@ func (m *Model) row(it Item) selector.Row {
 		row.Stage += " · " + name
 	}
 	if f.State != nil {
-		row.Items = len(f.State.OpenAttention())
+		_, answered := m.shownItems(it)
+		row.Items = len(f.State.OpenAttention()) - len(answered)
 	}
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)

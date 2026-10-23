@@ -141,12 +141,11 @@ type ActivityRow struct {
 }
 
 type Send struct {
-	Ready      bool
-	Reason     string
-	Preview    string
-	Refused    string
-	SentAt     time.Time
-	ReceivedAt time.Time
+	Ready   bool
+	Reason  string
+	Preview string
+	Refused string
+	SentAt  time.Time
 }
 
 type View struct {
@@ -157,11 +156,12 @@ type View struct {
 	Dim       bool
 	Now       time.Time
 
-	Items  []Item
-	Item   int
-	Draft  Draft
-	Send   Send
-	Counts [3]int
+	Items    []Item
+	Answered []string
+	Item     int
+	Draft    Draft
+	Send     Send
+	Counts   [3]int
 
 	PRs       []PR
 	Checked   time.Time
