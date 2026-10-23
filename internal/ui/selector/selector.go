@@ -310,6 +310,13 @@ func renderEmpty(c *theme.Canvas, d Data, w int) {
 	}
 	c.PutMax(2, y, "repos live in "+config, theme.Muted, inner)
 	y += 2
+	if len(d.Groups) == 0 {
+		for _, line := range theme.Wrap("No repos yet. Add one with factory init <repo> in a shell, then quit with q and run factory again.", inner) {
+			c.Put(2, y, line, theme.Text)
+			y++
+		}
+		y++
+	}
 	for _, line := range theme.Wrap("Factories already running in their own tmux sessions (from the old factory function) show up here by themselves.", inner) {
 		c.Put(2, y, line, theme.Text)
 		y++

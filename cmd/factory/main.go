@@ -36,6 +36,8 @@ func run(args []string) int {
 		return runDialog(args[1:])
 	case "open":
 		return runOpen(args[1:])
+	case "init":
+		return runInit(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "bootstrap":
@@ -63,6 +65,9 @@ commands:
   open [<id>] [--prompt text | <prompt…>] [--repo path]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
+  init [path] add a repo (default: the one you are in): write its factory
+              profile, ignore the factory's files in .git/info/exclude and
+              list it in config.yml; nothing is committed
   doctor      check what the factory needs and print the fix commands
   bootstrap   install the bundled skills, agents and hooks into the Claude config
   install-hooks [--remove]
