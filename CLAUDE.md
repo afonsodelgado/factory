@@ -25,7 +25,11 @@ Use Go 1.26 or later. For JavaScript, `.nvmrc` pins Node 24.22.1, `engines.node`
 
 After a package exists, `pnpm turbo run build` is the advanced direct command. Turbo caches generic `dist/**` and `build/**` outputs and lint/typecheck/test results; dev is persistent and uncached. The future website must add framework outputs, generated-type prerequisites, environment inputs and coverage declarations. No remote cache is configured. Factory profile autodetection still prefers `go.mod` and selects the Go commands.
 
-CI runs the same three commands on ubuntu and macos for every pull request.
+CI starts on every pull request and push to `main`, without workflow-level path filters. The `changes` job uses the PR changed-files API or the previous pushed head for main pushes. Go changes run `make go-build`, `make go-lint` and `make go-test` on Ubuntu and macOS with tmux/jq and no Node. Web changes install the pinned Node/pnpm tooling and frozen lockfile on Ubuntu, then run `make web-lint`, `make web-typecheck`, `make web-test` and `make web-build`; absent site tasks skip after installation.
+
+Go owns root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum` and the release workflow. Web owns `apps/**`, `packages/**`, root pnpm manifests/lockfile, `turbo.json` and `.nvmrc`. `Makefile`, `.gitignore` and the CI workflow select both. Root docs select neither. Include all data in owned directories; add new build inputs to the inline CI filters and README ownership table together.
+
+The final `ci` job always evaluates detection and both workload results. Detection must succeed; workloads may succeed or skip, but failures, cancellations and unknown outcomes fail the aggregate. Require `ci` in branch protection and manually remove old matrix requirements when adopting it. No workflow can guarantee reporting through platform outages, manual cancellation or commit-level CI-skip directives.
 
 ## Isolation
 

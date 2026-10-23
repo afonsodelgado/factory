@@ -68,6 +68,21 @@ Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` cal
 
 Factory profile autodetection still chooses Go commands because `go.mod` takes precedence over `package.json`. The workspace does not change the factory profile.
 
+### CI
+
+Pull requests and pushes to `main` always start CI. Changed paths select the Go matrix on Ubuntu/macOS, the web job on Ubuntu, or both. Go jobs install tmux and jq and run `make go-build`, `make go-lint` and `make go-test` without Node. The web job installs Node from `.nvmrc`, pnpm from `packageManager`, and dependencies with `pnpm install --frozen-lockfile`, then runs web lint, typecheck, test and build. Without a site manifest, those tasks skip successfully after the tooling installation.
+
+| Changed paths | Validation |
+|---|---|
+| Root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `profiles/**`, `go.mod`, `go.sum`, release workflow | Go |
+| `apps/**`, `packages/**`, root pnpm manifests and lockfile, `turbo.json`, `.nvmrc` | Web |
+| `Makefile`, `.gitignore`, CI workflow | Go and web |
+| Root README, CLAUDE and ordinary docs outside Go-owned directories | Neither workload |
+
+Mixed changes run the union of the matching workloads. Go-owned directories include their data and embedded documentation. Add new build inputs to this table and the inline CI filters together. Pull requests use the changed-files API; main pushes compare against the previous pushed head, including every commit in the push.
+
+Require the final `ci` check in branch protection. It reports success only when change detection succeeds and both workloads succeed or are skipped; failures, cancellations and unexpected results fail it. After adopting this workflow, replace any old matrix requirements with `ci` manually. A started workflow reports this aggregate after path skips or dependency failures, but platform outages, manual workflow cancellation and commit-level CI-skip directives still affect reporting.
+
 ## Add a repo
 
 The factory works in any git repo. From anywhere inside it, or one of its worktrees:

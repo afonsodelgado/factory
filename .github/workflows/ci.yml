@@ -5,8 +5,52 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
-  test:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            go:
+              - '*.go'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'bundle/**'
+              - 'profiles/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - '.gitignore'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+            web:
+              - 'apps/**'
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - '.nvmrc'
+              - 'Makefile'
+              - '.gitignore'
+              - '.github/workflows/ci.yml'
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +67,47 @@ jobs:
       - name: Install tmux and jq (macos)
         if: runner.os == 'macOS'
         run: brew install tmux jq
-      - run: go build ./...
-      - run: go vet ./...
-      - run: go test ./...
+      - run: make go-build
+      - run: make go-lint
+      - run: make go-test
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - run: make web-lint
+      - run: make web-typecheck
+      - run: make web-test
+      - run: make web-build
+
+  ci:
+    name: ci
+    needs: [changes, go, web]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check validation results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != success ]; then
+            echo "Change detection did not succeed: $CHANGES_RESULT"
+            exit 1
+          fi
+          for result in "$GO_RESULT" "$WEB_RESULT"; do
+            if [ "$result" != success ] && [ "$result" != skipped ]; then
+              echo "Validation did not succeed: $result"
+              exit 1
+            fi
+          done
