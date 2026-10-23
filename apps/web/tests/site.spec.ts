@@ -155,8 +155,15 @@ test("interactive commands stay local and survive reduced motion", async ({
   const staticHub = await hub.innerHTML();
 
   await expect(page.locator('[data-code="hero"] .ghost')).toHaveCount(1);
-  await page.getByRole("button", { name: "Copy the install commands" }).click();
+  const heroCopy = page.getByRole("button", {
+    name: "Copy the install commands",
+  });
+  await heroCopy.click();
   await expect.poll(copied).toEqual([HERO_COMMAND]);
+  await expect(heroCopy).toHaveText("copied");
+  await expect(page.locator("[data-live]")).toHaveText(
+    "Copied to the clipboard.",
+  );
 
   await page.getByRole("button", { name: "Linux, ARM64" }).click();
   await page

@@ -7,7 +7,7 @@ import {
   type CommandId,
   type Platform,
 } from "../lib/commands.ts";
-import { IC } from "../lib/frames.ts";
+import { IC, esc } from "../lib/frames.ts";
 
 const TYPE_DELAY_MS = 500;
 const CHAR_MS = 22;
@@ -132,13 +132,6 @@ function setupCopy() {
   }
 }
 
-function escapeHtml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 function setupTyping() {
   const code = document.querySelector<HTMLElement>('[data-code="hero"]');
   const cursor = document.querySelector<HTMLElement>("[data-cursor]");
@@ -165,8 +158,8 @@ function setupTyping() {
       } else {
         for (const ch of child.textContent ?? "") {
           const html = wrap
-            ? `<span class="${wrap}">${escapeHtml(ch)}</span>`
-            : escapeHtml(ch);
+            ? `<span class="${wrap}">${esc(ch)}</span>`
+            : esc(ch);
           const pause =
             ch === "\n" ? NEWLINE_MS : ch === " " ? SPACE_MS : CHAR_MS;
           tokens.push({ html, pause });
