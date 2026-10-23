@@ -997,7 +997,7 @@ func (m *Model) alert(previous map[string]factory.Status) {
 		if m.Config.Alerts.Bell && m.Bell != nil {
 			m.Bell.Write([]byte("\a"))
 		}
-		if m.Config.Alerts.MacOS && m.Notify != nil {
+		if m.Config.Alerts.Notifies() && m.Notify != nil {
 			go m.Notify(label + " needs you")
 		}
 	}

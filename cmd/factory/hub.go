@@ -146,6 +146,7 @@ func openURL(url string) {
 
 func notify(text string) {
 	if runtime.GOOS != "darwin" {
+		exec.Command("notify-send", "factory", text).Run()
 		return
 	}
 	script := fmt.Sprintf("display notification %q with title %q", text, "factory")

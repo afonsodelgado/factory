@@ -37,8 +37,13 @@ type Hub struct {
 }
 
 type Alerts struct {
-	Bell  bool `yaml:"bell"`
-	MacOS bool `yaml:"macos"`
+	Bell    bool `yaml:"bell"`
+	Desktop bool `yaml:"desktop"`
+	MacOS   bool `yaml:"macos"`
+}
+
+func (a Alerts) Notifies() bool {
+	return a.Desktop || a.MacOS
 }
 
 type Claude struct {
