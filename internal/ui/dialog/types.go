@@ -31,6 +31,12 @@ type RepoOption struct {
 	Pipelines       []state.Pipeline `json:"pipelines"`
 	DefaultPipeline string           `json:"default_pipeline"`
 	PipelineProblem string           `json:"pipeline_problem,omitempty"`
+	Agents          []AgentOption    `json:"agents"`
+}
+
+type AgentOption struct {
+	Role string `json:"role"`
+	state.AgentSetting
 }
 
 type NewContext struct {
@@ -40,12 +46,14 @@ type NewContext struct {
 }
 
 type NewResult struct {
-	Repo     string `json:"repo"`
-	Slug     string `json:"slug,omitempty"`
-	Prompt   string `json:"prompt,omitempty"`
-	Pipeline string `json:"pipeline,omitempty"`
-	Select   string `json:"select,omitempty"`
-	Wake     bool   `json:"wake,omitempty"`
+	Repo     string                        `json:"repo"`
+	Slug     string                        `json:"slug,omitempty"`
+	Prompt   string                        `json:"prompt,omitempty"`
+	Pipeline string                        `json:"pipeline,omitempty"`
+	Stages   []string                      `json:"stages,omitempty"`
+	Agents   map[string]state.AgentSetting `json:"agents,omitempty"`
+	Select   string                        `json:"select,omitempty"`
+	Wake     bool                          `json:"wake,omitempty"`
 }
 
 type SwitchRow struct {

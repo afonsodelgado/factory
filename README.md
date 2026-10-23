@@ -62,6 +62,8 @@ Worktrees have no copy of the profile, so the skill and its agents read it from 
 | `factory open csv-export` | without a prompt, a new factory's supervisor asks for one |
 | `factory open csv-export --repo ~/dev/factory` | in a given repo instead of the one holding the factory or the current directory |
 | `factory open csv-export --pipeline quick` | creates it with the `quick` pipeline instead of the default one |
+| `factory open csv-export --stages plan,implement,review` | creates it with exactly these stages, plus the ones that always run |
+| `factory open csv-export --agent engineer=sonnet:medium` | runs this factory's engineer on Sonnet at medium effort; repeat it for more agents |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
 
 An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
@@ -105,9 +107,24 @@ pipelines:
 default_pipeline: full
 ```
 
-Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.claude/factory.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
+Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.claude/factory.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out, and `qa_fixes` and `test_gaps` run only with `qa`. The name `custom` is reserved for a factory's own list. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
 
-Pick a pipeline when you create a factory: the `n` dialog has a step of its own for it, between the id and the prompt, where `↑↓` move through the presets, starting at `default_pipeline`, and `⏎` picks one. From the shell, use `factory open <id> --pipeline <name>`; an unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
+Pick the stages when you create a factory: the `n` dialog has a step of its own for them, "Stages & agents", between the id and the prompt. It starts at `default_pipeline`. `tab` loads the next preset, `↑↓` move through the stages, `space` checks or unchecks the selected one, and `⏎` goes on to the prompt. When the checked stages match no preset, the factory runs a `custom` pipeline. From the shell, use `factory open <id> --pipeline <name>` for a preset, or `--stages a,b,c` for an exact list; give one or the other, not both. An unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
 
 A pipeline only removes stages. The gates stay: `quick` still publishes the plan and waits for your approval before any code is written. `coderabbit: false` in the repo profile still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
 
+## Agent models
+
+Each stage runs one agent, and each agent has a default model and effort in its `bundle/agents/factory-<role>.md` file. The roles are `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa` and `fixer`; the fixer runs both `qa_fixes` and `test_gaps`. To spend less, set them in `config.yml`, in a repo's `.claude/factory.yml`, or for one factory:
+
+```yaml
+agents:
+  analyst:  {model: sonnet}
+  engineer: {model: sonnet, effort: medium}
+  reviewer: {effort: medium}
+  shepherd: {model: sonnet, effort: low}
+```
+
+Each layer overrides the one before it, one field at a time: the agent file, then `config.yml`, then the repo profile, then the factory. Models are `haiku`, `sonnet`, `opus` and `fable`. Efforts are `low`, `medium`, `high`, `xhigh` and `max`. `factory doctor` reports an unknown role, model or effort, naming the file and the key.
+
+For one factory, press `m` (model) or `e` (effort) on a stage's row in the dialog's "Stages & agents" step, or pass `--agent role=model:effort` to `factory open`. Either side can be empty, as in `--agent reviewer=:low`. A value set for this factory alone is shown in bold. The supervisor writes the result to `state.json`, so a resumed factory keeps its models. It passes them to the Agent tool on every spawn, and the files in `~/.claude/agents` stay as the bundle installed them.

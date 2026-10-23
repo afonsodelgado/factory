@@ -7,7 +7,7 @@ description: |
   handoff. This session is the supervisor; every stage runs as a factory-* subagent that
   hands off through files. Use when the user says "/factory <id>", "/factory status",
   "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
-argument-hint: "<id> [--pipeline <name>] [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
+argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
 ---
 
 # Factory supervisor
@@ -85,7 +85,7 @@ When it is missing in both places, stop at preflight and ask the user to run `fa
 
 ## Commands
 
-- `/factory <id> [--pipeline <name>]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` picks the pipeline a new factory runs (see "The pipeline"); on resume it is ignored, because `state.json` already records one. The lines after the first line of the message are the prompt.
+- `/factory <id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` picks the pipeline a new factory runs, and `--stages` gives its exact list instead (see "The pipeline"). Each `--agent` sets one agent's model, effort or both for this factory (see "Agent models"). On resume all three are ignored, because `state.json` already records them. The lines after the first line of the message are the prompt.
 - `/factory resume`: find the factory from the current branch or the only open `state.json`, then resume.
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
 - `/factory approve <design|plan> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
@@ -100,12 +100,27 @@ A pipeline is a named list of stage keys (`references/state.md`). Resolve the pi
    - `quick`: `[requirements, plan, implement, review, handoff]`
 2. Read `pipelines` and `default_pipeline` from the global config, `${FACTORY_CONFIG_DIR:-~/.config/factory}/config.yml`, when it exists. An entry replaces the built-in of the same name.
 3. Read `pipelines` and `default_pipeline` from the repo profile. Its entries and its `default_pipeline` win over the global config.
-4. The name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
-5. Add `requirements` and `handoff` when the list omits them. When the profile says `coderabbit: false`, remove `coderabbit`. Put the stages in the order of the stage keys.
+4. With `--stages a,b,c`, the list is those keys and the name is `custom`. Otherwise the name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
+5. Add `requirements` and `handoff` when the list omits them. When the profile says `coderabbit: false`, remove `coderabbit`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
 
-If the name is not a pipeline, or a list holds a key that is not a stage key, stop at preflight and tell the user the file and the key.
+If the name is not a pipeline, a list holds a key that is not a stage key, or a config names a pipeline `custom`, stop at preflight and tell the user the file and the key.
 
 A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the profile says `coderabbit: false`.
+
+### Agent models
+
+Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Resolve the **effective agents** for a new factory, field by field, each layer over the one before:
+
+1. the `model` and `effort` in the agent's own frontmatter
+2. `agents.<role>.model` and `agents.<role>.effort` in the global config
+3. the same keys in the repo profile
+4. the `--agent role=model:effort` arguments; either side may be empty, as in `--agent reviewer=:low`
+
+Models are `haiku`, `sonnet`, `opus` and `fable`. Efforts are `low`, `medium`, `high`, `xhigh` and `max`. An unknown role, model or effort stops preflight; tell the user the file and the key.
+
+Write every role whose resolved model or effort differs from its frontmatter to `state.agents`, as `{"engineer": {"model": "sonnet", "effort": "medium"}}`. Include both fields of that role. Write the result of all four layers, not only the `--agent` arguments: a profile's setting must reach the spawn too.
+
+**On every spawn of a role in `state.agents`, pass its `model` and `effort` to the Agent tool.** This is the user's explicit instruction to set the effort level. It covers fresh spawns after a restart and the retry after a failure. SendMessage keeps the agent's settings. For design variants, the Workflow tool's `agent()` takes no model or effort, so when `designer` is in `state.agents`, spawn the variants as parallel Agent calls in one message instead of a workflow.
 
 ## Start
 
@@ -118,7 +133,8 @@ A pipeline only removes stages. It never removes or changes a gate: the plan is 
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
    - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the profile's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
    - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead. When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
-3. Tell the user the plan in three lines: the pipeline and the stages it skips, which gates need them, and that everything after the plan runs unattended until handoff.
+   - **The agents.** Resolve them (see "Agent models") and write `agents`.
+3. Tell the user the plan in three lines: the pipeline and the stages it skips, the agents that do not run on their defaults, which gates need them, and that everything after the plan runs unattended until handoff.
 
 ## Asking the user
 
@@ -146,7 +162,7 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 {"status": "done|blocked|failed", "summary": "...", "outputs": ["path or url"], "questions": [], "data": {}}
 ```
 
-- **Spawn** with the Agent tool, `subagent_type: "factory-<role>"`. The prompt gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Write `waiting_on: "agent"` with the stage as the reason.
+- **Spawn** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there. The prompt gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Write `waiting_on: "agent"` with the stage as the reason.
 - **Record** the returned agent id in `state.stages.<stage>.agent_id` straight away. Names do not survive compaction, ids do.
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent with SendMessage, so it keeps its context. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.

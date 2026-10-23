@@ -11,24 +11,25 @@ import (
 var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "handoff"}
 
 type State struct {
-	ID             string           `json:"id"`
-	Title          string           `json:"title"`
-	Repo           string           `json:"repo"`
-	SessionID      string           `json:"session_id"`
-	NeedsDesign    bool             `json:"needs_design"`
-	Pipeline       string           `json:"pipeline"`
-	PipelineStages []string         `json:"pipeline_stages"`
-	Worktree       string           `json:"worktree"`
-	Branch         string           `json:"branch"`
-	Stage          string           `json:"stage"`
-	WaitingOn      string           `json:"waiting_on"`
-	WaitingReason  string           `json:"waiting_reason"`
-	UpdatedAt      Time             `json:"updated_at"`
-	Limits         Limits           `json:"limits"`
-	Stages         map[string]Stage `json:"stages"`
-	Attention      []Attention      `json:"attention"`
-	PRs            []PR             `json:"prs"`
-	History        []HistoryEntry   `json:"history"`
+	ID             string                  `json:"id"`
+	Title          string                  `json:"title"`
+	Repo           string                  `json:"repo"`
+	SessionID      string                  `json:"session_id"`
+	NeedsDesign    bool                    `json:"needs_design"`
+	Pipeline       string                  `json:"pipeline"`
+	PipelineStages []string                `json:"pipeline_stages"`
+	Agents         map[string]AgentSetting `json:"agents"`
+	Worktree       string                  `json:"worktree"`
+	Branch         string                  `json:"branch"`
+	Stage          string                  `json:"stage"`
+	WaitingOn      string                  `json:"waiting_on"`
+	WaitingReason  string                  `json:"waiting_reason"`
+	UpdatedAt      Time                    `json:"updated_at"`
+	Limits         Limits                  `json:"limits"`
+	Stages         map[string]Stage        `json:"stages"`
+	Attention      []Attention             `json:"attention"`
+	PRs            []PR                    `json:"prs"`
+	History        []HistoryEntry          `json:"history"`
 }
 
 type Limits struct {

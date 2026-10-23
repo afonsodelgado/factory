@@ -9,8 +9,9 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, refreshed on every write because remote control can change it mid-session |
 | `authorized` | `true` once `/factory` started; the per-factory commit/push/PR authorisation |
 | `needs_design` | whether stage 2 runs |
-| `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick` |
+| `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick`, or `custom` when it was started with `--stages` |
 | `pipeline_stages` | the resolved stage keys of that pipeline, in stage order; every other stage is `skipped` with the note "not in the <name> pipeline" |
+| `agents` | the effective model and effort of every agent role that does not run on its frontmatter, such as `{"engineer": {"model": "sonnet", "effort": "medium"}}`; passed to the Agent tool on every spawn of that role |
 | `worktree`, `branch`, `start_commit` | where the work happens and where it started |
 | `stage` | current stage key |
 | `waiting_on` | `null`, `"user"`, `"agent"` or `"ci"` |
@@ -25,6 +26,6 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 
 Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `handoff`.
 
-Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does.
+Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does. Factories started before agent models have no `agents`; every agent runs on its frontmatter.
 
 Older files have `ticket` (a string or `null`) instead of `id`, and no `updated_at`, `repo`, `session_id` or `attention`, history entries without `at`, and artifacts as bare URL strings. Readers accept both forms; the supervisor writes the new form from its next write on.

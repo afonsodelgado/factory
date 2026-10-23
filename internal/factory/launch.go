@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 func Slugify(s string) string {
@@ -49,6 +51,8 @@ type Launch struct {
 	Slug          string
 	Prompt        string
 	Pipeline      string
+	Stages        []string
+	Agents        map[string]state.AgentSetting
 	SessionID     string
 	Chrome        bool
 	RemoteControl bool
@@ -67,8 +71,16 @@ func (l Launch) flags() []string {
 
 func (l Launch) Message() string {
 	message := "/factory " + l.Slug
-	if l.Pipeline != "" {
+	switch {
+	case len(l.Stages) > 0:
+		message += " --stages " + strings.Join(l.Stages, ",")
+	case l.Pipeline != "":
 		message += " --pipeline " + l.Pipeline
+	}
+	for _, role := range state.AgentRoles {
+		if setting, ok := l.Agents[role]; ok {
+			message += " --agent " + setting.Flag(role)
+		}
 	}
 	if strings.TrimSpace(l.Prompt) != "" {
 		message += "\n" + strings.TrimRight(l.Prompt, "\n")

@@ -23,7 +23,7 @@ import (
 )
 
 var popupSizes = map[string][2]int{
-	"new":     {88, 27},
+	"new":     {88, 30},
 	"switch":  {112, 14},
 	"pause":   {68, 9},
 	"archive": {80, 12},
@@ -151,6 +151,13 @@ func (m *Model) newContext() dialog.NewContext {
 			option.PipelineProblem = err.Error()
 		} else {
 			option.Pipelines, option.DefaultPipeline = pipelines.List, pipelines.Default
+		}
+		if agents, err := m.Config.AgentsFor(repo); err != nil {
+			option.PipelineProblem = err.Error()
+		} else {
+			for _, role := range state.AgentRoles {
+				option.Agents = append(option.Agents, dialog.AgentOption{Role: role, AgentSetting: agents[role]})
+			}
 		}
 		for _, it := range m.snap.Items {
 			if it.Factory.Repo != repo {
@@ -285,14 +292,17 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err != nil {
 		return err
 	}
-	pipeline, err := pipelines.Find(r.Pipeline)
+	pipeline, err := chosenPipeline(pipelines, r)
 	if err != nil {
+		return err
+	}
+	if err := state.ValidateAgents("--agent", r.Agents); err != nil {
 		return err
 	}
 	earlier := m.retiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
 	profile, _ := state.ReadProfile(r.Repo)
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, SessionID: uuid.NewString(), Chrome: profile.BrowserQA(), RemoteControl: m.Config.RemoteControl()}
 	title := firstLine(r.Prompt)
 	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
@@ -319,6 +329,20 @@ func (m *Model) create(r dialog.NewResult) error {
 	m.Loader.Note(factory.Factory{Repo: r.Repo, Slug: r.Slug}, note)
 	m.selected = state.Key(r.Repo, r.Slug)
 	return nil
+}
+
+func chosenPipeline(pipelines state.Pipelines, r dialog.NewResult) (state.Pipeline, error) {
+	if len(r.Stages) > 0 {
+		return pipelines.Custom(r.Stages)
+	}
+	return pipelines.Find(r.Pipeline)
+}
+
+func customStages(p state.Pipeline) []string {
+	if p.Name != state.CustomPipeline {
+		return nil
+	}
+	return p.Stages
 }
 
 func firstLine(s string) string {

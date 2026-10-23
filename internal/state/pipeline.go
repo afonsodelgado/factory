@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const DefaultPipeline = "full"
+const (
+	DefaultPipeline = "full"
+	CustomPipeline  = "custom"
+)
 
 var builtinPipelines = map[string][]string{
 	"full":  StageKeys,
@@ -22,8 +25,9 @@ type Pipeline struct {
 }
 
 type Pipelines struct {
-	List    []Pipeline
-	Default string
+	List           []Pipeline
+	Default        string
+	dropCodeRabbit bool
 }
 
 func (ps Pipelines) Names() []string {
@@ -46,12 +50,29 @@ func (ps Pipelines) Find(name string) (Pipeline, error) {
 	return Pipeline{}, fmt.Errorf("no pipeline is called %q; available: %s", name, strings.Join(ps.Names(), ", "))
 }
 
+func (ps Pipelines) Custom(stages []string) (Pipeline, error) {
+	if err := checkStages("--stages", stages); err != nil {
+		return Pipeline{}, err
+	}
+	return Pipeline{Name: CustomPipeline, Stages: EffectiveStages(stages, ps.dropCodeRabbit)}, nil
+}
+
+func checkStages(source string, stages []string) error {
+	for _, stage := range stages {
+		if !slices.Contains(StageKeys, stage) {
+			return fmt.Errorf("%s has the unknown stage %q; stages are %s", source, stage, strings.Join(StageKeys, ", "))
+		}
+	}
+	return nil
+}
+
 func validatePipelines(path string, pipelines map[string][]string) error {
 	for _, name := range sortedNames(pipelines) {
-		for _, stage := range pipelines[name] {
-			if !slices.Contains(StageKeys, stage) {
-				return fmt.Errorf("%s: pipelines.%s has the unknown stage %q; stages are %s", path, name, stage, strings.Join(StageKeys, ", "))
-			}
+		if name == CustomPipeline {
+			return fmt.Errorf("%s: pipelines.%s is reserved for a factory's own list of stages; give the preset another name", path, name)
+		}
+		if err := checkStages(fmt.Sprintf("%s: pipelines.%s", path, name), pipelines[name]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -67,7 +88,8 @@ func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelin
 			merged[name] = stages
 		}
 	}
-	ps := Pipelines{Default: DefaultPipeline}
+	dropCodeRabbit := profile.CodeRabbit != nil && !*profile.CodeRabbit
+	ps := Pipelines{Default: DefaultPipeline, dropCodeRabbit: dropCodeRabbit}
 	for _, source := range []struct{ path, name string }{{cfg.ConfigFile(), cfg.DefaultPipeline}, {profilePath, profile.DefaultPipeline}} {
 		if source.name == "" {
 			continue
@@ -77,22 +99,31 @@ func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelin
 		}
 		ps.Default = source.name
 	}
-	dropCodeRabbit := profile.CodeRabbit != nil && !*profile.CodeRabbit
 	for _, name := range sortedNames(merged) {
-		ps.List = append(ps.List, Pipeline{Name: name, Stages: effectiveStages(merged[name], dropCodeRabbit)})
+		ps.List = append(ps.List, Pipeline{Name: name, Stages: EffectiveStages(merged[name], dropCodeRabbit)})
 	}
 	return ps, nil
 }
 
-func effectiveStages(chosen []string, dropCodeRabbit bool) []string {
+func EffectiveStages(chosen []string, dropCodeRabbit bool) []string {
+	withoutQA := !slices.Contains(chosen, "qa")
 	var stages []string
 	for _, key := range StageKeys {
 		wanted := slices.Contains(chosen, key) || slices.Contains(alwaysRun, key)
-		if wanted && !(key == "coderabbit" && dropCodeRabbit) {
+		removed := (key == "coderabbit" && dropCodeRabbit) || (withoutQA && dependsOnQA(key))
+		if wanted && !removed {
 			stages = append(stages, key)
 		}
 	}
 	return stages
+}
+
+func AlwaysRuns(stage string) bool { return slices.Contains(alwaysRun, stage) }
+
+func DependsOnQA(stage string) bool { return dependsOnQA(stage) }
+
+func dependsOnQA(stage string) bool {
+	return stage == "qa_fixes" || stage == "test_gaps"
 }
 
 func sortedNames(pipelines map[string][]string) []string {

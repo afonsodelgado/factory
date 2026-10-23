@@ -19,6 +19,8 @@ import (
 type frontmatter struct {
 	Name   string   `yaml:"name"`
 	Skills []string `yaml:"skills"`
+	Model  string   `yaml:"model"`
+	Effort string   `yaml:"effort"`
 }
 
 func readFrontmatter(t *testing.T, path string) frontmatter {
@@ -59,6 +61,15 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 			if name := readFrontmatter(t, path).Name; name != skill {
 				t.Errorf("%s preloads %q, but %s is named %q", agent, skill, path, name)
 			}
+		}
+	}
+}
+
+func TestDefaultAgentsMatchTheBundledFrontmatter(t *testing.T) {
+	for _, role := range state.AgentRoles {
+		fm := readFrontmatter(t, "agents/factory-"+role+".md")
+		if got := (state.AgentSetting{Model: fm.Model, Effort: fm.Effort}); got != state.DefaultAgents[role] {
+			t.Errorf("factory-%s.md says %+v, but the new-factory dialog shows %+v as its default", role, got, state.DefaultAgents[role])
 		}
 	}
 }
