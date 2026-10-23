@@ -107,7 +107,7 @@ default_pipeline: full
 
 Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.claude/factory.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
 
-Pick a pipeline when you create a factory: in the `n` dialog, `tab` cycles the presets on the prompt step, starting at `default_pipeline`. From the shell, use `factory open <id> --pipeline <name>`; an unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
+Pick a pipeline when you create a factory: the `n` dialog has a step of its own for it, between the id and the prompt, where `↑↓` move through the presets, starting at `default_pipeline`, and `⏎` picks one. From the shell, use `factory open <id> --pipeline <name>`; an unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
 
 A pipeline only removes stages. The gates stay: `quick` still publishes the plan and waits for your approval before any code is written. `coderabbit: false` in the repo profile still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
 

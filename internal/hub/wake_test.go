@@ -154,6 +154,7 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	tm := teatest.NewTestModel(t, dialog.NewFactory(model.newContext()), teatest.WithInitialTermSize(84, 22))
 	tm.Type("ENG-9")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	tm.Type("Retry the export.")
 	tm.Send(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	result, _ := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*dialog.NewFactoryModel).Result()
