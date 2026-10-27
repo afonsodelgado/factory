@@ -442,7 +442,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
             questions, gates, PRs and artifacts.
           </p>
         </div>
-        <HubDemo client:visible>
+        <HubDemo client:visible={{ rootMargin: "200px" }}>
           <div class="legend">
             <ul class="chips" aria-label="Statuses">
               {statuses.map(([iconClass, glyph, textClass, word]) => (

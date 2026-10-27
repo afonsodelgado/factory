@@ -227,6 +227,13 @@ test("interactive commands stay local and survive reduced motion", async ({
     "Copied to the clipboard.",
   );
 
+  await page.locator(".hubframe .win").evaluate((win) => {
+    const { top, height } = win.getBoundingClientRect();
+    window.scrollBy(0, top + height * 0.1 - window.innerHeight);
+  });
+  await expect(page.locator(".steps li.on")).toHaveCount(0);
+  await expect(hub).not.toContainText("yes, with a reset link");
+
   await page.getByRole("button", { name: "Linux, ARM64" }).click();
   await page
     .getByRole("button", { name: "Copy the download commands" })
@@ -245,8 +252,6 @@ test("interactive commands stay local and survive reduced motion", async ({
     "go install github.com/afonsodelgado/factory/cmd/factory@latest",
   );
 
-  await page.locator("#hub").scrollIntoViewIfNeeded();
-  await expect(page.locator(".steps li.on")).toHaveCount(0);
   await page.locator("footer").scrollIntoViewIfNeeded();
   await page.locator("#top").scrollIntoViewIfNeeded();
   await expect.poll(() => hero.innerHTML()).not.toBe(staticHero);
