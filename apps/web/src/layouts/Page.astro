@@ -2,6 +2,15 @@
 import "../styles/fonts.css";
 import "../styles/site.css";
 import "../styles/terminal.css";
+
+const title = "factory · manage your agents";
+const shareTitle =
+  "Manage your agents, like a factory. Stay in control when it matters.";
+const description =
+  "Manage your agents, like a factory, and stay in control when it matters. Give the instructions and your factory takes it to a tested, ready-to-deploy feature, stopping only when it needs you.";
+const image = new URL("/og.png", Astro.site).href;
+const imageAlt =
+  "The factory list in a terminal window: seven factories across two repos, each with a status and a stage track.";
 ---
 
 <!doctype html>
@@ -12,7 +21,22 @@ import "../styles/terminal.css";
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <title>factory · manage your agents</title>
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={shareTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={image} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={imageAlt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={shareTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={image} />
+    <meta name="twitter:image:alt" content={imageAlt} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
     <link
       rel="preload"
       href="/fonts/jetbrains-mono-regular.woff2"
