@@ -28,12 +28,14 @@ export function useDemoPlayback(playback: Playback) {
     const allowed = () =>
       ratio >= VISIBLE_RATIO && !document.hidden && !motion.matches;
 
+    const prime = () => {
+      if (playing || motion.matches) return;
+      playing = true;
+      latest.current.begin();
+    };
+
     const start = () => {
       if (timer !== undefined || !allowed()) return;
-      if (!playing) {
-        playing = true;
-        latest.current.begin();
-      }
       wait = remaining ?? latest.current.delay();
       remaining = null;
       startedAt = performance.now();
@@ -61,8 +63,11 @@ export function useDemoPlayback(playback: Playback) {
         latest.current.still();
         return;
       }
+      prime();
       update();
     };
+
+    prime();
 
     const observer = new IntersectionObserver(
       (entries) => {

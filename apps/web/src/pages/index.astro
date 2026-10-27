@@ -420,7 +420,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
             </li>
           </ul>
           <p class="layers">
-            Each agent ships with defaults. Your config, the repo's config and{" "}
+            Each agent ships with defaults. Your config, the repo’s config and{" "}
             <code class="inline">--agent</code> on one factory override them, in
             that order.
           </p>
@@ -437,12 +437,12 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
             </span>
           </h2>
           <p>
-            Factories on the left, grouped by repo. The selected factory's live
+            Factories on the left, grouped by repo. The selected factory’s live
             session on the right, and under it a panel for whatever needs you:
             questions, gates, PRs and artifacts.
           </p>
         </div>
-        <HubDemo client:visible>
+        <HubDemo client:visible={{ rootMargin: "200px" }}>
           <div class="legend">
             <ul class="chips" aria-label="Statuses">
               {statuses.map(([iconClass, glyph, textClass, word]) => (

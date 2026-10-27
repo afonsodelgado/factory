@@ -3,8 +3,9 @@ import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
 
 function siteOrigin(value = "http://localhost:4321") {
-  const url = new URL(value);
+  const url = URL.parse(value);
   const isOrigin =
+    url !== null &&
     ["http:", "https:"].includes(url.protocol) &&
     url.pathname === "/" &&
     !url.search &&
