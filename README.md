@@ -1,31 +1,107 @@
-# factory
+<p align="center">
+  <img src="docs/images/banner.svg" alt="factory: manage your agents, like a factory. Stay in control when it matters." width="100%">
+</p>
 
-`factory` runs every factory in one tmux session. A factory is a supervisor session (Claude Code, Codex or OpenCode) running `/factory` in its own worktree, identified by an id you choose and driven by a prompt you write: the prompt is the spec. The app lists factories on the left, shows the selected one's live session on the right, and puts a "Needs attention" panel under it for questions, gates and the rest.
+<p align="center">
+  <a href="https://github.com/afonsodelgado/factory/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/afonsodelgado/factory?style=flat-square&color=7aa2f7&labelColor=1a1b26"></a>
+  <a href="https://github.com/afonsodelgado/factory/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/afonsodelgado/factory/ci.yml?branch=main&style=flat-square&label=ci&labelColor=1a1b26"></a>
+  <a href="go.mod"><img alt="Go 1.26 or later" src="https://img.shields.io/badge/go-1.26%2B-7dcfff?style=flat-square&labelColor=1a1b26"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/afonsodelgado/factory?style=flat-square&color=9ece6a&labelColor=1a1b26"></a>
+  <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-bb9af7?style=flat-square&labelColor=1a1b26">
+  <img alt="Claude Code, Codex and OpenCode" src="https://img.shields.io/badge/Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20OpenCode-ff9e64?style=flat-square&labelColor=1a1b26">
+</p>
+
+<p align="center">
+  <b>You're the manager.</b> Give the instructions and your <b>factory</b> takes it to a tested, ready-to-deploy feature, and only stops when it needs you.
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#use">Use</a> ·
+  <a href="#configuration">Configure</a> ·
+  <a href="#develop">Develop</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/hub.png" alt="The factory hub: every factory in one tmux window, with the selected factory's live session on the right and a panel under it for the question it is waiting on." width="100%">
+</p>
+
+## What is it
+
+A factory is **an id and a prompt**. Name it, say what you want, and it gets its own worktree, branch and supervisor session. Then it runs a pipeline on its own: requirements, design, plan, code, review, QA and handoff.
+
+Run as many as you like, across every repo you work in. `factory` keeps all of them in one tmux window, so you always know which one needs you.
+
+- **Nothing lands in your repo.** The config lives in `.factory/` and stays out of git.
+- **Questions and gates come to you.** Everything else runs unattended.
+- **Made for the keyboard.** `j/k` to move, `⏎` to step into a session, `g` to jump to whatever needs you.
+
+## How it works
+
+One agent per stage. The factory waits for you at the gates and runs everything between them on its own.
+
+```
+requirements ─ design ─ plan ─ implement ─ review ─ coderabbit ─ qa ─ qa_fixes ─ test_gaps ─ handoff
+      ◆            ◆       ◆                                                                    ✓
+  you answer   you approve  you approve                                                  yours to merge
+```
+
+The plan is always published and approved before any code is written. At the end you get a stack of draft PRs and a handoff note. **Merging is yours.** The factory never merges, deploys or force-pushes `main`.
+
+Small change? `--pipeline quick` runs requirements, plan, implement, review and handoff. The plan still waits for your approval.
+
+## The right model for each job
+
+<table>
+<tr>
+<td width="52%" valign="top">
+
+Every role has its own harness, model and effort: **Claude Code**, **Codex** or **OpenCode**. Cheap models for routine stages, the best ones for delicate work.
+
+Agents **hand over through files on disk**: requirements, design, plan and state. It works the same whatever runs on either side.
+
+It runs on **your own subscriptions**, within their limits. No API keys, no API bill.
+
+Each agent ships with defaults. Your config, the repo's config and `--agent` on one factory override them, in that order.
+
+</td>
+<td width="48%" valign="top">
+<img src="docs/images/agents.png" alt="The Stages and agents step: role, tool, model and effort for each agent, with the engineer on Codex in bold as this factory's override.">
+</td>
+</tr>
+</table>
 
 ## Install
 
-Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `go.mod`, `go.sum` or the release workflow. Site, JavaScript tooling, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
+macOS or Linux, with tmux 3.3 or later, git, [gh](https://cli.github.com) and [Claude Code](https://claude.com/claude-code). `factory doctor` checks the rest.
 
-For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that exact release is published instead. A `v*` tag push releases regardless of changed paths, including tags on site-only commits.
-
-Download the binary for your machine from the private repo's latest release:
+**1. Download the binary** for your machine: `darwin_arm64`, `darwin_amd64`, `linux_amd64` or `linux_arm64`.
 
 ```sh
 gh release download --repo afonsodelgado/factory --pattern 'factory_darwin_arm64' --output ~/.local/bin/factory
 chmod +x ~/.local/bin/factory
 ```
 
-Or build it with Go 1.26 or later. A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
+Or build it with Go 1.26 or later:
 
 ```sh
 GOPRIVATE=github.com/afonsodelgado/* go install github.com/afonsodelgado/factory/cmd/factory@latest
 ```
 
-Then check the machine and install the factory into your Claude config. `doctor` lists what is missing, each with the command that fixes it, and changes nothing; `bootstrap` installs the bundled skills, agents and hooks, backing up any file it replaces.
+A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
+
+**2. Check the machine and install the skills and hooks.** `doctor` lists what is missing, each with the command that fixes it, and changes nothing. `bootstrap` installs the bundled skills, agents and hooks into your Claude config, backing up any file it replaces.
 
 ```sh
 factory doctor
 factory bootstrap
+```
+
+**3. Open the hub.**
+
+```sh
+factory
 ```
 
 `bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
@@ -89,6 +165,12 @@ Pull requests and pushes to `main` always start CI. Changed paths select the Go 
 Mixed changes run the union of the matching workloads. Go-owned directories include their data and embedded documentation. Add new build inputs to this table and the inline CI filters together. Pull requests use the changed-files API; main pushes compare against the previous pushed head, including every commit in the push.
 
 Require the final `ci` check in branch protection. It reports success only when change detection succeeds and both workloads succeed or are skipped; failures, cancellations and unexpected results fail it. After adopting this workflow, replace any old matrix requirements with `ci` manually. A started workflow reports this aggregate after path skips or dependency failures, but platform outages, manual workflow cancellation and commit-level CI-skip directives still affect reporting.
+### Releases
+
+Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `go.mod`, `go.sum` or the release workflow. Site, JavaScript tooling, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
+
+For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that exact release is published instead. A `v*` tag push releases regardless of changed paths, including tags on site-only commits.
+
 
 ## Add a repo
 
