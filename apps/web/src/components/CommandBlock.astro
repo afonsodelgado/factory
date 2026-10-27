@@ -1,0 +1,42 @@
+---
+import CopyButton from "./CopyButton.astro";
+import {
+  DEFAULT_PLATFORM,
+  commandHtml,
+  commandLines,
+  type CommandId,
+} from "../lib/commands.ts";
+
+interface Props {
+  command: CommandId;
+  label: string;
+  title?: string;
+  cursor?: boolean;
+}
+
+const { command, label, title, cursor = false } = Astro.props;
+const code = `<code data-code="${command}">${commandHtml(commandLines(command, DEFAULT_PLATFORM))}</code>`;
+const shell = cursor
+  ? `${code}<span class="cursor" data-cursor aria-hidden="true"></span>`
+  : code;
+---
+
+{title ? (
+  <div class="win full">
+    <div class="bar">
+      <span class="lights" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span class="wt">{title}</span>
+      <CopyButton command={command} label={label} />
+    </div>
+    <pre class="shell" set:html={shell} />
+  </div>
+) : (
+  <div class="cmd">
+    <pre class="shell" set:html={shell} />
+    <CopyButton command={command} label={label} />
+  </div>
+)}

@@ -1,41 +1,658 @@
 ---
 import Page from "../layouts/Page.astro";
+import CommandBlock from "../components/CommandBlock.astro";
 import TerminalFrame from "../components/TerminalFrame.astro";
-import { staticFrames } from "../lib/frames.ts";
+import { DEFAULT_PLATFORM, PLATFORMS } from "../lib/commands.ts";
+import { IC, staticFrames, type IconName } from "../lib/frames.ts";
 
 const frames = staticFrames();
+const repo = "https://github.com/afonsodelgado/factory";
+const chars = (text: string) => `--n: ${Array.from(text).length}`;
+
+const windows = [
+  ["what", "what"],
+  ["pipeline", "pipeline"],
+  ["agents", "agents"],
+  ["hub", "hub"],
+  ["keys", "keys"],
+  ["install", "install"],
+];
+
+const headings = {
+  what: "A factory is an id and a prompt.",
+  pipeline: "From a prompt to a merged stack.",
+  agents: "The right model for each job.",
+  hub: "One window. Every factory.",
+  keys: "Your hands stay on the keyboard.",
+  install: "Install",
+};
+
+const stages = [
+  {
+    key: "requirements",
+    role: "analyst",
+    desc: "Interviews you until the prompt leaves nothing to guess.",
+    tag: "◆ you answer",
+    tagClass: "you",
+  },
+  {
+    key: "design",
+    role: "designer",
+    desc: "HTML mocks of every state, when the change has a UI.",
+    tag: "◆ you approve",
+    tagClass: "you",
+  },
+  {
+    key: "plan",
+    role: "architect",
+    desc: "The implementation plan, layer by layer, published for review.",
+    tag: "◆ you approve",
+    tagClass: "you",
+  },
+  {
+    key: "implement",
+    role: "engineer",
+    desc: "A stack of draft PRs, one reviewable layer each.",
+  },
+  {
+    key: "review",
+    role: "reviewer",
+    desc: "A multi-agent review loop. Each finding is fixed in the layer that caused it.",
+  },
+  {
+    key: "coderabbit",
+    role: "shepherd",
+    desc: "Fixes the CodeRabbit threads that matter and replies to the rest. Only where CodeRabbit runs.",
+    sub: true,
+  },
+  {
+    key: "qa",
+    role: "qa",
+    desc: "Tests the branch by hand, in a browser or a scratch tmux server, then attacks the edges.",
+  },
+  {
+    key: "qa_fixes",
+    role: "fixer",
+    desc: "Fixes what QA found, on a layer of its own.",
+    sub: true,
+  },
+  {
+    key: "test_gaps",
+    role: "fixer",
+    desc: "Adds the tests QA said were missing.",
+    sub: true,
+  },
+  {
+    key: "handoff",
+    role: "supervisor",
+    desc: "A manual-test brief, and a stack that is ready for you.",
+    tag: "✓ yours to merge",
+    tagClass: "yours",
+  },
+];
+const current = stages.length - 1;
+
+const glyph = (name: IconName) => String.fromCodePoint(IC[name]);
+
+const statuses = [
+  ["c-cyn", glyph("starting"), "c-cyn", "starting"],
+  ["c-grn", glyph("running"), "c-grn", "running"],
+  ["c-org", glyph("needs"), "c-org", "needs you"],
+  ["c-mag", glyph("ci"), "c-mag", "on CI"],
+  ["c-mag", glyph("agent"), "c-mag", "on agent"],
+  ["c-yel", glyph("stalled"), "c-yel", "stalled"],
+  ["c-dk", glyph("done"), "c-mute", "done"],
+];
+
+const tracks = [
+  ["c-dk", "●", "done"],
+  ["c-grn", "◉", "current"],
+  ["c-d3", "○", "not yet"],
+  ["c-gt", "–", "skipped"],
+  ["c-red", "✕", "failed"],
+];
+
+const keyGroups = [
+  {
+    column: [
+      {
+        title: "+Factories",
+        keys: [
+          ["j/k", "move"],
+          ["1-9", "jump to row"],
+          ["/", "fuzzy find"],
+          ["g", "next needing you"],
+          ["⏎", "focus the session"],
+          ["i", "answer in the panel"],
+        ],
+      },
+      {
+        title: "+Anywhere",
+        keys: [
+          ["M-0", "back to factories"],
+          ["esc", "back to factories"],
+          ["q", "quit the UI only"],
+          ["?", "these keys"],
+        ],
+      },
+    ],
+  },
+  {
+    column: [
+      {
+        title: "+Lifecycle",
+        keys: [
+          ["n", "new factory"],
+          ["w", "wake selected"],
+          ["W", "wake all asleep"],
+          ["p", "pause (asks first)"],
+          ["a", "archive (asks first)"],
+          ["d", "delete (asks first)"],
+          ["H", "show archived"],
+        ],
+      },
+    ],
+  },
+  {
+    column: [
+      {
+        title: "+Panel",
+        keys: [
+          ["tab", "next tab"],
+          ["[ ]", "item, without a form"],
+          ["o", "open in browser"],
+          ["z", "fold or unfold"],
+          ["+/-", "taller or shorter"],
+          ["t", "all factories (Activity)"],
+        ],
+      },
+    ],
+  },
+  {
+    column: [
+      {
+        title: "+Answering",
+        keys: [
+          ["ctrl+s", "send"],
+          ["ctrl+a", "approve"],
+          ["ctrl+n/p", "next or previous item"],
+          ["ctrl+r", "retry, one more round"],
+          ["ctrl+x", "skip"],
+        ],
+      },
+    ],
+  },
+];
+
+const strip = [
+  ["j/k", "move"],
+  ["⏎", "session"],
+  ["i", "answer"],
+  ["g", "next needing you"],
+  ["/", "find"],
+  ["n", "new"],
+  ["ctrl+s", "send"],
+  ["M-0", "back"],
+  ["?", "all keys"],
+];
+
+const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
+  .map((p) => `factory_${p.id}`)
+  .join(", ");
 ---
 
 <Page>
-  <main id="main">
-    <h1>
-      Manage your agents, like a <strong class="brand">factory</strong>.{" "}
-      <span class="h1-sub">Stay in control when it matters.</span>
-    </h1>
-    <TerminalFrame
-      title="devbox:hub"
-      label="The factory list: seven factories across two repos, each with a status and a stage track that advances as they work."
-    >
-      <span slot="dim">38×22</span>
-      <pre class="term term-hero" set:html={frames.hero} />
-    </TerminalFrame>
-    <TerminalFrame
-      title="devbox:hub"
-      label="The agents for csv-export: each role with its tool, model and effort. The engineer runs on Codex for this factory only."
-    >
-      <span slot="dim">46×14</span>
-      <pre class="term term-agents" set:html={frames.agents} />
-    </TerminalFrame>
-    <TerminalFrame
-      title="devbox:hub"
-      label="The hub window. rate-limits asks two questions, g jumps to it, the answer is typed in the Needs attention panel and sent with ctrl+s, and the factory carries on."
-    >
-      <span slot="dim">
-        <span class="dim-wide">106×28</span>
-        <span class="dim-narrow">56×28</span>
+  <a class="skip" href="#main">
+    Skip to content
+  </a>
+  <header class="nav">
+    <div class="wrap nav-in">
+      <a class="mode" href="#top" aria-label="factory, back to top">
+        <i class="ic" data-n="&#xf275;" aria-hidden="true"></i>factory
+      </a>
+      <span class="sect" data-nav-sect>
+        ~/factory
       </span>
-      <pre class="term hub-wide" set:html={frames.hubWide} />
-      <pre class="term hub-narrow" set:html={frames.hubNarrow} />
-    </TerminalFrame>
+      <nav class="wins-nav" aria-label="Sections">
+        <ol class="wins">
+          {windows.map(([id, name], i) => (
+            <li>
+              <a href={`#${id}`}>
+                <b>{i + 1}</b>
+                {name}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <a class="gh" href={repo} aria-label="GitHub">
+        <i class="ic" data-n="&#xf09b;" aria-hidden="true"></i>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="wrap hero" id="top">
+      <div class="hero-copy">
+        <h1>
+          Manage your agents, like a <strong class="brand">factory</strong>.{" "}
+          <span class="h1-sub">Stay in control when it matters.</span>
+        </h1>
+        <p class="pitch">
+          You’re the manager. Give the instructions and your{" "}
+          <strong class="brand">factory</strong> takes it to a tested,
+          ready-to-deploy feature, and only stops when it needs you.
+        </p>
+        <CommandBlock
+          command="hero"
+          title="zsh · Apple silicon"
+          label="Copy the install commands"
+          cursor
+        />
+        <div class="hero-links">
+          <a class="btn" href={repo}>
+            <i class="ic" data-n="&#xf09b;" aria-hidden="true"></i>
+            afonsodelgado/factory
+          </a>
+          <a href="#install">Intel Mac, Linux or Go install ↓</a>
+        </div>
+      </div>
+      <TerminalFrame
+        class="hero-visual hero-pane"
+        title="devbox:hub"
+        label="The factory list: seven factories across two repos, each with a status and a stage track that advances as they work."
+      >
+        <span slot="dim">38×22</span>
+        <pre class="term term-hero" set:html={frames.hero} />
+      </TerminalFrame>
+    </div>
+
+    <section class="sec reveal" id="what" aria-labelledby="what-h">
+      <div class="wrap what">
+        <div>
+          <div class="sec-head">
+            <h2 id="what-h">
+              <span class="type" style={chars(headings.what)}>
+                {headings.what}
+              </span>
+            </h2>
+            <p>
+              Name it and say what you want. It gets its own worktree, branch
+              and supervisor session, then runs the pipeline on its own.
+            </p>
+            <p>
+              Run as many as you like, across every repo you work in. The hub
+              keeps all of them in one tmux window, so you always know which one
+              needs you.
+            </p>
+          </div>
+          <ul class="facts">
+            <li>
+              <i class="ic" data-n="&#xf418;" aria-hidden="true"></i>
+              <span>
+                Nothing lands in your repo. The config lives in{" "}
+                <code class="inline">.factory/</code> and stays out of git.
+              </span>
+            </li>
+            <li>
+              <i class="ic" data-n="&#xf059;" aria-hidden="true"></i>
+              <span>
+                Questions and gates come to you. Everything else runs
+                unattended.
+              </span>
+            </li>
+          </ul>
+        </div>
+        <div
+          class="win full"
+          role="img"
+          aria-label="A shell in ~/dev/shop: factory open csv-export creates the factory csv-export, with its prompt, worktree, branch, supervisor session and the full ten-stage pipeline."
+        >
+          <div class="bar">
+            <span class="lights" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </span>
+            <span class="wt">~/dev/shop</span>
+            <span></span>
+          </div>
+          <pre
+            class="shell tree"
+            set:html={`<span class="pr">❯ </span>factory open csv-export Export contacts as CSV for ops.
+
+<span class="t-id">csv-export</span>
+<span class="t-dim">├──</span> <span class="t-key">prompt  </span>  Export contacts as CSV for ops.
+<span class="t-dim">├──</span> <span class="t-key">worktree</span>  .claude/worktrees/csv-export
+<span class="t-dim">├──</span> <span class="t-key">branch  </span>  worktree-csv-export
+<span class="t-dim">├──</span> <span class="t-key">session </span>  claude, running /factory
+<span class="t-dim">└──</span> <span class="t-key">pipeline</span>  full <span class="t-dim">·</span> 10 stages`}
+          />
+        </div>
+      </div>
+    </section>
+
+    <section class="sec reveal" id="pipeline" aria-labelledby="pipeline-h">
+      <div class="wrap">
+        <div class="sec-head">
+          <h2 id="pipeline-h">
+            <span class="type" style={chars(headings.pipeline)}>
+              {headings.pipeline}
+            </span>
+          </h2>
+          <p>
+            One agent per stage. The factory waits for you at the gates and runs
+            everything between them on its own.
+          </p>
+        </div>
+        <div class="trackbig" aria-hidden="true" data-track>
+          {stages.map((_, i) =>
+            i < current ? <i class="c-dk">●</i> : <i class="c-grn">◉</i>,
+          )}
+        </div>
+        <ol class="stages" data-stages>
+          {stages.map((stage, i) => (
+            <li
+              class:list={["st", { sub: stage.sub }]}
+              data-s={i < current ? "done" : "cur"}
+            >
+              <span class="dot" aria-hidden="true">
+                {i < current ? "●" : "◉"}
+              </span>
+              <span class="key">{stage.key}</span>
+              <span class="role">{stage.role}</span>
+              <span class="desc">{stage.desc}</span>
+              <span class:list={["tag", stage.tagClass]}>{stage.tag}</span>
+            </li>
+          ))}
+        </ol>
+        <p class="quick">
+          Small change? <code class="inline">--pipeline quick</code> runs
+          requirements, plan, implement, review and handoff. The plan still
+          waits for your approval.
+        </p>
+      </div>
+    </section>
+
+    <section class="sec reveal" id="agents" aria-labelledby="agents-h">
+      <div class="wrap agents">
+        <TerminalFrame
+          class="agents-frame"
+          title="devbox:hub"
+          label="The agents for csv-export: each role with its tool, model and effort. The engineer runs on Codex for this factory only."
+        >
+          <span slot="dim">46×14</span>
+          <pre class="term term-agents" set:html={frames.agents} />
+        </TerminalFrame>
+        <div class="agents-copy">
+          <div class="sec-head">
+            <h2 id="agents-h">
+              <span class="type" style={chars(headings.agents)}>
+                {headings.agents}
+              </span>
+            </h2>
+          </div>
+          <ul class="facts">
+            <li>
+              <i class="ic" data-n="&#xf120;" aria-hidden="true"></i>
+              <span>
+                Every role has its own harness, model and effort: Claude Code,
+                Codex or OpenCode. Cheap models for routine stages, the best
+                ones for delicate work.
+              </span>
+            </li>
+            <li>
+              <i class="ic" data-n="&#xf0f6;" aria-hidden="true"></i>
+              <span>
+                Agents hand over through files on disk: requirements, design,
+                plan and state. It works the same whatever runs on either side.
+              </span>
+            </li>
+            <li>
+              <i class="ic" data-n="&#xf084;" aria-hidden="true"></i>
+              <span>
+                It runs on your own subscriptions, within their limits. No API
+                keys, no API bill.
+              </span>
+            </li>
+          </ul>
+          <p class="layers">
+            Each agent ships with defaults. Your config, the repo's config and{" "}
+            <code class="inline">--agent</code> on one factory override them, in
+            that order.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec reveal" id="hub" aria-labelledby="hub-h">
+      <div class="wrap">
+        <div class="sec-head">
+          <h2 id="hub-h">
+            <span class="type" style={chars(headings.hub)}>
+              {headings.hub}
+            </span>
+          </h2>
+          <p>
+            Factories on the left, grouped by repo. The selected factory's live
+            session on the right, and under it a panel for whatever needs you:
+            questions, gates, PRs and artifacts.
+          </p>
+        </div>
+        <TerminalFrame
+          class="hubframe"
+          title="devbox:hub"
+          label="The hub window. rate-limits asks two questions, g jumps to it, the answer is typed in the Needs attention panel and sent with ctrl+s, and the factory carries on."
+        >
+          <span slot="dim">
+            <span class="dim-wide">106×28</span>
+            <span class="dim-narrow">56×28</span>
+          </span>
+          <pre class="term hub-wide" set:html={frames.hubWide} />
+          <pre class="term hub-narrow" set:html={frames.hubNarrow} />
+        </TerminalFrame>
+        <div class="below">
+          <ol class="steps" aria-label="What the demo shows">
+            <li data-step="1">
+              <b>1</b>rate-limits asks two questions
+            </li>
+            <li data-step="2">
+              <b>2</b>
+              <span>
+                <kbd>g</kbd> jumps to it
+              </span>
+            </li>
+            <li data-step="3" class="on">
+              <b>3</b>you answer in the panel
+            </li>
+            <li data-step="4">
+              <b>4</b>
+              <span>
+                <kbd>ctrl+s</kbd> sends it, and it carries on
+              </span>
+            </li>
+          </ol>
+          <div class="legend">
+            <ul class="chips" aria-label="Statuses">
+              {statuses.map(([iconClass, glyph, textClass, word]) => (
+                <li>
+                  <i
+                    class={`ic ${iconClass}`}
+                    data-n={glyph}
+                    aria-hidden="true"
+                  />
+                  <span class={textClass}>{word}</span>
+                </li>
+              ))}
+            </ul>
+            <ul class="chips track" aria-label="Stage track">
+              {tracks.map(([cls, glyph, word]) => (
+                <li>
+                  <i class={`g ${cls}`} aria-hidden="true">
+                    {glyph}
+                  </i>
+                  <span>{word}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec reveal" id="keys" aria-labelledby="keys-h">
+      <div class="wrap">
+        <div class="sec-head">
+          <h2 id="keys-h">
+            <span class="type" style={chars(headings.keys)}>
+              {headings.keys}
+            </span>
+          </h2>
+          <p>
+            <kbd>j</kbd>/<kbd>k</kbd> to move, <kbd>⏎</kbd> to step into a
+            session, <kbd>g</kbd> to jump to whatever needs you. <kbd>M-0</kbd>{" "}
+            brings you back from anywhere.
+          </p>
+        </div>
+        <div class="whichkey" role="group" aria-label="Every key">
+          <span class="wk-title">Keys</span>
+          <span class="wk-app">factory</span>
+          {keyGroups.map(({ column }) => (
+            <div>
+              {column.map(({ title, keys }) => (
+                <>
+                  <h3>{title}</h3>
+                  <dl>
+                    {keys.map(([key, what]) => (
+                      <div>
+                        <dt>
+                          <kbd>{key}</kbd>
+                        </dt>
+                        <dd>{what}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </>
+              ))}
+            </div>
+          ))}
+        </div>
+        <ul class="strip" aria-label="Most used keys">
+          <li class="mode">FACTORIES</li>
+          {strip.map(([key, what]) => (
+            <li>
+              <kbd>{key}</kbd>
+              {what}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <section class="sec reveal" id="install" aria-labelledby="install-h">
+      <div class="wrap">
+        <div class="sec-head">
+          <h2 id="install-h">
+            <span class="type" style={chars(headings.install)}>
+              {headings.install}
+            </span>
+          </h2>
+          <p>
+            macOS or Linux, with tmux 3.3 or later, git, gh and Claude Code.{" "}
+            <code class="inline">factory doctor</code> checks the rest.
+          </p>
+        </div>
+        <ol class="inst">
+          <li>
+            <h3>Download the binary</h3>
+            <div class="body">
+              <div class="plat" role="group" aria-label="Platform" hidden>
+                {PLATFORMS.map((p) => (
+                  <button
+                    type="button"
+                    aria-pressed={p.id === DEFAULT_PLATFORM ? "true" : "false"}
+                    data-plat={p.id}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <CommandBlock
+                command="download"
+                label="Copy the download commands"
+              />
+              <p class="nojs-only">Other builds: {otherBuilds}.</p>
+              <p class="alt">Or build it with Go 1.26 or later:</p>
+              <CommandBlock command="go" label="Copy the go install command" />
+            </div>
+          </li>
+        </ol>
+        <ol class="inst later-steps" start="2">
+          <li>
+            <h3>Check the machine</h3>
+            <div class="body">
+              <p>
+                Lists what is missing, each with the command that fixes it.
+                Changes nothing.
+              </p>
+              <CommandBlock command="doctor" label="Copy factory doctor" />
+            </div>
+          </li>
+          <li>
+            <h3>Install the skills and hooks</h3>
+            <div class="body">
+              <p>
+                Adds the skills, agents and hooks to your Claude config, backing
+                up any file it replaces.
+              </p>
+              <CommandBlock
+                command="bootstrap"
+                label="Copy factory bootstrap"
+              />
+            </div>
+          </li>
+          <li>
+            <h3>Open the hub</h3>
+            <div class="body">
+              <p>
+                Run it in any git repo. The first run writes the repo config and
+                keeps it out of git.
+              </p>
+              <CommandBlock command="open" label="Copy factory" />
+            </div>
+          </li>
+        </ol>
+        <div class="update">
+          <h3>Update</h3>
+          <CommandBlock command="update" label="Copy the update commands" />
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <div class="foot-bar">
+        <span class="mode">FACTORY</span>
+        <span class="sect">made by developers, for developers</span>
+        <nav aria-label="Footer">
+          <a href={repo}>
+            <kbd>gh</kbd>source
+          </a>
+          <a href="#install">
+            <kbd>i</kbd>install
+          </a>
+          <a href="#top">
+            <kbd>gg</kbd>top
+          </a>
+        </nav>
+      </div>
+      <p class="credits">
+        factory is one Go binary for macOS and Linux. Set in JetBrains Mono Nerd
+        Font, under the SIL Open Font License. Colors from Tokyo Night.
+      </p>
+    </div>
+  </footer>
+  <p class="sr-only" data-live aria-live="polite"></p>
 </Page>
