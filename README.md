@@ -44,7 +44,7 @@ factory update     # install the latest release, then run its bootstrap
 
 ## Develop
 
-The Go module stays at the repository root: `cmd/`, `internal/` and `bundle/` keep their existing paths. The pnpm workspace reserves `apps/web` for the future website and `packages/*` for shared JavaScript packages. Neither directory exists until it has real code.
+The Go module stays at the repository root: `cmd/`, `internal/` and `bundle/` keep their existing paths. The pnpm workspace holds the website in `apps/web` (`@factory/web`): a static Astro site with React islands. `packages/*` is for shared JavaScript packages and does not exist until one has real code.
 
 Go development needs Go 1.26 or later, Make, tmux and jq. JavaScript tooling uses Node 24 (`.nvmrc` pins 24.22.1), pnpm 10.33.0 (`packageManager` in `package.json`) and Turbo 2.11.10. With nvm installed, set up the pinned tools from the repository root:
 
@@ -53,6 +53,7 @@ nvm install
 nvm use
 npm install --global pnpm@10.33.0
 pnpm install
+pnpm --filter @factory/web exec playwright install chromium
 ```
 
 | Command | Does |
@@ -60,24 +61,26 @@ pnpm install
 | `make` or `make build` | Build Go and the web packages |
 | `make test` | Test Go and the web packages |
 | `make lint` | Run Go vet, web lint and web typecheck |
-| `make dev` | Build Go, then start web development |
+| `make dev` | Build Go, then start the site at `http://localhost:4321/` |
 | `make go-build`, `make go-test`, `make go-lint` | Run `go build ./...`, `go test ./...`, `go vet ./...` |
 | `make web-build`, `make web-test`, `make web-lint`, `make web-typecheck`, `make web-dev` | Run the corresponding Turbo task |
 
-When `apps/web/package.json` is absent, each web target prints a skip message and succeeds before looking for pnpm. Go-only contributors can run every Make target without Node or pnpm installed. `make dev` builds Go first even with `-j`; it does not start the interactive CLI. Run `go run ./cmd/factory` separately when you intend to open the hub.
+With the site present, the whole-repository `make build`, `make lint`, `make test` and `make dev` need Node, pnpm and the Playwright Chromium browser. `make go-build`, `make go-lint` and `make go-test` stay Go-only. The web targets still print a skip message and succeed before looking for pnpm when `apps/web/package.json` is absent. `make dev` builds Go first even with `-j`; it does not start the interactive CLI. Run `go run ./cmd/factory` separately when you intend to open the hub.
 
-Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` call the guarded web targets. Once a package exists, `pnpm turbo run build` is the direct advanced entry point. Turbo runs only scripts defined by workspace packages; it caches build outputs in `dist/` and `build/`, and caches lint, typecheck and test results. Development tasks are persistent and uncached. The future website must declare its framework outputs, generated-type prerequisites, environment inputs and coverage files. Remote caching is not configured.
+The site's scripts are `build` (`astro build` into `apps/web/dist`), `lint` (Prettier), `typecheck` (`astro sync`, then `astro check`), `test` (Playwright against its own `astro preview` on port 4322), `dev` (port 4321) and `preview` (the production build on port 4321). Both servers bind `127.0.0.1` and fail instead of moving to another port when theirs is taken. Every server runs with `--ignore-lock`, so it stays in the foreground even when Astro detects a coding agent, and never hands over to a server that is already running.
+
+Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` call the guarded web targets. `pnpm turbo run build` is the direct advanced entry point. Turbo caches the site's `dist/` and generated `.astro/` types, and caches lint, typecheck and test results; `test` depends on the same package's `build`, because the browser tests serve `dist`. The build-time `SITE_URL` variable is part of the build, typecheck and test hashes. Development tasks are persistent and uncached. There is no coverage collection, and remote caching is not configured.
 
 Repo config autodetection still chooses Go commands because `go.mod` takes precedence over `package.json`. The workspace does not change the repo config.
 
 ### CI
 
-Pull requests and pushes to `main` always start CI. Changed paths select the Go matrix on Ubuntu/macOS, the web job on Ubuntu, or both. Go jobs install tmux and jq and run `make go-build`, `make go-lint` and `make go-test` without Node. The web job installs Node from `.nvmrc`, pnpm from `packageManager`, and dependencies with `pnpm install --frozen-lockfile`, then runs web lint, typecheck, test and build. Without a site manifest, those tasks skip successfully after the tooling installation.
+Pull requests and pushes to `main` always start CI. Changed paths select the Go matrix on Ubuntu/macOS, the web job on Ubuntu, or both. Go jobs install tmux and jq and run `make go-build`, `make go-lint` and `make go-test` without Node. The web job installs Node from `.nvmrc`, pnpm from `packageManager`, dependencies with `pnpm install --frozen-lockfile` and Playwright's Chromium with its system dependencies, then runs web lint, typecheck, test and build.
 
 | Changed paths | Validation |
 |---|---|
 | Root `*.go`, `cmd/**`, `internal/**`, `bundle/**`, `go.mod`, `go.sum`, release workflow | Go |
-| `apps/**`, `packages/**`, root pnpm manifests and lockfile, `turbo.json`, `.nvmrc` | Web |
+| `apps/**` (the site in `apps/web`: source, public assets and fonts, scripts, tests and config), `packages/**`, root pnpm manifests and lockfile, `turbo.json`, `.nvmrc` | Web |
 | `Makefile`, `.gitignore`, CI workflow | Go and web |
 | Root README, CLAUDE and ordinary docs outside Go-owned directories | Neither workload |
 

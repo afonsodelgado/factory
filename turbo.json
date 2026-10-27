@@ -4,18 +4,55 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "build/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.*",
+        "!.astro/**",
+        "!dist/**",
+        "!build/**",
+        "!test-results/**",
+        "!playwright-report/**",
+        "!coverage/**"
+      ],
+      "env": ["SITE_URL"],
+      "outputs": ["dist/**", "build/**", ".astro/**"]
     },
     "lint": {
       "outputs": [],
       "cache": true
     },
     "typecheck": {
-      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.*",
+        "!.astro/**",
+        "!dist/**",
+        "!build/**",
+        "!test-results/**",
+        "!playwright-report/**",
+        "!coverage/**"
+      ],
+      "env": ["SITE_URL"],
+      "outputs": [".astro/**"],
       "cache": true
     },
     "test": {
-      "outputs": [],
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env",
+        ".env.*",
+        "!.astro/**",
+        "!dist/**",
+        "!build/**",
+        "!test-results/**",
+        "!playwright-report/**",
+        "!coverage/**"
+      ],
+      "env": ["SITE_URL"],
+      "outputs": ["test-results/**"],
       "cache": true
     },
     "dev": {

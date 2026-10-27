@@ -1,0 +1,6 @@
+dist/
+build/
+.astro/
+test-results/
+playwright-report/
+coverage/
