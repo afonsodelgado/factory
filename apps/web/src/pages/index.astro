@@ -2,10 +2,12 @@
 import Page from "../layouts/Page.astro";
 import CommandBlock from "../components/CommandBlock.astro";
 import TerminalFrame from "../components/TerminalFrame.astro";
+import HeroDemo from "../components/HeroDemo.tsx";
+import HubDemo from "../components/HubDemo.tsx";
 import { DEFAULT_PLATFORM, PLATFORMS } from "../lib/commands.ts";
-import { IC, staticFrames, type IconName } from "../lib/frames.ts";
+import { IC, renderAgents, type IconName } from "../lib/frames.ts";
 
-const frames = staticFrames();
+const agentsFrame = renderAgents();
 const repo = "https://github.com/afonsodelgado/factory";
 const chars = (text: string) => `--n: ${Array.from(text).length}`;
 
@@ -264,7 +266,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
         label="The factory list: seven factories across two repos, each with a status and a stage track that advances as they work."
       >
         <span slot="dim">38×22</span>
-        <pre class="term term-hero" set:html={frames.hero} />
+        <HeroDemo client:load />
       </TerminalFrame>
     </div>
 
@@ -383,7 +385,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
           label="The agents for csv-export: each role with its tool, model and effort. The engineer runs on Codex for this factory only."
         >
           <span slot="dim">46×14</span>
-          <pre class="term term-agents" set:html={frames.agents} />
+          <pre class="term term-agents" set:html={agentsFrame} />
         </TerminalFrame>
         <div class="agents-copy">
           <div class="sec-head">
@@ -440,39 +442,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
             questions, gates, PRs and artifacts.
           </p>
         </div>
-        <TerminalFrame
-          class="hubframe"
-          title="devbox:hub"
-          label="The hub window. rate-limits asks two questions, g jumps to it, the answer is typed in the Needs attention panel and sent with ctrl+s, and the factory carries on."
-        >
-          <span slot="dim">
-            <span class="dim-wide">106×28</span>
-            <span class="dim-narrow">56×28</span>
-          </span>
-          <pre class="term hub-wide" set:html={frames.hubWide} />
-          <pre class="term hub-narrow" set:html={frames.hubNarrow} />
-        </TerminalFrame>
-        <div class="below">
-          <ol class="steps" aria-label="What the demo shows">
-            <li data-step="1">
-              <b>1</b>rate-limits asks two questions
-            </li>
-            <li data-step="2">
-              <b>2</b>
-              <span>
-                <kbd>g</kbd> jumps to it
-              </span>
-            </li>
-            <li data-step="3" class="on">
-              <b>3</b>you answer in the panel
-            </li>
-            <li data-step="4">
-              <b>4</b>
-              <span>
-                <kbd>ctrl+s</kbd> sends it, and it carries on
-              </span>
-            </li>
-          </ol>
+        <HubDemo client:visible>
           <div class="legend">
             <ul class="chips" aria-label="Statuses">
               {statuses.map(([iconClass, glyph, textClass, word]) => (
@@ -497,7 +467,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
               ))}
             </ul>
           </div>
-        </div>
+        </HubDemo>
       </div>
     </section>
 
@@ -656,3 +626,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
   </footer>
   <p class="sr-only" data-live aria-live="polite"></p>
 </Page>
+
+<script>
+  import "../scripts/enhance.ts";
+</script>

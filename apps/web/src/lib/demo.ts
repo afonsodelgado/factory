@@ -345,3 +345,69 @@ export function heroStateAt(index: number): DemoState {
   for (let i = 0; i <= index; i++) HERO_STEPS[i]!(s);
   return s;
 }
+
+export function heroDelay(index: number) {
+  return index === HERO_STATES - 1 ? HERO_LAST_STEP_MS : HERO_STEP_MS;
+}
+
+export const HUB_TICK_MS = 300;
+
+export interface HubPlayback {
+  index: number;
+  state: DemoState;
+  typed: number;
+  left: number;
+}
+
+function cloneState(st: DemoState): DemoState {
+  return { ...st, fleet: st.fleet.map((f) => ({ ...f })) };
+}
+
+export function hubStatic(): HubPlayback {
+  return {
+    index: HUB_STATIC,
+    state: hubStateAt(HUB_STATIC),
+    typed: ANSWER.length,
+    left: 0,
+  };
+}
+
+export function hubStart(): HubPlayback {
+  return { index: 0, state: hubStateAt(0), typed: 0, left: HUB_PHASES[0]!.ms };
+}
+
+function advance(p: HubPlayback): HubPlayback {
+  const index = (p.index + 1) % HUB_PHASES.length;
+  const phase = HUB_PHASES[index]!;
+  const { spin, secs, tool } = p.state;
+  let state: DemoState;
+  if (index === 0) {
+    state = { ...hubStateAt(0), spin, secs, tool };
+  } else {
+    state = p.state;
+    if (!phase.typing) phase.apply(state);
+    state.step = phase.step;
+  }
+  return { index, state, typed: 0, left: phase.ms };
+}
+
+export function hubTick(previous: HubPlayback): HubPlayback {
+  const state = cloneState(previous.state);
+  state.spin++;
+  if (state.spin % 3 === 0) state.secs++;
+  if (state.spin % 5 === 0) state.tool++;
+  const p = { ...previous, state };
+  if (HUB_PHASES[p.index]!.typing) {
+    if (p.typed < ANSWER.length) {
+      const typed = Math.min(
+        ANSWER.length,
+        p.typed + Math.ceil(HUB_TICK_MS / TYPING_MS_PER_CHAR),
+      );
+      state.answer = ANSWER.slice(0, typed);
+      return { ...p, typed };
+    }
+    return advance(p);
+  }
+  const left = p.left - HUB_TICK_MS;
+  return left <= 0 ? advance(p) : { ...p, left };
+}

@@ -1053,9 +1053,48 @@ kbd {
   }
 }
 
+.ghost,
+.ghost * {
+  color: transparent !important;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes typeon {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
+  }
+
+  .cursor.blink {
+    animation: blink 1.05s steps(1, end) infinite;
+  }
+
+  html[data-reveal] .reveal {
+    transition:
+      opacity 0.7s var(--ease),
+      transform 0.7s var(--ease);
+  }
+
+  html[data-reveal] .reveal:not(.in) {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  html[data-reveal] .reveal.in .type {
+    animation: typeon calc(var(--n, 24) * 26ms) steps(var(--n, 24), end) both;
   }
 }
 
