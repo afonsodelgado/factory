@@ -109,6 +109,12 @@
   min-width: 0;
 }
 
+@container (min-width: 300px) {
+  .scroll {
+    overflow-x: clip;
+  }
+}
+
 .term {
   margin: 0;
   padding: 14px;

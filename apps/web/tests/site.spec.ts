@@ -119,6 +119,18 @@ test.describe("without JavaScript", () => {
     );
     expect(overflow).toBe(0);
 
+    const focusableFrames = () =>
+      page.locator(".scroll").evaluateAll(
+        (frames) =>
+          frames.filter((frame) => {
+            (frame as HTMLElement).focus();
+            return document.activeElement === frame;
+          }).length,
+      );
+    expect(await focusableFrames()).toBe(0);
+    await page.setViewportSize({ width: 768, height: 800 });
+    expect(await focusableFrames()).toBe(0);
+
     await expect(page).toHaveTitle("factory · manage your agents");
     await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
     const meta = await page
