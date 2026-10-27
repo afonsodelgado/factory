@@ -28,6 +28,16 @@ body {
   margin: 0;
 }
 
+code,
+kbd,
+pre {
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
+}
+
 h1 {
   color: var(--ink);
   margin: 0;

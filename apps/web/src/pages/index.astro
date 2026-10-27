@@ -1,5 +1,9 @@
 ---
 import Page from "../layouts/Page.astro";
+import TerminalFrame from "../components/TerminalFrame.astro";
+import { staticFrames } from "../lib/frames.ts";
+
+const frames = staticFrames();
 ---
 
 <Page>
@@ -8,5 +12,30 @@ import Page from "../layouts/Page.astro";
       Manage your agents, like a <strong class="brand">factory</strong>.{" "}
       <span class="h1-sub">Stay in control when it matters.</span>
     </h1>
+    <TerminalFrame
+      title="devbox:hub"
+      label="The factory list: seven factories across two repos, each with a status and a stage track that advances as they work."
+    >
+      <span slot="dim">38×22</span>
+      <pre class="term term-hero" set:html={frames.hero} />
+    </TerminalFrame>
+    <TerminalFrame
+      title="devbox:hub"
+      label="The agents for csv-export: each role with its tool, model and effort. The engineer runs on Codex for this factory only."
+    >
+      <span slot="dim">46×14</span>
+      <pre class="term term-agents" set:html={frames.agents} />
+    </TerminalFrame>
+    <TerminalFrame
+      title="devbox:hub"
+      label="The hub window. rate-limits asks two questions, g jumps to it, the answer is typed in the Needs attention panel and sent with ctrl+s, and the factory carries on."
+    >
+      <span slot="dim">
+        <span class="dim-wide">106×28</span>
+        <span class="dim-narrow">56×28</span>
+      </span>
+      <pre class="term hub-wide" set:html={frames.hubWide} />
+      <pre class="term hub-narrow" set:html={frames.hubNarrow} />
+    </TerminalFrame>
   </main>
 </Page>

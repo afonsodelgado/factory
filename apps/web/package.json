@@ -6,9 +6,10 @@
     "build": "astro build",
     "lint": "prettier --check .",
     "typecheck": "astro sync && astro check --noSync",
-    "test": "playwright test",
+    "test": "node --test tests/frames.test.ts && playwright test",
     "dev": "astro dev --host 127.0.0.1 --port 4321 --ignore-lock",
-    "preview": "astro preview --host 127.0.0.1 --port 4321 --ignore-lock"
+    "preview": "astro preview --host 127.0.0.1 --port 4321 --ignore-lock",
+    "fonts": "node scripts/build-fonts.mjs"
   },
   "dependencies": {
     "@astrojs/react": "7.1.1",

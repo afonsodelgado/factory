@@ -1,0 +1,28 @@
+---
+interface Props {
+  title: string;
+  label: string;
+  class?: string;
+}
+
+const { title, label, class: className } = Astro.props;
+---
+
+<div class:list={["frame", className]}>
+  <div class="win">
+    <div class="bar">
+      <span class="lights" aria-hidden="true">
+        <i></i>
+        <i></i>
+        <i></i>
+      </span>
+      <span class="wt">{title}</span>
+      <span class="dim">
+        <slot name="dim" />
+      </span>
+    </div>
+    <div class="scroll" role="img" aria-label={label}>
+      <slot />
+    </div>
+  </div>
+</div>
