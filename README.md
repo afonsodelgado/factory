@@ -76,10 +76,12 @@ Each agent ships with defaults. Your config, the repo's config and `--agent` on 
 
 macOS or Linux, with tmux 3.3 or later, git, [gh](https://cli.github.com) and [Claude Code](https://claude.com/claude-code). `factory doctor` checks the rest.
 
-**1. Download the binary** for your machine: `darwin_arm64`, `darwin_amd64`, `linux_amd64` or `linux_arm64`.
+**1. Download the binary** for your machine: `darwin_arm64`, `darwin_amd64`, `linux_amd64` or `linux_arm64`. The first two lines pick `darwin` or `linux` and `amd64` or `arm64` from `uname`:
 
 ```sh
-gh release download --repo afonsodelgado/factory --pattern 'factory_darwin_arm64' --output ~/.local/bin/factory
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+gh release download --repo afonsodelgado/factory --pattern "factory_${os}_${arch}" --output ~/.local/bin/factory --clobber
 chmod +x ~/.local/bin/factory
 ```
 
