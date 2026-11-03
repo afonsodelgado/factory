@@ -223,9 +223,9 @@ Spawn `factory-reviewer` with the PR list. It runs revmux in loop mode and pushe
 When the repo config says `coderabbit: false`, mark the stage `skipped` with the reason "no CodeRabbit on this repo" and go to stage 7.
 
 1. Mark the PRs ready, bottom first: `gh pr ready <n>`.
-2. Wait without spending model turns. Write `waiting_on: "ci"`, then run `scripts/wait-for-review.sh --dir <factory dir> <pr numbers…>` with Bash `run_in_background: true`. It exits once CodeRabbit and CI have finished on every PR, or on its timeout, and touches `<factory dir>/.heartbeat` on every poll so the app does not read the wait as a stall. You get one notification.
+2. Wait without spending model turns. Write `waiting_on: "ci"`, then run `scripts/wait-for-review.sh --dir <factory dir> <pr numbers…>` with Bash `run_in_background: true`. It exits once CodeRabbit and CI have finished on every PR, or on its timeout, and touches `<factory dir>/.heartbeat` on every poll so the app does not read the wait as a stall. You get one notification. Each PR whose CodeRabbit and CI checks finished reports `coderabbit=<check> ci=<check> threads=<n>`, where `threads` counts CodeRabbit's unresolved, non-outdated review threads. `coderabbit=pass` only means its check finished: it says nothing about its threads.
 3. If a PR reports `no-checks` or `coderabbit=absent`, its base branch is probably filtered out of CI or out of CodeRabbit. Say so in state and in the handoff. A PR with no checks is not a passing PR.
-4. Spawn `factory-shepherd` with the PR list. It triages in factory mode, fixes what is relevant, replies on the rest, and pushes.
+4. Spawn `factory-shepherd` with the PRs that report `threads` above 0, `threads=unknown` or `coderabbit=fail`. It triages in factory mode, fixes what is relevant, replies on the rest, and pushes. When every PR reports `threads=0` and no CodeRabbit failure, there is nothing to triage: skip the shepherd and go to stage 7.
 5. If it pushed anything and the round counter is below the limit, go back to step 2 for another CodeRabbit pass. Otherwise move on and leave anything still open in `coderabbit.md`.
 
 ### 7 · qa (dark)

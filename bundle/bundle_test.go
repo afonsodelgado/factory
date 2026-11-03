@@ -134,3 +134,39 @@ func TestWaitForReviewCountsPollsNotWallClock(t *testing.T) {
 		t.Errorf("no heartbeat written: %v", err)
 	}
 }
+
+func TestWaitForReviewCountsOpenCodeRabbitThreads(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil && os.Getenv("CI") == "" {
+		t.Skip("jq not installed")
+	}
+	stubs := t.TempDir()
+	stub := `#!/bin/sh
+case "$1" in
+pr) echo '[{"name":"CodeRabbit","bucket":"pass"},{"name":"build","bucket":"pass"}]' ;;
+api) cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+{"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"coderabbitai"}}]}},
+{"isResolved":true,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"coderabbitai"}}]}},
+{"isResolved":false,"isOutdated":true,"comments":{"nodes":[{"author":{"login":"coderabbitai"}}]}},
+{"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"author":{"login":"a-teammate"}}]}}
+]}}}}}
+JSON
+;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(stubs, "gh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "skills/factory/scripts/wait-for-review.sh", "7")
+	cmd.Env = append(os.Environ(), "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wait-for-review.sh: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "PR 7: coderabbit=pass ci=pass threads=1") {
+		t.Errorf("output = %q, want one open CodeRabbit thread: a passing check must not hide threads the shepherd has to triage", out)
+	}
+}
