@@ -70,6 +70,27 @@ pr_report() {
   ' <<<"$checks"
 }
 
+open_threads() {
+  local threads count
+  threads=$(gh api graphql -F owner='{owner}' -F repo='{repo}' -F number="$1" -f query='
+    query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100) {
+            nodes { isResolved isOutdated comments(first: 100) { nodes { author { login } } } }
+          }
+        }
+      }
+    }' 2>/dev/null)
+  count=$(jq -r '
+    [.data.repository.pullRequest.reviewThreads.nodes[]
+      | select((.isResolved or .isOutdated) | not)
+      | select(any(.comments.nodes[]; .author.login == "coderabbitai"))]
+    | length
+  ' <<<"$threads" 2>/dev/null)
+  echo "${count:-unknown}"
+}
+
 while :; do
   heartbeat
   elapsed_min=$(( polls * poll_seconds / 60 ))
@@ -83,7 +104,7 @@ while :; do
       continue
     fi
     if [ "$coderabbit" != "pending" ] && [ "$coderabbit" != "absent" ] && [ "$ci" != "pending" ]; then
-      say "PR $pr: coderabbit=$coderabbit ci=$ci"
+      say "PR $pr: coderabbit=$coderabbit ci=$ci threads=$(open_threads "$pr")"
       finished="$finished$pr "
       continue
     fi

@@ -171,7 +171,7 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 - **Spawn a `claude` role** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there.
 - **Start a `codex` or `opencode` role** through the factory app, which opens it in its own pane beside yours. Write the prompt to `<factory dir>/stages/<role>-task.md`, then run `"${FACTORY_BIN:-factory}" stage start --role <role> --task <that file> --wait` with Bash `run_in_background: true`. The app adds the role's instructions and the developer's rules itself. When the command finishes, its output is the result file's path and the `factory-result` JSON: handle it as an agent's final message. A non-zero exit carries the reason; treat it as `failed`.
 - **Record** the agent id in `state.stages.<stage>.agent_id` straight away: the returned id for a Claude subagent, `stage:<role>` for a role in another tool. Names do not survive compaction, ids do.
-- **Follow-ups** go to the same agent so it keeps its context: SendMessage for a Claude subagent; for a role in another tool, write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`.
+- **Follow-ups** to a role in another tool go to the same agent: write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`. A Claude subagent's prompt cache lasts five minutes, and a later SendMessage re-sends its whole context at the cache-write price. SendMessage it only when you act on its report straight away, without waiting on another agent, CI or the user in between, or when the message continues work it has not finished: answers to its `blocked` questions, and design comments in iteration mode. Otherwise spawn a fresh agent of the same role with the follow-up and the files that hold its earlier work.
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent as a follow-up. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
 - **On `done`:** record `outputs` and `data`, mark the stage done, and go to the next stage.
@@ -212,7 +212,7 @@ Spawn `factory-analyst` with the factory id and `brief.md`. It returns `blocked`
 
 ### 4 · implement (dark)
 
-Spawn `factory-engineer` with `plan.md`. It builds the stack with gh-stack and opens every PR as a draft. Store `data.prs` (ordered bottom to top: number, branch, title) in `state.prs`.
+Spawn `factory-engineer` with `plan.md`. It builds the stack with gh-stack, opens every PR as a draft, and writes the QA brief while it still holds what it verified. Store `data.prs` (ordered bottom to top: number, branch, title) in `state.prs`, and make sure the brief path from `data.brief` is in `stages.implement.outputs`.
 
 ### 5 · review (dark, bounded)
 
@@ -223,21 +223,21 @@ Spawn `factory-reviewer` with the PR list. It runs revmux in loop mode and pushe
 When the repo config says `coderabbit: false`, mark the stage `skipped` with the reason "no CodeRabbit on this repo" and go to stage 7.
 
 1. Mark the PRs ready, bottom first: `gh pr ready <n>`.
-2. Wait without spending model turns. Write `waiting_on: "ci"`, then run `scripts/wait-for-review.sh --dir <factory dir> <pr numbers…>` with Bash `run_in_background: true`. It exits once CodeRabbit and CI have finished on every PR, or on its timeout, and touches `<factory dir>/.heartbeat` on every poll so the app does not read the wait as a stall. You get one notification.
+2. Wait without spending model turns. Write `waiting_on: "ci"`, then run `scripts/wait-for-review.sh --dir <factory dir> <pr numbers…>` with Bash `run_in_background: true`. It exits once CodeRabbit and CI have finished on every PR, or on its timeout, and touches `<factory dir>/.heartbeat` on every poll so the app does not read the wait as a stall. You get one notification. Each PR whose CodeRabbit and CI checks finished reports `coderabbit=<check> ci=<check> threads=<n>`, where `threads` counts CodeRabbit's unresolved, non-outdated review threads. `coderabbit=pass` only means its check finished: it says nothing about its threads.
 3. If a PR reports `no-checks` or `coderabbit=absent`, its base branch is probably filtered out of CI or out of CodeRabbit. Say so in state and in the handoff. A PR with no checks is not a passing PR.
-4. Spawn `factory-shepherd` with the PR list. It triages in factory mode, fixes what is relevant, replies on the rest, and pushes.
+4. Spawn `factory-shepherd` with the PRs that report `threads` above 0, `threads=unknown` or `coderabbit=fail`. It triages in factory mode, fixes what is relevant, replies on the rest, and pushes. When every PR reports `threads=0` and no CodeRabbit failure, there is nothing to triage: skip the shepherd and go to stage 7.
 5. If it pushed anything and the round counter is below the limit, go back to step 2 for another CodeRabbit pass. Otherwise move on and leave anything still open in `coderabbit.md`.
 
 ### 7 · qa (dark)
 
-1. **Brief.** SendMessage the engineer from stage 4, using its recorded id, to run `/qa-brief-factory`: it still holds what it verified by hand. If it cannot be reached, spawn a fresh `factory-engineer` in brief-only mode on the state files.
+1. **Brief.** Use the brief path the engineer returned, recorded in `stages.implement.outputs`. Do not wake the engineer for it. If that file is missing, spawn a fresh `factory-engineer` in brief-only mode on the state files.
 2. **Test.** Spawn `factory-qa`. It runs the `qa-factory` skill in factory mode, in the repo config's `qa.mode`: the charter goes to the report and testing starts without waiting. It returns the report path, and `data.findings` counts blockers, majors and minors.
 3. **No findings:** go to stage 9. **Findings:** go to stage 8.
 
 ### 8 · qa-fixes (dark, bounded at `limits.qa_rounds`)
 
 1. Spawn `factory-fixer` with the QA report. On the first round it creates the QA-fixes layer on top of the stack. Later rounds reuse that layer. It fixes every confirmed finding and pushes. Record the QA-fixes PR in `state.prs` with `qa_fixes: true`.
-2. SendMessage the QA agent from stage 7 to re-verify the previous findings and re-run the charter's affected behaviours. Use a fresh `factory-qa` if it cannot be reached.
+2. Ask QA to re-verify the previous findings and re-run the charter's affected behaviours, as a follow-up. The fixer's run leaves the stage-7 agent's cache cold, so this is normally a fresh `factory-qa` given the report path.
 3. Repeat until a round has no new findings, or until `qa_rounds` is reached. At the cap, write a `cap` item with the open findings and wait.
 
 ### 9 · test-gaps (dark)

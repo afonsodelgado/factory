@@ -4,7 +4,7 @@ description: |
   Write a short handoff brief for a later /qa-factory session at the end of a
   development session: what the feature should do, what was already verified by
   hand, where the developer is unsure, and the setup it needs. Use when the factory
-  supervisor asks the engineer for the QA brief, or the user says "/qa-brief-factory".
+  engineer finishes its stack, or the user says "/qa-brief-factory".
 ---
 
 # QA handoff brief
