@@ -163,7 +163,7 @@ func ParseAgentFlag(flag string) (string, AgentSetting, error) {
 	role, value, hasValue := strings.Cut(flag, "=")
 	setting := ParseSetting(value)
 	if !hasValue || setting == (AgentSetting{}) {
-		return "", setting, fmt.Errorf("--agent %q: write it as role=model:effort or role=tool/model:effort, such as engineer=sonnet:medium, reviewer=:low or engineer=codex/gpt-5.6-sol:high", flag)
+		return "", setting, fmt.Errorf("--agent %q: write it as role=model:effort or role=tool/model:effort, such as engineer=sonnet:medium, reviewer=:low or engineer=codex/gpt-6.1-sol:high", flag)
 	}
 	return role, setting, ValidateAgents("--agent", map[string]AgentSetting{role: setting})
 }

@@ -162,7 +162,7 @@ export const AGENTS: Agent[] = [
   ["analyst", "claude", "sonnet", "high", false],
   ["designer", "claude", "opus", "xhigh", false],
   ["architect", "claude", "fable", "high", false],
-  ["engineer", "codex", "gpt-5.6-sol", "high", true],
+  ["engineer", "codex", "gpt-6.1-sol", "high", true],
   ["reviewer", "claude", "opus", "high", false],
   ["shepherd", "opencode", "big-pickle", "", false],
   ["qa", "claude", "opus", "high", false],
