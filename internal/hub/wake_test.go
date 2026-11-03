@@ -193,3 +193,23 @@ func TestOpenRefusesARepoTheRunningHubDoesNotListUntilFactoryRunsThere(t *testin
 		t.Errorf("after factory ran in /r/added-later the n dialog offers %d repos with %q picked (here %v); want it listed without a restart and picked, so no list to choose from", len(c.Repos), c.Repos[c.Repo].Path, c.Here)
 	}
 }
+
+func TestCreatingAFactoryKeepsTheConfiguredToolUnderAModelPickedInTheDialog(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	repo := t.TempDir()
+	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir(), Agents: map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-6-astra", Effort: "high"}}}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+
+	err = model.create(dialog.NewResult{Repo: repo, Slug: "csv", Prompt: "Export contacts.", Agents: map[string]state.AgentSetting{"engineer": {Model: "gpt-6.1-sol"}}})
+	if err == nil || !strings.Contains(err.Error(), "not attached to tmux") {
+		t.Fatalf("create = %v; want it to get as far as tmux, not refuse gpt-6.1-sol as a claude model", err)
+	}
+	want := state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-6.1-sol", Effort: "high"}
+	if got := registry.Find(repo, "csv").Agents["engineer"]; got != want {
+		t.Errorf("the engineer was registered as %+v; want %+v", got, want)
+	}
+}

@@ -297,19 +297,24 @@ func (m *Model) create(r dialog.NewResult) error {
 	if err != nil {
 		return err
 	}
-	if err := state.ValidateAgents("--agent", r.Agents); err != nil {
-		return err
-	}
 	if _, err := m.Config.AgentsFor(r.Repo); err != nil {
 		return err
 	}
 	cfg, profile := m.repoConfig(r.Repo)
+	agents := state.ResolveAgents(m.Config, profile, r.Agents)
+	chosen := map[string]state.AgentSetting{}
+	for role := range r.Agents {
+		chosen[role] = agents[role]
+	}
+	if err := state.ValidateAgents("--agent", chosen); err != nil {
+		return err
+	}
 	supervisor := r.Supervisor.Over(cfg.Supervisor)
 	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
 		return err
 	}
 	catalogs := catalog.Local(m.Config.StateDir)
-	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", r.Agents)); err != nil {
+	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", chosen)); err != nil {
 		return err
 	}
 	if err := catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor)); err != nil {
@@ -326,7 +331,7 @@ func (m *Model) create(r dialog.NewResult) error {
 		launch.AddDirs = m.writableDirs(r.Repo, "", supervisor)
 	}
 	title := firstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: state.ResolveAgents(m.Config, profile, r.Agents)}
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		pinDirs(reg, earlier)
 		reg.Upsert(entry)
