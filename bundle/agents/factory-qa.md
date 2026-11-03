@@ -14,7 +14,7 @@ In `qa.mode: browser`, the browser tools come from the supervisor's session. Loa
 
 ## Re-verification rounds
 
-Later messages ask you to re-verify. In each one:
+A later message or your prompt asks you to re-verify. A fresh agent gets the report path instead of a history: read the report first. Then:
 1. Pull the latest commits.
 2. Re-run the repro of every finding from your last report, then re-run the charter behaviours the fixes could affect.
 3. Probe once more around each fix, since a fix is a new change.
