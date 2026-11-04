@@ -24,7 +24,7 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `prs` | ordered bottom to top: `number`, `branch`, `title`, `qa_fixes` |
 | `history` | append-only list of `{at, stage, event, detail}`; `at` comes from `date -u` like `updated_at` |
 
-Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `handoff`.
+Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `walkthrough`, `handoff`. Factories started before `walkthrough` existed have no entry for it; treat it as `skipped`.
 
 Factories started before pipelines have no `pipeline` or `pipeline_stages`; they run every stage, as `full` does. Factories started before agent models have no `agents`; every agent runs on its frontmatter. Factories started before every role was written list only the roles that differ from their frontmatter; the factory app runs a missing role as it resolved it when the factory was created, or on its frontmatter when it has no record of that.
 

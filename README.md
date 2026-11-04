@@ -42,9 +42,9 @@ Run as many as you like, across every repo you work in. `factory` keeps all of t
 One agent per stage. The factory waits for you at the gates and runs everything between them on its own.
 
 ```
-requirements ─ design ─ plan ─ implement ─ review ─ coderabbit ─ qa ─ qa_fixes ─ test_gaps ─ handoff
-      ◆            ◆       ◆                                                                    ✓
-  you answer   you approve  you approve                                                  yours to merge
+requirements ─ design ─ plan ─ implement ─ review ─ coderabbit ─ qa ─ qa_fixes ─ test_gaps ─ walkthrough ─ handoff
+      ◆            ◆       ◆                                                                        ◆            ✓
+  you answer   you approve  you approve                                                         you try it   yours to merge
 ```
 
 The plan is always reviewed and approved before any code is written. At the end you get a stack of draft PRs and a handoff note. **Merging is yours.** The factory never merges, deploys or force-pushes `main`.
@@ -272,12 +272,12 @@ A pipeline is the list of stages a factory runs. Two are built in, so they work 
 
 ```yaml
 pipelines:
-  full:  [requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, handoff]
+  full:  [requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, walkthrough, handoff]
   quick: [requirements, plan, implement, review, handoff]
 default_pipeline: full
 ```
 
-Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.factory/config.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out, and `qa_fixes` and `test_gaps` run only with `qa`. The name `custom` is reserved for a factory's own list. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
+Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.factory/config.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out, `qa_fixes` and `test_gaps` run only with `qa`, and `walkthrough` runs only in repos with browser QA (`qa.mode: browser`). The name `custom` is reserved for a factory's own list. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
 
 Pick the stages when you create a factory: the `n` dialog has a step of its own for them, "Stages & agents", between the id and the prompt. It starts at `default_pipeline`. `tab` loads the next preset, `↑↓` move through the stages, `space` checks or unchecks the selected one, and `⏎` goes on to the prompt. When the checked stages match no preset, the factory runs a `custom` pipeline. From the shell, use `factory open <id> --pipeline <name>` for a preset, or `--stages a,b,c` for an exact list; give one or the other, not both. An unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
 
@@ -285,7 +285,7 @@ A pipeline only removes stages. The gates stay: `quick` still shows you the plan
 
 ## Agent models
 
-Each stage runs one agent, and each agent has a default model and effort in its `bundle/agents/factory-<role>.md` file. The roles are `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa` and `fixer`; the fixer runs both `qa_fixes` and `test_gaps`. To spend less, set them in `config.yml`, in a repo's `.factory/config.yml`, or for one factory:
+Each stage runs one agent, and each agent has a default model and effort in its `bundle/agents/factory-<role>.md` file. The roles are `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa` and `fixer`; the fixer runs `qa_fixes`, `test_gaps` and `walkthrough`. To spend less, set them in `config.yml`, in a repo's `.factory/config.yml`, or for one factory:
 
 ```yaml
 agents:

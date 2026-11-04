@@ -85,7 +85,7 @@ func TestSelectorNarrowFold(t *testing.T) {
 func TestHighlightedIconKeepsItsPadCell(t *testing.T) {
 	selection := "48;2;41;46;66"
 	for status := factory.Running; status <= factory.Done; status++ {
-		row := selector.Row{Key: "k", Label: "ENG-1", Status: status, Track: make([]factory.Step, 10), Time: "1m"}
+		row := selector.Row{Key: "k", Label: "ENG-1", Status: status, Track: make([]factory.Step, len(state.StageKeys)), Time: "1m"}
 		d := selector.Data{Groups: selector.Arrange([]selector.Group{{Name: "repo", Rows: []selector.Row{row}}}), Selected: "k", Focused: true, Icons: theme.Nerd}
 		out := selector.Render(d, hub.SelectorWidth, 6)
 		glyph := theme.Nerd.Glyph(theme.StatusIcon(status))

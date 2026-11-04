@@ -233,7 +233,7 @@ func factoryRow(c *theme.Canvas, y, inner int, r Row, d Data) {
 	if stage == "" {
 		stage = "no state yet"
 	}
-	c.PutMax(17, y+1, stage, theme.Quiet, timeStart-1-17)
+	c.PutMax(18, y+1, stage, theme.Quiet, timeStart-1-18)
 }
 
 func shortRow(c *theme.Canvas, y, inner int, r Row, d Data) {

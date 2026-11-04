@@ -166,3 +166,7 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 	}
 	return nil, false
 }
+
+func (r RepoOption) Support() state.RepoSupport {
+	return state.RepoSupport{CodeRabbit: r.CodeRabbit, BrowserQA: r.Browser}
+}

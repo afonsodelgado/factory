@@ -51,6 +51,7 @@ var stageRoles = map[string]string{
 	"qa":           "qa",
 	"qa_fixes":     "fixer",
 	"test_gaps":    "fixer",
+	"walkthrough":  "fixer",
 }
 
 func RoleOf(stage string) string { return stageRoles[stage] }
