@@ -77,6 +77,7 @@ Each repo has `.factory/config.yml` (template: `templates/factory.yml`). You and
 | `codebase_skill` | optional; the skill the architect loads to navigate the repo |
 | `design.source` | `web` (HTML mocks of the web app) or `terminal` (character-grid mocks) |
 | `design.files` | the design system files the designer reads first |
+| `design.prototype.dir`, `.path`, `.css` | optional, `web` only; a git-ignored directory inside the web app where the designer builds prototypes from the app's real components, the URL path where the web dev server serves it (such as `/prototypes`), and the app's main stylesheet. When `dir` is set, designs are prototypes (see stage 2) |
 | `qa.mode` | `browser` (Chrome against a local stack) or `terminal` (a scratch tmux server) |
 | `qa.notes` | optional; a repo file with environment, seeding and port steps for QA |
 | `qa.api_port`, `qa.web_port`, `qa.start`, `qa.health` | browser mode only: how the local stack runs |
@@ -207,6 +208,12 @@ Spawn `factory-analyst` with the factory id and `brief.md`. It returns `blocked`
 
 1. **Variants.** Use the number the user asked for, default 1. For one variant, spawn `factory-designer`. For several, launch the Workflow tool with one `agent()` per variant, `agentType: "factory-designer"`, each given a different direction (for example: closest to existing patterns, densest information, most guided). Each writes `design/variant-<letter>.html`. Subagents cannot launch workflows, so this fan-out is yours. When `designer` runs on another tool, start the variants one after another with `stage start --role designer`, each waiting for its result.
 2. **List them.** Record each variant as an artifact (see "Artifacts") with its direction in the title, and post the paths.
+
+   **Prototypes.** When the repo config sets `design.prototype.dir`, the designer builds each variant inside the app, and the variants are pages of its dev server, not files to serve. Before you list them:
+   - Spawn `factory-qa` in stack mode: "stack mode for design prototypes; set `url` to `<web origin><design.prototype.path>/<id>/variant-a.html`".
+   - Run `"${FACTORY_BIN:-factory}" review stack --for design`, then `"${FACTORY_BIN:-factory}" review open --for design <url>` for each other variant.
+   - Record each variant as an artifact with that `http://` URL; `o` in the panel opens it in the factory's Chrome with comments.
+   - The stack keeps running through iteration, and the walkthrough replaces it later.
 3. **Iterate.** Start one designer in iteration mode, which owns every variant file: write its task to `<factory dir>/stages/designer-iterate.md` and run `"${FACTORY_BIN:-factory}" stage start --role designer --task <that file> --wait` (Bash `run_in_background: true`; on Codex and OpenCode, as `references/hosts.md` says). Record `stage:designer` as the agent id. Its first result says it is ready for comments: that is not the end of the stage. From here the user's comments go straight to it. When a new `design/*.html` appears, such as `variant-final.html`, record it as an artifact.
 4. **Gate.** Write the `gate-<id>-design` item, then wait. Approval comes from `/factory approve design`, sent by the panel or by the review page's Approve button, or from a plain message. `<item id> changes: <text>` is a change request: send it to the designer with `stage send`. On approval, record any `design/*.html` not yet listed, then send the designer "The design is approved" with `stage send … --wait`, so it writes `design/approved.md`: which file, and the decisions the threads settled (`factory review threads` lists them).
 

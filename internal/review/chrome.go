@@ -108,12 +108,15 @@ func (b *Browser) OpenPage(url string) error {
 	if !ok {
 		return fmt.Errorf("%s is not a review page", url)
 	}
-	_, err := b.open(url, f, false, nil)
+	_, err := b.open(url, f, "", nil)
 	return err
 }
 
-func (b *Browser) OpenApp(url string, f Factory, cookies []Cookie) (*Tab, error) {
-	return b.open(url, f, true, cookies)
+func (b *Browser) OpenApp(url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
+	if !Live(page) {
+		return nil, fmt.Errorf("%q is not a live page; use %s or %s", page, App, Prototype)
+	}
+	return b.open(url, f, page, cookies)
 }
 
 type Cookie struct {
@@ -123,7 +126,8 @@ type Cookie struct {
 	Path   string `json:"path,omitempty"`
 }
 
-func (b *Browser) open(url string, f Factory, app bool, cookies []Cookie) (*Tab, error) {
+func (b *Browser) open(url string, f Factory, livePage string, cookies []Cookie) (*Tab, error) {
+	app := livePage != ""
 	root, err := b.start()
 	if err != nil {
 		return nil, err
@@ -140,7 +144,7 @@ func (b *Browser) open(url string, f Factory, app bool, cookies []Cookie) (*Tab,
 		call(runtime.AddBinding, runtime.AddBindingParams{Name: bindingName}),
 	}
 	if app {
-		steps = append(steps, call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: b.server.appPrelude(f) + string(b.server.overlay)}))
+		steps = append(steps, call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: b.server.appPrelude(f, livePage) + string(b.server.overlay)}))
 	}
 	for _, c := range cookies {
 		steps = append(steps, call(network.SetCookie, network.SetCookieParams{Name: c.Name, Value: c.Value, URL: url, Domain: c.Domain, Path: c.Path}))
@@ -165,11 +169,11 @@ func call[P, R any](cmd cdp.Command[P, R], params P) chromedp.Action[chromedp.Vo
 	})
 }
 
-func (s *Server) appPrelude(f Factory) string {
+func (s *Server) appPrelude(f Factory, page string) string {
 	config := map[string]string{
 		"api":  "/r/" + s.token + "/" + f.Key + "/_api",
-		"page": f.Key + "/" + App,
-		"file": App,
+		"page": f.Key + "/" + page,
+		"file": page,
 	}
 	data, _ := json.Marshal(config)
 	return "window.__factoryReviewConfig = " + string(data) + ";\n"

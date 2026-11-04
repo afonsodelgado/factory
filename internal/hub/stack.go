@@ -82,7 +82,7 @@ func (m *Model) startStack(e Event, r ReviewRequest) tea.Cmd {
 		if err := waitHealthy(stack.healthURL(), stackReadyWait); err != nil {
 			return noticeMsg(it.Factory.Label() + "'s stack did not come up: " + err.Error() + ". Its window shows why.")
 		}
-		if _, err := chrome.OpenApp(stack.URL, f, stack.Cookies); err != nil {
+		if _, err := chrome.OpenApp(stack.URL, f, livePage(r.Page), stack.Cookies); err != nil {
 			return noticeMsg(err.Error())
 		}
 		return nil

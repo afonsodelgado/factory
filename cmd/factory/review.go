@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [text…]
        factory review threads [--page <path>] [--open]
-       factory review open [--factory <id>] <url>
-       factory review stack`
+       factory review open [--factory <id>] [--for design|walkthrough] <url>
+       factory review stack [--for design|walkthrough]`
 
 func runReview(args []string) int {
 	if len(args) == 0 {
@@ -30,7 +31,7 @@ func runReview(args []string) int {
 	case "open":
 		return runReviewOpen(args[1:])
 	case "stack":
-		return runReviewStack()
+		return runReviewStack(args[1:])
 	}
 	fmt.Fprintln(os.Stderr, reviewUsage)
 	return 2
@@ -79,14 +80,16 @@ func runReviewThreads(args []string) int {
 func runReviewOpen(args []string) int {
 	flags := flag.NewFlagSet("review open", flag.ContinueOnError)
 	id := flags.String("factory", "", "the factory the comments belong to; default: the one this directory is in")
+	stage := flags.String("for", "walkthrough", "the stage whose agent gets the comments: design (the designer) or walkthrough (the fixer)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 {
+	page, ok := livePages[*stage]
+	if flags.NArg() != 1 || !ok {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	reply, err := askReview(hub.ReviewRequest{Action: "open", ID: *id, URL: flags.Arg(0)})
+	reply, err := askReview(hub.ReviewRequest{Action: "open", ID: *id, URL: flags.Arg(0), Page: page})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
@@ -95,8 +98,20 @@ func runReviewOpen(args []string) int {
 	return 0
 }
 
-func runReviewStack() int {
-	reply, err := askReview(hub.ReviewRequest{Action: "stack"})
+var livePages = map[string]string{"design": review.Prototype, "walkthrough": review.App}
+
+func runReviewStack(args []string) int {
+	flags := flag.NewFlagSet("review stack", flag.ContinueOnError)
+	stage := flags.String("for", "walkthrough", "the stage whose agent gets the comments: design (the designer) or walkthrough (the fixer)")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	page, ok := livePages[*stage]
+	if !ok {
+		fmt.Fprintln(os.Stderr, reviewUsage)
+		return 2
+	}
+	reply, err := askReview(hub.ReviewRequest{Action: "stack", Page: page})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
