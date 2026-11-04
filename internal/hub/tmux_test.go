@@ -199,6 +199,66 @@ func TestRebuildPutsTheSlotBackAboveThePanelWhenTheSessionPaneCloses(t *testing.
 	framed(t, e, rebuilt, "after the rebuild")
 }
 
+func TestInPlaceHubStaysInItsPaneAndLeavesNothingBehind(t *testing.T) {
+	tm := scratchServer(t)
+	editor, err := tm.NewSession("work", "code", 220, 50, "exec sleep 600")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, err := tm.Split(tmux.Split{Target: editor, Horizontal: true, Size: 150, Command: "exec sleep 600"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	editorBefore := pane(t, tm, editor)
+	staleHub, err := tm.NewSession("factory", HubWindow, 80, 24, "exec sleep 600")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.SetPaneOption(staleHub, "@factory_ui", "selector"); err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{TM: tm, Session: "factory", ViewCommand: func(string) string { return "exec sleep 600" }}
+	width, height, err := e.Measure(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := e.Build(self, Shape{Width: width, Height: height})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "eng-3-z", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Select(&l, created); err != nil {
+		t.Fatal(err)
+	}
+	if got := pane(t, tm, editor); got.Width != editorBefore.Width || got.Height != editorBefore.Height || got.WindowName != "code" {
+		t.Errorf("editor = %dx%d in %q, want %dx%d in \"code\": the hub must stay inside the pane it was started in", got.Width, got.Height, got.WindowName, editorBefore.Width, editorBefore.Height)
+	}
+
+	e.Release(l)
+	panes, err := tm.Panes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, p := range panes {
+		if p.WindowID == l.Window {
+			left = append(left, p.ID)
+		}
+	}
+	if len(left) != 2 || pane(t, tm, self).UI != "" {
+		t.Errorf("window holds %v (selector tag %q) after quitting, want only the editor and the user's own pane, untagged", left, pane(t, tm, self).UI)
+	}
+	if parked := pane(t, tm, created); parked.Session != "factory" || parked.WindowName != ParkName("eng-3-z") {
+		t.Errorf("factory pane = %+v, want it parked in the factory session so it keeps running after the hub quits", parked)
+	}
+	if lines, _ := tm.LocalWindowOption(l.Window, "pane-border-lines"); lines != "" {
+		t.Errorf("pane-border-lines = %q on the user's window after quitting, want it unset again", lines)
+	}
+}
+
 func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 	e, l := hubFixture(t)
 	repo, sameSlugElsewhere := t.TempDir(), t.TempDir()

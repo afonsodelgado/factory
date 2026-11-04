@@ -149,7 +149,14 @@ type Window struct {
 }
 
 func (c Client) NewWindow(w Window) (string, error) {
-	args := []string{"new-window", "-d", "-t", w.Session + ":", "-n", w.Name, "-P", "-F", "#{pane_id}"}
+	return c.Run(w.args("new-window", "-d", "-t", w.Session+":", "-n", w.Name, "-P", "-F", "#{pane_id}")...)
+}
+
+func (c Client) NewDetachedSession(w Window) (string, error) {
+	return c.Run(w.args("new-session", "-d", "-s", w.Session, "-n", w.Name, "-P", "-F", "#{pane_id}")...)
+}
+
+func (w Window) args(args ...string) []string {
 	if w.Dir != "" {
 		args = append(args, "-c", w.Dir)
 	}
@@ -159,7 +166,7 @@ func (c Client) NewWindow(w Window) (string, error) {
 	if w.Command != "" {
 		args = append(args, w.Command)
 	}
-	return c.Run(args...)
+	return args
 }
 
 type Split struct {
@@ -252,6 +259,20 @@ func (c Client) SetWindowOption(window, name, value string) error {
 	return err
 }
 
+func (c Client) UnsetPaneOption(pane, name string) error {
+	_, err := c.Run("set-option", "-p", "-u", "-t", pane, name)
+	return err
+}
+
+func (c Client) LocalWindowOption(window, name string) (string, error) {
+	return c.Run("show-options", "-w", "-q", "-v", "-t", window, name)
+}
+
+func (c Client) UnsetWindowOption(window, name string) error {
+	_, err := c.Run("set-option", "-w", "-u", "-t", window, name)
+	return err
+}
+
 func (c Client) SetSessionOption(session, name, value string) error {
 	_, err := c.Run("set-option", "-t", session, name, value)
 	return err
@@ -331,8 +352,18 @@ func (c Client) WindowSize(target string) (int, int, error) {
 	return width, height, err
 }
 
-func (c Client) Clients(session string) ([]string, error) {
-	out, err := c.Run("list-clients", "-t", session, "-F", "#{client_name}")
+func (c Client) PaneSize(pane string) (int, int, error) {
+	out, err := c.Display(pane, "#{pane_width} #{pane_height}")
+	if err != nil {
+		return 0, 0, err
+	}
+	var width, height int
+	_, err = fmt.Sscan(out, &width, &height)
+	return width, height, err
+}
+
+func (c Client) Clients(target string) ([]string, error) {
+	out, err := c.Run("list-clients", "-t", target, "-F", "#{client_name}")
 	if err != nil || out == "" {
 		return nil, err
 	}

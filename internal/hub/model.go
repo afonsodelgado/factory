@@ -289,7 +289,7 @@ func (m *Model) ensureSlot() {
 			return
 		}
 	}
-	width, height, err := m.Engine.TM.WindowSize(m.Layout.Selector)
+	width, height, err := m.Engine.Measure(m.Layout.Selector)
 	if err != nil {
 		return
 	}
@@ -357,7 +357,7 @@ func paneTitle(f factory.Factory) string {
 
 func (m *Model) slotViewer() string {
 	for _, p := range m.snap.Panes {
-		if p.UI == "slot" && p.Session == m.Engine.Session {
+		if p.UI == "slot" && m.Engine.Owns(p) {
 			return p.ID
 		}
 	}
@@ -398,7 +398,7 @@ func (m *Model) measureWindow() {
 	if m.Engine == nil {
 		return
 	}
-	if width, height, err := m.Engine.TM.WindowSize(m.Layout.Selector); err == nil {
+	if width, height, err := m.Engine.Measure(m.Layout.Selector); err == nil {
 		m.window = [2]int{width, height}
 	}
 	m.arrange()
