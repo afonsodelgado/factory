@@ -206,7 +206,7 @@ Spawn `factory-analyst` with the factory id and `brief.md`. It returns `blocked`
 
 ### 3 · plan (lit)
 
-1. Spawn `factory-architect` with `requirements.md` and `design/approved.md` when present. It writes `plan.md`, a reviewable `plan.html`, and `schematic.html` when the architecture is complex.
+1. Spawn `factory-architect` with `requirements.md` and `design/approved.md` when present. It writes `plan.md` for the engineer, `plan.html` as a short plain-language review page for the user, and `schematic.html` when the architecture is complex.
 2. Publish `plan.html`, and `schematic.html` if present, then iterate exactly as in design. Open questions the architect raises go into the artifact as their own section, so the user can answer them in comment threads.
 3. **Gate.** Write the `gate-<id>-plan` item, then wait. On approval, SendMessage the architect to write the final implementation plan into `plan.md`, with every answered question folded in. Mark the stage done. From here the factory runs unattended.
 
