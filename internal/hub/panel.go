@@ -50,7 +50,7 @@ const notResolved = "The supervisor received this answer but finished its turn w
 func (m *Model) forgetClosedItems() {
 	open := map[string]time.Time{}
 	for _, it := range m.snap.Items {
-		for _, item := range attentionItems(it, m.snap.At) {
+		for _, item := range attentionItems(it, m.snap.At, m.threadCounter()) {
 			if item.ID != "" {
 				open[draftKey(it.Factory, item.ID)] = item.Since
 			}
@@ -132,7 +132,7 @@ func (m *Model) awaitingResolution(f factory.Factory, item panel.Item) bool {
 }
 
 func (m *Model) shownItems(it Item) (shown []panel.Item, answered []string) {
-	for _, item := range attentionItems(it, m.snap.At) {
+	for _, item := range attentionItems(it, m.snap.At, m.threadCounter()) {
 		if m.awaitingResolution(it.Factory, item) {
 			answered = append(answered, item.ID)
 		} else {
@@ -151,7 +151,7 @@ func newPanelState() panelState {
 	}
 }
 
-func attentionItems(it Item, now time.Time) []panel.Item {
+func attentionItems(it Item, now time.Time, counter threadCounter) []panel.Item {
 	var items []panel.Item
 	f := it.Factory
 	if f.StateErr != nil {
@@ -159,7 +159,7 @@ func attentionItems(it Item, now time.Time) []panel.Item {
 	}
 	if f.State != nil {
 		for _, a := range f.State.OpenAttention() {
-			items = append(items, fromAttention(f.State, a))
+			items = append(items, fromAttention(f.State, a, counter))
 		}
 	}
 	if factory.PermissionPrompt(it.Hook) {
@@ -178,7 +178,7 @@ func attentionItems(it Item, now time.Time) []panel.Item {
 	return items
 }
 
-func fromAttention(st *state.State, a state.Attention) panel.Item {
+func fromAttention(st *state.State, a state.Attention, counter threadCounter) panel.Item {
 	item := panel.Item{ID: a.ID, Kind: a.Kind, Title: a.Title, Body: a.Body, ArtifactURL: a.ArtifactURL, ThreadID: a.ThreadID, Since: a.CreatedAt.Time, Stage: a.Stage()}
 	for i, q := range a.Questions {
 		question := panel.Question{Text: q}
@@ -192,18 +192,27 @@ func fromAttention(st *state.State, a state.Attention) panel.Item {
 	}
 	if a.Kind == "gate" {
 		for _, art := range st.Stages[item.Stage].Artifacts {
-			item.Artifacts = append(item.Artifacts, artifactRow(art))
+			item.Artifacts = append(item.Artifacts, artifactRow(art, counter))
 		}
 	}
 	return item
 }
 
-func artifactRow(a state.Artifact) panel.ArtifactRow {
+type threadCounter func(url string) (int, bool)
+
+func artifactRow(a state.Artifact, counter threadCounter) panel.ArtifactRow {
 	title := a.Title
 	if title == "" {
 		title = a.URL
 	}
-	return panel.ArtifactRow{Name: path(a.URL), Title: title, URL: a.URL, OpenThreads: a.OpenThreads, CheckedAt: a.ThreadsCheckedAt.Time}
+	row := panel.ArtifactRow{Name: path(a.URL), Title: title, URL: a.URL, OpenThreads: a.OpenThreads, CheckedAt: a.ThreadsCheckedAt.Time}
+	if counter == nil {
+		return row
+	}
+	if open, ok := counter(a.URL); ok {
+		row.OpenThreads, row.CheckedAt, row.Live = &open, time.Time{}, true
+	}
+	return row
 }
 
 func path(url string) string {
@@ -476,7 +485,7 @@ func (m *Model) panelView() panel.View {
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
-			v.Artifacts = append(v.Artifacts, artifactRow(a))
+			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter()))
 		}
 	}
 	v.PRs = m.prsFor(f)
