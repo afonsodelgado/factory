@@ -13,7 +13,8 @@ import (
 )
 
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [text…]
-       factory review threads [--page <path>] [--open]`
+       factory review threads [--page <path>] [--open]
+       factory review open [--factory <id>] <url>`
 
 func runReview(args []string) int {
 	if len(args) == 0 {
@@ -25,6 +26,8 @@ func runReview(args []string) int {
 		return runReviewReply(args[1:])
 	case "threads":
 		return runReviewThreads(args[1:])
+	case "open":
+		return runReviewOpen(args[1:])
 	}
 	fmt.Fprintln(os.Stderr, reviewUsage)
 	return 2
@@ -67,6 +70,25 @@ func runReviewThreads(args []string) int {
 		}
 		fmt.Printf("%s  %s  %s  %s\n", t.ID, t.Status, t.Page, t.Messages[len(t.Messages)-1].Text)
 	}
+	return 0
+}
+
+func runReviewOpen(args []string) int {
+	flags := flag.NewFlagSet("review open", flag.ContinueOnError)
+	id := flags.String("factory", "", "the factory the comments belong to; default: the one this directory is in")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, reviewUsage)
+		return 2
+	}
+	reply, err := askReview(hub.ReviewRequest{Action: "open", ID: *id, URL: flags.Arg(0)})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory review:", err)
+		return 1
+	}
+	fmt.Printf("Opened %s in the factory's Chrome; comments go to %s.\n", flags.Arg(0), reply.Target)
 	return 0
 }
 

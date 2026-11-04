@@ -67,10 +67,11 @@ type threadsFile struct {
 }
 
 type Store struct {
-	mu   sync.Mutex
-	path string
-	now  func() time.Time
-	data threadsFile
+	mu      sync.Mutex
+	path    string
+	now     func() time.Time
+	data    threadsFile
+	console []string
 }
 
 func StorePath(factoryDir string) string {
@@ -245,6 +246,31 @@ func (s *Store) MarkSent(batch int, ids []string) error {
 		t.Status, t.Batch = Sent, batch
 	}
 	return s.save()
+}
+
+func (s *Store) SetShot(id, rel string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, err := s.find(id)
+	if err != nil {
+		return err
+	}
+	t.Shot = rel
+	return s.save()
+}
+
+func (s *Store) AddConsole(lines []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.console = append(s.console, lines...)
+}
+
+func (s *Store) TakeConsole() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lines := s.console
+	s.console = nil
+	return lines
 }
 
 func (s *Store) NextBatch() int {

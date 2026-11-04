@@ -56,7 +56,13 @@ type Codex struct {
 }
 
 type Review struct {
-	Port int `yaml:"port"`
+	Port    int    `yaml:"port"`
+	Browser string `yaml:"browser"`
+	Chrome  string `yaml:"chrome"`
+}
+
+func (r Review) FactoryChrome() bool {
+	return r.Browser != "system"
 }
 
 type Tmux struct {
