@@ -25,9 +25,18 @@ type Pipeline struct {
 }
 
 type Pipelines struct {
-	List           []Pipeline
-	Default        string
-	dropCodeRabbit bool
+	List    []Pipeline
+	Default string
+	repo    RepoSupport
+}
+
+type RepoSupport struct {
+	CodeRabbit bool
+	BrowserQA  bool
+}
+
+func (p Profile) Support() RepoSupport {
+	return RepoSupport{CodeRabbit: p.CodeRabbit == nil || *p.CodeRabbit, BrowserQA: p.BrowserQA()}
 }
 
 func (ps Pipelines) Names() []string {
@@ -54,7 +63,7 @@ func (ps Pipelines) Custom(stages []string) (Pipeline, error) {
 	if err := checkStages("--stages", stages); err != nil {
 		return Pipeline{}, err
 	}
-	return Pipeline{Name: CustomPipeline, Stages: EffectiveStages(stages, ps.dropCodeRabbit)}, nil
+	return Pipeline{Name: CustomPipeline, Stages: EffectiveStages(stages, ps.repo)}, nil
 }
 
 func checkStages(source string, stages []string) error {
@@ -88,8 +97,7 @@ func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelin
 			merged[name] = stages
 		}
 	}
-	dropCodeRabbit := profile.CodeRabbit != nil && !*profile.CodeRabbit
-	ps := Pipelines{Default: DefaultPipeline, dropCodeRabbit: dropCodeRabbit}
+	ps := Pipelines{Default: DefaultPipeline, repo: profile.Support()}
 	for _, source := range []struct{ path, name string }{{cfg.ConfigFile(), cfg.DefaultPipeline}, {profilePath, profile.DefaultPipeline}} {
 		if source.name == "" {
 			continue
@@ -100,22 +108,32 @@ func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelin
 		ps.Default = source.name
 	}
 	for _, name := range sortedNames(merged) {
-		ps.List = append(ps.List, Pipeline{Name: name, Stages: EffectiveStages(merged[name], dropCodeRabbit)})
+		ps.List = append(ps.List, Pipeline{Name: name, Stages: EffectiveStages(merged[name], ps.repo)})
 	}
 	return ps, nil
 }
 
-func EffectiveStages(chosen []string, dropCodeRabbit bool) []string {
+func EffectiveStages(chosen []string, repo RepoSupport) []string {
 	withoutQA := !slices.Contains(chosen, "qa")
 	var stages []string
 	for _, key := range StageKeys {
 		wanted := slices.Contains(chosen, key) || slices.Contains(alwaysRun, key)
-		removed := (key == "coderabbit" && dropCodeRabbit) || (withoutQA && dependsOnQA(key))
+		removed := (withoutQA && dependsOnQA(key)) || !repo.Offers(key)
 		if wanted && !removed {
 			stages = append(stages, key)
 		}
 	}
 	return stages
+}
+
+func (r RepoSupport) Offers(stage string) bool {
+	switch stage {
+	case "coderabbit":
+		return r.CodeRabbit
+	case "walkthrough":
+		return r.BrowserQA
+	}
+	return true
 }
 
 func AlwaysRuns(stage string) bool { return slices.Contains(alwaysRun, stage) }

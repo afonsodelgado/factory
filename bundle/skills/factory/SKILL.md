@@ -43,7 +43,7 @@ All state for a factory lives in the worktree the session runs in:
   plan.md, plan.html stage 3 output (schematic.html optional)
   review.md          stage 5 round log
   coderabbit.md      stage 6 triage log
-  handoff.md         stage 10 output
+  handoff.md         stage 11 output
   .heartbeat         touched by scripts/wait-for-review.sh on every poll
 ```
 
@@ -100,12 +100,12 @@ When it is missing everywhere, stop at preflight and ask the user to run `factor
 A pipeline is a named list of stage keys (`references/state.md`). Resolve the pipeline for a new factory like this:
 
 1. Start from the built-ins:
-   - `full`: `[requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, handoff]`
+   - `full`: `[requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, walkthrough, handoff]`
    - `quick`: `[requirements, plan, implement, review, handoff]`
 2. Read `pipelines` and `default_pipeline` from the global config, `${FACTORY_CONFIG_DIR:-~/.config/factory}/config.yml`, when it exists. An entry replaces the built-in of the same name.
 3. Read `pipelines` and `default_pipeline` from the repo config. Its entries and its `default_pipeline` win over the global config.
 4. With `--stages a,b,c`, the list is those keys and the name is `custom`. Otherwise the name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
-5. Add `requirements` and `handoff` when the list omits them. When the repo config says `coderabbit: false`, remove `coderabbit`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
+5. Add `requirements` and `handoff` when the list omits them. When the repo config says `coderabbit: false`, remove `coderabbit`. When its `qa.mode` is not `browser`, remove `walkthrough`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
 
 If the name is not a pipeline, a list holds a key that is not a stage key, or a config names a pipeline `custom`, stop at preflight and tell the user the file and the key.
 
@@ -136,7 +136,7 @@ Write every role to `state.agents`, including the ones that run on their frontma
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
    - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the repo config's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
-   - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead. When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
+   - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead, and a `walkthrough` stage removed by terminal QA gets "no browser stack on this repo". When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
    - **The agents.** Resolve them (see "Agent models") and write `agents`.
 3. Tell the user the plan in three lines: the pipeline and the stages it skips, the agents that do not run on their defaults, which gates need them, and that everything after the plan runs unattended until handoff.
 
@@ -250,7 +250,11 @@ When the repo config says `coderabbit: false`, mark the stage `skipped` with the
 
 SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" section on the QA-fixes layer. If no QA-fixes layer exists yet, create one. The developer's test rules apply: each test names the regression it prevents. It pushes. Unless stage 6 was skipped, CodeRabbit reviews the new layer when it is marked ready: run one more pass of stage 6 on that PR only.
 
-### 10 · handoff (lit)
+### 10 · walkthrough (lit, browser QA only)
+
+Not set up yet: mark it `skipped` with the note "walkthrough is not set up yet" and go to the handoff.
+
+### 11 · handoff (lit)
 
 Write `handoff.md` and post it to the user. Include:
 

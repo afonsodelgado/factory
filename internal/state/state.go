@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "handoff"}
+var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "walkthrough", "handoff"}
 
 type State struct {
 	ID             string                  `json:"id"`

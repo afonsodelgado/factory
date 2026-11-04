@@ -15,7 +15,7 @@ const (
 	SlotParking         = "hub-slot"
 	KeepAlive           = "hub-keep"
 	StageParking        = "s-"
-	SelectorWidth       = 34
+	SelectorWidth       = 35
 	NarrowSelectorWidth = 5
 	NarrowAt            = 100
 	PanelShare          = 1.0 / 3

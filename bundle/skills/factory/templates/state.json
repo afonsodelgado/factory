@@ -26,6 +26,7 @@
     "qa": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
     "qa_fixes": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
     "test_gaps": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
+    "walkthrough": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
     "handoff": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" }
   },
   "attention": [],

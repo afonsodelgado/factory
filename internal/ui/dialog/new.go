@@ -144,7 +144,7 @@ func (m *NewFactoryModel) runStages() []string {
 	if m.chosen == nil {
 		return m.presetStages(m.pipelineName())
 	}
-	return state.EffectiveStages(m.chosen, !m.selectedRepo().CodeRabbit)
+	return state.EffectiveStages(m.chosen, m.selectedRepo().Support())
 }
 
 func (m *NewFactoryModel) chosenPipeline() (string, []string) {
@@ -165,9 +165,8 @@ func (m *NewFactoryModel) resetChoices() {
 }
 
 func (m *NewFactoryModel) locked(stage string) bool {
-	codeRabbitOff := stage == "coderabbit" && !m.selectedRepo().CodeRabbit
 	qaSkipped := state.DependsOnQA(stage) && !slices.Contains(m.runStages(), "qa")
-	return state.AlwaysRuns(stage) || codeRabbitOff || qaSkipped
+	return state.AlwaysRuns(stage) || !m.selectedRepo().Support().Offers(stage) || qaSkipped
 }
 
 func (m *NewFactoryModel) toggle(stage string) {
@@ -778,6 +777,8 @@ func (m *NewFactoryModel) drawStageRow(c *theme.Canvas, y, i int, stage string, 
 	switch {
 	case stage == "coderabbit" && !m.selectedRepo().CodeRabbit:
 		c.Put(19, y, "off in this repo", theme.Quiet)
+	case stage == "walkthrough" && !m.selectedRepo().Browser:
+		c.Put(19, y, "browser QA repos only", theme.Quiet)
 	case role == "":
 		c.Put(19, y, "—", theme.Quiet)
 	default:
