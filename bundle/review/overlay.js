@@ -26,6 +26,9 @@
     showResolved: false,
     replying: null,
     pendingReload: false,
+    status: { owner: "", gate: "" },
+    sending: false,
+    confirmApprove: false,
   };
 
   function remember(name, value) {
@@ -84,12 +87,53 @@
   setInterval(schedulePins, 500);
 
   async function load() {
+    const page = encodeURIComponent(config.file);
     try {
-      state.threads = await api("GET", "/threads?page=" + encodeURIComponent(config.file));
+      const [threads, status] = await Promise.all([api("GET", "/threads?page=" + page), api("GET", "/status?page=" + page).catch(() => state.status)]);
+      state.threads = threads;
+      state.status = status;
     } catch (error) {
       toast("Could not load comments: " + error.message);
     }
     renderAll();
+  }
+
+  async function send() {
+    if (state.sending) return;
+    state.sending = true;
+    renderBar();
+    try {
+      const result = await api("POST", "/send", { page: config.file });
+      const who = result.target === "supervisor" ? "the supervisor" : "the " + result.target;
+      toast(`Sent ${result.count} ${result.count === 1 ? "comment" : "comments"} to ${who}.`);
+    } catch (error) {
+      toast("Not sent: " + error.message);
+    }
+    state.sending = false;
+    await load();
+  }
+
+  let confirmTimer;
+  async function approve() {
+    if (!state.confirmApprove) {
+      state.confirmApprove = true;
+      renderBar();
+      clearTimeout(confirmTimer);
+      confirmTimer = setTimeout(() => {
+        state.confirmApprove = false;
+        renderBar();
+      }, 4000);
+      return;
+    }
+    state.confirmApprove = false;
+    clearTimeout(confirmTimer);
+    try {
+      await api("POST", "/approve", { page: config.file });
+      toast("Approval sent to the supervisor.");
+    } catch (error) {
+      toast("Not approved: " + error.message);
+    }
+    await load();
   }
 
   function renderAll() {
@@ -170,9 +214,15 @@
       <button class="bar-button" data-action="panel" aria-expanded="${state.panelOpen}" title="Show comments">
         ${icon("list")}<span>${open} open</span>${drafts ? `<span class="badge">${drafts} not sent</span>` : ""}
       </button>
-      ${state.pendingReload ? `<span class="bar-note">New version waiting · finish your comment</span>` : ""}`;
+      ${state.pendingReload ? `<span class="bar-note">New version waiting · finish your comment</span>` : ""}
+      ${drafts ? `<button class="bar-button primary-pill" data-action="send" ${state.sending ? "disabled" : ""} title="Send the comments that are not sent yet${state.status.owner ? " to the " + state.status.owner : ""}">${icon("send")}<span>${state.sending ? "Sending…" : `Send ${drafts}`}</span></button>` : ""}
+      ${state.status.gate ? `<button class="bar-button approve ${state.confirmApprove ? "confirm" : ""}" data-action="approve" title="Approve this stage's gate">${icon("check")}<span>${state.confirmApprove ? "Click again to approve" : "Approve"}</span></button>` : ""}`;
     ui.bar.querySelector('[data-action="pick"]').onclick = () => (state.mode === "pick" ? stopPicking() : startPicking());
     ui.bar.querySelector('[data-action="panel"]').onclick = () => togglePanel();
+    const sendButton = ui.bar.querySelector('[data-action="send"]');
+    if (sendButton) sendButton.onclick = send;
+    const approveButton = ui.bar.querySelector('[data-action="approve"]');
+    if (approveButton) approveButton.onclick = approve;
   }
 
   function togglePanel(open = !state.panelOpen) {
@@ -651,6 +701,8 @@
       comment: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5z"/>',
       list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
       close: '<path d="M6 6l12 12M18 6L6 18"/>',
+      send: '<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
+      check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     };
     return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
   }
@@ -692,6 +744,11 @@
       .bar-button.active { background: var(--accent); color: var(--accent-fg); }
       .bar-button.active kbd { color: inherit; border-color: currentColor; }
       .bar-note { padding: 0 10px; color: var(--muted); font-size: 12px; }
+      .primary-pill { background: var(--accent); color: var(--accent-fg); }
+      .primary-pill:hover { background: var(--accent); filter: brightness(1.08); }
+      .primary-pill[disabled] { opacity: .6; cursor: progress; }
+      .approve { color: var(--ok); }
+      .approve.confirm { background: var(--ok); color: var(--accent-fg); }
       .badge { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--change) 18%, transparent); color: var(--change); font-size: 11px; font-weight: 600; }
       .composer { position: fixed; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); box-shadow: var(--shadow); pointer-events: auto; }
       .composer header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }

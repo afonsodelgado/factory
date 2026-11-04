@@ -38,7 +38,7 @@ func inboxMessages(stateDir string, it Item, delivered []string) []inboxMessage 
 	var messages []inboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
 	for _, run := range runs.Runs {
-		if run.Finished() && !slices.Contains(delivered, run.Result) {
+		if run.Finished() && !run.Review && !slices.Contains(delivered, run.Result) {
 			messages = append(messages, inboxMessage{key: run.Result, text: "stage " + run.Role + " done: " + run.Result})
 		}
 	}

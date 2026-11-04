@@ -83,6 +83,7 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer pages.Close()
+	pages.SetActions(hub.ReviewActions(events))
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, layout)
 	defer restore()
 	icons := theme.IconsFor(cfg.Icons)

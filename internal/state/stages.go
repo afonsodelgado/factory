@@ -17,6 +17,7 @@ type StageRun struct {
 	Prompt    string       `json:"prompt"`
 	Result    string       `json:"result"`
 	StartedAt time.Time    `json:"started_at"`
+	Review    bool         `json:"review,omitempty"`
 }
 
 func (r StageRun) Finished() bool {

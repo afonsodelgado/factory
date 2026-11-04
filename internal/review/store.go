@@ -14,6 +14,8 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
+const App = "app"
+
 const (
 	Draft    = "draft"
 	Sent     = "sent"
@@ -219,6 +221,36 @@ func (s *Store) OpenCount(page string) int {
 		}
 	}
 	return count
+}
+
+func (s *Store) Drafts(page string) []Thread {
+	var drafts []Thread
+	for _, t := range s.Threads(page) {
+		if t.Status == Draft {
+			drafts = append(drafts, t)
+		}
+	}
+	return drafts
+}
+
+func (s *Store) MarkSent(batch int, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.Batches = batch
+	for _, id := range ids {
+		t, err := s.find(id)
+		if err != nil {
+			return err
+		}
+		t.Status, t.Batch = Sent, batch
+	}
+	return s.save()
+}
+
+func (s *Store) NextBatch() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Batches + 1
 }
 
 func (s *Store) find(id string) (*Thread, error) {
