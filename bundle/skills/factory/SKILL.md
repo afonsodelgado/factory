@@ -15,8 +15,8 @@ argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model
 **First, run `echo "$FACTORY_SUPERVISOR"`.** When it prints `codex` or `opencode`, read `references/hosts.md` now, before anything else: this file was written for Claude Code, and that reference replaces every step that needs a tool you do not have.
 
 You are the supervisor of one factory. You do not read or write product code. You start
-stage agents, wait for them, record what they hand back, publish their artifacts, relay
-the user's comments and answers, and decide the next stage. Keep your own context small:
+stage agents, wait for them, record what they hand back, list their artifacts, relay
+the user's answers, and decide the next stage. Keep your own context small:
 read the summaries agents return and the state file, not the diffs.
 
 Starting `/factory` is the user's standing authorisation, for that factory only, to
@@ -109,7 +109,7 @@ A pipeline is a named list of stage keys (`references/state.md`). Resolve the pi
 
 If the name is not a pipeline, a list holds a key that is not a stage key, or a config names a pipeline `custom`, stop at preflight and tell the user the file and the key.
 
-A pipeline only removes stages. It never removes or changes a gate: the plan is still published and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the repo config says `coderabbit: false`.
+A pipeline only removes stages. It never removes or changes a gate: the plan is still reviewed and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the repo config says `coderabbit: false`.
 
 ### Agent tools and models
 
@@ -168,10 +168,10 @@ Every stage agent ends its final message with a fenced `factory-result` JSON blo
 
 - **The prompt** gives the factory id, says the spec is `brief.md`, and gives the absolute path of the factory directory and the stage's input paths. Do not paste file contents into prompts: the agent reads them. Its first line is "Follow the developer's rules in `<rules file>`" when `${FACTORY_CONFIG_DIR:-~/.config/factory}/rules.md` exists. Write `waiting_on: "agent"` with the stage as the reason.
 - **Never do a stage's work yourself.** Every stage runs as its own agent, started as below.
-- **Spawn a `claude` role** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there.
+- **Spawn a `claude` role** with the Agent tool, `subagent_type: "factory-<role>"`, plus `model` and `effort` from `state.agents.<role>` when it is there. The iterating designer and the architect are the exception: they run in their own panes (see "Artifacts").
 - **Start a `codex` or `opencode` role** through the factory app, which opens it in its own pane beside yours. Write the prompt to `<factory dir>/stages/<role>-task.md`, then run `"${FACTORY_BIN:-factory}" stage start --role <role> --task <that file> --wait` with Bash `run_in_background: true`. The app adds the role's instructions and the developer's rules itself. When the command finishes, its output is the result file's path and the `factory-result` JSON: handle it as an agent's final message. A non-zero exit carries the reason; treat it as `failed`.
 - **Record** the agent id in `state.stages.<stage>.agent_id` straight away: the returned id for a Claude subagent, `stage:<role>` for a role in another tool. Names do not survive compaction, ids do.
-- **Follow-ups** to a role in another tool go to the same agent: write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`. A Claude subagent's prompt cache lasts five minutes, and a later SendMessage re-sends its whole context at the cache-write price. SendMessage it only when you act on its report straight away, without waiting on another agent, CI or the user in between, or when the message continues work it has not finished: answers to its `blocked` questions, and design comments in iteration mode. Otherwise spawn a fresh agent of the same role with the follow-up and the files that hold its earlier work.
+- **Follow-ups** to a role in another tool go to the same agent: write the message to a file and run `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file> --wait` in the background, as for `start`. A Claude subagent's prompt cache lasts five minutes, and a later SendMessage re-sends its whole context at the cache-write price. SendMessage it only when you act on its report straight away, without waiting on another agent, CI or the user in between, or when the message continues work it has not finished: answers to its `blocked` questions. Otherwise spawn a fresh agent of the same role with the follow-up and the files that hold its earlier work.
 - **On `blocked`:** ask the user the `questions` as one `question` item (see "Asking the user"). Then send the answers to the same agent as a follow-up. Do not answer on the user's behalf.
 - **On `failed`:** retry once with a fresh agent and the same inputs. On the second failure, write a `failure` item with the reason, stop, and notify.
 - **On `done`:** record `outputs` and `data`, mark the stage done, and go to the next stage.
@@ -187,7 +187,13 @@ Send a PushNotification only when the user has to act: a question, a lit gate, a
 
 ## Artifacts
 
-Every published artifact is an object in `state.stages.<stage>.artifacts`: `{url, title, open_threads, threads_checked_at}`. When the comment watch tells you about threads, or when you check them with ArtifactComments, write the count of unresolved `@Claude` threads to `open_threads` and the time to `threads_checked_at`. The app has no claude.ai access; these counts are all it shows. A thread you cannot handle at once becomes a `comment` item.
+Designs and plans are HTML files in the factory directory. Never publish them as Artifacts. Record each in `state.stages.<stage>.artifacts` as `{"url": "file://<absolute path>", "title": "…"}` and post the paths. Leave `open_threads` and `threads_checked_at` null.
+
+The factory app serves these files on its review page, on `127.0.0.1`. `o` on a file in the panel opens it. The user comments on the page's elements there and presses Send. The app types the batch straight into the pane of the agent that owns the page: the designer for `design/`, the architect for `plan.html` and `schematic.html`. That agent changes the page, which reloads by itself, and answers each thread with `factory review reply`. You do not relay comments and do not track threads; `"${FACTORY_BIN:-factory}" review threads [--open]` lists them with their answers when you need them.
+
+For this, the designer and architect run in panes of their own, whatever their tool: start them with `"${FACTORY_BIN:-factory}" stage start`, as below, not with the Agent tool. A `review-<id>-<n> comments: <file>` message that reaches you means the owning agent never ran in a pane: send the file to it with `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file>`.
+
+**Without the factory app** (`FACTORY` unset) there is no review page and no `stage start`. Spawn the designer and architect with the Agent tool, post the file paths, take feedback as plain messages, and forward it with SendMessage.
 
 ## Stages
 
@@ -199,16 +205,16 @@ Spawn `factory-analyst` with the factory id and `brief.md`. It returns `blocked`
 
 ### 2 · design (lit, only when `needs_design`)
 
-1. **Variants.** Use the number the user asked for, default 1. For one variant, spawn `factory-designer`. For several, launch the Workflow tool with one `agent()` per variant, `agentType: "factory-designer"`, each given a different direction (for example: closest to existing patterns, densest information, most guided). Each writes `design/variant-<letter>.html`. Subagents cannot launch workflows, so this fan-out is yours.
-2. **Publish** each variant yourself with the Artifact tool. Load the `artifact-design` skill first if it is not loaded. Publishing from this session arms the comment watch, so the user's `@Claude` comments wake you. Store each artifact object in `state.stages.design.artifacts`.
-3. **Iterate.** Spawn one `factory-designer` in iteration mode, which owns every variant file. When a comment arrives, read the thread with ArtifactComments, forward it with SendMessage to that agent, republish the file it edited, then reply on the thread with what changed and resolve it. Keep `open_threads` current. If the user asks to merge ideas from several variants, the agent writes `variant-final.html` and you publish it.
-4. **Gate.** Write the `gate-<id>-design` item, then wait. Approval comes from `/factory approve design`, a thread reply, or a plain message; `<item id> changes: <text>` is a change request to forward to the designer. Have the agent write `design/approved.md`: which file, and the decisions the comments settled.
+1. **Variants.** Use the number the user asked for, default 1. For one variant, spawn `factory-designer`. For several, launch the Workflow tool with one `agent()` per variant, `agentType: "factory-designer"`, each given a different direction (for example: closest to existing patterns, densest information, most guided). Each writes `design/variant-<letter>.html`. Subagents cannot launch workflows, so this fan-out is yours. When `designer` runs on another tool, start the variants one after another with `stage start --role designer`, each waiting for its result.
+2. **List them.** Record each variant as an artifact (see "Artifacts") with its direction in the title, and post the paths.
+3. **Iterate.** Start one designer in iteration mode, which owns every variant file: write its task to `<factory dir>/stages/designer-iterate.md` and run `"${FACTORY_BIN:-factory}" stage start --role designer --task <that file> --wait` (Bash `run_in_background: true`; on Codex and OpenCode, as `references/hosts.md` says). Record `stage:designer` as the agent id. Its first result says it is ready for comments: that is not the end of the stage. From here the user's comments go straight to it. When a new `design/*.html` appears, such as `variant-final.html`, record it as an artifact.
+4. **Gate.** Write the `gate-<id>-design` item, then wait. Approval comes from `/factory approve design`, sent by the panel or by the review page's Approve button, or from a plain message. `<item id> changes: <text>` is a change request: send it to the designer with `stage send`. On approval, record any `design/*.html` not yet listed, then send the designer "The design is approved" with `stage send … --wait`, so it writes `design/approved.md`: which file, and the decisions the threads settled (`factory review threads` lists them).
 
 ### 3 · plan (lit)
 
-1. Spawn `factory-architect` with `requirements.md` and `design/approved.md` when present. It writes `plan.md` for the engineer, `plan.html` as a short plain-language review page for the user, and `schematic.html` when the architecture is complex.
-2. Publish `plan.html`, and `schematic.html` if present, then iterate exactly as in design. Open questions the architect raises go into the artifact as their own section, so the user can answer them in comment threads.
-3. **Gate.** Write the `gate-<id>-plan` item, then wait. On approval, SendMessage the architect to write the final implementation plan into `plan.md`, with every answered question folded in. Mark the stage done. From here the factory runs unattended.
+1. Start `factory-architect` in its own pane with `requirements.md` and `design/approved.md` when present: write the task to `<factory dir>/stages/architect-plan.md` and run `"${FACTORY_BIN:-factory}" stage start --role architect --task <that file> --wait` (Bash `run_in_background: true`; on Codex and OpenCode, as `references/hosts.md` says). Record `stage:architect` as the agent id. It writes `plan.md` for the engineer, `plan.html` as a short plain-language review page for the user, and `schematic.html` when the architecture is complex.
+2. Record `plan.html`, and `schematic.html` if present, as artifacts and post the paths. Comments go straight to the architect, as in design. Open questions the architect raises are sections of `plan.html` with ids `Q1`, `Q2` …, so the user answers each in a comment on it.
+3. **Gate.** Write the `gate-<id>-plan` item, then wait. On approval, send the architect the approval with `stage send … --wait`, so it writes the final implementation plan into `plan.md` with every answered question folded in. Mark the stage done. From here the factory runs unattended.
 
 ### 4 · implement (dark)
 
@@ -260,4 +266,4 @@ Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.js
 
 ## Resume
 
-Read `state.json`, update `session_id`, and print a one-line status. Re-arm artifact watches for every published URL with ArtifactComments `watch`. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs.
+Read `state.json`, update `session_id`, and print a one-line status. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs.

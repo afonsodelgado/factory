@@ -410,7 +410,7 @@ func resultContract(path string) string {
 	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file."
 }
 
-const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have, such as artifact-design or artifact-diagramming; for HTML, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the supervisor shows the files you write."
+const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have; for HTML without the factory-artifact skill, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the factory app serves the files you write."
 
 func stagePrompt(role, task, result, rules string, onClaude bool) (string, error) {
 	data, err := fs.ReadFile(bundle.Files, "agents/factory-"+role+".md")
