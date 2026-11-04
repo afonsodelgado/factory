@@ -515,6 +515,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.repoRequest(e)
 	case "stage":
 		return m.stageRequest(e)
+	case "review":
+		return m.reviewRequest(e)
 	case "delete":
 		return m.deleteRequest(e)
 	case "paste":

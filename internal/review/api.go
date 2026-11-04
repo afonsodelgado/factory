@@ -142,3 +142,43 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
+
+type Action struct {
+	Kind    string `json:"kind"`
+	Factory string `json:"factory"`
+	Page    string `json:"page"`
+}
+
+func (s *Server) SetActions(act func(Action) (any, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.act = act
+}
+
+func (s *Server) action(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		act := s.act
+		s.mu.Unlock()
+		if act == nil {
+			http.Error(w, "the hub is not taking actions", http.StatusServiceUnavailable)
+			return
+		}
+		page := r.URL.Query().Get("page")
+		if r.Method == http.MethodPost {
+			var body struct {
+				Page string `json:"page"`
+			}
+			if !readJSON(w, r, &body) {
+				return
+			}
+			page = body.Page
+		}
+		result, err := act(Action{Kind: kind, Factory: r.PathValue("key"), Page: page})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}

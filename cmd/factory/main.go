@@ -54,6 +54,8 @@ func run(args []string) int {
 		return runInstallHooks(args[1:])
 	case "stage":
 		return runStage(args[1:])
+	case "review":
+		return runReview(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -104,6 +106,11 @@ commands:
   stage ci <pr number>...
               wait for CI and CodeRabbit on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
+  review reply --thread <id> [--resolve] [text…]
+              answer a comment thread from the review page, and resolve it
+              when the change is made (run by a stage agent)
+  review threads [--page path] [--open]
+              list this factory's comment threads
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap

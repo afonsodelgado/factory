@@ -26,7 +26,17 @@ type Message struct {
 
 type Event struct {
 	Message
-	From *Conn
+	From  *Conn
+	Reply chan Message
+}
+
+func (e Event) respond(m Message) {
+	switch {
+	case e.Reply != nil:
+		e.Reply <- m
+	case e.From != nil:
+		e.From.Send(m)
+	}
 }
 
 type Conn struct {

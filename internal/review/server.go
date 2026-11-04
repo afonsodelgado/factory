@@ -37,6 +37,7 @@ type Server struct {
 	clients   map[chan event]bool
 	stores    map[string]*Store
 	now       func() time.Time
+	act       func(Action) (any, error)
 }
 
 type event struct {
@@ -153,6 +154,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PATCH /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.updateThread)))
 	mux.HandleFunc("DELETE /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.deleteThread)))
 	mux.HandleFunc("POST /r/{token}/{key}/_api/threads/{id}/replies", s.withToken(s.mutation(s.replyThread)))
+	mux.HandleFunc("GET /r/{token}/{key}/_api/status", s.withToken(s.action("status")))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/send", s.withToken(s.mutation(s.action("send"))))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/approve", s.withToken(s.mutation(s.action("approve"))))
 	return s.sameHost(mux)
 }
 
