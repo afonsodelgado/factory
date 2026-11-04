@@ -14,7 +14,8 @@ import (
 
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [text…]
        factory review threads [--page <path>] [--open]
-       factory review open [--factory <id>] <url>`
+       factory review open [--factory <id>] <url>
+       factory review stack`
 
 func runReview(args []string) int {
 	if len(args) == 0 {
@@ -28,6 +29,8 @@ func runReview(args []string) int {
 		return runReviewThreads(args[1:])
 	case "open":
 		return runReviewOpen(args[1:])
+	case "stack":
+		return runReviewStack()
 	}
 	fmt.Fprintln(os.Stderr, reviewUsage)
 	return 2
@@ -89,6 +92,16 @@ func runReviewOpen(args []string) int {
 		return 1
 	}
 	fmt.Printf("Opened %s in the factory's Chrome; comments go to %s.\n", flags.Arg(0), reply.Target)
+	return 0
+}
+
+func runReviewStack() int {
+	reply, err := askReview(hub.ReviewRequest{Action: "stack"})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory review:", err)
+		return 1
+	}
+	fmt.Printf("Starting the stack in its own window; the factory's Chrome opens %s once it answers.\n", reply.Target)
 	return 0
 }
 

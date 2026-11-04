@@ -81,6 +81,7 @@ type focusPollMsg struct{}
 type activeMsg string
 type eventMsg Event
 type changedMsg struct{}
+type noticeMsg string
 
 func NewModel(m Model) *Model {
 	model := &m
@@ -209,6 +210,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusFromPane(string(msg))
 	case eventMsg:
 		cmd = tea.Batch(m.handleEvent(Event(msg)), m.waitEvent())
+	case noticeMsg:
+		m.notice = string(msg)
 	case tea.KeyPressMsg:
 		m.focus = footer.Factories
 		m.notice = ""

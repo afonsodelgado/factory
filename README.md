@@ -226,6 +226,16 @@ Designs and plans are HTML pages in the factory directory, listed in the panel's
 
 The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` opens any page, such as your app on its dev server, in the factory's Chrome with the same comment layer; its comments go to the factory you run it from, or the one `--factory <id>` names.
 
+### Walking through the finished app
+
+In repos with browser QA, the `walkthrough` stage comes after QA, just before the handoff:
+
+1. QA writes a script that starts this worktree's stack on free ports, signed in as a test user.
+2. The hub runs that script in a window of its own, so you can see its logs.
+3. When the stack answers, the hub opens the app in the factory's Chrome with the same comment layer.
+
+Click through the change and comment on anything you want different. Each Send goes to the fixer, which changes the code on the QA-fixes layer. The dev server reloads the change in the same tab, and the fixer answers each thread. Approve on the page or in the panel when it is right. The stack stops when the factory is done.
+
 ## Configuration
 
 `~/.config/factory/config.yml` (or `$FACTORY_CONFIG_DIR/config.yml`):

@@ -33,6 +33,20 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
 
+## Stack mode
+
+Applies when the prompt says **stack mode** (the factory's walkthrough, or a design stage with prototypes). Do not test. Bring up this worktree's stack for the developer and hand it over:
+
+1. Follow Phase 2's browser mode and the notes to find free ports, run migrations and seed a test principal, exactly as for testing. Never reuse a stack another checkout runs.
+2. Write `<factory dir>/review/stack.sh`: a POSIX shell script that starts the whole stack in the foreground from the worktree, with every environment variable and port it needs, and stops all of it when its window closes or on Ctrl-C (`trap 'kill 0' HUP INT TERM EXIT`). Run it in the background, check that `qa.health` and the web port answer, then stop it. The factory app runs it again in a window of its own, where the developer can see its logs.
+3. Sign the test principal in the way the notes say, and record what the browser needs to be signed in: for a session cookie, its name and value.
+4. Write `<factory dir>/review/stack.json`:
+   ```json
+   {"url": "http://localhost:<web port>/<the page the change is on>", "script": "<abs path of stack.sh>", "health": "<health URL on the new port>", "cookies": [{"name": "<cookie>", "value": "<value>", "domain": "localhost", "path": "/"}]}
+   ```
+   Leave `cookies` empty when the app needs no sign-in.
+5. Make sure nothing you started is still running, then return `done` with the URL in `summary` and both paths in `outputs`.
+
 ## Ground rules
 
 - **Local only.** Never prod, never staging, never a production database, even read-only.

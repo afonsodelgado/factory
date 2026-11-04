@@ -7,7 +7,7 @@ description: |
   handoff. This session is the supervisor; every stage runs as a factory-* subagent that
   hands off through files. Use when the user says "/factory <id>", "/factory status",
   "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
-argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan> [item id] [notes] | skip <stage>"
+argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan|walkthrough> [item id] [notes] | skip <stage>"
 ---
 
 # Factory supervisor
@@ -92,7 +92,7 @@ When it is missing everywhere, stop at preflight and ask the user to run `factor
 - `/factory <id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` picks the pipeline a new factory runs, and `--stages` gives its exact list instead (see "The pipeline"). Each `--agent` sets one agent's model, effort or both for this factory (see "Agent models"). On resume all three are ignored, because `state.json` already records them. The lines after the first line of the message are the prompt.
 - `/factory resume`: find the factory from the current branch or the only open `state.json`, then resume.
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
-- `/factory approve <design|plan> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
+- `/factory approve <design|plan|walkthrough> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
 - `/factory skip <stage>`: record `skipped` with the user's reason and move on.
 
 ### The pipeline
@@ -252,7 +252,13 @@ SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" sec
 
 ### 10 · walkthrough (lit, browser QA only)
 
-Not set up yet: mark it `skipped` with the note "walkthrough is not set up yet" and go to the handoff.
+The user tries the finished change in the running app and comments on it; the fixer acts on every comment while they watch.
+
+1. **Stack.** Spawn `factory-qa` in stack mode on the top branch: "stack mode: bring up this worktree's stack for the walkthrough, signed in". It writes `review/stack.sh` and `review/stack.json`.
+2. **Fixer.** Start the fixer in its own pane in walkthrough mode: write its task to `<factory dir>/stages/fixer-walkthrough.md` and run `"${FACTORY_BIN:-factory}" stage start --role fixer --task <that file> --wait` (Bash `run_in_background: true`; on Codex and OpenCode, as `references/hosts.md` says). Its first result says it is ready: that is not the end of the stage.
+3. **Open.** Run `"${FACTORY_BIN:-factory}" review stack`. The factory app runs the stack in a window of its own and opens the app, signed in, in its Chrome with the comment layer. Comments the user sends go straight to the fixer.
+4. **Gate.** Write the `gate-<id>-walkthrough` item: its body names the URL and says to comment on anything that should change, then approve on the page or in the panel. Wait. `<item id> changes: <text>` goes to the fixer with `stage send`.
+5. On approval, record the fixer's PR in `state.prs` with `qa_fixes: true` if it is new, list the open threads (`factory review threads --open`) for the handoff, and mark the stage done. The stack stops when the factory is done.
 
 ### 11 · handoff (lit)
 
@@ -261,6 +267,7 @@ Write `handoff.md` and post it to the user. Include:
 - the PRs in merge order, with links
 - what QA verified, with the report path; when the pipeline skipped `qa`, say that QA was not run
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
+- the walkthrough's threads still open, each with its page and the fixer's last answer; when the pipeline skipped `walkthrough`, say so
 
 Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.
 

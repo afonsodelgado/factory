@@ -72,6 +72,9 @@ func (m *Model) reviewRequest(e Event) tea.Cmd {
 	if err == nil && r.Action == "open" {
 		return m.openApp(e, r)
 	}
+	if err == nil && r.Action == "stack" {
+		return m.startStack(e, r)
+	}
 	if err == nil {
 		reply, err = m.review(r)
 	}
