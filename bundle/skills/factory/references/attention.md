@@ -27,7 +27,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | `questions` | `question` only: the questions in order |
 | `options` | `question` only: one list of options per question, empty for free text |
 | `recommended` | `question` only: one recommended answer per question |
-| `artifact_url`, `thread_id` | `gate` and `comment`: the artifact, and the thread for a comment |
+| `artifact_url`, `thread_id` | `gate` and `comment`: the artifact, and the thread for a comment. Factories started before the review page have `comment` items; new ones do not |
 | `created_at`, `resolved_at` | ISO 8601 UTC |
 
 ## Ids

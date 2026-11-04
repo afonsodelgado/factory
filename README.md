@@ -47,7 +47,7 @@ requirements ─ design ─ plan ─ implement ─ review ─ coderabbit ─ qa 
   you answer   you approve  you approve                                                  yours to merge
 ```
 
-The plan is always published and approved before any code is written. At the end you get a stack of draft PRs and a handoff note. **Merging is yours.** The factory never merges, deploys or force-pushes `main`.
+The plan is always reviewed and approved before any code is written. At the end you get a stack of draft PRs and a handoff note. **Merging is yours.** The factory never merges, deploys or force-pushes `main`.
 
 Small change? `--pipeline quick` runs requirements, plan, implement, review and handoff. The plan still waits for your approval.
 
@@ -215,6 +215,17 @@ Inside the hub, `?` lists every key. `M-0` returns to the factory list from any 
 
 `d` deletes the selected factory in any status, and `factory delete <id> [--repo path]` does the same from the shell. Delete closes the factory's pane, force-removes its worktree, force-deletes its local branch and every local branch of its PR stack, and removes its factory and QA directories (in the worktree, the main checkout and `.claude/factory-archive`), its `.ready` marker, activity log, drafts and registry entry. A new factory with the same id then gets that id and starts empty. Pushed PRs and remote branches are never touched. Delete always asks first; when the worktree has uncommitted changes or a branch has commits no remote branch has, it lists them and asks a second time, and `factory delete` refuses that second question when stdin is not a terminal. `--yes` skips only the first question. A delete that fails part way says which step failed; running it again finishes the job.
 
+### Reviewing designs and plans
+
+Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `o` opens one on the hub's review page on `127.0.0.1`, in any browser. There:
+
+- `C`, then click anything, leaves a comment on that element: a fix, a change or a question. *Comment on the whole page* in the comments list covers the rest.
+- Comments are saved as you write them. **Send** delivers the ones not sent yet to the agent that owns the page: the designer or the architect, in its own pane.
+- The agent changes the page, which reloads by itself, and answers each thread. Reply on a thread to keep the conversation going; your reply goes out with the next Send.
+- **Approve** appears while the page's gate is open and sends the same approval as the panel.
+
+The panel shows each page's open threads. `factory review threads` lists them in a terminal.
+
 ## Configuration
 
 `~/.config/factory/config.yml` (or `$FACTORY_CONFIG_DIR/config.yml`):
@@ -268,7 +279,7 @@ Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace
 
 Pick the stages when you create a factory: the `n` dialog has a step of its own for them, "Stages & agents", between the id and the prompt. It starts at `default_pipeline`. `tab` loads the next preset, `↑↓` move through the stages, `space` checks or unchecks the selected one, and `⏎` goes on to the prompt. When the checked stages match no preset, the factory runs a `custom` pipeline. From the shell, use `factory open <id> --pipeline <name>` for a preset, or `--stages a,b,c` for an exact list; give one or the other, not both. An unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
 
-A pipeline only removes stages. The gates stay: `quick` still publishes the plan and waits for your approval before any code is written. `coderabbit: false` in the repo config still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
+A pipeline only removes stages. The gates stay: `quick` still shows you the plan and waits for your approval before any code is written. `coderabbit: false` in the repo config still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
 
 ## Agent models
 
@@ -303,7 +314,7 @@ In the dialog's "Stages & agents" step, `t` cycles a row's tool, and the top row
 
 A role on another tool runs in its own pane, and while it works the hub splits the session view and shows it beside the supervisor; the split closes when the stage writes its result. The supervisor starts and follows up with these roles through `factory stage`. Codex runs each stage unattended, in a sandbox that may write the worktree, the repo's git dir and the caches above, and reach the network.
 
-With a Claude supervisor nothing else changes: `claude` roles are still subagents, and designs and plans are still artifacts you comment on. With a Codex or OpenCode supervisor, designs and plans stay as HTML files in the factory directory, listed in the panel's Artifacts tab. `o` opens them through the hub on `127.0.0.1`, where a page reloads by itself when the agent rewrites it, and you give feedback in the session or from the panel. OpenCode has no `/factory` command: it reads the factory skill from `~/.claude/skills`, so the app sends it `Use the factory skill for: /factory …` instead.
+With a Claude supervisor, `claude` roles are still subagents, except the iterating designer and the architect, which run in panes of their own so your comments reach them. OpenCode has no `/factory` command: it reads the factory skill from `~/.claude/skills`, so the app sends it `Use the factory skill for: /factory …` instead.
 
 Your coding rules go in `~/.config/factory/rules.md` (or `$FACTORY_CONFIG_DIR/rules.md`). Every stage agent receives them, on every tool, before the repo's own `AGENTS.md` and `CLAUDE.md`.
 

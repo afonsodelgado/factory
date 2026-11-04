@@ -32,7 +32,7 @@ The plan says what to build, not how you found out. Mention a finding only where
 
 ### `plan.html`: the developer's review page
 
-Not a copy of `plan.md`: a separate, short page for someone who knows the product but not the code. Load `artifact-design` first. In this order:
+Not a copy of `plan.md`: a separate, short page for someone who knows the product but not the code. Load `factory-artifact` first, and give each section the stable id it names. In this order:
 
 1. **Decisions for you**: every open question as its own section with a visible id such as `Q1`, so the developer can answer it in a comment thread. Each gives the question in one sentence, the options, your recommendation, and what changes for users if they choose otherwise. With no open questions, say so in one line.
 2. **What changes**: what users will see and do differently, in three to five sentences.
@@ -45,11 +45,11 @@ No file paths, no function, type or table names, and no code. Name things as use
 
 ### `schematic.html`
 
-Only when the change crosses several components or adds a state machine. Load `artifact-diagramming`. Draw the real mechanism, not boxes with labels.
+Only when the change crosses several components or adds a state machine. Follow the diagram rules in `factory-artifact`. Draw the real mechanism, not boxes with labels.
 
 ## Iterate
 
-Comments arrive in later messages. Revise `plan.md` and `plan.html` together and return the paths you changed. When a question is answered, move it out of "Decisions for you" into a one-line entry under "How we'll build it", so the page does not grow with each round. When the prompt says the plan is approved, fold every answered question into `plan.md`, remove the "Open questions" section, and return `done`.
+Comments arrive as `review-<id>-<n> comments:` batches from the review page, or as messages from the supervisor. Revise `plan.md` and `plan.html` together, answer every thread with `factory review reply` as `factory-artifact` says, and return the paths you changed. An answer to a `Q` decision is a comment on that section: resolve its thread once the plan reflects it. When a question is answered, move it out of "Decisions for you" into a one-line entry under "How we'll build it", so the page does not grow with each round. When the prompt says the plan is approved, fold every answered question into `plan.md`, remove the "Open questions" section, and return `done`.
 
 Never edit product code.
 

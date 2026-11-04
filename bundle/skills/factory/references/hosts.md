@@ -9,7 +9,6 @@ The factory app sets `FACTORY_SUPERVISOR` to the tool this session runs in: `cla
 | SendMessage a stage agent | `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file>`, without `--wait`, then end your turn. |
 | The agent's final message | A message `stage <role> done: <result file>` arrives in this session when the agent finishes. Read the `factory-result` JSON from that file and continue as the skill says for `done`, `blocked` or `failed`. |
 | Workflow fan-out for design variants | Start the variants one after another with `"${FACTORY_BIN:-factory}" stage start --role designer`, waiting for each `done` message. |
-| Publish an artifact; ArtifactComments | Do not publish. Post the absolute path of every HTML file the designer or architect wrote, and record each as an artifact `{"url": "file://<absolute path>", "title": "…"}` so the panel lists it and opens it in the browser. Feedback arrives as plain messages in this session or as `<item id> changes: <text>` from the panel; forward it to the agent as a follow-up, then post the updated paths. `open_threads` stays `null`. |
 | `scripts/wait-for-review.sh` with `run_in_background` | Run `"${FACTORY_BIN:-factory}" stage ci <pr numbers…>` and end your turn. The app waits for CI and CodeRabbit and types the summary into this session. |
 | PushNotification | Skip it. The factory app alerts on every open attention item. |
 | AskUserQuestion | Always ask in plain text, in the factory-app form. |
