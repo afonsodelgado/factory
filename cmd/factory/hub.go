@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -84,6 +85,11 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	}
 	defer pages.Close()
 	pages.SetActions(hub.ReviewActions(events))
+	var chrome *review.Browser
+	if cfg.Review.FactoryChrome() {
+		chrome = pages.NewBrowser(filepath.Join(cfg.StateDir, "chrome"), cfg.Review.Chrome, false)
+		defer chrome.Close()
+	}
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, layout)
 	defer restore()
 	icons := theme.IconsFor(cfg.Icons)
@@ -107,8 +113,9 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		Watch:  watch,
 		GitHub: &hub.GitHub{Run: hub.RunGH},
 		Typist: engine,
-		Open:   openURL,
+		Open:   reviewOpener(pages, chrome),
 		Review: pages,
+		Chrome: chrome,
 		Bell:   os.Stderr,
 		Notify: notify,
 		Icons:  icons,
@@ -132,6 +139,15 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
 	}
 	return err
+}
+
+func reviewOpener(pages *review.Server, chrome *review.Browser) func(string) {
+	return func(url string) {
+		if chrome != nil && strings.HasPrefix(url, pages.Origin()+"/") && chrome.OpenPage(url) == nil {
+			return
+		}
+		openURL(url)
+	}
 }
 
 func startReview(cfg *state.Config) (*review.Server, error) {

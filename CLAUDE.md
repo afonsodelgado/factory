@@ -45,6 +45,7 @@ Tests, manual runs and QA never touch the real machine:
 
 - tmux: always `tmux -L <scratch name> -f /dev/null`. Never the default server, never the user's `tmux.conf`.
 - `FACTORY_CONFIG_DIR`, `FACTORY_STATE_DIR`, `FACTORY_TMUX_SOCKET` and `CLAUDE_CONFIG_DIR` point at temporary directories.
+- Chrome: tests and QA start it headless with a temporary profile, never the user's profile or `$FACTORY_STATE_DIR/chrome` of the real machine.
 - Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory` or `~/.local/state/factory`.
 - `factory` and `factory open` set up the repo they run in, as `init` does. Run `init`, `factory` and `factory open` only in a temporary git repo, with `HOME`, `FACTORY_CONFIG_DIR` and `FACTORY_STATE_DIR` pointing at temporary directories, never in a real repo.
 

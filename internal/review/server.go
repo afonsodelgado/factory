@@ -38,6 +38,7 @@ type Server struct {
 	stores    map[string]*Store
 	now       func() time.Time
 	act       func(Action) (any, error)
+	browser   *Browser
 }
 
 type event struct {
@@ -116,6 +117,27 @@ func (s *Server) PageURL(fileURL string) (string, bool) {
 		return "", false
 	}
 	return s.pageURL(f.Key, rel), true
+}
+
+func (s *Server) factoryOfPage(raw string) (Factory, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || "http://"+u.Host != s.Origin() {
+		return Factory{}, false
+	}
+	return s.factoryOfAPI(u.Path)
+}
+
+func (s *Server) factoryOfAPI(path string) (Factory, bool) {
+	rest, ok := strings.CutPrefix(path, "/r/"+s.token+"/")
+	if !ok {
+		return Factory{}, false
+	}
+	key, _, _ := strings.Cut(rest, "/")
+	key, err := url.PathUnescape(key)
+	if err != nil {
+		return Factory{}, false
+	}
+	return s.factory(key)
 }
 
 func (s *Server) locate(path string) (Factory, string, bool) {
@@ -368,6 +390,9 @@ func (s *Server) broadcast(e event) {
 }
 
 func (s *Server) broadcastLocked(e event) {
+	if s.browser != nil {
+		s.browser.push(e)
+	}
 	for c := range s.clients {
 		select {
 		case c <- e:

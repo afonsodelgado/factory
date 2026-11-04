@@ -111,6 +111,9 @@ commands:
               when the change is made (run by a stage agent)
   review threads [--page path] [--open]
               list this factory's comment threads
+  review open [--factory id] <url>
+              open any page, such as the running app, in the factory's
+              Chrome with the comment layer
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap

@@ -40,6 +40,7 @@ type Model struct {
 	Typist Typist
 	Open   func(url string)
 	Review *review.Server
+	Chrome *review.Browser
 
 	DialogCommand func(kind string) string
 	Bell          io.Writer

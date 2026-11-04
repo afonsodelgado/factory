@@ -20,6 +20,8 @@ const reviewWait = 10 * time.Second
 
 type ReviewRequest struct {
 	Action  string `json:"action"`
+	URL     string `json:"url,omitempty"`
+	ID      string `json:"id,omitempty"`
 	Token   string `json:"token,omitempty"`
 	Cwd     string `json:"cwd,omitempty"`
 	Factory string `json:"factory,omitempty"`
@@ -67,6 +69,9 @@ func (m *Model) reviewRequest(e Event) tea.Cmd {
 	var r ReviewRequest
 	var reply ReviewReply
 	err := json.Unmarshal(e.Data, &r)
+	if err == nil && r.Action == "open" {
+		return m.openApp(e, r)
+	}
 	if err == nil {
 		reply, err = m.review(r)
 	}
@@ -106,7 +111,39 @@ func (m *Model) review(r ReviewRequest) (ReviewReply, error) {
 	return ReviewReply{}, fmt.Errorf("unknown review action %q", r.Action)
 }
 
+func (m *Model) openApp(e Event, r ReviewRequest) tea.Cmd {
+	fail := func(err error) tea.Cmd {
+		e.respond(Message{T: "error", Error: err.Error()})
+		return nil
+	}
+	if m.Chrome == nil || m.Review == nil {
+		return fail(errors.New("the factory's Chrome is off; set review.browser to chrome"))
+	}
+	it, ok := m.reviewItem(r)
+	if !ok {
+		return fail(errors.New("no factory owns this session; pass --factory <id>"))
+	}
+	chrome, f, url := m.Chrome, reviewFactory(it), r.URL
+	return func() tea.Msg {
+		if _, err := chrome.OpenApp(url, f, nil); err != nil {
+			e.respond(Message{T: "error", Error: err.Error()})
+			return nil
+		}
+		data, _ := json.Marshal(ReviewReply{Target: f.Label})
+		e.respond(Message{T: "done", Data: data})
+		return nil
+	}
+}
+
 func (m *Model) reviewItem(r ReviewRequest) (Item, bool) {
+	if r.ID != "" {
+		for _, it := range m.snap.Items {
+			if it.Factory.Label() == r.ID {
+				return it, true
+			}
+		}
+		return Item{}, false
+	}
 	if r.Factory != "" {
 		for _, it := range m.snap.Items {
 			if reviewKey(it.Factory) == r.Factory {
@@ -150,7 +187,7 @@ func (m *Model) sendReview(it Item, store *review.Store, page string) (ReviewRep
 	}
 	batch := store.NextBatch()
 	id := review.BatchID(it.Factory.Label(), batch)
-	path, text, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, batch)
+	path, text, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
 	if err != nil {
 		return ReviewReply{}, err
 	}

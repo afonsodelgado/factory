@@ -15,7 +15,7 @@ func BatchPath(factoryDir string, batch int) string {
 	return filepath.Join(factoryDir, "review", fmt.Sprintf("batch-%d.md", batch))
 }
 
-func WriteBatch(factoryDir, id, page string, threads []Thread, batch int) (string, string, error) {
+func WriteBatch(factoryDir, id, page string, threads []Thread, console []string, batch int) (string, string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s comments: %s\n\n", id, page)
 	if page != App {
@@ -24,6 +24,12 @@ func WriteBatch(factoryDir, id, page string, threads []Thread, batch int) (strin
 	b.WriteString("Act on each thread: change what it is about, or answer the question without changing anything. Then answer every thread with `factory review reply --thread <id> [--resolve] <text>`. Resolve it when you made the change; leave it open when you answered a question or need the developer.\n")
 	for _, t := range threads {
 		writeThread(&b, factoryDir, t)
+	}
+	if len(console) > 0 {
+		b.WriteString("\n## Browser errors since the last send\n\n")
+		for _, line := range console {
+			fmt.Fprintf(&b, "- %s\n", oneLine(line, 300))
+		}
 	}
 	path := BatchPath(factoryDir, batch)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -224,7 +224,7 @@ Designs and plans are HTML pages in the factory directory, listed in the panel's
 - The agent changes the page, which reloads by itself, and answers each thread. Reply on a thread to keep the conversation going; your reply goes out with the next Send.
 - **Approve** appears while the page's gate is open and sends the same approval as the panel.
 
-The panel shows each page's open threads. `factory review threads` lists them in a terminal.
+The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` opens any page, such as your app on its dev server, in the factory's Chrome with the same comment layer; its comments go to the factory you run it from, or the one `--factory <id>` names.
 
 ## Configuration
 
@@ -244,9 +244,11 @@ claude:
   remote_control: true
 review:
   port: 7417
+  browser: chrome
+  chrome: ""
 ```
 
-`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. `review.port` is where the hub serves the factories' design and plan pages on `127.0.0.1`; when another program holds it, the hub takes a free port. Every other value above is the default.
+`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. `review.port` is where the hub serves the factories' design and plan pages on `127.0.0.1`; when another program holds it, the hub takes a free port. `review.browser: chrome` opens them in a Chrome window that factory drives, with its own profile in the state directory, so comments carry a screenshot of the element and the page's console errors and failed requests; `system` opens them in your default browser instead, without those. `review.chrome` names the Chrome binary when it is not in the usual place. Every other value above is the default.
 
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`.
 

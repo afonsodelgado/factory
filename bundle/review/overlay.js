@@ -1,15 +1,19 @@
 (() => {
+  if (window.top !== window || window.__factoryReviewLoaded) return;
   const script = document.currentScript;
-  if (!script || window.__factoryReviewLoaded) return;
+  const config = script && script.dataset.factoryReview !== undefined ? { ...script.dataset } : window.__factoryReviewConfig;
+  if (!config) return;
   window.__factoryReviewLoaded = true;
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => start(config), { once: true });
+  else start(config);
+})();
 
-  const config = {
-    events: script.dataset.events,
-    api: script.dataset.api,
-    page: script.dataset.page,
-    file: script.dataset.file,
-  };
+function start(config) {
   const factoryKey = config.page.split("/")[0];
+  const isApp = config.file === "app";
+  const binding = typeof window.__factoryReview === "function" ? window.__factoryReview : null;
+  const pendingCalls = new Map();
+  let callSeq = 0;
   const sessionKey = (name) => "factory-review:" + name + ":" + config.page;
   const intents = [
     ["fix", "Fix"],
@@ -40,7 +44,22 @@
     return null;
   }
 
+  window.__factoryReviewReceive = (id, status, text) => {
+    const call = pendingCalls.get(id);
+    if (!call) return;
+    pendingCalls.delete(id);
+    if (status >= 200 && status < 300) call.resolve(JSON.parse(text));
+    else call.reject(new Error(String(text).trim() || "status " + status));
+  };
+
   async function api(method, path, body) {
+    if (binding) {
+      return new Promise((resolve, reject) => {
+        const id = ++callSeq;
+        pendingCalls.set(id, { resolve, reject });
+        binding(JSON.stringify({ id, api: config.api, method, path, body }));
+      });
+    }
     const response = await fetch(config.api + path, {
       method,
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
@@ -143,6 +162,13 @@
   }
 
   function connectEvents() {
+    window.__factoryReviewEvent = (name, data) => {
+      if (name === "threads" && data === factoryKey) load();
+    };
+    window.__factoryReviewHide = (hidden) => {
+      host.style.visibility = hidden ? "hidden" : "";
+    };
+    if (!config.events) return;
     const events = new EventSource(config.events);
     let reloadTimer;
     events.addEventListener("change", (e) => {
@@ -185,6 +211,23 @@
 
   function pageThreads() {
     return state.threads.filter((t) => t.page === config.file);
+  }
+
+  function onThisURL(thread) {
+    if (!isApp || !thread.anchor.url) return true;
+    try {
+      return new URL(thread.anchor.url).pathname === location.pathname;
+    } catch {
+      return true;
+    }
+  }
+
+  function pathOf(thread) {
+    try {
+      return new URL(thread.anchor.url).pathname;
+    } catch {
+      return "";
+    }
   }
 
   function numberOf(thread) {
@@ -524,6 +567,7 @@
   function renderPins() {
     ui.pins.innerHTML = "";
     for (const thread of visibleThreads()) {
+      if (!onThisURL(thread)) continue;
       const element = locate(thread);
       if (!element) continue;
       const rect = element.getBoundingClientRect();
@@ -574,7 +618,8 @@
   }
 
   function card(thread) {
-    const located = !thread.anchor.selector || locate(thread) !== null;
+    const elsewhere = !onThisURL(thread);
+    const located = elsewhere || !thread.anchor.selector || locate(thread) !== null;
     const status = { draft: "Not sent", sent: "Sent", resolved: "Resolved" }[thread.status];
     const replying = state.replying === thread.id;
     return `<li class="card ${thread.status}" data-id="${thread.id}" tabindex="0">
@@ -584,6 +629,7 @@
         <span class="status">${status}</span>
         ${thread.anchor.selector ? "" : `<span class="muted">whole page</span>`}
       </div>
+      ${isApp ? `<p class="where">${elsewhere ? `<a href="${escapeHTML(thread.anchor.url)}">${escapeHTML(pathOf(thread))}</a>` : escapeHTML(pathOf(thread))}</p>` : ""}
       ${located ? "" : `<p class="detached">The element is gone from this version of the page.</p>`}
       ${thread.messages.map((m) => `<div class="message ${m.by === "you" ? "mine" : "theirs"}"><span class="by">${escapeHTML(m.by)}</span><p>${escapeHTML(m.text)}</p></div>`).join("")}
       ${replying ? `<form class="reply"><textarea rows="3" placeholder="Reply" aria-label="Reply"></textarea><div><button type="button" class="ghost" data-action="cancel-reply">Cancel</button><button class="primary">Reply</button></div></form>` : ""}
@@ -782,6 +828,8 @@
       .intent { font-size: 11px; font-weight: 600; text-transform: capitalize; }
       .intent.fix { color: var(--fix); } .intent.change { color: var(--change); } .intent.question { color: var(--question); }
       .status { margin-left: auto; font-size: 11px; color: var(--muted); }
+      .where { margin: 0 0 6px; font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+      .where a { color: var(--accent); }
       .detached { margin: 0 0 6px; padding: 6px 8px; border-radius: 6px; background: var(--raised); color: var(--muted); font-size: 12px; }
       .message { margin-top: 6px; }
       .message .by { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: capitalize; }
@@ -794,4 +842,4 @@
       @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     `;
   }
-})();
+}
