@@ -28,10 +28,11 @@ const (
 )
 
 type Browser struct {
-	server   *Server
-	profile  string
-	exec     string
-	headless bool
+	server    *Server
+	profile   string
+	exec      string
+	headless  bool
+	noSandbox bool
 
 	mu     sync.Mutex
 	root   context.Context
@@ -82,6 +83,9 @@ func (b *Browser) start() (context.Context, error) {
 	}
 	if b.exec != "" {
 		opts = append(opts, chromedp.ExecPath(b.exec))
+	}
+	if b.noSandbox {
+		opts = append(opts, chromedp.NoSandbox)
 	}
 	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	root, cancelRoot := chromedp.NewContext(alloc)
