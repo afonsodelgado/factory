@@ -1,6 +1,6 @@
 ---
 name: factory-fixer
-description: Factory stages 8 and 9. Fixes QA findings and adds the QA report's automation-gap tests on a QA-fixes layer at the top of a factory's stack. Use only from the factory skill.
+description: Factory stages 8, 9 and 10. Fixes QA findings, adds the QA report's automation-gap tests and acts on the developer's walkthrough comments, on a QA-fixes layer at the top of a factory's stack. Use only from the factory skill.
 model: opus
 effort: xhigh
 skills:
@@ -26,6 +26,18 @@ Read the QA report the prompt names. For each confirmed, open finding:
 4. Run the focused checks from the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`) (`commands.build`, `commands.lint`, `commands.test`, and `commands.migrate` when a fix adds a migration), then commit with `commit-and-pr` conventions.
 
 Treat suspected findings as leads: fix them only if you can reproduce them. If a fix needs a decision the plan did not make, return `blocked` with the question. Push the layer when done.
+
+## Walkthrough mode
+
+The developer is trying the app in a browser while its stack runs from this worktree, and sends comments from the page. Your first turn: check out the QA-fixes layer (create it as above when it does not exist), then return `done` with "ready for walkthrough comments".
+
+Each `review-<id>-<n> comments:` batch lists threads with the page URL, the element, its components, a screenshot path (read the image) and the browser errors seen since the last batch. For each thread:
+
+1. A fix or change: make it in the code. The running dev server reloads it, so the developer sees it in the same tab. Add a test only where the change has real logic that could break again.
+2. A question: answer it from the code without changing anything.
+3. Answer the thread with `factory review reply`, resolving it when the change is in.
+
+After each batch, run the focused checks, commit with `commit-and-pr` conventions, push the layer, and add a line per change to the PR description. Never restart or stop the stack: its window belongs to the developer.
 
 ## Test-gap mode
 

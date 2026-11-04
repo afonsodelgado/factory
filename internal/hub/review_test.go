@@ -158,3 +158,41 @@ func TestAReviewRoundDoesNotTellTheSupervisorTheStageIsDone(t *testing.T) {
 		t.Errorf("inbox %+v; want only the real stage result, never the review round's, which would move the supervisor past its gate", messages)
 	}
 }
+
+func TestTheWalkthroughStackRunsInItsOwnWindowAndStopsWithTheFactory(t *testing.T) {
+	e, l := hubFixture(t)
+	worktree := t.TempDir()
+	dir := filepath.Join(worktree, ".claude", "factory", "csv")
+	script := filepath.Join(dir, "review", "stack.sh")
+	writeFile(script, "exec sleep 600\n")
+	writeFile(StackPath(dir), `{"url": "http://127.0.0.1:1/", "script": "`+script+`"}`)
+	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: &state.State{ID: "csv"}}
+	m := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Engine: e, Layout: l, Typist: e})
+	m.snap = Snapshot{At: time.Now(), Items: []Item{{Factory: f}}}
+	reply := make(chan Message, 1)
+
+	m.startStack(Event{Reply: reply}, ReviewRequest{Action: "stack", Cwd: worktree})
+
+	if got := <-reply; got.T != "done" {
+		t.Fatalf("stack request: %+v", got)
+	}
+	stackPanes := func() int {
+		panes, _ := e.TM.Panes()
+		n := 0
+		for _, p := range panes {
+			if p.StageOf == "csv" && p.Stage == stackRole {
+				n++
+			}
+		}
+		return n
+	}
+	if stackPanes() != 1 {
+		t.Fatalf("%d stack panes after the request; want one window running the stack", stackPanes())
+	}
+	m.snap.Items[0].Status = factory.Done
+	m.snap.Panes, _ = e.TM.Panes()
+	m.closeFinishedStages()
+	if stackPanes() != 0 {
+		t.Error("the stack still runs after the factory is done, leaving dev servers behind")
+	}
+}

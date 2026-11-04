@@ -35,7 +35,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | Kind | Id |
 |---|---|
 | question batch | `q-<id>-<n>`, `n` counting batches from 1 |
-| gate | `gate-<id>-design`, `gate-<id>-plan` |
+| gate | `gate-<id>-design`, `gate-<id>-plan`, `gate-<id>-walkthrough` |
 | artifact comment | `comment-<id>-<n>` |
 | cap | `cap-<id>-<stage>` |
 | failure | `fail-<id>-<stage>` |
@@ -49,7 +49,7 @@ The app delivers answers into the session as one message, in exactly these forms
 | Item | Message |
 |---|---|
 | question batch | `<id> answers:` then one line per question, `N) <option text or typed text>`; a question the user did not touch is `N) recommended` |
-| gate approve | `/factory approve <design\|plan> <id> <notes>` on one line |
+| gate approve | `/factory approve <design\|plan\|walkthrough> <id> <notes>` on one line |
 | gate changes | `<id> changes: <text>` |
 | artifact comment | `<id> reply: <text>` (reply on the item's thread with that text) |
 | cap, one more round | `<id> continue: raise <coderabbit_rounds\|qa_rounds> by one for this factory` |
