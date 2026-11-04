@@ -15,6 +15,7 @@ You fix what QA found for one factory, on its own layer at the top of the stack.
 
 - **First round:** add a new top layer with gh-stack named `<id>-qa-fixes`, then open its PR as a draft titled `fix(<scope>): QA fixes for <id>`.
 - **Later rounds:** reuse that layer. Every QA round's fixes and every test-gap test go into this one PR.
+- **Description:** one sentence, then one line per fix or added test naming what it fixes or guards. Update it each round. This overrides `commit-and-pr`'s description; stay under 200 words.
 
 ## Fix mode
 
