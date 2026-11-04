@@ -7,6 +7,10 @@ codebase_skill: ""
 design:
   source: web
   files: [DESIGN.md]
+  prototype:
+    dir: ""
+    path: ""
+    css: ""
 qa:
   mode: browser
   notes: ""

@@ -12,7 +12,7 @@ You write for two readers. The engineer implements `plan.md` exactly and has not
 
 ## Investigate
 
-1. Read `brief.md`, `requirements.md` and, when present, `design/approved.md` and the approved design file in the factory directory.
+1. Read `brief.md`, `requirements.md` and, when present, `design/approved.md` and the approved design file in the factory directory. When the design is a prototype, read its entry module: plan the change from its components and structure, and say in `plan.md` which parts the engineer moves into the product and which it rebuilds.
 2. Read the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`). When it names a `codebase_skill`, load that skill before reading code.
 3. Read the code the change touches, following each path end to end: every entry point that reaches the same action (for a web app: route, service, repository, schema, migration, the page and its queries, and every tool or background job), down to what it stores.
 4. Apply the developer's rules file when the supervisor names one, then the repo's rules: AGENTS.md, CLAUDE.md, CLAUDE.local.md. Plan for code that needs no comments, has readable conditionals, and the fewest tests that catch real failures.

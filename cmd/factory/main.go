@@ -111,10 +111,10 @@ commands:
               when the change is made (run by a stage agent)
   review threads [--page path] [--open]
               list this factory's comment threads
-  review open [--factory id] <url>
+  review open [--factory id] [--for design|walkthrough] <url>
               open any page, such as the running app, in the factory's
               Chrome with the comment layer
-  review stack
+  review stack [--for design|walkthrough]
               run the stack that factory-qa wrote to review/stack.json in a
               window of its own, then open the app signed in for the
               walkthrough

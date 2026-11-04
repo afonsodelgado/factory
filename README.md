@@ -224,6 +224,12 @@ Designs and plans are HTML pages in the factory directory, listed in the panel's
 - The agent changes the page, which reloads by itself, and answers each thread. Reply on a thread to keep the conversation going; your reply goes out with the next Send.
 - **Approve** appears while the page's gate is open and sends the same approval as the panel.
 
+In a web repo, the design can instead be a working prototype built from the app's real components and stylesheet:
+
+1. Set `design.prototype` in the repo config (see "Repo config").
+2. The designer writes each variant into that git-ignored directory.
+3. The hub runs the app's dev server and opens the variants in its Chrome. Comments on them go to the designer, as on any design.
+
 The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` opens any page, such as your app on its dev server, in the factory's Chrome with the same comment layer; its comments go to the factory you run it from, or the one `--factory <id>` names.
 
 ### Walking through the finished app
@@ -274,7 +280,19 @@ supervisor: {effort: medium}
 stalled_after: 45m
 ```
 
-`agents` and `supervisor` override one field at a time, `pipelines` override by name, and `codex.writable_dirs` adds to the global list. `repos`, `hub`, `alerts`, `icons` and `tmux` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it, and `factory init` copies it to `.factory/config.yml` and leaves the old file for factories already running there.
+`agents` and `supervisor` override one field at a time, `pipelines` override by name, and `codex.writable_dirs` adds to the global list. A web repo can have the designer build prototypes from the app's real components:
+
+```yaml
+design:
+  source: web
+  files: [DESIGN.md]
+  prototype:
+    dir: apps/web/prototypes   # git-ignored, inside the web app's dev server root
+    path: /prototypes          # where that dev server serves it
+    css: apps/web/src/index.css
+```
+
+`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it, and `factory init` copies it to `.factory/config.yml` and leaves the old file for factories already running there.
 
 ## Pipelines
 

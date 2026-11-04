@@ -49,7 +49,7 @@ func TestChromeCommentsOnARunningAppWithAScreenshotAndItsErrors(t *testing.T) {
 	chrome := s.NewBrowser(t.TempDir(), "", true)
 	chrome.noSandbox = goruntime.GOOS == "linux"
 	t.Cleanup(chrome.Close)
-	tab, err := chrome.OpenApp(app.URL, f, nil)
+	tab, err := chrome.OpenApp(app.URL, f, App, nil)
 	if err != nil {
 		if os.Getenv("CI") == "" {
 			t.Skip("no Chrome here: ", err)

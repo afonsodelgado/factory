@@ -14,7 +14,14 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const App = "app"
+const (
+	App       = "app"
+	Prototype = "prototype"
+)
+
+func Live(page string) bool {
+	return page == App || page == Prototype
+}
 
 const (
 	Draft    = "draft"

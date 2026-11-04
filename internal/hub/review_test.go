@@ -107,6 +107,18 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 		}
 	})
 
+	t.Run("a prototype on the app's dev server is the designer's, not the walkthrough fixer's", func(t *testing.T) {
+		fx := newReviewFixture(t, true, idleHook(at))
+		fx.store.Create(review.NewThread{Page: review.Prototype, Intent: "change", Text: "Use the compact table.", Anchor: review.Anchor{URL: "http://localhost:3001/prototypes/csv/variant-a.html", Selector: "table"}})
+		reply, err := fx.m.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: review.Prototype})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reply.Target != "designer" {
+			t.Errorf("prototype comments went to %q; want the designer", reply.Target)
+		}
+	})
+
 	t.Run("without a designer pane the busy supervisor gets the batch once it is idle", func(t *testing.T) {
 		fx := newReviewFixture(t, false, busyHook(at))
 		reply, err := fx.m.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})

@@ -128,7 +128,7 @@ func (m *Model) openApp(e Event, r ReviewRequest) tea.Cmd {
 	}
 	chrome, f, url := m.Chrome, reviewFactory(it), r.URL
 	return func() tea.Msg {
-		if _, err := chrome.OpenApp(url, f, nil); err != nil {
+		if _, err := chrome.OpenApp(url, f, livePage(r.Page), nil); err != nil {
 			e.respond(Message{T: "error", Error: err.Error()})
 			return nil
 		}
@@ -281,8 +281,11 @@ func (m *Model) speaker(it Item, token string) string {
 }
 
 func stageOfPage(f factory.Factory, page string) string {
-	if page == review.App {
+	switch page {
+	case review.App:
 		return "walkthrough"
+	case review.Prototype:
+		return "design"
 	}
 	if f.State != nil && f.Dir != "" {
 		url := "file://" + filepath.Join(f.Dir, filepath.FromSlash(page))
@@ -301,6 +304,13 @@ func stageOfPage(f factory.Factory, page string) string {
 		return "plan"
 	}
 	return ""
+}
+
+func livePage(page string) string {
+	if page == review.Prototype {
+		return review.Prototype
+	}
+	return review.App
 }
 
 func openGate(f factory.Factory, stage string) (state.Attention, bool) {
@@ -341,4 +351,37 @@ func (m *Model) threadCounter() threadCounter {
 		return nil
 	}
 	return m.Review.OpenCount
+}
+
+func (m *Model) openLive(url string) tea.Cmd {
+	if m.Chrome == nil || !strings.HasPrefix(url, "http") {
+		return nil
+	}
+	for _, it := range m.snap.Items {
+		if it.Factory.State == nil {
+			continue
+		}
+		for _, key := range []string{"design", "walkthrough"} {
+			for _, a := range it.Factory.State.Stages[key].Artifacts {
+				if a.URL != url {
+					continue
+				}
+				chrome, f, page, fallback := m.Chrome, reviewFactory(it), livePageOf(key), m.Open
+				return func() tea.Msg {
+					if _, err := chrome.OpenApp(url, f, page, nil); err != nil {
+						fallback(url)
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func livePageOf(stage string) string {
+	if stage == "design" {
+		return review.Prototype
+	}
+	return review.App
 }

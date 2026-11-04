@@ -18,7 +18,7 @@ func BatchPath(factoryDir string, batch int) string {
 func WriteBatch(factoryDir, id, page string, threads []Thread, console []string, batch int) (string, string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s comments: %s\n\n", id, page)
-	if page != App {
+	if !Live(page) {
 		fmt.Fprintf(&b, "Page: %s\n\n", filepath.Join(factoryDir, filepath.FromSlash(page)))
 	}
 	b.WriteString("Act on each thread: change what it is about, or answer the question without changing anything. Then answer every thread with `factory review reply --thread <id> [--resolve] <text>`. Resolve it when you made the change; leave it open when you answered a question or need the developer.\n")
@@ -44,7 +44,7 @@ func writeThread(b *strings.Builder, factoryDir string, t Thread) {
 		where = "`" + t.Anchor.Selector + "`"
 	}
 	fmt.Fprintf(b, "\n## %s · %s · %s\n\n", t.ID, t.Intent, where)
-	if t.Anchor.URL != "" && t.Page == App {
+	if t.Anchor.URL != "" && Live(t.Page) {
 		fmt.Fprintf(b, "- URL: %s\n", t.Anchor.URL)
 	}
 	if len(t.Anchor.Components) > 0 {

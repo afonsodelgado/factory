@@ -10,7 +10,7 @@
 
 function start(config) {
   const factoryKey = config.page.split("/")[0];
-  const isApp = config.file === "app";
+  const isApp = config.file === "app" || config.file === "prototype";
   const binding = typeof window.__factoryReview === "function" ? window.__factoryReview : null;
   const pendingCalls = new Map();
   let callSeq = 0;
