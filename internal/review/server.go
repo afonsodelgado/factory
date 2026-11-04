@@ -34,7 +34,14 @@ type Server struct {
 	mu        sync.Mutex
 	factories map[string]Factory
 	watched   map[string]bool
-	clients   map[chan string]bool
+	clients   map[chan event]bool
+	stores    map[string]*Store
+	now       func() time.Time
+}
+
+type event struct {
+	name string
+	data string
 }
 
 func Listen(port int, token string, overlay []byte) (*Server, error) {
@@ -57,7 +64,9 @@ func Listen(port int, token string, overlay []byte) (*Server, error) {
 		watch:     watch,
 		factories: map[string]Factory{},
 		watched:   map[string]bool{},
-		clients:   map[chan string]bool{},
+		clients:   map[chan event]bool{},
+		stores:    map[string]*Store{},
+		now:       time.Now,
 	}
 	s.http = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go s.http.Serve(ln)
@@ -82,9 +91,16 @@ func (s *Server) SetFactories(factories []Factory) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.factories = map[string]Factory{}
+	listed := map[string]bool{}
 	for _, f := range factories {
 		if f.Key != "" && f.Dir != "" {
 			s.factories[f.Key] = f
+			listed[f.Dir] = true
+		}
+	}
+	for dir := range s.stores {
+		if !listed[dir] {
+			delete(s.stores, dir)
 		}
 	}
 }
@@ -94,15 +110,23 @@ func (s *Server) PageURL(fileURL string) (string, bool) {
 	if err != nil || u.Scheme != "file" {
 		return "", false
 	}
+	f, rel, ok := s.locate(u.Path)
+	if !ok {
+		return "", false
+	}
+	return s.pageURL(f.Key, rel), true
+}
+
+func (s *Server) locate(path string) (Factory, string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, f := range s.factories {
-		rel, err := filepath.Rel(f.Dir, u.Path)
+		rel, err := filepath.Rel(f.Dir, path)
 		if err == nil && filepath.IsLocal(rel) {
-			return s.pageURL(f.Key, rel), true
+			return f, filepath.ToSlash(rel), true
 		}
 	}
-	return "", false
+	return Factory{}, "", false
 }
 
 func (s *Server) pageURL(key, rel string) string {
@@ -120,9 +144,15 @@ func escapePath(p string) string {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /r/{token}/{$}", s.withToken(s.serveIndex))
 	mux.HandleFunc("GET /r/{token}/events", s.withToken(s.serveEvents))
 	mux.HandleFunc("GET /r/{token}/{key}/{path...}", s.withToken(s.serveFile))
+	mux.HandleFunc("GET /r/{token}/{key}/_api/threads", s.withToken(s.listThreads))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/threads", s.withToken(s.mutation(s.createThread)))
+	mux.HandleFunc("PATCH /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.updateThread)))
+	mux.HandleFunc("DELETE /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.deleteThread)))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/threads/{id}/replies", s.withToken(s.mutation(s.replyThread)))
 	return s.sameHost(mux)
 }
 
@@ -218,8 +248,9 @@ func isHTML(path string) bool {
 }
 
 func (s *Server) scriptTag(key, rel string) []byte {
-	return fmt.Appendf(nil, `<script src="/_review/overlay.js" data-factory-review data-events="%s" data-page="%s" defer></script>`,
-		html.EscapeString("/r/"+s.token+"/events"), html.EscapeString(key+"/"+rel))
+	base := "/r/" + s.token
+	return fmt.Appendf(nil, `<script src="/_review/overlay.js" data-factory-review data-events="%s" data-api="%s" data-page="%s" data-file="%s" defer></script>`,
+		html.EscapeString(base+"/events"), html.EscapeString(base+"/"+url.PathEscape(key)+"/_api"), html.EscapeString(key+"/"+rel), html.EscapeString(rel))
 }
 
 func inject(page, tag []byte) []byte {
@@ -322,12 +353,21 @@ func (s *Server) changed(path string) {
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
-		page := f.Key + "/" + filepath.ToSlash(rel)
-		for c := range s.clients {
-			select {
-			case c <- page:
-			default:
-			}
+		s.broadcastLocked(event{"change", f.Key + "/" + filepath.ToSlash(rel)})
+	}
+}
+
+func (s *Server) broadcast(e event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broadcastLocked(e)
+}
+
+func (s *Server) broadcastLocked(e event) {
+	for c := range s.clients {
+		select {
+		case c <- e:
+		default:
 		}
 	}
 }
@@ -340,7 +380,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	c := make(chan string, 16)
+	c := make(chan event, 16)
 	s.mu.Lock()
 	s.clients[c] = true
 	s.mu.Unlock()
@@ -357,8 +397,8 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case page := <-c:
-			fmt.Fprintf(w, "event: change\ndata: %s\n\n", page)
+		case e := <-c:
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.name, e.data)
 			flusher.Flush()
 		case <-keepAlive.C:
 			fmt.Fprint(w, ": ping\n\n")

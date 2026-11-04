@@ -144,6 +144,7 @@ type ArtifactRow struct {
 	URL         string
 	OpenThreads *int
 	CheckedAt   time.Time
+	Live        bool
 }
 
 type ActivityRow struct {

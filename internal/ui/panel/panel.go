@@ -643,7 +643,11 @@ func renderArtifacts(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 			count = fmt.Sprintf("✎ %d", *a.OpenThreads)
 		}
 		c.Put(x+w-14, r, count, theme.FgInk(theme.Cyan))
-		c.Right(x+w-1, r, checkedLabel(v.Now, a.CheckedAt), theme.Muted)
+		checked := checkedLabel(v.Now, a.CheckedAt)
+		if a.Live {
+			checked = "live"
+		}
+		c.Right(x+w-1, r, checked, theme.Muted)
 	}
 	place(c, x, y+h-1, w, hints("o", "open in browser", "tab", "next tab"))
 }

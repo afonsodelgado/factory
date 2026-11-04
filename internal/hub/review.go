@@ -25,3 +25,10 @@ func (m *Model) reviewURL(url string) string {
 	}
 	return url
 }
+
+func (m *Model) threadCounter() threadCounter {
+	if m.Review == nil {
+		return nil
+	}
+	return m.Review.OpenCount
+}

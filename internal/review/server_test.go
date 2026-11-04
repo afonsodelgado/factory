@@ -97,6 +97,44 @@ func TestEditingAServedPageNotifiesOpenTabs(t *testing.T) {
 	}
 }
 
+func TestCommentsSurviveAHubRestart(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
+	s, err := Listen(0, "tok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
+
+	body := `{"page":"plan.html","intent":"question","text":"Why two layers?","anchor":{"selector":"#q1","text":"Q1"}}`
+	req, _ := http.NewRequest("POST", s.Origin()+"/r/tok/k/_api/threads", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: %v %v", resp, err)
+	}
+
+	reopened, err := OpenStore(dir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threads := reopened.Threads("plan.html")
+	if len(threads) != 1 || threads[0].Anchor.Selector != "#q1" || threads[0].Messages[0].Text != "Why two layers?" || threads[0].Status != Draft {
+		t.Fatalf("after reopening: %+v", threads)
+	}
+	if open, _ := s.OpenCount("file://" + filepath.Join(dir, "plan.html")); open != 1 {
+		t.Fatalf("open count %d, want 1", open)
+	}
+
+	os.RemoveAll(filepath.Join(dir, "review"))
+	s.SetFactories(nil)
+	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
+	if st, _ := s.Store(Factory{Key: "k", Dir: dir}); len(st.Threads("")) != 0 {
+		t.Error("a factory deleted and created again with the same id still shows the old factory's comments")
+	}
+}
+
 func write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
