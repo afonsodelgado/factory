@@ -538,6 +538,10 @@ func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
 		return m.openDialog("new", m.newContext())
 	case pane == "slot" && key == "w":
 		m.wakeSelected()
+	case pane == "slot" && (key == "q" || key == "ctrl+c"):
+		return m.quit()
+	case pane == "slot" && key == "?":
+		return m.openDialog("keys", nil)
 	}
 	return nil
 }

@@ -90,6 +90,31 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 	}
 }
 
+func TestQQuitsFromThePanelUnlessItIsTypedIntoAnAnswer(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	idle := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	tm := teatest.NewTestModel(t, idle, teatest.WithInitialTermSize(34, 44))
+	panelKeys(tm, "q")
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+
+	snap := questionFactory("Stop", now)
+	snap.Items[0].Factory.State.Attention[0].Questions = nil
+	typist := &fakeTypist{}
+	answering := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	answering.SetSnapshot(snap)
+	tm = teatest.NewTestModel(t, answering, teatest.WithInitialTermSize(34, 44))
+	panelKeys(tm, "right", "left")
+	typeText(tm, "q")
+	panelKeys(tm, "ctrl+s")
+	if err := tm.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
+	if len(typist.typed) != 1 || typist.typed[0] != "%9: q-7452-1 q" {
+		t.Errorf("typed %q, want q typed into the answer, not taken as quit", typist.typed)
+	}
+}
+
 var escapes = regexp.MustCompile("\x1b\\[[0-9;:]*m")
 
 func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
