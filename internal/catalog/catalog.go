@@ -71,8 +71,7 @@ func CodexTrusts(home, repo string) bool {
 		return false
 	}
 	trustedRepo := regexp.MustCompile(`\[projects\."` + regexp.QuoteMeta(repo) + `"\]\s*\n\s*trust_level\s*=\s*"trusted"`)
-	trustedHooks := strings.Contains(string(data), filepath.Join(home, "hooks.json")+":stop:")
-	return trustedHooks && trustedRepo.Match(data)
+	return trustedRepo.Match(data)
 }
 
 func OpenCodeCachePath(stateDir string) string {

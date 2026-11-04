@@ -269,7 +269,7 @@ func runnable(repo, role string, setting state.AgentSetting) error {
 	case setting.ToolName() == state.ToolOpenCode && setting.Model == "":
 		return fmt.Errorf("%s on opencode needs a model; pick one of the free models", role)
 	case setting.ToolName() == state.ToolCodex && !catalog.CodexTrusts(state.CodexHome(), repo):
-		return fmt.Errorf("Codex would stop at a trust prompt: run codex once in %s, choose Trust and continue, then Trust all for the hooks, and start the stage again", repo)
+		return fmt.Errorf("Codex would stop at a trust prompt: run codex once in %s, choose Trust and continue, and start the stage again", repo)
 	}
 	return nil
 }

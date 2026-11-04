@@ -64,7 +64,7 @@ func (s StageLaunch) codex() string {
 }
 
 func CodexSandbox(addDirs []string) []string {
-	flags := []string{"-a", "never", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"}
+	flags := []string{"-a", "never", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--dangerously-bypass-hook-trust"}
 	for _, dir := range addDirs {
 		flags = append(flags, "--add-dir", ShellQuote(dir))
 	}

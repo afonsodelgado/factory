@@ -114,7 +114,7 @@ func codexChecks(o Options, repos []string) []Check {
 		}
 	}
 	if len(untrusted) > 0 {
-		checks = append(checks, Check{Name: "codex trust", Mark: Fail, Detail: "Codex would stop at a trust prompt in " + strings.Join(untrusted, ", "), Fix: "run codex once in each repo, choose Trust and continue, then Trust all for the factory hooks"})
+		checks = append(checks, Check{Name: "codex trust", Mark: Fail, Detail: "Codex would stop at a trust prompt in " + strings.Join(untrusted, ", "), Fix: "run codex once in each repo and choose Trust and continue"})
 	}
 	return append(checks, codexSandbox(o))
 }
