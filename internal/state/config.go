@@ -20,6 +20,7 @@ type Config struct {
 	Icons        string   `yaml:"icons"`
 	Claude       Claude   `yaml:"claude"`
 	Tmux         Tmux     `yaml:"tmux"`
+	Review       Review   `yaml:"review"`
 
 	Pipelines       map[string][]string     `yaml:"pipelines"`
 	DefaultPipeline string                  `yaml:"default_pipeline"`
@@ -52,6 +53,10 @@ type Claude struct {
 
 type Codex struct {
 	WritableDirs []string `yaml:"writable_dirs"`
+}
+
+type Review struct {
+	Port int `yaml:"port"`
 }
 
 type Tmux struct {
@@ -111,6 +116,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Hub.ReturnKey == "" {
 		c.Hub.ReturnKey = "M-0"
+	}
+	if c.Review.Port == 0 {
+		c.Review.Port = 7417
 	}
 	if c.Icons == "" {
 		c.Icons = "nerd"

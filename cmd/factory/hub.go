@@ -14,7 +14,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -76,6 +78,11 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer server.Close()
+	pages, err := startReview(cfg)
+	if err != nil {
+		return err
+	}
+	defer pages.Close()
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, layout)
 	defer restore()
 	icons := theme.IconsFor(cfg.Icons)
@@ -100,6 +107,7 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		GitHub: &hub.GitHub{Run: hub.RunGH},
 		Typist: engine,
 		Open:   openURL,
+		Review: pages,
 		Bell:   os.Stderr,
 		Notify: notify,
 		Icons:  icons,
@@ -123,6 +131,18 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
 	}
 	return err
+}
+
+func startReview(cfg *state.Config) (*review.Server, error) {
+	token, err := review.Token(cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	overlay, err := bundle.Files.ReadFile("review/overlay.js")
+	if err != nil {
+		return nil, err
+	}
+	return review.Listen(cfg.Review.Port, token, overlay)
 }
 
 func lockHub(path string) (func(), error) {

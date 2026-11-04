@@ -41,7 +41,7 @@ type Profile struct {
 	Codex           Codex                   `yaml:"codex"`
 }
 
-var machineKeys = []string{"repos", "hub", "alerts", "icons", "tmux"}
+var machineKeys = []string{"repos", "hub", "alerts", "icons", "tmux", "review"}
 
 func RepoDir(repo string) string {
 	return filepath.Join(repo, ".factory")

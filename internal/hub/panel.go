@@ -938,6 +938,7 @@ func (m *Model) openCmd(url string) tea.Cmd {
 	if url == "" || m.Open == nil {
 		return nil
 	}
+	url = m.reviewURL(url)
 	open := m.Open
 	return func() tea.Msg {
 		open(url)

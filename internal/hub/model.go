@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
@@ -38,6 +39,7 @@ type Model struct {
 	GitHub *GitHub
 	Typist Typist
 	Open   func(url string)
+	Review *review.Server
 
 	DialogCommand func(kind string) string
 	Bell          io.Writer
@@ -255,6 +257,7 @@ func (m *Model) apply(s Snapshot) {
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
+	m.syncReview()
 	if first {
 		m.pending = append(m.pending, m.refreshPRs(false))
 	}
