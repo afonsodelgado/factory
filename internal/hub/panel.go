@@ -596,6 +596,10 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	case "]":
 		m.moveItem(1)
 		return nil
+	case "q", "ctrl+c":
+		return m.quit()
+	case "?":
+		return m.openDialog("keys", nil)
 	}
 	if m.panel.tab != panel.Attention {
 		return m.listKey(key)

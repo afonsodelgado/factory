@@ -66,12 +66,12 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 		}
 	}
 	tm := m.Engine.TM
-	session := m.Engine.Session
+	window := m.Layout.Window
 	command := m.DialogCommand(kind)
 	return func() tea.Msg {
-		clients, err := tm.Clients(session)
+		clients, err := tm.Clients(window)
 		if err != nil || len(clients) == 0 {
-			return dialogClosedMsg{kind, errors.New("dialogs need a terminal attached to the factory session")}
+			return dialogClosedMsg{kind, errors.New("dialogs need a terminal attached to the hub's session")}
 		}
 		err = tm.Popup(tmux.Popup{Client: clients[0], Title: title, Width: fmt.Sprint(width), Height: fmt.Sprint(height), Command: command})
 		return dialogClosedMsg{kind, err}

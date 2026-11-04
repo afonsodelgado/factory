@@ -149,14 +149,18 @@ func openMain(r hub.OpenRequest) error {
 	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
 		return err
 	}
+	calls := []hubCall{{"repo", hub.RepoRequest{Repo: here, Here: !named, Notice: notice}}}
+	if name != "" {
+		calls = append(calls, hubCall{"open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}})
+	}
+	if !hubRunning(cfg) && sharesServer(tm) {
+		return hubMain(startupEvents(calls), false)
+	}
 	if err := ensureHub(cfg, tm, bin); err != nil {
 		return err
 	}
-	if _, err := request(cfg.SocketPath(), "repo", hub.RepoRequest{Repo: here, Here: !named, Notice: notice}); err != nil {
-		return err
-	}
-	if name != "" {
-		reply, err := request(cfg.SocketPath(), "open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
+	for _, c := range calls {
+		reply, err := request(cfg.SocketPath(), c.kind, c.payload)
 		if err != nil {
 			return err
 		}
@@ -168,6 +172,41 @@ func openMain(r hub.OpenRequest) error {
 		fmt.Println(notice)
 	}
 	return attach(cfg, tm)
+}
+
+type hubCall struct {
+	kind    string
+	payload any
+}
+
+func startupEvents(calls []hubCall) []hub.Event {
+	var events []hub.Event
+	for _, c := range calls {
+		data, err := json.Marshal(c.payload)
+		if err == nil {
+			events = append(events, hub.Event{Message: hub.Message{T: c.kind, Pane: "cli", Data: data}})
+		}
+	}
+	return events
+}
+
+func sharesServer(tm tmux.Client) bool {
+	client, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
+	if client == "" || os.Getenv("TMUX_PANE") == "" {
+		return false
+	}
+	socket, err := tm.Run("display-message", "-p", "#{socket_path}")
+	return err == nil && socket == client
+}
+
+func passedEnvironment() []string {
+	var env []string
+	for _, name := range passedEnv {
+		if value := os.Getenv(name); value != "" {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
 }
 
 func configuredRepo(repos []string, path string) (string, bool) {
@@ -227,10 +266,8 @@ func ensureHub(cfg *state.Config, tm tmux.Client, bin string) error {
 	hubCommand := shellQuote(bin) + " hub; exec " + loginShell()
 	if !tm.HasSession(cfg.Hub.Session) {
 		args := []string{"new-session", "-d", "-s", cfg.Hub.Session, "-n", hub.HubWindow, "-x", "200", "-y", "50"}
-		for _, name := range passedEnv {
-			if value := os.Getenv(name); value != "" {
-				args = append(args, "-e", name+"="+value)
-			}
+		for _, kv := range passedEnvironment() {
+			args = append(args, "-e", kv)
 		}
 		_, err := tm.Run(append(args, hubCommand)...)
 		return err
@@ -293,8 +330,9 @@ func request(socket, kind string, payload any) (hub.Message, error) {
 }
 
 func attach(cfg *state.Config, tm tmux.Client) error {
+	target := hubPane(cfg, tm)
 	if os.Getenv("TMUX") != "" {
-		if _, err := tm.Run("switch-client", "-t", "="+cfg.Hub.Session); err == nil {
+		if _, err := tm.Run("switch-client", "-t", target); err == nil {
 			return nil
 		}
 	}
@@ -302,7 +340,7 @@ func attach(cfg *state.Config, tm tmux.Client) error {
 	if err != nil {
 		return err
 	}
-	argv := append([]string{"tmux"}, tm.Command("attach-session", "-t", "="+cfg.Hub.Session).Args[1:]...)
+	argv := append([]string{"tmux"}, tm.Command("attach-session", "-t", target).Args[1:]...)
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "TMUX=") {
@@ -310,4 +348,14 @@ func attach(cfg *state.Config, tm tmux.Client) error {
 		}
 	}
 	return syscall.Exec(path, argv, env)
+}
+
+func hubPane(cfg *state.Config, tm tmux.Client) string {
+	panes, _ := tm.Panes()
+	for _, p := range panes {
+		if p.UI == "selector" {
+			return p.ID
+		}
+	}
+	return "=" + cfg.Hub.Session
 }

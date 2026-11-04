@@ -70,7 +70,7 @@ func (e *Engine) SlotViewer() (string, bool) {
 		return "", false
 	}
 	for _, p := range panes {
-		if p.Session == e.Session && p.UI == "slot" {
+		if e.Owns(p) && p.UI == "slot" {
 			return p.ID, true
 		}
 	}
@@ -97,7 +97,7 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 	var adopted []string
 	for _, session := range sessions {
 		candidates, legacy := worktrees[session]
-		if !legacy || session == e.Session {
+		if !legacy || session == e.Session || session == e.home.Session {
 			continue
 		}
 		pane, ok := firstPane(panes, session)
@@ -258,10 +258,19 @@ func (e *Engine) hideStageOf(l *Layout, repo, slug string) error {
 }
 
 func (e *Engine) killStage(p tmux.Pane) error {
-	if p.WindowName == HubWindow {
+	if p.WindowID == e.home.WindowID {
 		return e.TM.KillPane(p.ID)
 	}
 	return e.TM.KillWindow(p.WindowID)
+}
+
+func InHubWindow(panes []tmux.Pane, p tmux.Pane) bool {
+	for _, q := range panes {
+		if q.UI == "selector" && q.WindowID == p.WindowID {
+			return true
+		}
+	}
+	return false
 }
 
 func loginShell() string {

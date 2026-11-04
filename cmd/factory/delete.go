@@ -184,9 +184,6 @@ func deleteFactory(cfg *state.Config, f factory.Factory, r factory.Removal) (str
 
 func closePane(cfg *state.Config, f factory.Factory) error {
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	if !tm.HasSession(cfg.Hub.Session) {
-		return nil
-	}
 	panes, err := tm.Panes()
 	if err != nil {
 		return err
@@ -195,7 +192,7 @@ func closePane(cfg *state.Config, f factory.Factory) error {
 	switch {
 	case !ok:
 		return nil
-	case pane.WindowName == hub.HubWindow:
+	case hub.InHubWindow(panes, pane):
 		return tm.KillPane(pane.ID)
 	}
 	return tm.KillWindow(pane.WindowID)

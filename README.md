@@ -106,6 +106,8 @@ factory bootstrap
 factory
 ```
 
+Inside tmux, the hub opens in the pane you typed it in, even when that pane is one side of a split; your session, window name and status bar stay as they were. `q` puts your shell back in that pane. Outside tmux, `factory` attaches to a `factory` session instead, and `q` detaches. Either way the factories keep running in the background `factory` session.
+
 `bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
 
 A permission prompt marks its factory "needs you" until the approved tool has run, on the thread that asked: the `PostToolUse` and `PostToolUseFailure` hooks report that, and `doctor` lists them as missing until `bootstrap` or `install-hooks` adds them. A session started before you updated keeps its old hooks until you restart it, and a prompt that was already open when you updated shows as answered.
@@ -194,7 +196,7 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 
 | Command | Does |
 |---|---|
-| `factory open` | attaches to the hub, starting it if needed |
+| `factory open` | opens the hub in this pane, or jumps to the hub that is already running |
 | `factory open csv-export --prompt "Export contacts as CSV for ops."` | selects the factory `csv-export`, or creates it with that prompt |
 | `factory open csv-export Export contacts as CSV for ops.` | the same: the words after the id are the prompt |
 | `factory open csv-export` | without a prompt, a new factory's supervisor asks for one |
@@ -231,7 +233,7 @@ claude:
   remote_control: true
 ```
 
-`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every other value above is the default.
+`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. Every other value above is the default.
 
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`.
 

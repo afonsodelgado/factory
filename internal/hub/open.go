@@ -58,12 +58,20 @@ func (m *Model) repoRequest(e Event) tea.Cmd {
 	if err == nil {
 		m.addRepo(r)
 	}
+	m.reply(e, err)
+	return m.load()
+}
+
+func (m *Model) reply(e Event, err error) {
+	if e.From == nil {
+		m.report(err)
+		return
+	}
 	reply := Message{T: "done"}
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error()}
 	}
 	e.From.Send(reply)
-	return m.load()
 }
 
 func (m *Model) addRepo(r RepoRequest) {
@@ -106,11 +114,7 @@ func (m *Model) openRequest(e Event) tea.Cmd {
 	if err == nil {
 		err = m.open(r)
 	}
-	reply := Message{T: "done"}
-	if err != nil {
-		reply = Message{T: "error", Error: err.Error()}
-	}
-	e.From.Send(reply)
+	m.reply(e, err)
 	return m.load()
 }
 

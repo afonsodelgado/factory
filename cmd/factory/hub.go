@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
@@ -20,14 +21,14 @@ import (
 )
 
 func runHub(args []string) int {
-	if err := hubMain(); err != nil {
+	if err := hubMain(nil, true); err != nil {
 		fmt.Fprintln(os.Stderr, "factory hub:", err)
 		return 1
 	}
 	return 0
 }
 
-func hubMain() error {
+func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return err
@@ -50,14 +51,15 @@ func hubMain() error {
 	if err != nil {
 		return err
 	}
-	engine := &hub.Engine{TM: tm, Session: cfg.Hub.Session, ViewCommand: func(kind string) string {
+	engine := &hub.Engine{TM: tm, Session: cfg.Hub.Session, Env: passedEnvironment(), ViewCommand: func(kind string) string {
 		return shellQuote(bin) + " view " + kind + " --socket " + shellQuote(cfg.SocketPath())
 	}}
-	width, height, err := tm.WindowSize(self)
+	width, height, err := engine.Measure(self)
 	if err != nil {
 		return err
 	}
 	layout, err := engine.Build(self, hub.Shape{Width: width, Height: height})
+	defer func() { engine.Release(layout) }()
 	if err != nil {
 		return err
 	}
@@ -66,12 +68,15 @@ func hubMain() error {
 		return err
 	}
 	events := make(chan hub.Event, 64)
+	for _, e := range startup {
+		events <- e
+	}
 	server, err := hub.Listen(cfg.SocketPath(), func(e hub.Event) { events <- e })
 	if err != nil {
 		return err
 	}
 	defer server.Close()
-	restore := engine.BindReturn(cfg.Hub.ReturnKey, self)
+	restore := engine.BindReturn(cfg.Hub.ReturnKey, layout)
 	defer restore()
 	icons := theme.IconsFor(cfg.Icons)
 	defer engine.SetHeader(hub.StoppedHeader(icons))
@@ -102,7 +107,21 @@ func hubMain() error {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},
 	})
-	_, err = tea.NewProgram(model).Run()
+	program := tea.NewProgram(model)
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP)
+	defer signal.Stop(hangup)
+	go func() {
+		<-hangup
+		program.Quit()
+	}()
+	final, err := program.Run()
+	if m, ok := final.(*hub.Model); ok {
+		layout = m.Layout
+	}
+	if err == nil && detachOnQuit {
+		tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
+	}
 	return err
 }
 
