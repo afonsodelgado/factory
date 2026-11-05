@@ -41,15 +41,49 @@ func RunGH(dir string, args ...string) ([]byte, error) {
 }
 
 type prJSON struct {
-	Number            int    `json:"number"`
-	Title             string `json:"title"`
-	IsDraft           bool   `json:"isDraft"`
-	URL               string `json:"url"`
-	StatusCheckRollup []struct {
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-		State      string `json:"state"`
-	} `json:"statusCheckRollup"`
+	Number            int     `json:"number"`
+	Title             string  `json:"title"`
+	IsDraft           bool    `json:"isDraft"`
+	URL               string  `json:"url"`
+	StatusCheckRollup []check `json:"statusCheckRollup"`
+}
+
+type check struct {
+	Name         string    `json:"name"`
+	WorkflowName string    `json:"workflowName"`
+	Context      string    `json:"context"`
+	Status       string    `json:"status"`
+	Conclusion   string    `json:"conclusion"`
+	State        string    `json:"state"`
+	StartedAt    time.Time `json:"startedAt"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+func (c check) key() string {
+	return c.WorkflowName + "\x00" + c.Name + "\x00" + c.Context
+}
+
+func (c check) at() time.Time {
+	if c.StartedAt.IsZero() {
+		return c.CreatedAt
+	}
+	return c.StartedAt
+}
+
+func latestRuns(checks []check) []check {
+	index := map[string]int{}
+	var latest []check
+	for _, c := range checks {
+		i, seen := index[c.key()]
+		switch {
+		case !seen:
+			index[c.key()] = len(latest)
+			latest = append(latest, c)
+		case c.at().After(latest[i].at()):
+			latest[i] = c
+		}
+	}
+	return latest
 }
 
 func (g *GitHub) Checked() time.Time {
@@ -103,10 +137,11 @@ func (g *GitHub) fetch(dir string, n int, now time.Time) panel.PR {
 	g.mu.Lock()
 	g.last = now
 	g.mu.Unlock()
-	pr := panel.PR{Number: raw.Number, Title: raw.Title, Draft: raw.IsDraft, URL: raw.URL, Loaded: true, Total: len(raw.StatusCheckRollup)}
+	checks := latestRuns(raw.StatusCheckRollup)
+	pr := panel.PR{Number: raw.Number, Title: raw.Title, Draft: raw.IsDraft, URL: raw.URL, Loaded: true, Total: len(checks)}
 	pr.CI = "none"
 	failed, pending := false, false
-	for _, c := range raw.StatusCheckRollup {
+	for _, c := range checks {
 		switch {
 		case c.State == "FAILURE" || c.State == "ERROR" || failing(c.Conclusion):
 			failed = true
