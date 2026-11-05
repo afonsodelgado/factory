@@ -303,6 +303,9 @@ func (e *Engine) Release(l Layout) {
 	if !e.InPlace() {
 		return
 	}
+	if viewer, found := e.SlotViewer(); found {
+		e.Select(&l, viewer)
+	}
 	e.releaseWindow(l.Window, l.Selector)
 	for name, saved := range e.borrowed {
 		if saved == "" {
@@ -528,15 +531,11 @@ func (e *Engine) Arrange(l Layout, shape Shape) error {
 }
 
 func (e *Engine) SlotSize(l Layout) (int, int, error) {
-	panes, err := e.TM.Panes()
+	g, err := e.groupOf(l.Window, l.Slot)
 	if err != nil {
 		return 0, 0, err
 	}
-	slot, ok := byID(panes, l.Slot)
-	if !ok {
-		return 0, 0, fmt.Errorf("slot pane %s not found", l.Slot)
-	}
-	return slot.Width, slot.Height, nil
+	return g.cell.Width, g.cell.Height, nil
 }
 
 func (e *Engine) FitParking(l Layout) error {
@@ -581,16 +580,16 @@ func (e *Engine) ShowStage(l *Layout, stage string) error {
 	if err := e.HideStage(l); err != nil {
 		return err
 	}
-	width, _, err := e.SlotSize(*l)
+	g, err := e.groupOf(l.Window, l.Slot)
 	if err != nil {
 		return err
 	}
-	_, stageWidth := SplitWidths(width)
-	if err := e.TM.Join(stage, tmux.Split{Target: l.Slot, Horizontal: true, Size: stageWidth}); err != nil {
-		return err
+	if g.cell.Leaf() {
+		err = e.joinStage(l, stage, g.cell.Width)
+	} else {
+		err = e.joinStageBesideGroup(l, stage, g)
 	}
-	l.Stage = stage
-	if l.Split, err = e.uiPane("frame-split", tmux.Split{Target: l.Slot, Horizontal: true, Size: 1}); err != nil {
+	if err != nil {
 		return err
 	}
 	if err := e.TM.DisableInput(l.Split); err != nil {
@@ -599,7 +598,32 @@ func (e *Engine) ShowStage(l *Layout, stage string) error {
 	return e.FitParking(*l)
 }
 
+func (e *Engine) joinStage(l *Layout, stage string, width int) error {
+	_, stageWidth := SplitWidths(width)
+	if err := e.TM.Join(stage, tmux.Split{Target: l.Slot, Horizontal: true, Size: stageWidth}); err != nil {
+		return err
+	}
+	l.Stage = stage
+	var err error
+	l.Split, err = e.uiPane("frame-split", tmux.Split{Target: l.Slot, Horizontal: true, Size: 1})
+	return err
+}
+
+func (e *Engine) joinStageBesideGroup(l *Layout, stage string, g group) error {
+	if err := e.TM.Join(stage, tmux.Split{Target: widest(g.cell), Horizontal: true}); err != nil {
+		return err
+	}
+	l.Stage = stage
+	var err error
+	if l.Split, err = e.uiPane("frame-split", tmux.Split{Target: stage, Horizontal: true, Before: true, Size: 1}); err != nil {
+		return err
+	}
+	g.replace(besideStage(g, l.Split, stage))
+	return e.TM.ApplyLayout(l.Window, g.window)
+}
+
 func (e *Engine) HideStage(l *Layout) error {
+	beside, groupErr := e.groupOf(l.Window, l.Slot)
 	if err := e.removeSplit(l); err != nil {
 		return err
 	}
@@ -618,7 +642,21 @@ func (e *Engine) HideStage(l *Layout) error {
 	if err := e.TM.Break(p.ID, e.Session, StageParkName(p.StageOf, p.Stage)); err != nil {
 		return err
 	}
+	if groupErr == nil && !beside.cell.Leaf() {
+		if err := e.restoreGroup(*l, beside.cell); err != nil {
+			return err
+		}
+	}
 	return e.FitParking(*l)
+}
+
+func (e *Engine) restoreGroup(l Layout, cell *tmux.Cell) error {
+	widened, err := e.groupOf(l.Window, l.Slot)
+	if err != nil {
+		return err
+	}
+	widened.replace(cell)
+	return e.TM.ApplyLayout(l.Window, widened.window)
 }
 
 func (e *Engine) removeSplit(l *Layout) error {
