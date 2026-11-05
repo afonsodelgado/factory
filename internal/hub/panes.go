@@ -54,7 +54,7 @@ func (e *Engine) Select(l *Layout, incoming string) error {
 		return nil
 	}
 	out, _ := byID(panes, l.Slot)
-	if err := e.TM.Swap(incoming, l.Slot); err != nil {
+	if err := e.exchange(*l, in); err != nil {
 		return err
 	}
 	if err := e.TM.RenameWindow(in.WindowID, parkingName(out)); err != nil {

@@ -136,6 +136,71 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 	}
 }
 
+func TestSplitsStayWithTheFactoryTheyWereMadeIn(t *testing.T) {
+	e, l := hubFixture(t)
+	a, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "a", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "b", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Select(&l, a); err != nil {
+		t.Fatal(err)
+	}
+	beside, err := e.TM.Split(tmux.Split{Target: a, Horizontal: true, Command: "exec sleep 600"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.TM.Split(tmux.Split{Target: beside, Command: "exec sleep 600"}); err != nil {
+		t.Fatal(err)
+	}
+	split, err := e.groupOf(l.Window, l.Slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	made := split.cell.String()
+
+	if err := e.Select(&l, b); err != nil {
+		t.Fatal(err)
+	}
+	if shown, _ := e.groupOf(l.Window, l.Slot); !shown.cell.Leaf() {
+		t.Errorf("b shows %v; want b alone, without the splits made beside a", shown.cell.Leaves())
+	}
+	framed(t, e, l, "with b shown")
+	for _, id := range split.cell.Leaves() {
+		if name := pane(t, e.TM, id).WindowName; name != ParkName("a") {
+			t.Errorf("a's pane %s is in %q, want it parked with a", id, name)
+		}
+	}
+
+	if err := e.Select(&l, a); err != nil {
+		t.Fatal(err)
+	}
+	if back, _ := e.groupOf(l.Window, l.Slot); back.cell.String() != made {
+		t.Errorf("a came back as %s; want the splits as they were made, %s", back.cell, made)
+	}
+
+	agentWidth := pane(t, e.TM, a).Width
+	stage, err := e.NewStagePane(l, StagePane{Repo: "/repo", Slug: "a", Role: "engineer", Token: "t", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ShowStage(&l, stage); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := areaOf(t, e.TM, stage).h, areaOf(t, e.TM, l.Frame.Left).h-4; got != want {
+		t.Errorf("stage is %d rows tall, want %d: it belongs beside all of a's panes, not beside one of them", got, want)
+	}
+	if err := e.HideStage(&l); err != nil {
+		t.Fatal(err)
+	}
+	if got := pane(t, e.TM, a).Width; got < agentWidth-2 || got > agentWidth+2 {
+		t.Errorf("a is %d columns wide after the stage left, want about %d: the split beside it took the stage's room", got, agentWidth)
+	}
+}
+
 type area struct{ x, y, w, h int }
 
 func areaOf(t *testing.T, tm tmux.Client, id string) area {

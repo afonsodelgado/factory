@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -368,4 +369,59 @@ func (c Client) Clients(target string) ([]string, error) {
 		return nil, err
 	}
 	return strings.Split(out, "\n"), nil
+}
+
+func (c Client) WindowLayout(window string) (*Cell, error) {
+	out, err := c.Display(window, "#{window_layout}")
+	if err != nil {
+		return nil, err
+	}
+	return ParseLayout(out)
+}
+
+func (c Client) PaneOrder(window string) ([]string, error) {
+	out, err := c.Run("list-panes", "-t", window, "-F", "#{pane_id}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func (c Client) Batch(commands ...[]string) error {
+	var args []string
+	for i, command := range commands {
+		if i > 0 {
+			args = append(args, ";")
+		}
+		args = append(args, command...)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	_, err := c.Run(args...)
+	return err
+}
+
+func (c Client) ApplyLayout(window string, layout *Cell) error {
+	order, err := c.PaneOrder(window)
+	if err != nil {
+		return err
+	}
+	want := layout.Leaves()
+	if len(order) != len(want) {
+		return fmt.Errorf("window %s holds %d panes, the layout places %d", window, len(order), len(want))
+	}
+	var commands [][]string
+	for i, pane := range want {
+		j := slices.Index(order, pane)
+		if j < 0 {
+			return fmt.Errorf("pane %s is not in window %s", pane, window)
+		}
+		if j != i {
+			commands = append(commands, []string{"swap-pane", "-d", "-s", pane, "-t", order[i]})
+			order[i], order[j] = order[j], order[i]
+		}
+	}
+	commands = append(commands, []string{"select-layout", "-t", window, layout.String()})
+	return c.Batch(commands...)
 }
