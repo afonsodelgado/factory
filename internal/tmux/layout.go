@@ -145,6 +145,7 @@ type jsonCell struct {
 	Height   int        `json:"h"`
 	X        int        `json:"x"`
 	Y        int        `json:"y"`
+	Index    int        `json:"i"`
 	Pane     string     `json:"I"`
 	Children []jsonCell `json:"c"`
 }
