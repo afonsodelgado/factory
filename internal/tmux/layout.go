@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -120,6 +121,9 @@ func checksum(layout string) uint16 {
 }
 
 func ParseLayout(layout string) (*Cell, error) {
+	if strings.HasPrefix(layout, "{") {
+		return parseJSONLayout(layout)
+	}
 	_, body, ok := strings.Cut(layout, ",")
 	if !ok {
 		return nil, fmt.Errorf("layout %q has no checksum", layout)
@@ -133,6 +137,37 @@ func ParseLayout(layout string) (*Cell, error) {
 		return nil, fmt.Errorf("layout %q: %w", layout, err)
 	}
 	return cell, nil
+}
+
+type jsonCell struct {
+	Type     string     `json:"t"`
+	Width    int        `json:"w"`
+	Height   int        `json:"h"`
+	X        int        `json:"x"`
+	Y        int        `json:"y"`
+	Pane     string     `json:"I"`
+	Children []jsonCell `json:"c"`
+}
+
+func parseJSONLayout(layout string) (*Cell, error) {
+	var doc struct {
+		Root *jsonCell `json:"L"`
+	}
+	if err := json.Unmarshal([]byte(layout), &doc); err != nil {
+		return nil, fmt.Errorf("layout %q: %w", layout, err)
+	}
+	if doc.Root == nil {
+		return nil, fmt.Errorf("layout %q has no tiled panes", layout)
+	}
+	return doc.Root.cell(), nil
+}
+
+func (j jsonCell) cell() *Cell {
+	c := &Cell{Width: j.Width, Height: j.Height, X: j.X, Y: j.Y, Pane: j.Pane, Horizontal: j.Type == "h"}
+	for _, child := range j.Children {
+		c.Children = append(c.Children, child.cell())
+	}
+	return c
 }
 
 type layoutParser struct {
