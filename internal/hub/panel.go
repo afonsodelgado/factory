@@ -435,6 +435,8 @@ func (m *Model) deliver(action string) {
 	}
 	sentAt := m.Now()
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
+	mark := m.answerMark(it.Factory, item.ID, item.Since, text)
+	mark.leavesOpen = item.Kind == "gate" && action == "changes"
 	reason, err := Deliver(m.Typist, m.freshTarget(it), text)
 	if err != nil {
 		reason = err.Error()
@@ -449,10 +451,19 @@ func (m *Model) deliver(action string) {
 	if it.Pane != nil {
 		m.typedAt[it.Pane.ID] = sentAt
 	}
-	m.panel.sent[key] = sentMark{at: sentAt, itemSince: item.Since, factory: it.Factory.Key(), itemID: item.ID, head: state.PromptHead(text), draft: m.draftPath(it.Factory, item.ID), leavesOpen: item.Kind == "gate" && action == "changes"}
+	m.recordSent(mark, sentAt)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
+}
+
+func (m *Model) answerMark(f factory.Factory, itemID string, itemSince time.Time, text string) sentMark {
+	return sentMark{itemSince: itemSince, factory: f.Key(), itemID: itemID, head: state.PromptHead(text), draft: m.draftPath(f, itemID)}
+}
+
+func (m *Model) recordSent(mark sentMark, at time.Time) {
+	mark.at = at
+	m.panel.sent[mark.factory+"|"+mark.itemID] = mark
 }
 
 func unanswered(item panel.Item, d *panel.Draft) string {

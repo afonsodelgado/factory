@@ -137,6 +137,36 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 	})
 }
 
+func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T) {
+	now := time.Now()
+	fx := newReviewFixture(t, false, busyHook(now.Add(-time.Minute)))
+	fx.f.State.Attention = []state.Attention{{ID: "gate-csv-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-time.Hour)}}}
+	clock := now
+	fx.m.Now = func() time.Time { return clock }
+	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"}); err != nil {
+		t.Fatal(err)
+	}
+
+	later := func(after time.Duration, hook *state.HookFile) {
+		clock = now.Add(after)
+		snap := fx.m.snap
+		snap.At = clock
+		snap.Hooks = []*state.HookFile{withToken(hook, "t-sup")}
+		snap.Items = []Item{{Factory: fx.f, Pane: &fx.supervisor, Hook: snap.Hooks[0]}}
+		fx.m.apply(snap)
+	}
+	later(30*time.Second, idleHook(now.Add(29*time.Second)))
+	received := idleHook(now.Add(29 * time.Second))
+	received.Submit = &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "/factory approve design gate-csv-design", At: now.Add(31 * time.Second)}
+	later(32*time.Second, received)
+
+	shown, answered := fx.m.shownItems(fx.m.snap.Items[0])
+	refused := fx.m.panel.refused[draftKey(fx.f, "gate-csv-design")]
+	if len(fx.typist.typed) != 1 || len(shown) != 0 || len(answered) != 1 || refused != "" {
+		t.Errorf("typed %q, panel shows %+v, answered %q, refused %q; want the approval typed once the supervisor was idle and the gate closed in the panel", fx.typist.typed, shown, answered, refused)
+	}
+}
+
 func TestAnAgentAnswersAndResolvesAThreadFromItsPane(t *testing.T) {
 	fx := newReviewFixture(t, true, idleHook(time.Now()))
 	thread := fx.store.Threads("")[0]

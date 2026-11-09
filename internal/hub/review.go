@@ -246,7 +246,11 @@ func (m *Model) approveFromPage(it Item, page string) (ReviewReply, error) {
 		return ReviewReply{}, fmt.Errorf("%s has no supervisor pane; wake it, then approve again", it.Factory.Label())
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), GateApprove(gate.Stage(), gate.ID, ""))
-	m.queueType(queuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text})
+	mark := m.answerMark(it.Factory, gate.ID, gate.CreatedAt.Time, text)
+	m.queueType(queuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text, Answers: &mark})
+	if m.Loader != nil {
+		m.Loader.Note(it.Factory, "approved "+gate.ID+" from the review page")
+	}
 	return ReviewReply{Target: "supervisor", Gate: gate.ID}, nil
 }
 
