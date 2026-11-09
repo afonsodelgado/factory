@@ -53,6 +53,7 @@ type queuedType struct {
 	NotBefore time.Time
 	Delivers  string
 	Record    string
+	Answers   *sentMark
 }
 
 type StageView struct {
@@ -365,6 +366,7 @@ func (m *Model) flushTypeQueue() {
 			waiting = append(waiting, q)
 			continue
 		}
+		typedAt := m.Now()
 		reason, err := Deliver(m.Typist, Target{Label: q.Label, Pane: &pane, Hook: hook}, q.Text)
 		if err != nil {
 			m.notice = err.Error()
@@ -375,6 +377,9 @@ func (m *Model) flushTypeQueue() {
 			continue
 		}
 		m.typedAt[q.Pane] = m.Now()
+		if q.Answers != nil {
+			m.recordSent(*q.Answers, typedAt)
+		}
 		if q.Delivers != "" {
 			markDelivered(q.Record, q.Delivers)
 		}
