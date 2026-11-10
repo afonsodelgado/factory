@@ -150,4 +150,22 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 	if slug := FreshSlug("eng-5-x", taken); slug != "eng-5-x" {
 		t.Errorf("a new factory after delete gets %s; want the same id back", slug)
 	}
+
+	writeFile(t, filepath.Join(worktree, "node_modules", "left.js"), "")
+	registry.Upsert(state.Entry{Repo: repo, Slug: "eng-5-x", Created: true})
+	stranger := filepath.Join(root, "not-a-factory")
+	writeFile(t, filepath.Join(stranger, "keep.md"), "")
+	for _, found := range Discover([]string{repo}, registry) {
+		if found.Slug == "eng-5-x" {
+			f = found
+		}
+	}
+	orphaned := Run(PlanRemoval(f, cfg), update)
+	if failed, ok := FirstFailure(orphaned); ok || exists(worktree) || registry.Find(repo, "eng-5-x") != nil {
+		t.Fatalf("delete of a worktree folder git no longer tracks: failed %+v, folder there %v; it fails forever and the factory can never be deleted\n%s", failed, exists(worktree), Report(orphaned))
+	}
+	Run(Removal{Repo: repo, Slug: "eng-5-x", Worktree: stranger}, update)
+	if !exists(filepath.Join(stranger, "keep.md")) {
+		t.Error("delete removed an untracked folder outside the factory's own worktrees slot")
+	}
 }
