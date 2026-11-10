@@ -25,6 +25,7 @@ type Entry struct {
 	Archived   bool         `json:"archived,omitempty"`
 	Dir        string       `json:"dir,omitempty"`
 	Supervisor AgentSetting `json:"supervisor,omitzero"`
+	Branches   []string     `json:"branches,omitempty"`
 
 	Agents map[string]AgentSetting `json:"agents,omitempty"`
 }

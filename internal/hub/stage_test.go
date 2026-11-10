@@ -69,6 +69,9 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 func TestWakeResumesTheSupervisorNotTheStageAgentThatWorkedLast(t *testing.T) {
 	stateDir := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), ".claude", "worktrees", "csv")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	for _, h := range []struct{ session, token string }{{"supervisor", "t-sup"}, {"engineer", "t-eng"}} {
 		payload := `{"session_id":"` + h.session + `","cwd":"` + worktree + `","hook_event_name":"Stop"}`

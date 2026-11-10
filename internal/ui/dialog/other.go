@@ -357,10 +357,10 @@ func (d *Delete) drawWhatGoes(c *theme.Canvas) {
 		name, value string
 		ink         theme.Ink
 	}{
-		{"session", "its Claude pane, if it runs", theme.Text},
+		{"session", "its Claude and stage panes, and what they started", theme.Text},
 		{"worktree", worktree, worktreeInk},
 		{"branches", branches, branchesInk},
-		{"state", "its factory and QA directories, activity log and drafts", theme.Text},
+		{"state", "its factory and QA directories, logs, drafts and hook records", theme.Text},
 	}
 	for i, r := range rows {
 		c.Put(3, 2+i, r.name, theme.Text)

@@ -34,6 +34,20 @@ func StageRunsPath(stateDir, repo, slug string) string {
 	return filepath.Join(stateDir, "stages", FileStem(repo, slug)+".json")
 }
 
+const SupervisorLaunch = "supervisor"
+
+func LaunchScriptPath(stateDir, repo, slug, role string) string {
+	return filepath.Join(stateDir, "launch", FileStem(repo, slug)+"-"+role+".sh")
+}
+
+func LaunchScriptPaths(stateDir, repo, slug string) []string {
+	var paths []string
+	for _, role := range append([]string{SupervisorLaunch}, AgentRoles...) {
+		paths = append(paths, LaunchScriptPath(stateDir, repo, slug, role))
+	}
+	return paths
+}
+
 func LoadStageRuns(path string) (*StageRuns, error) {
 	runs := &StageRuns{path: path}
 	data, err := os.ReadFile(path)

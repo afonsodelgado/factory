@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
@@ -98,5 +100,38 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 	forgotten := (&Loader{Config: cfg, Registry: empty, Now: time.Now}).Load()
 	if len(forgotten.Items) != 1 || !forgotten.Items[0].Factory.Archived() || !retired(forgotten.Items[0].Factory) {
 		t.Errorf("with the registry entry lost, discovery finds %+v; want the moved directory still read as retired, archived history, or a new factory with the id picks up its state", forgotten.Items)
+	}
+}
+
+func TestDeleteStillKnowsTheStackOfAFactoryWhoseWorktreeWasRemovedByHand(t *testing.T) {
+	repo := t.TempDir()
+	worktree := filepath.Join(factory.WorktreesDir(repo), "x")
+	if err := os.MkdirAll(filepath.Join(worktree, ".claude", "factory", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".claude", "factory", "x", "state.json"), []byte(`{"id":"x","branch":"worktree-x","prs":[{"number":1,"branch":"x-layer-1"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.Upsert(state.Entry{Repo: repo, Slug: "x", Created: true})
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	(&Loader{Config: cfg, Registry: registry, Now: time.Now}).Load()
+
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := factory.Discover([]string{repo}, reloaded)
+	if len(found) != 1 || !slices.Contains(factory.PlanRemoval(found[0], cfg).Branches, "x-layer-1") {
+		t.Errorf("found %+v; delete must still plan x-layer-1 once state.json went with the worktree, or the stack branch is left behind for good", found)
 	}
 }

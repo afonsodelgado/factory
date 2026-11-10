@@ -309,6 +309,9 @@ func (e *Engine) Pause(l *Layout, repo, slug string) error {
 		return nil
 	}
 	if pane.ID == l.Slot {
+		if err := e.ensureSlotViewer(); err != nil {
+			return err
+		}
 		viewer, found := e.SlotViewer()
 		if found {
 			if err := e.Select(l, viewer); err != nil {

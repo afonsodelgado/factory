@@ -116,7 +116,11 @@ func IsFactoryDir(cwd string) bool {
 	if strings.Contains(cwd, string(filepath.Separator)+filepath.Join(".claude", "worktrees")+string(filepath.Separator)) {
 		return true
 	}
-	info, err := os.Stat(filepath.Join(cwd, ".claude", "factory"))
+	return dirExists(filepath.Join(cwd, ".claude", "factory"))
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
@@ -125,7 +129,7 @@ func RecordHook(stateDir string, payload []byte, token string, now time.Time) er
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return err
 	}
-	if p.SessionID == "" || p.HookEventName == "" || !IsFactoryDir(p.CWD) {
+	if p.SessionID == "" || p.HookEventName == "" || !IsFactoryDir(p.CWD) || !dirExists(p.CWD) {
 		return nil
 	}
 	dir := SessionsDir(stateDir)

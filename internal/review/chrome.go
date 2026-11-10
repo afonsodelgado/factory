@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +67,18 @@ func (b *Browser) Close() {
 		b.cancel()
 		b.cancel, b.root, b.tabs = nil, nil, nil
 	}
+}
+
+func (b *Browser) CloseFactory(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tabs = slices.DeleteFunc(b.tabs, func(t *Tab) bool {
+		if t.factory.Key != key {
+			return false
+		}
+		t.cancel()
+		return true
+	})
 }
 
 func (b *Browser) start() (context.Context, error) {

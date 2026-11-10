@@ -2,6 +2,7 @@ package hub
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,7 @@ func (l *Loader) Load() Snapshot {
 		}
 		hook := hookFor(f, tokenOf(pane), supervisorHooks)
 		l.rememberSession(f, paneHook(tokenOf(pane), hooks))
+		l.rememberBranches(f)
 		stage := runningStage(f, runs[f.Key()], panes, hooks)
 		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.hook()}
 		status := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
@@ -140,6 +142,26 @@ func (l *Loader) rememberSession(f factory.Factory, hook *state.HookFile) {
 	}
 	if entry := l.Registry.Find(f.Repo, f.Slug); entry != nil {
 		entry.SessionID = hook.SessionID
+		l.Registry.Save()
+	}
+}
+
+func (l *Loader) rememberBranches(f factory.Factory) {
+	entry := l.Registry.Find(f.Repo, f.Slug)
+	if entry == nil || f.State == nil {
+		return
+	}
+	known := len(entry.Branches)
+	branches := []string{f.State.Branch}
+	for _, pr := range f.State.PRs {
+		branches = append(branches, pr.Branch)
+	}
+	for _, branch := range branches {
+		if branch != "" && !slices.Contains(entry.Branches, branch) {
+			entry.Branches = append(entry.Branches, branch)
+		}
+	}
+	if len(entry.Branches) > known {
 		l.Registry.Save()
 	}
 }
@@ -262,6 +284,17 @@ func (l *Loader) Known(repo, slug string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.Registry.Find(repo, slug) != nil
+}
+
+func (l *Loader) Lookup(repo, slug string) (factory.Factory, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, f := range factory.Discover([]string{repo}, l.Registry) {
+		if f.Slug == slug {
+			return f, true
+		}
+	}
+	return factory.Factory{}, false
 }
 
 func (l *Loader) UpdateRegistry(fn func(*state.Registry)) error {
