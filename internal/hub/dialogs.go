@@ -527,27 +527,32 @@ func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 	if !ok || m.Loader == nil {
 		return nil, fmt.Errorf("the hub does not list %s", key)
 	}
-	if it.Pane != nil && m.Engine != nil {
-		if err := m.Engine.Pause(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
-			return nil, err
-		}
-	}
+	return m.deleteFactory(it.Factory)
+}
+
+func (m *Model) deleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
 	if m.Engine != nil {
-		if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, ""); err != nil {
+		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)
+		if err := m.Engine.Pause(&m.Layout, f.Repo, f.Slug); err != nil {
 			return nil, err
 		}
+		Terminate(strays)
 	}
+	if m.Chrome != nil {
+		m.Chrome.CloseFactory(reviewKey(f))
+	}
+	key := f.Key()
 	if m.selected == key {
 		m.choose(m.rowAfter(key))
 	}
 	m.forgetFactory(key)
-	removal := factory.PlanRemoval(it.Factory, m.Config)
+	removal := factory.PlanRemoval(f, m.Config)
 	steps := factory.Run(removal, m.Loader.UpdateRegistry)
 	m.Loader.Forget(key)
 	if failed, stopped := factory.FirstFailure(steps); stopped {
-		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", it.Factory.Label(), failed.Name, failed.Detail, failed.Err)
+		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", f.Label(), failed.Name, failed.Detail, failed.Err)
 	}
-	m.notice = it.Factory.Label() + " is deleted."
+	m.notice = f.Label() + " is deleted."
 	return steps, nil
 }
 

@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -476,5 +478,72 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 		if got := factory.StatusOf(f, live, time.Now(), time.Hour); got != want {
 			t.Errorf("%s: status = %s, want %s", slug, got, want)
 		}
+	}
+}
+
+func TestPausingTheShownFactoryKeepsTheHubWhenItsViewerIsGone(t *testing.T) {
+	e, l := hubFixture(t)
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "x", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer := l.Slot
+	if err := e.Select(&l, created); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.TM.KillPane(viewer); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Pause(&l, "/repo", "x"); err != nil {
+		t.Fatal(err)
+	}
+	panes, _ := e.TM.Panes()
+	if _, ok := byID(panes, l.Selector); !ok {
+		t.Fatal("pausing or deleting the shown factory killed the hub window, because no viewer was left to swap back into the slot")
+	}
+	if _, ok := FactoryPane(panes, "/repo", "x"); ok {
+		t.Error("the factory pane survived the pause")
+	}
+}
+
+func TestClosingAFactoryWithoutTheHubStopsItsStagesAndStrayProcesses(t *testing.T) {
+	e, l := hubFixture(t)
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "x", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.NewStagePane(l, StagePane{Repo: "/repo", Slug: "x", Role: "engineer", Token: "t", Dir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	if err := e.Type(created, "nohup sleep 600 >/dev/null 2>&1 & echo $! > "+pidFile); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var stray int
+	for stray == 0 && time.Now().Before(deadline) {
+		data, _ := os.ReadFile(pidFile)
+		fmt.Sscan(string(data), &stray)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if stray == 0 {
+		t.Fatal("the factory pane never started its background process")
+	}
+	t.Cleanup(func() { syscall.Kill(stray, syscall.SIGKILL) })
+
+	if err := CloseFactoryPanes(e.TM, "/repo", "x"); err != nil {
+		t.Fatal(err)
+	}
+	panes, _ := e.TM.Panes()
+	for _, p := range panes {
+		if ofFactory(p, "/repo", "x") {
+			t.Errorf("pane %s (%s) survived: deleting with the hub down left the factory's stage running", p.ID, p.WindowName)
+		}
+	}
+	for syscall.Kill(stray, 0) == nil {
+		if time.Now().After(deadline.Add(5 * time.Second)) {
+			t.Fatalf("process %s started from the factory pane outlived the delete", strconv.Itoa(stray))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

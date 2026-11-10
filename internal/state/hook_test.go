@@ -27,6 +27,11 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(SessionsDir(stateDir), "plain.json")); err == nil {
 		t.Error("a session outside any factory got a hook file")
 	}
+	deleted := filepath.Join(filepath.Dir(worktree), "deleted-factory")
+	record(`{"session_id":"dying","cwd":"`+deleted+`","hook_event_name":"SessionEnd"}`, at)
+	if _, err := os.Stat(filepath.Join(SessionsDir(stateDir), "dying.json")); err == nil {
+		t.Error("a session ending after its factory was deleted wrote its hook file back")
+	}
 
 	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"Stop","transcript_path":"/t.jsonl"}`, at)
 	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"PreToolUse","tool_name":"Bash","agent_id":"a1","agent_type":"factory-engineer"}`, at.Add(time.Minute))

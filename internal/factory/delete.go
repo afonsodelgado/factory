@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -24,6 +25,8 @@ type Removal struct {
 	Drafts    string
 	StageRuns string
 	Delivered string
+	Sessions  []string
+	Launches  []string
 }
 
 func PlanRemoval(f Factory, cfg *state.Config) Removal {
@@ -36,17 +39,31 @@ func PlanRemoval(f Factory, cfg *state.Config) Removal {
 		Drafts:    filepath.Join(cfg.DraftsDir(), state.FileStem(f.Repo, f.Slug)),
 		StageRuns: state.StageRunsPath(cfg.StateDir, f.Repo, f.Slug),
 		Delivered: filepath.Join(cfg.StateDir, "delivered", state.FileStem(f.Repo, f.Slug)+".json"),
+		Sessions:  sessionFiles(cfg, f),
+		Launches:  existing(state.LaunchScriptPaths(cfg.StateDir, f.Repo, f.Slug)),
 	}
 	branch := worktreeBranch(f)
-	r.Branches = append(r.Branches, branch)
-	if f.State != nil {
-		for _, pr := range f.State.PRs {
-			r.Branches = append(r.Branches, pr.Branch)
-		}
-	}
-	r.Branches = localBranches(f.Repo, r.Branches)
+	others := otherFactoriesBranches(cfg, f)
+	r.Branches = slices.DeleteFunc(localBranches(f.Repo, withStacks(f.Repo, knownBranches(f, branch))), func(b string) bool {
+		return slices.Contains(others, b)
+	})
 	r.StateDirs = stateDirs(f, branch)
 	return r
+}
+
+func otherFactoriesBranches(cfg *state.Config, f Factory) []string {
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		return nil
+	}
+	var branches []string
+	for _, e := range registry.Factories {
+		if e.Repo == f.Repo && e.Slug != f.Slug {
+			branches = append(branches, "worktree-"+e.Slug)
+			branches = append(branches, e.Branches...)
+		}
+	}
+	return branches
 }
 
 func worktreeBranch(f Factory) string {
@@ -61,19 +78,119 @@ func worktreeBranch(f Factory) string {
 	return "worktree-" + f.Slug
 }
 
-func localBranches(repo string, names []string) []string {
-	trunk := ""
-	if remoteHead, err := git(repo, "rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
-		trunk = strings.TrimPrefix(remoteHead, "origin/")
+func knownBranches(f Factory, branch string) []string {
+	names := []string{branch, "worktree-" + f.Slug}
+	if listed, ok, _ := findWorktree(f.Repo, f.Worktree); ok {
+		names = append(names, listed.branch)
 	}
+	if f.State != nil {
+		for _, pr := range f.State.PRs {
+			names = append(names, pr.Branch)
+		}
+	}
+	if f.Entry != nil {
+		names = append(names, f.Entry.Branches...)
+	}
+	return names
+}
+
+func withStacks(repo string, names []string) []string {
+	for _, stack := range ghStacks(repo) {
+		if slices.ContainsFunc(stack, func(b string) bool { return slices.Contains(names, b) }) {
+			names = append(names, stack...)
+		}
+	}
+	return names
+}
+
+func ghStacks(repo string) [][]string {
+	common, err := git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(common, "gh-stack"))
+	if err != nil {
+		return nil
+	}
+	var file struct {
+		Stacks []struct {
+			Branches []struct {
+				Branch string `json:"branch"`
+			} `json:"branches"`
+		} `json:"stacks"`
+	}
+	if json.Unmarshal(data, &file) != nil {
+		return nil
+	}
+	var stacks [][]string
+	for _, s := range file.Stacks {
+		var names []string
+		for _, b := range s.Branches {
+			names = append(names, b.Branch)
+		}
+		stacks = append(stacks, names)
+	}
+	return stacks
+}
+
+func localBranches(repo string, names []string) []string {
+	protected := trunkNames(repo)
 	var branches []string
 	for _, name := range names {
-		if name == "" || name == trunk || slices.Contains(branches, name) {
+		if name == "" || slices.Contains(protected, name) || slices.Contains(branches, name) {
 			continue
 		}
 		branches = append(branches, name)
 	}
 	return branches
+}
+
+func trunkNames(repo string) []string {
+	names := []string{"main", "master"}
+	if remoteHead, err := git(repo, "rev-parse", "--abbrev-ref", "origin/HEAD"); err == nil {
+		names = append(names, strings.TrimPrefix(remoteHead, "origin/"))
+	}
+	return names
+}
+
+func remoteTrunk(repo string) string {
+	for _, ref := range []string{"origin/HEAD", "origin/main", "origin/master"} {
+		if _, err := git(repo, "rev-parse", "--verify", "--quiet", "refs/remotes/"+ref); err == nil {
+			return ref
+		}
+	}
+	return ""
+}
+
+func sessionFiles(cfg *state.Config, f Factory) []string {
+	hooks, _ := state.ReadHookFiles(cfg.StateDir)
+	worktree := ""
+	if f.Worktree != "" && realPath(f.Worktree) != realPath(f.Repo) {
+		worktree = realPath(f.Worktree)
+	}
+	var paths []string
+	for _, h := range hooks {
+		ownSession := h.SessionID == f.SessionID()
+		inWorktree := worktree != "" && within(realPath(h.CWD), worktree)
+		if h.SessionID == "" || (!ownSession && !inWorktree) {
+			continue
+		}
+		for _, ext := range []string{".json", ".lock"} {
+			paths = append(paths, filepath.Join(cfg.SessionsDir(), h.SessionID+ext))
+		}
+	}
+	return existing(paths)
+}
+
+func existing(paths []string) []string {
+	return slices.DeleteFunc(paths, func(path string) bool {
+		_, err := os.Lstat(path)
+		return err != nil
+	})
+}
+
+func within(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }
 
 func stateDirs(f Factory, branch string) []string {
@@ -108,11 +225,20 @@ func isPlainName(name string) bool {
 }
 
 func throughLinkedParent(path string) string {
-	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
-	if err != nil {
-		return filepath.Clean(path)
+	clean := filepath.Clean(path)
+	return filepath.Join(realPath(filepath.Dir(clean)), filepath.Base(clean))
+}
+
+func realPath(path string) string {
+	clean := filepath.Clean(path)
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		return real
 	}
-	return filepath.Join(parent, filepath.Base(path))
+	parent := filepath.Dir(clean)
+	if parent == clean {
+		return clean
+	}
+	return filepath.Join(realPath(parent), filepath.Base(clean))
 }
 
 type Work struct {
@@ -133,6 +259,7 @@ func CheckWork(r Removal) Work {
 		}
 		w.Dirty = lines(status)
 	}
+	trunk := remoteTrunk(r.Repo)
 	for _, branch := range r.Branches {
 		if !branchExists(r.Repo, branch) {
 			continue
@@ -141,11 +268,24 @@ func CheckWork(r Removal) Work {
 		if err != nil {
 			commits = "cannot compare with the remotes: " + commits
 		}
-		if found := lines(commits); len(found) > 0 {
+		if found := lines(commits); len(found) > 0 && !landedIn(r.Repo, trunk, branch) {
 			w.Unpushed[branch] = found
 		}
 	}
 	return w
+}
+
+func landedIn(repo, trunk, branch string) bool {
+	if trunk == "" {
+		return false
+	}
+	merged, err := git(repo, "merge-tree", "--write-tree", trunk, "refs/heads/"+branch)
+	if err != nil {
+		return false
+	}
+	tree, err := git(repo, "rev-parse", trunk+"^{tree}")
+	mergedTree, _, _ := strings.Cut(merged, "\n")
+	return err == nil && mergedTree == tree
 }
 
 type Outcome int
@@ -171,8 +311,9 @@ type RemovalStep struct {
 
 func Run(r Removal, registry func(func(*state.Registry)) error) []RemovalStep {
 	steps := []RemovalStep{removeWorktree(r)}
+	worktrees, _ := listWorktrees(r.Repo)
 	for _, branch := range r.Branches {
-		steps = append(steps, deleteBranch(r.Repo, branch))
+		steps = append(steps, deleteBranch(r.Repo, branch, worktrees))
 	}
 	for _, dir := range r.StateDirs {
 		steps = append(steps, removePath("remove state", dir))
@@ -184,6 +325,12 @@ func Run(r Removal, registry func(func(*state.Registry)) error) []RemovalStep {
 		removePath("remove stage runs", r.StageRuns),
 		removePath("remove delivered messages", r.Delivered),
 	)
+	for _, path := range r.Sessions {
+		steps = append(steps, removePath("remove session record", path))
+	}
+	for _, path := range r.Launches {
+		steps = append(steps, removePath("remove launch script", path))
+	}
 	if _, stopped := FirstFailure(steps); stopped {
 		return append(steps, keepEntry(r, registry))
 	}
@@ -198,6 +345,11 @@ func keepEntry(r Removal, registry func(func(*state.Registry)) error) RemovalSte
 			entry = reg.Upsert(state.Entry{Repo: r.Repo, Slug: r.Slug})
 		}
 		entry.Created = true
+		for _, branch := range r.Branches {
+			if !slices.Contains(entry.Branches, branch) {
+				entry.Branches = append(entry.Branches, branch)
+			}
+		}
 	})
 	if err != nil {
 		step.State, step.Err = Failed, err
@@ -208,44 +360,74 @@ func keepEntry(r Removal, registry func(func(*state.Registry)) error) RemovalSte
 func removeWorktree(r Removal) RemovalStep {
 	defer git(r.Repo, "worktree", "prune")
 	step := RemovalStep{Name: "remove worktree", Detail: r.Worktree, State: Skipped}
-	ownFolder := filepath.Clean(r.Worktree) == filepath.Join(WorktreesDir(r.Repo), r.Slug)
-	switch {
-	case !dirExists(r.Worktree):
+	if r.Worktree == "" {
 		return step
-	case ownFolder && !registeredWorktree(r.Repo, r.Worktree):
+	}
+	listed, tracked, err := findWorktree(r.Repo, r.Worktree)
+	ownFolder := realPath(r.Worktree) == realPath(filepath.Join(WorktreesDir(r.Repo), r.Slug))
+	untracked := err == nil && !tracked
+	switch {
+	case realPath(r.Worktree) == realPath(r.Repo):
+		step.Detail += ", kept: it is the main checkout"
+		return step
+	case !tracked && !dirExists(r.Worktree):
+		return step
+	case ownFolder && untracked:
 		return removePath(step.Name, r.Worktree)
 	}
+	target := r.Worktree
+	if tracked {
+		target = listed.path
+	}
 	step.State = Ran
-	if out, err := git(r.Repo, "worktree", "remove", "--force", "--force", r.Worktree); err != nil {
+	if out, err := git(r.Repo, "worktree", "remove", "--force", "--force", target); err != nil {
 		step.State, step.Err = Failed, fmt.Errorf("git worktree remove: %s", out)
 	}
 	return step
 }
 
-func registeredWorktree(repo, dir string) bool {
-	list, err := git(repo, "worktree", "list", "--porcelain")
+type gitWorktree struct {
+	path   string
+	branch string
+}
+
+func listWorktrees(repo string) ([]gitWorktree, error) {
+	out, err := git(repo, "worktree", "list", "--porcelain")
 	if err != nil {
-		return true
+		return nil, err
 	}
-	target := realPath(dir)
-	for _, line := range lines(list) {
-		if path, ok := strings.CutPrefix(line, "worktree "); ok && realPath(path) == target {
-			return true
+	var list []gitWorktree
+	for _, line := range lines(out) {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			list = append(list, gitWorktree{path: path})
+		} else if branch, ok := strings.CutPrefix(line, "branch refs/heads/"); ok && len(list) > 0 {
+			list[len(list)-1].branch = branch
 		}
 	}
-	return false
+	return list, nil
 }
 
-func realPath(path string) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
+func findWorktree(repo, dir string) (gitWorktree, bool, error) {
+	if dir == "" {
+		return gitWorktree{}, false, nil
 	}
-	return filepath.Clean(path)
+	list, err := listWorktrees(repo)
+	target := realPath(dir)
+	for _, w := range list {
+		if realPath(w.path) == target {
+			return w, true, nil
+		}
+	}
+	return gitWorktree{}, false, err
 }
 
-func deleteBranch(repo, branch string) RemovalStep {
+func deleteBranch(repo, branch string, worktrees []gitWorktree) RemovalStep {
 	step := RemovalStep{Name: "delete branch", Detail: branch, State: Skipped}
 	if !branchExists(repo, branch) {
+		return step
+	}
+	if i := slices.IndexFunc(worktrees, func(w gitWorktree) bool { return w.branch == branch }); i >= 0 {
+		step.Detail += ", kept: checked out at " + worktrees[i].path
 		return step
 	}
 	step.State = Ran

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -37,6 +38,10 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 		return 1
 	}
 	f, err := findFactory(cfg, *repoFlag, id)
+	if errors.Is(err, errNoFactory) {
+		fmt.Fprintf(out, "Nothing to delete: %v.\n", err)
+		return 0
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory delete:", err)
 		return 1
@@ -70,10 +75,17 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 	return 0
 }
 
+var errNoFactory = errors.New("no factory")
+
 func findFactory(cfg *state.Config, repoFlag, id string) (factory.Factory, error) {
+	registry, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		return factory.Factory{}, err
+	}
+	known := knownRepos(cfg, registry)
 	repos := cfg.Repos
 	if repoFlag != "" {
-		configured, ok := configuredRepo(cfg.Repos, repoFlag)
+		configured, ok := configuredRepo(known, repoFlag)
 		if !ok {
 			return factory.Factory{}, fmt.Errorf("the hub has no repo at %s (its repos: %s)", repoFlag, strings.Join(cfg.Repos, ", "))
 		}
@@ -81,10 +93,26 @@ func findFactory(cfg *state.Config, repoFlag, id string) (factory.Factory, error
 	} else if repo := repoOf(cfg, id, cwdRepo(cfg)); repo != "" {
 		repos = []string{repo}
 	}
-	registry, err := state.LoadRegistry(cfg.RegistryPath())
-	if err != nil {
-		return factory.Factory{}, err
+	f, err := matchFactory(repos, registry, id)
+	if errors.Is(err, errNoFactory) && repoFlag == "" {
+		if f, err := matchFactory(known, registry, id); err == nil {
+			return f, nil
+		}
 	}
+	return f, err
+}
+
+func knownRepos(cfg *state.Config, registry *state.Registry) []string {
+	repos := slices.Clone(cfg.Repos)
+	for _, e := range registry.Factories {
+		if !slices.Contains(repos, e.Repo) {
+			repos = append(repos, e.Repo)
+		}
+	}
+	return repos
+}
+
+func matchFactory(repos []string, registry *state.Registry, id string) (factory.Factory, error) {
 	slug := factory.Slugify(id)
 	var bySlug, byLabel []factory.Factory
 	for _, f := range factory.Discover(repos, registry) {
@@ -101,7 +129,7 @@ func findFactory(cfg *state.Config, repoFlag, id string) (factory.Factory, error
 	}
 	switch len(matches) {
 	case 0:
-		return factory.Factory{}, fmt.Errorf("no factory %q in %s; pass --repo when it lives in another configured repo", id, strings.Join(repos, ", "))
+		return factory.Factory{}, fmt.Errorf("%w %q in %s; pass --repo when it lives in another configured repo", errNoFactory, id, strings.Join(repos, ", "))
 	case 1:
 		return matches[0], nil
 	}
@@ -126,7 +154,7 @@ func whatGoes(f factory.Factory, r factory.Removal) string {
 		name += " · " + f.Title()
 	}
 	fmt.Fprintf(&b, "Deletes %s (%s) for good:\n", name, f.RepoName())
-	fmt.Fprintln(&b, "  session    its Claude pane, if it runs")
+	fmt.Fprintln(&b, "  session    its Claude and stage panes, and what they started")
 	worktree := r.Worktree
 	if _, err := os.Stat(r.Worktree); r.Worktree == "" || err != nil {
 		worktree = "already removed"
@@ -137,7 +165,7 @@ func whatGoes(f factory.Factory, r factory.Removal) string {
 		branches = "none left"
 	}
 	fmt.Fprintln(&b, "  branches  ", branches, "(local only)")
-	fmt.Fprintln(&b, "  state      its factory and QA directories, activity log, drafts and registry entry")
+	fmt.Fprintln(&b, "  state      its factory and QA directories, activity log, drafts, hook records, launch scripts and registry entry")
 	fmt.Fprintln(&b, "Pushed PRs and remote branches stay. The id can be used again.")
 	return b.String()
 }
@@ -167,7 +195,7 @@ func deleteFactory(cfg *state.Config, f factory.Factory, r factory.Removal) (str
 		json.Unmarshal(reply.Data, &report)
 		return report, reply.T == "error", nil
 	}
-	if err := closePane(cfg, f); err != nil {
+	if err := hub.CloseFactoryPanes(tmux.Client{Socket: cfg.Tmux.Socket}, f.Repo, f.Slug); err != nil {
 		return "", false, err
 	}
 	steps := factory.Run(r, func(change func(*state.Registry)) error {
@@ -180,20 +208,4 @@ func deleteFactory(cfg *state.Config, f factory.Factory, r factory.Removal) (str
 	})
 	_, failed := factory.FirstFailure(steps)
 	return factory.Report(steps), failed, nil
-}
-
-func closePane(cfg *state.Config, f factory.Factory) error {
-	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	panes, err := tm.Panes()
-	if err != nil {
-		return err
-	}
-	pane, ok := hub.FactoryPane(panes, f.Repo, f.Slug)
-	switch {
-	case !ok:
-		return nil
-	case hub.InHubWindow(panes, pane):
-		return tm.KillPane(pane.ID)
-	}
-	return tm.KillWindow(pane.WindowID)
 }

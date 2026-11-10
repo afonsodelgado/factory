@@ -309,18 +309,17 @@ func (m *Model) openStagePane(it Item, run state.StageRun, command string) error
 	if err != nil {
 		return err
 	}
-	return m.typeLaunch(pane, state.FileStem(it.Factory.Repo, it.Factory.Slug)+"-"+run.Role, command)
+	return m.typeLaunch(pane, state.LaunchScriptPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug, run.Role), command)
 }
 
 func (m *Model) typeSupervisor(pane string, f factory.Factory, command string) error {
 	if f.Supervisor().OnClaude() {
 		return m.Engine.Type(pane, command)
 	}
-	return m.typeLaunch(pane, state.FileStem(f.Repo, f.Slug)+"-supervisor", command)
+	return m.typeLaunch(pane, state.LaunchScriptPath(m.Config.StateDir, f.Repo, f.Slug, state.SupervisorLaunch), command)
 }
 
-func (m *Model) typeLaunch(pane, name, command string) error {
-	path := filepath.Join(m.Config.StateDir, "launch", name+".sh")
+func (m *Model) typeLaunch(pane, path, command string) error {
 	if err := writeFile(path, command+"\n"); err != nil {
 		return err
 	}

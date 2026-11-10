@@ -41,7 +41,7 @@ func (m *Model) deleteRequest(e Event) tea.Cmd {
 	var steps []factory.RemovalStep
 	err := json.Unmarshal(e.Data, &r)
 	if err == nil {
-		steps, err = m.delete(state.Key(r.Repo, r.Slug))
+		steps, err = m.deleteRequested(r)
 	}
 	report, _ := json.Marshal(factory.Report(steps))
 	reply := Message{T: "done", Data: report}
@@ -50,6 +50,18 @@ func (m *Model) deleteRequest(e Event) tea.Cmd {
 	}
 	e.From.Send(reply)
 	return m.load()
+}
+
+func (m *Model) deleteRequested(r DeleteRequest) ([]factory.RemovalStep, error) {
+	key := state.Key(r.Repo, r.Slug)
+	if _, listed := m.snap.Find(key); listed || m.Loader == nil {
+		return m.delete(key)
+	}
+	f, ok := m.Loader.Lookup(r.Repo, r.Slug)
+	if !ok {
+		return nil, fmt.Errorf("the hub does not list %s", key)
+	}
+	return m.deleteFactory(f)
 }
 
 func (m *Model) repoRequest(e Event) tea.Cmd {
