@@ -206,15 +206,41 @@ func keepEntry(r Removal, registry func(func(*state.Registry)) error) RemovalSte
 }
 
 func removeWorktree(r Removal) RemovalStep {
+	defer git(r.Repo, "worktree", "prune")
 	step := RemovalStep{Name: "remove worktree", Detail: r.Worktree, State: Skipped}
-	if dirExists(r.Worktree) {
-		step.State = Ran
-		if out, err := git(r.Repo, "worktree", "remove", "--force", "--force", r.Worktree); err != nil {
-			step.State, step.Err = Failed, fmt.Errorf("git worktree remove: %s", out)
+	ownFolder := filepath.Clean(r.Worktree) == filepath.Join(WorktreesDir(r.Repo), r.Slug)
+	switch {
+	case !dirExists(r.Worktree):
+		return step
+	case ownFolder && !registeredWorktree(r.Repo, r.Worktree):
+		return removePath(step.Name, r.Worktree)
+	}
+	step.State = Ran
+	if out, err := git(r.Repo, "worktree", "remove", "--force", "--force", r.Worktree); err != nil {
+		step.State, step.Err = Failed, fmt.Errorf("git worktree remove: %s", out)
+	}
+	return step
+}
+
+func registeredWorktree(repo, dir string) bool {
+	list, err := git(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return true
+	}
+	target := realPath(dir)
+	for _, line := range lines(list) {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok && realPath(path) == target {
+			return true
 		}
 	}
-	git(r.Repo, "worktree", "prune")
-	return step
+	return false
+}
+
+func realPath(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }
 
 func deleteBranch(repo, branch string) RemovalStep {
