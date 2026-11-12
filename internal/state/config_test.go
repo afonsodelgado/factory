@@ -204,4 +204,12 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), "# main repo") || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" {
 		t.Fatalf("config after adding a remote:\n%s\nerr %v; want the user's comments kept and only homelab listed", data, err)
 	}
+	for range 3 {
+		if err := UpdateMachine(dir, func(m *Machine) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if again, _ := os.ReadFile(filepath.Join(dir, "config.yml")); string(again) != string(data) {
+		t.Fatalf("config after three more writes:\n%s\nwant it unchanged, not indented further on every write:\n%s", again, data)
+	}
 }

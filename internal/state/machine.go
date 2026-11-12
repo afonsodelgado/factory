@@ -153,16 +153,13 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 }
 
 func setKey(file *ast.File, name string, value any, zero bool) error {
-	path, err := yaml.PathString("$." + name)
-	if err != nil {
-		return err
-	}
-	if _, err := path.FilterFile(file); err == nil {
-		node, err := yaml.ValueToNode(value)
+	if entry := topLevelEntry(file, name); entry != nil {
+		fresh, err := entryOf(name, value)
 		if err != nil {
 			return err
 		}
-		return path.ReplaceWithNode(file, node)
+		entry.Value = fresh.Value
+		return nil
 	}
 	if zero {
 		return nil
@@ -176,4 +173,41 @@ func setKey(file *ast.File, name string, value any, zero bool) error {
 		return err
 	}
 	return root.MergeFromNode(file, node)
+}
+
+func topLevelEntry(file *ast.File, name string) *ast.MappingValueNode {
+	for _, doc := range file.Docs {
+		for _, entry := range entriesOf(doc.Body) {
+			if entry.Key.GetToken().Value == name {
+				return entry
+			}
+		}
+	}
+	return nil
+}
+
+func entriesOf(body ast.Node) []*ast.MappingValueNode {
+	switch n := body.(type) {
+	case *ast.MappingNode:
+		return n.Values
+	case *ast.MappingValueNode:
+		return []*ast.MappingValueNode{n}
+	}
+	return nil
+}
+
+func entryOf(name string, value any) (*ast.MappingValueNode, error) {
+	data, err := yaml.Marshal(map[string]any{name: value})
+	if err != nil {
+		return nil, err
+	}
+	file, err := parser.ParseBytes(data, 0)
+	if err != nil {
+		return nil, err
+	}
+	entry := topLevelEntry(file, name)
+	if entry == nil {
+		return nil, fmt.Errorf("could not write %s", name)
+	}
+	return entry, nil
 }
