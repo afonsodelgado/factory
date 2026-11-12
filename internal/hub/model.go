@@ -599,6 +599,11 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		if strings.HasPrefix(e.Pane, "frame-") {
 			m.focusSlot()
 		}
+	default:
+		if e.Pane == "cli" {
+			e.Respond(m.execution().Handle(e.Message))
+			return m.load()
+		}
 	}
 	return nil
 }

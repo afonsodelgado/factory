@@ -13,7 +13,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
@@ -297,7 +296,7 @@ func mutate(cfg *state.Config, name, action string, payload, reply any) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 	defer cancel()
-	return client.Mutate(ctx, action, uuid.NewString(), payload, reply)
+	return client.MutateOnce(ctx, action, payload, reply)
 }
 
 type answeredMsg struct {
