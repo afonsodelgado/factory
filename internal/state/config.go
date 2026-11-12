@@ -202,5 +202,9 @@ func ExpandHome(path string) string {
 		return path
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, strings.TrimPrefix(path, "~"))
+	expanded := filepath.Join(home, strings.TrimPrefix(path, "~"))
+	if strings.HasSuffix(path, string(filepath.Separator)) {
+		expanded += string(filepath.Separator)
+	}
+	return expanded
 }

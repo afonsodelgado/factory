@@ -85,12 +85,15 @@ func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
 	if m.setupRetry == nil {
 		m.setupRetry = map[string]bool{}
 	}
+	retrying := m.setupRetry[repo]
 	m.setupRetry[repo] = true
 	result, err := install.Init(repo, m.Context.StateDir)
 	if err != nil {
 		return context, err
 	}
 	delete(m.setupRetry, repo)
+	repo = result.Repo
+	context.Repo = repo
 	context.Banner = "✓ Added " + filepath.Base(repo) + " to the hub. Setup wrote these values; check them, then save."
 	top, err := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel").Output()
 	switch {
@@ -98,6 +101,8 @@ func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
 		context.Banner = "✓ Added " + filepath.Base(repo) + ", the main checkout of the worktree you typed."
 	case result.CopiedFrom != "":
 		context.Banner = "✓ Copied .claude/factory.yml to .factory/config.yml. The form edits the new file."
+	case retrying:
+		context.Banner = "✓ Finished setting up " + filepath.Base(repo) + ". Check these values, then save."
 	case listed:
 		context.Banner = "✓ Set up the missing repo config. Check these values, then save."
 	case !result.ProfileWritten:

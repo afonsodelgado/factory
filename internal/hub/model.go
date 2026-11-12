@@ -1045,7 +1045,7 @@ func (m *Model) hints() []footer.Hint {
 func dialogHints(kind string) []footer.Hint {
 	switch kind {
 	case "new":
-		return hints("⏎", "next", "↑↓", "pick", "ctrl+e", "settings", "esc", "back or cancel")
+		return hints("⏎", "next", "↑↓", "pick", "esc", "back or cancel")
 	case "settings":
 		return hints("ctrl+s", "save", "↑↓", "field", "esc", "cancel")
 	case "switch":
