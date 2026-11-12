@@ -57,6 +57,7 @@ type Cache struct {
 type Reservation struct {
 	ID     string    `json:"id"`
 	GitURL string    `json:"git_url"`
+	Digest string    `json:"digest"`
 	Op     string    `json:"op"`
 	At     time.Time `json:"at"`
 }
@@ -172,13 +173,29 @@ func (c Client) Mutate(ctx context.Context, action, op string, payload, reply an
 	return json.Unmarshal(data, reply)
 }
 
-func (c Client) MutateOnce(ctx context.Context, action string, payload, reply any) error {
+func operationKey(action string, payload any) (string, error) {
 	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte(action+"\x00"), body...))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (c Client) Unsettled(action string, payload any) bool {
+	key, err := operationKey(action, payload)
+	if err != nil {
+		return false
+	}
+	cache, err := LoadCache(c.StateDir, c.Name)
+	return err == nil && slices.ContainsFunc(cache.Pending, func(p PendingOp) bool { return p.Key == key && time.Since(p.At) <= pendingLife })
+}
+
+func (c Client) MutateOnce(ctx context.Context, action string, payload, reply any) error {
+	key, err := operationKey(action, payload)
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(append([]byte(action+"\x00"), body...))
-	key := hex.EncodeToString(sum[:])
 	var op string
 	err = UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
 		cache.Pending = slices.DeleteFunc(cache.Pending, func(p PendingOp) bool { return time.Since(p.At) > pendingLife })

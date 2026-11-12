@@ -327,6 +327,22 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	if gitState(t, src) != before {
 		t.Fatal("remote creation changed the developer's checkout")
 	}
+
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=create"}, "open", "--remote", "homelab", "json", "--prompt", "first prompt"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost acknowledgement reported %v:\n%s", err, out)
+	}
+	if out, _ := s.factory(t, src, nil, "open", "--remote", "homelab", "json", "--prompt", "second prompt"); strings.Contains(out, "did not start") || !strings.Contains(out, "json already runs on homelab") {
+		t.Fatalf("a retry with another prompt said:\n%s\nwant that the lost attempt created json, never that it did not start", out)
+	}
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=delete"}, "delete", "csv", "--remote", "homelab", "--yes"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost delete answer reported %v:\n%s", err, out)
+	}
+	if out, err := s.factory(t, src, nil, "delete", "csv", "--remote", "homelab", "--yes"); err != nil {
+		t.Fatalf("retrying a delete whose answer was lost: %v\n%s\nwant the deletion it already made reported", err, out)
+	}
+	if slices.ContainsFunc(s.serverRegistry(t), func(e state.Entry) bool { return e.Slug == "csv" }) {
+		t.Fatal("csv is still on the server after its delete was retried")
+	}
 }
 
 func paneCommands(socket string) string {

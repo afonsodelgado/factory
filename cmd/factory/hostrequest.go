@@ -107,6 +107,9 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		}
 		return completed(preview)
 	case "delete":
+		if reply, done := host.Finished(cfg.StateDir, req.Op, req.Action); done {
+			return settled(reply)
+		}
 		f, err := targetFactory(cfg, req.Data)
 		if err != nil {
 			return nil, remote.Failed, err

@@ -92,40 +92,52 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 
 var errNoFactory = errors.New("no factory")
 
-func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out io.Writer) int {
-	fail := func(err error) int {
-		fmt.Fprintln(os.Stderr, "factory delete:", err)
-		return 1
+func deleteFailed(err error) int {
+	fmt.Fprintln(os.Stderr, "factory delete:", err)
+	return 1
+}
+
+func confirmRemoteDelete(ctx context.Context, client remote.Client, target remote.Target, yes bool, in *os.File, out io.Writer) (int, bool) {
+	var preview remote.Removal
+	if err := client.Read(ctx, "removal", target, &preview); err != nil {
+		return deleteFailed(err), false
 	}
+	answers := bufio.NewReader(in)
+	if !yes && !confirm(out, answers, preview.What+"Delete "+target.ID+" on "+client.Name+"? [y/N] ") {
+		fmt.Fprintln(out, "Nothing was deleted.")
+		return 0, false
+	}
+	if preview.Risk == "" {
+		return 0, true
+	}
+	if !term.IsTerminal(in.Fd()) {
+		return deleteFailed(fmt.Errorf("refusing: %s has unpushed or uncommitted work on %s and stdin is not a terminal; run it in a terminal", target.ID, client.Name)), false
+	}
+	if !confirm(out, answers, preview.Risk+"Delete it anyway? [y/N] ") {
+		fmt.Fprintln(out, "Nothing was deleted.")
+		return 0, false
+	}
+	return 0, true
+}
+
+func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out io.Writer) int {
 	client, err := remote.For(cfg, name)
 	if err != nil {
-		return fail(err)
+		return deleteFailed(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), remote.CreateWait)
 	defer cancel()
-	var preview remote.Removal
-	if err := client.Read(ctx, "removal", remote.Target{ID: id}, &preview); err != nil {
-		return fail(err)
-	}
-	answers := bufio.NewReader(in)
-	if !yes && !confirm(out, answers, preview.What+"Delete "+id+" on "+name+"? [y/N] ") {
-		fmt.Fprintln(out, "Nothing was deleted.")
-		return 0
-	}
-	if preview.Risk != "" {
-		if !term.IsTerminal(in.Fd()) {
-			return fail(fmt.Errorf("refusing: %s has unpushed or uncommitted work on %s and stdin is not a terminal; run it in a terminal", id, name))
-		}
-		if !confirm(out, answers, preview.Risk+"Delete it anyway? [y/N] ") {
-			fmt.Fprintln(out, "Nothing was deleted.")
-			return 0
+	target := remote.Target{ID: id}
+	if !client.Unsettled("delete", target) {
+		if code, confirmed := confirmRemoteDelete(ctx, client, target, yes, in, out); !confirmed {
+			return code
 		}
 	}
 	var report string
-	err = client.MutateOnce(ctx, "delete", remote.Target{ID: id}, &report)
+	err = client.MutateOnce(ctx, "delete", target, &report)
 	fmt.Fprint(out, report)
 	if err != nil {
-		return fail(fmt.Errorf("%s on %s is not fully deleted: %w. Run factory delete --remote %s %s again to finish", id, name, err, name, id))
+		return deleteFailed(fmt.Errorf("%s on %s is not fully deleted: %w. Run factory delete --remote %s %s again to finish", id, name, err, name, id))
 	}
 	return exitOf(remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
 		c.Inventory = slices.DeleteFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == id })

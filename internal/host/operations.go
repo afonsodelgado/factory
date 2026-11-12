@@ -64,6 +64,21 @@ func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, 
 	return op.Reply
 }
 
+func Finished(stateDir, id, action string) (Message, bool) {
+	if uuid.Validate(id) != nil {
+		return Message{}, false
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "operations", id+".json"))
+	if err != nil {
+		return Message{}, false
+	}
+	var op Operation
+	if json.Unmarshal(data, &op) != nil || op.Action != action || op.Status == "accepted" {
+		return Message{}, false
+	}
+	return op.Reply, true
+}
+
 func sameJSON(a, b json.RawMessage) bool {
 	var x, y bytes.Buffer
 	json.Compact(&x, a)
