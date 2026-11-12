@@ -117,18 +117,19 @@ commands:
   install-hooks [--remove]
               add (or remove) only the factory hooks, in Claude's
               settings.json and Codex's hooks.json
-  stage start --role <role> --task <file> [--wait]
-  stage send --role <role> --message <file> [--wait]
+  stage start --role <role> --task <file> [--wait] [--factory id [--remote name]]
+  stage send --role <role> --message <file> [--wait] [--factory id [--remote name]]
               run a stage agent on its own tool in a pane beside the
               supervisor, or send it a follow-up; prints the result file
-              (run by the supervisor from its pane)
+              (run by the supervisor from its pane; --factory and --remote
+              reach a factory from outside its panes)
   stage ci <pr number>...
               wait for CI and CodeRabbit on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
-  review reply --thread <id> [--resolve] [text…]
+  review reply --thread <id> [--resolve] [--factory id [--remote name]] [text…]
               answer a comment thread from the review page, and resolve it
               when the change is made (run by a stage agent)
-  review threads [--page path] [--open]
+  review threads [--page path] [--open] [--factory id [--remote name]]
               list this factory's comment threads
   review open [--factory id] [--for design|walkthrough] <url>
               open any page, such as the running app, in the factory's

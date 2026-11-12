@@ -228,6 +228,7 @@ A factory can run on an always-on Linux server over SSH, so it keeps going while
 | `factory open --remote homelab csv-export` / `--local` | picks where a new factory runs; `--git-remote upstream` picks the git remote the server clones from when the repo has no `origin` |
 | `factory remote push` | turns on phone push through [ntfy](https://ntfy.sh) with a new private topic to subscribe to; `--server https://ntfy.example.com` uses your own server, `--off` turns it off |
 | `factory delete --remote homelab csv-export` | deletes it on the server, asking the same questions as a local delete |
+| `factory stage start --role qa --task t.md --factory csv-export --remote homelab` | runs a stage on a remote factory from outside its panes; `factory review reply` and `factory review threads` take the same `--factory` and `--remote` |
 | `factory forget --remote homelab csv-export` | hides it on this machine without touching the server |
 | `factory remote list` / `remove homelab` | lists remotes, or stops this machine connecting to one; its factories and push keep running there |
 
