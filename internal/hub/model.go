@@ -601,8 +601,7 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		}
 	default:
 		if e.Pane == "cli" {
-			e.Respond(m.execution().Handle(e.Message))
-			return m.load()
+			e.Respond(Message{T: "error", Error: "the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run"})
 		}
 	}
 	return nil

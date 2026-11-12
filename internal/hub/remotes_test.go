@@ -89,16 +89,18 @@ func TestRemoteAnswerKeepsTheDraftWhenTheServerIsAwayOrSilent(t *testing.T) {
 	}
 }
 
-func TestAHubHoldingTheServerSocketAnswersRemoteViews(t *testing.T) {
+func TestAHubHoldingTheServerSocketRefusesRemoteRequestsAtOnce(t *testing.T) {
 	m := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Now: func() time.Time { return remoteNow }})
-	replies := make(chan Message, 1)
-	m.handleEvent(Event{Message: Message{T: "view", Pane: "cli"}, Reply: replies})
-	select {
-	case reply := <-replies:
-		if reply.T != "done" {
-			t.Fatalf("view reply %+v; want done, since a silent hub makes the laptop mark the server unreachable", reply)
+	for _, kind := range []string{"view", "events", "qa-claim"} {
+		replies := make(chan Message, 1)
+		m.handleEvent(Event{Message: Message{T: kind, Pane: "cli"}, Reply: replies})
+		select {
+		case reply := <-replies:
+			if reply.T != "error" || !strings.Contains(reply.Error, "factory host run") {
+				t.Fatalf("%s reply %+v; want an error naming what to do, since a silent hub makes the laptop wait and mark the server unreachable", kind, reply)
+			}
+		default:
+			t.Fatalf("the hub left a remote %s unanswered", kind)
 		}
-	default:
-		t.Fatal("the hub left a remote view unanswered")
 	}
 }
