@@ -113,5 +113,7 @@ func WriteOpeners(dir, bin string) error {
 			return err
 		}
 	}
-	return nil
+	return os.WriteFile(openersFirst(dir), []byte("export PATH="+factory.ShellQuote(dir)+":\"$PATH\"\n"), 0o644)
 }
+
+func openersFirst(dir string) string { return filepath.Join(dir, "path.sh") }

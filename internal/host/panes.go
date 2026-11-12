@@ -76,7 +76,11 @@ func (e *Panes) serverEnv() []string {
 	if e.Openers == "" {
 		return nil
 	}
-	return []string{"FACTORY_SERVER=1"}
+	env := []string{"FACTORY_SERVER=1"}
+	if os.Getenv("CLAUDE_ENV_FILE") == "" {
+		env = append(env, "CLAUDE_ENV_FILE="+openersFirst(e.Openers))
+	}
+	return env
 }
 
 // tmux replaces a PATH given with -e by its client's, and login profiles rebuild PATH, so only the running shell can put the shims first.

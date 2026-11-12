@@ -66,6 +66,7 @@ func newStandIn(t *testing.T) standIn {
 		"SHELL="+filepath.Join(s.bin, "shell"),
 		"ZDOTDIR=",
 		"ENV=",
+		"CLAUDE_ENV_FILE=",
 		"HOME="+filepath.Join(client, "home"),
 		"FACTORY_CONFIG_DIR="+filepath.Join(client, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(client, "state"),
@@ -518,7 +519,10 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 		writeFile(t, filepath.Join(s.bin, opener), "#!/bin/sh\necho \"$@\" >>"+bypassed+"\n")
 		os.Chmod(filepath.Join(s.bin, opener), 0o755)
 	}
-	writeFile(t, filepath.Join(s.bin, "claude"), "#!/bin/sh\nxdg-open "+factory.ShellQuote(appURL)+"\nexec sleep 600\n")
+	loginProfile := "PATH=" + factory.ShellQuote(s.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFile(t, filepath.Join(s.bin, "shell"), "#!/bin/sh\n[ \"${1:-}\" = -l ] && shift\n"+loginProfile+"\nexec /bin/sh \"$@\"\n")
+	bashTool := factory.ShellQuote(`. "$CLAUDE_ENV_FILE" && xdg-open ` + factory.ShellQuote(appURL+"&from=bash"))
+	writeFile(t, filepath.Join(s.bin, "claude"), "#!/bin/sh\nxdg-open "+factory.ShellQuote(appURL)+"\n\"$SHELL\" -l -c "+bashTool+"\nexec sleep 600\n")
 	os.Chmod(filepath.Join(s.bin, "claude"), 0o755)
 	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -536,10 +540,10 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 
 	var view remote.View
 	waitFor(t, "the agent's xdg-open to reach the server's queue", func() bool {
-		return homelab.Read(context.Background(), "view", nil, &view) == nil && len(view.Opens) == 1
+		return homelab.Read(context.Background(), "view", nil, &view) == nil && len(view.Opens) == 2
 	})
-	if opened := readOr(bypassed); opened != "" || view.Opens[0].URL != appURL {
-		t.Fatalf("the agent's xdg-open ran the server's own opener with %q and queued %v; want its link queued for the laptop", opened, view.Opens)
+	if opened := readOr(bypassed); opened != "" || view.Opens[0].URL != appURL || view.Opens[1].URL != appURL+"&from=bash" {
+		t.Fatalf("the agent's xdg-open ran the server's own opener with %q and queued %v; want its links, direct and from a Bash tool's login shell, queued for the laptop", opened, view.Opens)
 	}
 	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
 	if out, err := s.factory(t, dir, onServer, "review", "link", "file:///etc/passwd"); err == nil || strings.Contains(out, "Queued") {
@@ -563,7 +567,7 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	if status, body := fetch(t, page); status != http.StatusOK || !strings.Contains(body, "overlay.js") {
 		t.Fatalf("the plan through the tunnel answered %d %q; want the served page past the host check", status, body)
 	}
-	if err := homelab.Read(ctx, "opened", []string{view.Opens[0].ID}, nil); err != nil {
+	if err := homelab.Read(ctx, "opened", []string{view.Opens[0].ID, view.Opens[1].ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var after remote.View
