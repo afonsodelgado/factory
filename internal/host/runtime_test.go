@@ -47,7 +47,11 @@ func newFixture(t *testing.T) fixture {
 	t.Setenv("FACTORY_CONFIG_DIR", filepath.Join(root, "config"))
 	t.Setenv("FACTORY_STATE_DIR", filepath.Join(root, "state"))
 	t.Setenv("FACTORY_TMUX_SOCKET", "host-test-"+uuid.NewString())
-	t.Setenv("SHELL", "/bin/sh")
+	shell, err := exec.LookPath("bash")
+	if err != nil {
+		shell = "/bin/sh"
+	}
+	t.Setenv("SHELL", shell)
 	t.Setenv("TMUX", "")
 	bin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(bin, 0o755); err != nil {
@@ -77,11 +81,16 @@ func newFixture(t *testing.T) fixture {
 	if err := f.engine.Type(pane, "exec sleep 600"); err != nil {
 		t.Fatal(err)
 	}
-	panes, err := tm.Panes()
-	if err != nil {
-		t.Fatal(err)
+	for deadline := time.Now().Add(10 * time.Second); f.supervisor.Command != "sleep"; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the supervisor pane never left its shell: %+v", f.supervisor)
+		}
+		panes, err := tm.Panes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.supervisor, _ = FactoryPane(panes, repo, "csv")
 	}
-	f.supervisor, _ = FactoryPane(panes, repo, "csv")
 	f.hook(t, "Stop")
 	return f
 }
