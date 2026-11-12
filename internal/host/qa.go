@@ -101,7 +101,7 @@ func (m *Runtime) HoldQA(it Item, runs *state.StageRuns, run state.StageRun, pro
 	job := remote.QAJob{
 		ID: uuid.NewString(), Factory: f.Label(), Incarnation: Incarnation(f), Kind: laptopKind(f), Round: run.Round,
 		GitURL: gitURL, Branch: branch, SHA: sha, Setting: run.Setting, Root: f.Worktree, Prompt: promptPath, Result: resultPath,
-		Inputs: qaInputs(f.Worktree, promptPath, prompt), Phase: remote.QAHeld, CreatedAt: m.Now(),
+		Inputs: qaInputs(f.Worktree, f.Dir, promptPath, prompt), Phase: remote.QAHeld, CreatedAt: m.Now(),
 	}
 	if err := m.saveQA(job); err != nil {
 		return StageReply{}, err
@@ -134,10 +134,11 @@ func publishedHead(worktree string) (string, string, string, error) {
 	return gitURL, branch, sha, nil
 }
 
-func qaInputs(root, promptPath, prompt string) []remote.QAFile {
+func qaInputs(root, dir, promptPath, prompt string) []remote.QAFile {
 	inputs := []remote.QAFile{remote.NewQAFile(promptPath, []byte(prompt))}
 	mentioned := regexp.MustCompile(regexp.QuoteMeta(root+"/") + "[^\\s\"'`<>()\\[\\],;]+")
-	for _, match := range mentioned.FindAllString(prompt, -1) {
+	spec := []string{filepath.Join(dir, "brief.md"), filepath.Join(dir, "requirements.md"), filepath.Join(dir, "plan.md")}
+	for _, match := range slices.Concat(spec, mentioned.FindAllString(prompt, -1)) {
 		path := strings.TrimRight(match, ".:")
 		rel, _ := filepath.Rel(root, path)
 		info, err := os.Stat(path)

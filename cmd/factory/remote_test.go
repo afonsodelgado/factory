@@ -642,7 +642,7 @@ func TestRemoteQAReturnsEvidenceForExactCommit(t *testing.T) {
 		return s.run(t, s.onServer(worktree, "git", "rev-parse", "HEAD"))
 	}
 	writeFile(t, filepath.Join(dir, "brief.md"), "the QA brief")
-	writeFile(t, filepath.Join(dir, "stages", "qa-task.md"), "QA csv. The brief is "+filepath.Join(dir, "brief.md")+".")
+	writeFile(t, filepath.Join(dir, "stages", "qa-task.md"), "QA csv. The spec is brief.md in "+dir+".")
 
 	implemented := publish("qa", "implement")
 	var waited strings.Builder

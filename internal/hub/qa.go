@@ -31,8 +31,9 @@ type qaClaimedMsg struct {
 }
 
 type qaReturnedMsg struct {
-	run remote.QARun
-	err error
+	run     remote.QARun
+	failure string
+	err     error
 }
 
 func (m *Model) qaRuns() []remote.QARun {
@@ -222,12 +223,11 @@ func (m *Model) tendQA(name string) {
 		report, ready, err := remote.QAReport(run.Dir, run.Job)
 		switch {
 		case err != nil:
-			report, ready = remote.FailedQA(run.Job, "the laptop could not read the QA report: "+err.Error()), true
-		case !ready && m.qaEnded(run):
-			report, ready = remote.FailedQA(run.Job, "the QA process on the laptop ended without a report"), true
-		}
-		if ready {
+			m.returnQA(run, remote.FailedQA(run.Job, "the laptop could not read the QA report: "+err.Error()))
+		case ready:
 			m.returnQA(run, report)
+		case m.qaEnded(run):
+			m.returnQA(run, remote.FailedQA(run.Job, "the QA process on the laptop ended without a report"))
 		}
 	}
 }
@@ -246,8 +246,9 @@ func (m *Model) returnQA(run remote.QARun, report remote.QAReturn) {
 	}
 	m.returning[run.Job.ID] = true
 	cfg := m.Config
+	failure := remote.Failure(report)
 	m.later = append(m.later, func() tea.Msg {
-		return qaReturnedMsg{run: run, err: mutate(cfg, run.Remote, "qa-return", report, nil)}
+		return qaReturnedMsg{run: run, failure: failure, err: mutate(cfg, run.Remote, "qa-return", report, nil)}
 	})
 }
 
@@ -259,17 +260,27 @@ func (m *Model) qaReturned(msg qaReturnedMsg) {
 		return
 	case msg.err != nil:
 		m.dropQA(msg.run, problem(msg.run.Remote+" refused the QA report: "+msg.err.Error()))
+	case msg.failure != "":
+		m.dropQA(msg.run, problem(msg.run.Job.Factory+": "+msg.failure+". "+msg.run.Remote+"'s supervisor gets the failure to retry."))
 	default:
 		m.dropQA(msg.run, news("The QA report of "+msg.run.Job.Factory+" went back to "+msg.run.Remote+"."))
 	}
 }
 
 func (m *Model) dropQA(run remote.QARun, why notice) {
-	m.saveRuns(slices.DeleteFunc(slices.Clone(m.qaRuns()), func(r remote.QARun) bool { return r.Job.ID == run.Job.ID }))
-	m.notice = why
-	if m.Engine != nil {
+	if p, running := m.proxyPane(run.Key, "qa", run.Job.Token); running && m.Engine != nil {
+		strays := host.Descendants([]int{p.PID})
 		m.Engine.KillStages(run.Key, run.Slug, "qa")
+		host.Terminate(strays)
 	}
+	m.saveRuns(slices.DeleteFunc(slices.Clone(m.qaRuns()), func(r remote.QARun) bool { return r.Job.ID == run.Job.ID }))
+	for i, w := range m.link(run.Remote).view.Factories {
+		if w.QA != nil && w.QA.ID == run.Job.ID {
+			m.link(run.Remote).view.Factories[i].QA = nil
+		}
+	}
+	m.refresh()
+	m.notice = why
 	m.later = append(m.later, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), qaPrepareWait)
 		defer cancel()

@@ -14,7 +14,7 @@ In `qa.mode: browser`, the browser tools come from the supervisor's session. Loa
 
 ## On the developer's laptop
 
-For a factory on a server, the laptop runs you in a detached worktree of the exact commit to test, so `git branch --show-current` prints nothing. Test that commit as it is: do not check out, pull, commit or push. Put the report and evidence under `.claude/` and list them in `outputs`: only those files go back to the server.
+For a factory on a server, the laptop runs you in a detached worktree of the exact commit to test, so `git branch --show-current` prints nothing. Test that commit as it is: do not check out, pull, commit or push. Put the report and evidence under `.claude/qa/` and list them in `outputs`: only those files go back to the server.
 
 ## Stack mode
 

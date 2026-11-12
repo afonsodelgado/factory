@@ -132,7 +132,7 @@ Write every role to `state.agents`, including the ones that run on their frontma
 1. **Preflight.** Read the repo config, then run these checks and stop with a clear message if one fails:
    - `gh auth status` succeeds.
    - The working tree is clean. Untracked tool caches do not count: ignore `?? .impeccable/` and `?? .revmux/` lines in `git status --porcelain`.
-   - In `qa.mode: browser` only: browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome --remote-control` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
+   - In `qa.mode: browser` only, and not on a server (`FACTORY_SERVER` unset, since QA then runs on the laptop): browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome --remote-control` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
    - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.

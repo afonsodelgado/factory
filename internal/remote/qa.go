@@ -23,7 +23,7 @@ const (
 	QAAccepted  = "accepted"
 	QACancelled = "cancelled"
 
-	QAReturnable = ".claude/"
+	QAReturnable = ".claude/qa/"
 	qaFileLimit  = 10 << 20
 	qaTotalLimit = 50 << 20
 )
@@ -173,9 +173,13 @@ func QAReport(dir string, job QAJob) (QAReturn, bool, error) {
 		Outputs []string `json:"outputs"`
 	}
 	json.Unmarshal(raw, &result)
-	r := QAReturn{Job: job.ID, Token: job.Token, SHA: job.SHA, Result: json.RawMessage(strings.ReplaceAll(string(raw), dir, job.Root))}
+	serverPaths := strings.NewReplacer(resolved(dir), job.Root, dir, job.Root)
+	r := QAReturn{Job: job.ID, Token: job.Token, SHA: job.SHA, Result: json.RawMessage(serverPaths.Replace(string(raw)))}
 	for _, out := range result.Outputs {
-		rel, err := filepath.Rel(dir, out)
+		if !filepath.IsAbs(out) {
+			out = filepath.Join(dir, out)
+		}
+		rel, err := filepath.Rel(resolved(dir), resolved(out))
 		if err != nil || !returnable(rel) || slices.ContainsFunc(r.Files, func(f QAFile) bool { return f.Path == rel }) {
 			continue
 		}
@@ -202,6 +206,18 @@ func regularFile(path string) ([]byte, error) {
 func FailedQA(job QAJob, why string) QAReturn {
 	result, _ := json.Marshal(map[string]any{"status": "failed", "summary": why, "outputs": []string{}, "questions": []string{}, "data": map[string]any{}})
 	return QAReturn{Job: job.ID, Token: job.Token, SHA: job.SHA, Result: result}
+}
+
+func Failure(r QAReturn) string {
+	var result struct {
+		Status  string `json:"status"`
+		Summary string `json:"summary"`
+	}
+	json.Unmarshal(r.Result, &result)
+	if result.Status != "failed" {
+		return ""
+	}
+	return result.Summary
 }
 
 type QARun struct {

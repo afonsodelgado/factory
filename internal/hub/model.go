@@ -1225,6 +1225,8 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
+	case item.Kind == "qa":
+		return hints("⏎", "start on this laptop", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")
 }
