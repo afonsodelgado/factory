@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 )
 
 func TestStalledAfterWithoutAUnitIsRefused(t *testing.T) {
@@ -170,6 +172,7 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 	}{
 		{name: "block comments and order", input: "# header\ncommands:\n  # build head\n  build: old # inline\n  migrate: keep\nqa:\n  mode: browser\n  start: original # start\n  health: original-health # health\n  notes: keep notes\nports: [42, 43]\n# footer\n", mode: "terminal", contains: []string{"# header", "# build head", "build: new # inline", "migrate: keep", "start: original # start", "health: original-health # health", "notes: keep notes", "ports: [42, 43]", "# footer"}},
 		{name: "editing a block scalar keeps newlines", input: "commands:\n  build: |\n    make deps\n    make all\n", build: "make deps\nmake all\n -j4"},
+		{name: "repeated CRLF saves preserve block scalars and comments", input: "# config\r\ncommands:\r\n  build: old # build\r\ndesign:\r\n  brief: |\r\n    line one\r\n    line two\r\n"},
 		{name: "flow mapping", input: "commands: {test: old, migrate: keep}\nqa: {notes: keep}\ncoderabbit: true # rabbit\n", mode: "browser", contains: []string{"test: \"\"", "migrate: keep", "notes: keep", "# rabbit"}},
 		{name: "flow punctuation in a value", input: "commands: {}\nqa: {mode: terminal}\n", build: "go build -tags=a,b ./... {x} [y]"},
 		{name: "flow punctuation under a missing parent", input: "design: {source: terminal}\n", build: "go test -run 'A,B' ./..."},
@@ -263,6 +266,32 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 					t.Errorf("%s = %q, present %v", key, again.Values[key], again.Present[key])
 				}
 			}
+			if tc.name == "repeated CRLF saves preserve block scalars and comments" {
+				for save := range 2 {
+					text := string(data)
+					if strings.Contains(text, "\r\r") || strings.Contains(text, "\r\n\r\n") || strings.Contains(strings.ReplaceAll(text, "\r\n", ""), "\n") {
+						t.Errorf("save %d changed line endings or added blank lines: %q", save+1, text)
+					}
+					file, err := parseRepoSettings(data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var brief string
+					if err := yaml.NodeToValue(settingsNode(file, "design.brief"), &brief); err != nil || brief != "line one\nline two\n" {
+						t.Errorf("save %d changed brief: %q, %v", save+1, brief, err)
+					}
+					if save == 0 {
+						values["commands.build"] += " again"
+						if err := again.Save(values); err != nil {
+							t.Fatal(err)
+						}
+						data, err = os.ReadFile(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			}
 			if tc.name == "block comments and order" {
 				if !(strings.Index(string(data), "build:") < strings.Index(string(data), "migrate:") && strings.Index(string(data), "commands:") < strings.Index(string(data), "qa:") && strings.Index(string(data), "qa:") < strings.Index(string(data), "ports:")) {
 					t.Fatal("existing keys reordered")
@@ -293,5 +322,13 @@ func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
 	}
 	if settings.Values["coderabbit"] != "true" {
 		t.Errorf("coderabbit = %q; the pipeline treats a null as on, so the form must show on", settings.Values["coderabbit"])
+	}
+}
+
+func TestExpandHomeCleansTrailingSlashForRepoMatching(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got, want := ExpandHome("~/dev/app/"), filepath.Join(home, "dev", "app"); got != want {
+		t.Fatalf("expanded repo = %q, want clean path %q", got, want)
 	}
 }

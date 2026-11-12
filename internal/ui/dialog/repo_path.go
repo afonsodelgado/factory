@@ -117,12 +117,17 @@ type directoryCompletion struct {
 	problem string
 }
 
-func completeDirectory(input string) directoryCompletion {
+func splitDirectoryInput(input string) (string, string) {
 	expanded := state.ExpandHome(input)
-	if input == "~" {
-		expanded += string(filepath.Separator)
+	separator := string(filepath.Separator)
+	if input == "~" || strings.HasSuffix(input, separator) {
+		return expanded, ""
 	}
-	dir, prefix := filepath.Split(expanded)
+	return filepath.Split(expanded)
+}
+
+func completeDirectory(input string) directoryCompletion {
+	dir, prefix := splitDirectoryInput(input)
 	if dir == "" {
 		dir = "."
 	}
@@ -164,10 +169,7 @@ func (m *NewFactoryModel) drawRepoPath(c *theme.Canvas, y, w int) {
 	completion := completeDirectory(m.repoPath)
 	c.PutMax(3+theme.Width(m.repoPath)+1, y+1, completion.suffix, theme.Muted, max(w-5-theme.Width(m.repoPath), 0))
 	y += 3
-	dir, _ := filepath.Split(state.ExpandHome(m.repoPath))
-	if m.repoPath == "~" {
-		dir = state.ExpandHome("~")
-	}
+	dir, _ := splitDirectoryInput(m.repoPath)
 	for _, match := range completion.matches[:min(5, len(completion.matches))] {
 		path := filepath.Join(dir, match)
 		badge := ""

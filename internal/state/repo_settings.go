@@ -154,7 +154,8 @@ func settingsNode(file *ast.File, key string) ast.Node {
 }
 
 func (s *RepoSettings) Save(values map[string]string) error {
-	file, err := parseRepoSettings(s.original)
+	normalized := bytes.ReplaceAll(s.original, []byte("\r\n"), []byte("\n"))
+	file, err := parseRepoSettings(normalized)
 	if err != nil {
 		return err
 	}
@@ -177,7 +178,7 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	}
 	data := []byte(file.String())
 	if empty {
-		data = append(append(bytes.Clone(s.original), '\n'), data...)
+		data = append(append(bytes.Clone(normalized), '\n'), data...)
 	}
 	if _, err := parseRepoSettings(data); err != nil {
 		return err
