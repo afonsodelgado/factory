@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -44,15 +45,15 @@ func newStandIn(t *testing.T) standIn {
 	if err := os.WriteFile(filepath.Join(s.bin, "claude"), []byte("#!/bin/sh\nexec sleep 600\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("tmux", "-L", s.tmux, "-f", "/dev/null", "new-session", "-d", "-s", "scratch", "exec sleep 600").CombinedOutput(); err != nil {
-		t.Fatalf("tmux: %v\n%s", err, out)
+	if err := os.WriteFile(filepath.Join(s.bin, "shell"), []byte("#!/bin/sh\n[ \"${1:-}\" = -l ] && shift\nexec /bin/sh \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { exec.Command("tmux", "-L", s.tmux, "kill-server").Run() })
-	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\n", freePort(t)))
 	client := filepath.Join(root, "client")
-	writeFile(t, filepath.Join(client, "config", "config.yml"), "remotes:\n  homelab:\n    host: homelab\n")
 	s.env = append(os.Environ(),
 		"PATH="+s.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"SHELL="+filepath.Join(s.bin, "shell"),
+		"ZDOTDIR=",
+		"ENV=",
 		"HOME="+filepath.Join(client, "home"),
 		"FACTORY_CONFIG_DIR="+filepath.Join(client, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(client, "state"),
@@ -63,6 +64,14 @@ func newStandIn(t *testing.T) standIn {
 		"FACTORY_SSH_STANDIN_BIN="+filepath.Join(s.bin, "factory"),
 		"FACTORY_SSH_STANDIN_TMUX="+s.tmux,
 	)
+	server := exec.Command("tmux", "-L", s.tmux, "-f", "/dev/null", "new-session", "-d", "-s", "scratch", "exec sleep 600")
+	server.Env = s.env
+	if out, err := server.CombinedOutput(); err != nil {
+		t.Fatalf("tmux: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("tmux", "-L", s.tmux, "kill-server").Run() })
+	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\n", freePort(t)))
+	writeFile(t, filepath.Join(client, "config", "config.yml"), "remotes:\n  homelab:\n    host: homelab\n")
 	return s
 }
 
@@ -232,6 +241,11 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	if _, err := os.Stat(pwned); err == nil {
 		t.Fatal("the prompt ran as shell on the server")
 	}
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(paneCommands(s.tmux), "p-csv sleep"); time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the server's csv pane runs:\n%s\nwant the stub claude; a test must never start the developer's own claude", paneCommands(s.tmux))
+		}
+	}
 	if rules := readOr(filepath.Join(s.server, "config", "rules.md")); rules != "Write no comments." {
 		t.Fatalf("the server's stage agents follow %q, not the developer's rules", rules)
 	}
@@ -258,4 +272,9 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	if gitState(t, src) != before {
 		t.Fatal("remote creation changed the developer's checkout")
 	}
+}
+
+func paneCommands(socket string) string {
+	out, _ := exec.Command("tmux", "-L", socket, "list-panes", "-a", "-F", "#{window_name} #{pane_current_command}").Output()
+	return string(out)
 }
