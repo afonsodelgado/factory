@@ -17,6 +17,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/remote"
@@ -362,7 +363,7 @@ func send(socket string, m hub.Message) (hub.Message, error) {
 	}
 	conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), host.MaxMessage)
 	for scanner.Scan() {
 		var reply hub.Message
 		if json.Unmarshal(scanner.Bytes(), &reply) == nil && (reply.T == "done" || reply.T == "error" || reply.T == "uncertain") {

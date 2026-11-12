@@ -669,7 +669,9 @@ func TestRemoteQAReturnsEvidenceForExactCommit(t *testing.T) {
 	}
 	report := filepath.Join(run.Dir, ".claude", "qa", "csv-report.md")
 	writeFile(t, report, "1 major: the export drops the header")
-	writeFile(t, filepath.Join(run.Dir, run.Job.Result), `{"status": "done", "summary": "1 major", "outputs": ["`+report+`"]}`)
+	shot := filepath.Join(run.Dir, ".claude", "qa", "csv-shot.png")
+	writeFile(t, shot, strings.Repeat("x", 4<<20))
+	writeFile(t, filepath.Join(run.Dir, run.Job.Result), `{"status": "done", "summary": "1 major", "outputs": ["`+report+`", "`+shot+`"]}`)
 	back, ready, err := remote.QAReport(run.Dir, run.Job)
 	if !ready || err != nil {
 		t.Fatalf("the laptop's report is not ready: %v", err)
@@ -679,6 +681,9 @@ func TestRemoteQAReturnsEvidenceForExactCommit(t *testing.T) {
 	}
 	if err := stage.Wait(); err != nil || !strings.Contains(waited.String(), filepath.Join(worktree, ".claude", "qa", "csv-report.md")) {
 		t.Fatalf("the supervisor's wait ended with %v:\n%s\nwant the result naming the report on the server", err, waited.String())
+	}
+	if info, err := os.Stat(filepath.Join(worktree, ".claude", "qa", "csv-shot.png")); err != nil || info.Size() != 4<<20 {
+		t.Fatalf("the server's copy of a 4 MiB screenshot is %v, %v; the host socket must carry the whole report", info, err)
 	}
 	if got := readOr(filepath.Join(worktree, ".claude", "qa", "csv-report.md")); got != "1 major: the export drops the header" {
 		t.Fatalf("the server's copy of the report reads %q", got)

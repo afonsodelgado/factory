@@ -8,7 +8,11 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/afonsodelgado/factory/internal/remote"
 )
+
+const MaxMessage = remote.QATotalLimit/3*4 + 1<<20
 
 type Message struct {
 	T     string          `json:"t"`
@@ -100,7 +104,7 @@ func (s *Server) serve(c *Conn) {
 		}
 	}()
 	scanner := bufio.NewScanner(c.c)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), MaxMessage)
 	for scanner.Scan() {
 		var m Message
 		if json.Unmarshal(scanner.Bytes(), &m) != nil {

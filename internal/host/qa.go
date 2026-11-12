@@ -1,14 +1,17 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,6 +21,8 @@ import (
 )
 
 const qaInputLimit = 1 << 20
+
+var publishCheckWait = 20 * time.Second
 
 func (m *Runtime) qaPath() string { return filepath.Join(m.Config.StateDir, "qa.json") }
 
@@ -103,6 +108,9 @@ func (m *Runtime) HoldQA(it Item, runs *state.StageRuns, run state.StageRun, pro
 		GitURL: gitURL, Branch: branch, SHA: sha, Setting: run.Setting, Root: f.Worktree, Prompt: promptPath, Result: resultPath,
 		Inputs: qaInputs(f.Worktree, f.Dir, promptPath, prompt), Phase: remote.QAHeld, CreatedAt: m.Now(),
 	}
+	if job.Kind == "walkthrough" {
+		job.Stack = stackFiles(f)
+	}
 	if err := m.saveQA(job); err != nil {
 		return StageReply{}, err
 	}
@@ -127,11 +135,38 @@ func publishedHead(worktree string) (string, string, string, error) {
 	if err != nil {
 		return "", "", "", errors.New("the worktree has no origin to publish the commit to")
 	}
-	published, err := Git(worktree, "ls-remote", "origin", "refs/heads/"+branch)
-	if err != nil || !strings.HasPrefix(published, sha) {
+	published, timedOut := remoteHead(worktree, branch)
+	if timedOut {
+		return "", "", "", errors.New("origin did not answer in time, so the commit could not be checked; try again once it does")
+	}
+	if !strings.HasPrefix(published, sha) {
 		return "", "", "", fmt.Errorf("push %s first: the laptop fetches %s from origin, which does not have it on that branch yet", branch, sha[:7])
 	}
 	return gitURL, branch, sha, nil
+}
+
+func stackFiles(f factory.Factory) []string {
+	dir, err := filepath.Rel(f.Worktree, filepath.Join(f.Dir, "review"))
+	if err != nil {
+		return nil
+	}
+	return []string{filepath.Join(dir, "stack.sh"), filepath.Join(dir, "stack.json")}
+}
+
+func remoteHead(worktree, branch string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), publishCheckWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", worktree, "ls-remote", "origin", "refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", true
+	}
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimRight(string(out), "\n"), false
 }
 
 func qaInputs(root, dir, promptPath, prompt string) []remote.QAFile {
@@ -196,7 +231,7 @@ func (m *Runtime) ReturnQA(r remote.QAReturn) error {
 	case !json.Valid(r.Result):
 		return errors.New("the QA result is not JSON")
 	}
-	if err := remote.CheckQAFiles(r.Files); err != nil {
+	if err := remote.CheckQAFiles(job, r.Files); err != nil {
 		return err
 	}
 	for _, f := range r.Files {

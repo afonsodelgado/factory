@@ -10,9 +10,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -25,7 +28,7 @@ const (
 
 	QAReturnable = ".claude/qa/"
 	qaFileLimit  = 10 << 20
-	qaTotalLimit = 50 << 20
+	QATotalLimit = 50 << 20
 )
 
 type QAJob struct {
@@ -42,6 +45,7 @@ type QAJob struct {
 	Prompt      string             `json:"prompt"`
 	Result      string             `json:"result"`
 	Inputs      []QAFile           `json:"inputs,omitempty"`
+	Stack       []string           `json:"stack,omitempty"`
 	Phase       string             `json:"phase"`
 	Runner      string             `json:"runner,omitempty"`
 	Token       string             `json:"token,omitempty"`
@@ -67,6 +71,29 @@ type QAReturn struct {
 	Files  []QAFile        `json:"files,omitempty"`
 }
 
+var (
+	settingValue = regexp.MustCompile(`^[A-Za-z0-9._:/@+-]*$`)
+	commitHash   = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
+)
+
+func (j QAJob) Validate() error {
+	if _, err := uuid.Parse(j.ID); err != nil {
+		return errors.New("the server sent a QA job whose id is not a UUID")
+	}
+	if !commitHash.MatchString(j.SHA) {
+		return errors.New("the server sent a QA job whose commit is not a full hash")
+	}
+	if !filepath.IsLocal(j.Prompt) || !filepath.IsLocal(j.Result) {
+		return errors.New("the server sent a QA job with a prompt or result path outside the worktree")
+	}
+	for _, value := range []string{j.Setting.Tool, j.Setting.Model, j.Setting.Effort} {
+		if !settingValue.MatchString(value) {
+			return fmt.Errorf("the server sent a QA job whose agent setting %q is not a plain model or effort name", value)
+		}
+	}
+	return nil
+}
+
 func (j QAJob) Start() string {
 	switch j.Kind {
 	case "recheck":
@@ -87,14 +114,14 @@ func NewQAFile(path string, data []byte) QAFile {
 	return QAFile{Path: path, Data: data, SHA256: hex.EncodeToString(sum[:])}
 }
 
-func CheckQAFiles(files []QAFile) error {
+func CheckQAFiles(job QAJob, files []QAFile) error {
 	total := 0
 	for _, f := range files {
 		total += len(f.Data)
 		switch {
-		case !returnable(f.Path):
-			return fmt.Errorf("%q is not a report or evidence file under %s", f.Path, QAReturnable)
-		case len(f.Data) > qaFileLimit || total > qaTotalLimit:
+		case !returnable(job, f.Path):
+			return fmt.Errorf("%q is not a report or evidence file under %s or a stack file this job asked for", f.Path, QAReturnable)
+		case len(f.Data) > qaFileLimit || total > QATotalLimit:
 			return fmt.Errorf("%s is over the size limit for returned QA evidence", f.Path)
 		case NewQAFile(f.Path, f.Data).SHA256 != f.SHA256:
 			return fmt.Errorf("%s arrived damaged: its hash does not match", f.Path)
@@ -103,8 +130,9 @@ func CheckQAFiles(files []QAFile) error {
 	return nil
 }
 
-func returnable(rel string) bool {
-	return !filepath.IsAbs(rel) && filepath.Clean(rel) == rel && strings.HasPrefix(rel, QAReturnable) && filepath.Base(rel) != "state.json"
+func returnable(job QAJob, rel string) bool {
+	inside := strings.HasPrefix(rel, QAReturnable) && filepath.Base(rel) != "state.json"
+	return !filepath.IsAbs(rel) && filepath.Clean(rel) == rel && (inside || slices.Contains(job.Stack, rel))
 }
 
 func LocalCheckout(repos []string, gitURL string) (string, bool) {
@@ -180,12 +208,15 @@ func QAReport(dir string, job QAJob) (QAReturn, bool, error) {
 			out = filepath.Join(dir, out)
 		}
 		rel, err := filepath.Rel(resolved(dir), resolved(out))
-		if err != nil || !returnable(rel) || slices.ContainsFunc(r.Files, func(f QAFile) bool { return f.Path == rel }) {
+		if err != nil || !returnable(job, rel) || slices.ContainsFunc(r.Files, func(f QAFile) bool { return f.Path == rel }) {
 			continue
 		}
 		file, err := regularFile(filepath.Join(dir, rel))
 		if err != nil {
 			return QAReturn{}, false, err
+		}
+		if slices.Contains(job.Stack, rel) {
+			file = []byte(serverPaths.Replace(string(file)))
 		}
 		r.Files = append(r.Files, NewQAFile(rel, file))
 	}

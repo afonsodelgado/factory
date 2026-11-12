@@ -264,7 +264,7 @@ SendMessage the fixer, or spawn one, to apply the report's "Automation gaps" sec
 
 The user tries the finished change in the running app and comments on it; the fixer acts on every comment while they watch.
 
-1. **Stack.** Spawn `factory-qa` (on a server, as "Browser QA on a server" says) in stack mode on the top branch: "stack mode: bring up this worktree's stack for the walkthrough, signed in". It writes `review/stack.sh` and `review/stack.json`.
+1. **Stack.** Spawn `factory-qa` (on a server, as "Browser QA on a server" says) in stack mode on the top branch: "stack mode: bring up this worktree's stack for the walkthrough, signed in". It writes `review/stack.sh` and `review/stack.json`; on a server they come back from the laptop with its report, and the stack then runs here.
 2. **Fixer.** Start the fixer in its own pane in walkthrough mode: write its task to `<factory dir>/stages/fixer-walkthrough.md` and run `"${FACTORY_BIN:-factory}" stage start --role fixer --task <that file> --wait` (Bash `run_in_background: true`; on Codex and OpenCode, as `references/hosts.md` says). Its first result says it is ready: that is not the end of the stage.
 3. **Open.** Run `"${FACTORY_BIN:-factory}" review stack`. The factory app runs the stack in a window of its own and opens the app, signed in, in its Chrome with the comment layer. Comments the user sends go straight to the fixer.
 4. **Gate.** Write the `gate-<id>-walkthrough` item: its body names the URL and says to comment on anything that should change, then approve on the page or in the panel. Wait. `<item id> changes: <text>` goes to the fixer with `stage send`.

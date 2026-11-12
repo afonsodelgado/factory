@@ -150,6 +150,9 @@ func (m *Model) startQA(it Item) {
 }
 
 func claimQA(cfg *state.Config, runner string, run remote.QARun) tea.Msg {
+	if err := run.Job.Validate(); err != nil {
+		return qaClaimedMsg{run: run, err: err}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), qaPrepareWait)
 	defer cancel()
 	remote.RemoveQA(ctx, run.Repo, run.Dir, run.Job)
@@ -160,7 +163,9 @@ func claimQA(cfg *state.Config, runner string, run remote.QARun) tea.Msg {
 	}
 	if err == nil {
 		run.Job = claimed
-		err = remote.WriteQAInputs(run.Dir, claimed)
+		if err = claimed.Validate(); err == nil {
+			err = remote.WriteQAInputs(run.Dir, claimed)
+		}
 	}
 	if err != nil && run.Job.Token == "" {
 		remote.RemoveQA(ctx, run.Repo, run.Dir, run.Job)
