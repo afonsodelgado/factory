@@ -99,7 +99,12 @@ func deleteFailed(err error) int {
 
 func confirmRemoteDelete(ctx context.Context, client remote.Client, target remote.Target, yes bool, in *os.File, out io.Writer) (int, bool) {
 	var preview remote.Removal
-	if err := client.Read(ctx, "removal", target, &preview); err != nil {
+	err := client.Read(ctx, "removal", target, &preview)
+	var refused *remote.ServerError
+	switch {
+	case errors.As(err, &refused) && client.Unsettled("delete", target):
+		return 0, true
+	case err != nil:
 		return deleteFailed(err), false
 	}
 	answers := bufio.NewReader(in)
@@ -128,10 +133,8 @@ func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out
 	ctx, cancel := context.WithTimeout(context.Background(), remote.CreateWait)
 	defer cancel()
 	target := remote.Target{ID: id}
-	if !client.Unsettled("delete", target) {
-		if code, confirmed := confirmRemoteDelete(ctx, client, target, yes, in, out); !confirmed {
-			return code
-		}
+	if code, confirmed := confirmRemoteDelete(ctx, client, target, yes, in, out); !confirmed {
+		return code
 	}
 	var report string
 	err = client.MutateOnce(ctx, "delete", target, &report)
