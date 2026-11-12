@@ -22,11 +22,11 @@ func (m *Model) stageRequest(e Event) tea.Cmd {
 		reply, err = m.stage(r)
 	}
 	if err != nil {
-		e.From.Send(Message{T: "error", Error: err.Error()})
+		e.Respond(Message{T: "error", Error: err.Error()})
 		return m.load()
 	}
 	data, _ := json.Marshal(reply)
-	e.From.Send(Message{T: "done", Data: data})
+	e.Respond(Message{T: "done", Data: data})
 	return m.load()
 }
 

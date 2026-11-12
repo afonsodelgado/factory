@@ -1,12 +1,15 @@
 package hub
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
@@ -41,9 +44,17 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	supervisorPane := pane(t, e.TM, supervisor)
 	m.snap = Snapshot{At: time.Now(), Items: []Item{{Factory: f, Pane: &supervisorPane}}}
 
-	reply, err := m.stage(StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
-	if err != nil {
-		t.Fatal(err)
+	op := uuid.NewString()
+	request, _ := json.Marshal(StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
+	send := func() Message {
+		replies := make(chan Message, 1)
+		m.handleEvent(Event{Message: Message{T: "stage", Op: op, Data: request}, Reply: replies})
+		return <-replies
+	}
+	first, retry := send(), send()
+	var reply StageReply
+	if err := json.Unmarshal(first.Data, &reply); err != nil || first.T != "done" || string(retry.Data) != string(first.Data) {
+		t.Fatalf("first %+v, retry %+v: a retried operation must return the first receipt", first, retry)
 	}
 
 	prompt := filepath.Join(f.Dir, "stages", "engineer-1.prompt.md")
@@ -62,7 +73,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 		t.Errorf("FactoryPane picked %s; want the supervisor %s, or answers and wakes would go to the stage agent", p.ID, supervisor)
 	}
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(cfg.StateDir, repo, "csv"))
-	if run, ok := runs.Running(); !ok || run.Role != "engineer" || run.Result != reply.Result {
+	if run, ok := runs.Running(); !ok || len(runs.Runs) != 1 || run.Role != "engineer" || run.Result != reply.Result {
 		t.Errorf("running stage = %+v; want the engineer writing to %s", run, reply.Result)
 	}
 }

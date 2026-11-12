@@ -27,7 +27,7 @@ func (m *Model) deleteRequest(e Event) tea.Cmd {
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error(), Data: report}
 	}
-	e.From.Send(reply)
+	e.Respond(reply)
 	return m.load()
 }
 
@@ -54,7 +54,7 @@ func (m *Model) repoRequest(e Event) tea.Cmd {
 }
 
 func (m *Model) reply(e Event, err error) {
-	if e.From == nil {
+	if e.From == nil && e.Reply == nil {
 		m.report(err)
 		return
 	}
@@ -62,7 +62,7 @@ func (m *Model) reply(e Event, err error) {
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error()}
 	}
-	e.From.Send(reply)
+	e.Respond(reply)
 }
 
 func (m *Model) addRepo(r RepoRequest) {
