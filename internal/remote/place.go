@@ -82,10 +82,24 @@ func Holders(cfg *state.Config, id string) []string {
 }
 
 func RefreshInventories(cfg *state.Config) {
+	refreshInventories(cfg, slices.Collect(maps.Keys(cfg.Remotes)))
+}
+
+func RefreshWhereListed(cfg *state.Config, id string) {
+	var listing []string
+	for name := range cfg.Remotes {
+		if cache, err := LoadCache(cfg.StateDir, name); err == nil && cache.Lists(id) {
+			listing = append(listing, name)
+		}
+	}
+	refreshInventories(cfg, listing)
+}
+
+func refreshInventories(cfg *state.Config, names []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), RefreshWait)
 	defer cancel()
 	var wg sync.WaitGroup
-	for name := range cfg.Remotes {
+	for _, name := range names {
 		client, err := For(cfg, name)
 		if err != nil {
 			continue
@@ -139,6 +153,10 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 	if err != nil {
 		return err
 	}
+	lostDelete, err := operationKey("delete", Target{ID: create.ID})
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), CreateWait)
 	defer cancel()
 	say(fmt.Sprintf("Creating %s on %s: the server clones or fetches %s first, which can take a while.", create.ID, name, create.GitURL))
@@ -151,6 +169,7 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 		c.Reservations = slices.DeleteFunc(c.Reservations, func(res Reservation) bool { return res.ID == create.ID })
 		if err == nil {
 			c.Inventory = append(slices.DeleteFunc(c.Inventory, func(l Listing) bool { return l.ID == create.ID }), listing)
+			c.Pending = slices.DeleteFunc(c.Pending, func(p PendingOp) bool { return p.Key == lostDelete })
 		}
 		return nil
 	})

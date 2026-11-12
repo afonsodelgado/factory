@@ -137,15 +137,12 @@ func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out
 		return code
 	}
 	var report string
-	err = client.MutateOnce(ctx, "delete", target, &report)
+	err = client.Delete(ctx, target, &report)
 	fmt.Fprint(out, report)
 	if err != nil {
 		return deleteFailed(fmt.Errorf("%s on %s is not fully deleted: %w. Run factory delete --remote %s %s again to finish", id, name, err, name, id))
 	}
-	return exitOf(remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
-		c.Inventory = slices.DeleteFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == id })
-		return nil
-	}))
+	return 0
 }
 
 func exitOf(err error) int {

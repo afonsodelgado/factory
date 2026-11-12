@@ -73,8 +73,11 @@ func (c Cache) Shown() []Listing {
 }
 
 func (c Cache) Holds(id string) bool {
-	return slices.ContainsFunc(c.Inventory, func(l Listing) bool { return l.ID == id }) ||
-		slices.ContainsFunc(c.Reservations, func(r Reservation) bool { return r.ID == id })
+	return c.Lists(id) || slices.ContainsFunc(c.Reservations, func(r Reservation) bool { return r.ID == id })
+}
+
+func (c Cache) Lists(id string) bool {
+	return slices.ContainsFunc(c.Inventory, func(l Listing) bool { return l.ID == id })
 }
 
 func CachePath(stateDir, name string) string {
@@ -222,6 +225,16 @@ func (c Client) MutateOnce(ctx context.Context, action string, payload, reply an
 		return settled
 	}
 	return err
+}
+
+func (c Client) Delete(ctx context.Context, target Target, reply any) error {
+	if err := c.MutateOnce(ctx, "delete", target, reply); err != nil {
+		return err
+	}
+	return UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
+		cache.Inventory = slices.DeleteFunc(cache.Inventory, func(l Listing) bool { return l.ID == target.ID })
+		return nil
+	})
 }
 
 func answered(err error) bool {

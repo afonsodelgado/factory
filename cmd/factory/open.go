@@ -78,12 +78,15 @@ func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote strin
 	if r.Name != "" {
 		r.Name = factory.Slugify(r.Name)
 	}
+	if r.Name != "" {
+		remote.RefreshWhereListed(cfg, r.Name)
+	}
 	where, err := remote.Place(cfg, r.Name, remoteFlag, local)
 	if err != nil {
 		return err
 	}
 	if where != "" {
-		if cache, _ := remote.LoadCache(cfg.StateDir, where); slices.ContainsFunc(cache.Inventory, func(l remote.Listing) bool { return l.ID == r.Name }) {
+		if cache, _ := remote.LoadCache(cfg.StateDir, where); cache.Lists(r.Name) {
 			fmt.Printf("%s runs on %s.\n", r.Name, where)
 			return remote.UpdateCache(cfg.StateDir, where, func(c *remote.Cache) error {
 				shown := slices.IndexFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == r.Name })

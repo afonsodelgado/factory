@@ -380,8 +380,12 @@ func (m *Model) remoteAct(it Item, action string, fields map[string]any) error {
 	payload := map[string]any{"id": f.Label(), "incarnation": f.Remote.Incarnation}
 	maps.Copy(payload, fields)
 	cfg, name, label := m.Config, f.Remote.Name, f.Label()
+	send := func() error { return mutate(cfg, name, action, payload, nil) }
+	if action == "delete" {
+		send = func() error { return deleteOn(cfg, name, remote.Target{ID: label, Incarnation: f.Remote.Incarnation}) }
+	}
 	m.later = append(m.later, func() tea.Msg {
-		err := mutate(cfg, name, action, payload, nil)
+		err := send()
 		switch {
 		case errors.Is(err, remote.ErrUncertain):
 			return noticeMsg(problem(fmt.Sprintf("%s did not answer, so whether %s was %s is unknown. Wait for the list to refresh before trying again.", name, label, pastTense[action])))
@@ -405,6 +409,16 @@ func mutateWithin(cfg *state.Config, name, action string, wait time.Duration, pa
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	return client.MutateOnce(ctx, action, payload, reply)
+}
+
+func deleteOn(cfg *state.Config, name string, target remote.Target) error {
+	client, err := remote.For(cfg, name)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
+	defer cancel()
+	return client.Delete(ctx, target, nil)
 }
 
 type answeredMsg struct {
@@ -825,14 +839,28 @@ func (m *Model) knownElsewhere() []dialog.Existing {
 		known = append(known, dialog.Existing{Key: f.Key(), Worktree: f.Slug, Label: f.Label(), Status: it.Status.String(), Stage: stage, Archived: f.Archived(), Retired: f.Remote == nil && retired(f), Remote: f.Where()})
 	}
 	for _, name := range m.remoteNames() {
-		cache, _ := remote.LoadCache(m.Config.StateDir, name)
-		for _, l := range cache.Inventory {
-			if !listed[name+"|"+l.ID] {
-				known = append(known, dialog.Existing{Worktree: l.ID, Label: l.ID, Remote: name})
+		for _, id := range m.idsOn(name) {
+			if !listed[name+"|"+id] {
+				known = append(known, dialog.Existing{Worktree: id, Label: id, Remote: name})
 			}
 		}
 	}
 	return known
+}
+
+func (m *Model) idsOn(name string) []string {
+	var ids []string
+	if l := m.link(name); l.state(m.Now()) == connected {
+		for _, w := range l.view.Factories {
+			ids = append(ids, w.ID)
+		}
+		return ids
+	}
+	cache, _ := remote.LoadCache(m.Config.StateDir, name)
+	for _, l := range cache.Inventory {
+		ids = append(ids, l.ID)
+	}
+	return ids
 }
 
 func (m *Model) createRemote(r dialog.NewResult) error {

@@ -343,6 +343,17 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	if slices.ContainsFunc(s.serverRegistry(t), func(e state.Entry) bool { return e.Slug == "csv" }) {
 		t.Fatal("csv is still on the server after its delete was retried")
 	}
+
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=delete"}, "delete", "json", "--remote", "homelab", "--yes"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost delete answer reported %v:\n%s", err, out)
+	}
+	reborn := func(e state.Entry) bool { return e.Slug == "json" && e.Title == "json second life" }
+	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "json", "--prompt", "json second life"); err != nil || !slices.ContainsFunc(s.serverRegistry(t), reborn) {
+		t.Fatalf("reusing json after its delete answer was lost: %v\n%s\nwant a new json with the new prompt, never \"runs on\" for a factory that is gone", err, out)
+	}
+	if out, err := s.factory(t, src, nil, "delete", "json", "--remote", "homelab", "--yes"); err != nil || slices.ContainsFunc(s.serverRegistry(t), func(e state.Entry) bool { return e.Slug == "json" }) {
+		t.Fatalf("deleting the new json: %v\n%s\nwant it gone, not the lost delete's receipt replayed while it keeps running", err, out)
+	}
 }
 
 func paneCommands(socket string) string {
