@@ -16,16 +16,17 @@ type Registry struct {
 }
 
 type Entry struct {
-	Repo       string       `json:"repo"`
-	Slug       string       `json:"slug"`
-	Title      string       `json:"title,omitempty"`
-	SessionID  string       `json:"session_id,omitempty"`
-	CreatedAt  time.Time    `json:"created_at"`
-	Created    bool         `json:"created,omitempty"`
-	Archived   bool         `json:"archived,omitempty"`
-	Dir        string       `json:"dir,omitempty"`
-	Supervisor AgentSetting `json:"supervisor,omitzero"`
-	Branches   []string     `json:"branches,omitempty"`
+	Repo        string       `json:"repo"`
+	Slug        string       `json:"slug"`
+	Title       string       `json:"title,omitempty"`
+	SessionID   string       `json:"session_id,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	Created     bool         `json:"created,omitempty"`
+	Archived    bool         `json:"archived,omitempty"`
+	Dir         string       `json:"dir,omitempty"`
+	Supervisor  AgentSetting `json:"supervisor,omitzero"`
+	Branches    []string     `json:"branches,omitempty"`
+	Incarnation string       `json:"incarnation,omitempty"`
 
 	Agents map[string]AgentSetting `json:"agents,omitempty"`
 }

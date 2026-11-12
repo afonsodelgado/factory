@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/afonsodelgado/factory/internal/factory"
 )
 
 func (m *Runtime) Run(ctx context.Context, events <-chan Event) error {
@@ -51,7 +53,9 @@ func (m *Runtime) handle(request Message) Message {
 	case "delete":
 		var r DeleteRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
-			value, err = m.Delete(r)
+			var steps []factory.RemovalStep
+			steps, err = m.Delete(r)
+			value = factory.Report(steps)
 		}
 	case "wake", "pause":
 		var r struct{ Key string }
@@ -84,17 +88,22 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.Review(r)
 		}
+	case "repo":
+		var r RepoRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			m.AddRepo(r.Repo)
+		}
 	case "snapshot":
 		value = m.snap
 	default:
 		return Message{T: "error", Error: "unknown host action: " + request.T}
 	}
-	if err != nil {
-		return Message{T: "error", Error: err.Error()}
+	data, marshalErr := json.Marshal(value)
+	if err == nil {
+		err = marshalErr
 	}
-	data, err := json.Marshal(value)
 	if err != nil {
-		return Message{T: "error", Error: err.Error()}
+		return Message{T: "error", Error: err.Error(), Data: data}
 	}
 	return Message{T: "done", Data: data}
 }

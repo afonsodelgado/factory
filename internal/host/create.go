@@ -77,7 +77,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 		launch.AddDirs = m.WritableDirs(r.Repo, "", supervisor)
 	}
 	title := FirstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents}
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents, Incarnation: uuid.NewString()}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		PinDirs(reg, earlier)
 		reg.Upsert(entry)

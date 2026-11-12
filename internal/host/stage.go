@@ -32,8 +32,9 @@ type StageRequest struct {
 	Token  string   `json:"token"`
 	Cwd    string   `json:"cwd"`
 	Role   string   `json:"role"`
-	Text   string   `json:"text"`
-	PRs    []string `json:"prs,omitempty"`
+	Text    string   `json:"text"`
+	PRs     []string `json:"prs,omitempty"`
+	Factory string   `json:"factory,omitempty"`
 
 	Review bool
 }
@@ -68,9 +69,9 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if !slices.Contains(state.AgentRoles, r.Role) {
 		return StageReply{}, fmt.Errorf("%q is not a role; roles are %s", r.Role, strings.Join(state.AgentRoles, ", "))
 	}
-	it, ok := m.ItemForStage(r.Token, r.Cwd)
+	it, ok := m.stageItem(r)
 	if !ok {
-		return StageReply{}, errors.New("no factory owns this session; run factory stage from a factory's supervisor pane")
+		return StageReply{}, errors.New("no factory owns this session; run factory stage from a factory's supervisor pane, or name it with --factory")
 	}
 	if it.Factory.Dir == "" || it.Factory.Worktree == "" {
 		return StageReply{}, fmt.Errorf("%s has no factory directory or worktree yet; write state.json first", it.Factory.Label())
@@ -86,7 +87,7 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 }
 
 func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
-	it, ok := m.ItemForStage(r.Token, r.Cwd)
+	it, ok := m.stageItem(r)
 	if !ok || it.Factory.Dir == "" {
 		return StageReply{}, errors.New("no factory owns this session; run factory stage ci from a factory's supervisor pane")
 	}
@@ -126,6 +127,13 @@ func (m *Runtime) CiScript() (string, error) {
 		return "", err
 	}
 	return path, os.WriteFile(path, data, 0o755)
+}
+
+func (m *Runtime) stageItem(r StageRequest) (Item, bool) {
+	if r.Factory != "" {
+		return m.snap.Named(r.Factory)
+	}
+	return m.ItemForStage(r.Token, r.Cwd)
 }
 
 func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {

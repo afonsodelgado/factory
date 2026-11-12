@@ -3,7 +3,6 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -77,27 +76,14 @@ func (m *Model) addRepo(r RepoRequest) {
 	if r.Notice != "" {
 		m.notice = news(r.Notice)
 	}
-	if r.Repo == "" || slices.Contains(m.Config.Repos, r.Repo) {
-		return
-	}
-	added := append(slices.Clip(m.Config.Repos), r.Repo)
-	if m.Loader != nil {
-		m.Loader.SetRepos(added)
-		return
-	}
-	m.Config.Repos = added
+	m.execution().AddRepo(r.Repo)
 }
 
 func (m *Model) forgetRepo(repo string) {
 	if m.here == repo {
 		m.here = ""
 	}
-	kept := slices.DeleteFunc(slices.Clone(m.Config.Repos), func(r string) bool { return r == repo })
-	if m.Loader != nil {
-		m.Loader.SetRepos(kept)
-		return
-	}
-	m.Config.Repos = kept
+	m.execution().ForgetRepo(repo)
 }
 
 func (m *Model) openRequest(e Event) tea.Cmd {

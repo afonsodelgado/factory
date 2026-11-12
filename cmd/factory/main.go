@@ -60,6 +60,10 @@ func run(args []string) int {
 		return runReview(args[1:])
 	case "attention":
 		return runAttention(args[1:])
+	case "remote":
+		return runRemote(args[1:])
+	case "--remote", "--local":
+		return runOpen(args)
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)

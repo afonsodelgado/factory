@@ -19,11 +19,12 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent", "--supervisor"}
+var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent", "--supervisor", "--remote", "--git-remote"}
 
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
@@ -36,6 +37,9 @@ func runOpen(args []string) int {
 	agents := agentFlags{}
 	flags.Var(agents, "agent", "role=model:effort or role=tool/model:effort for one agent of this factory; repeatable")
 	supervisorFlag := flags.String("supervisor", "", "tool/model:effort the supervisor runs on, such as codex/gpt-6.1-sol:high")
+	remoteFlag := flags.String("remote", "", "create the factory on this remote; default: default_remote")
+	local := flags.Bool("local", false, "create the factory on this machine, whatever default_remote says")
+	gitRemote := flags.String("git-remote", "", "the git remote the server clones from; default: origin, or the only remote")
 	if err := flags.Parse(reorder(args)); err != nil {
 		return 2
 	}
@@ -59,11 +63,39 @@ func runOpen(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 2
 	}
-	if err := openMain(hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}); err != nil {
+	request := hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}
+	if err := openWhere(request, *remoteFlag, *local, *gitRemote); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0
+}
+
+func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote string) error {
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if r.Name != "" {
+		r.Name = factory.Slugify(r.Name)
+	}
+	where, err := whereToRun(cfg, r.Name, remoteFlag, local)
+	if err != nil {
+		return err
+	}
+	if where != "" {
+		if cache, _ := remote.LoadCache(cfg.StateDir, where); slices.ContainsFunc(cache.Inventory, func(l remote.Listing) bool { return l.ID == r.Name }) {
+			fmt.Printf("%s runs on %s.\n", r.Name, where)
+			return nil
+		}
+		return createRemote(cfg, where, r, gitRemote)
+	}
+	if r.Name != "" && !localFactory(cfg, r.Name) {
+		if err := withCreationLock(cfg, func() error { return refuseKnownID(cfg, r.Name) }); err != nil {
+			return err
+		}
+	}
+	return openMain(r)
 }
 
 func catalogRefusal(agents map[string]state.AgentSetting, supervisor state.AgentSetting) error {
@@ -301,7 +333,12 @@ func request(socket, kind string, payload any) (hub.Message, error) {
 	if err != nil {
 		return hub.Message{}, err
 	}
+	return send(socket, hub.Message{T: kind, Pane: "cli", Data: data})
+}
+
+func send(socket string, m hub.Message) (hub.Message, error) {
 	var conn net.Conn
+	var err error
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		conn, err = net.Dial("unix", socket)
@@ -314,16 +351,16 @@ func request(socket, kind string, payload any) (hub.Message, error) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	defer conn.Close()
-	if err := json.NewEncoder(conn).Encode(hub.Message{T: kind, Pane: "cli", Data: data}); err != nil {
+	if err := json.NewEncoder(conn).Encode(m); err != nil {
 		return hub.Message{}, err
 	}
 	conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
-		var m hub.Message
-		if json.Unmarshal(scanner.Bytes(), &m) == nil && (m.T == "done" || m.T == "error") {
-			return m, nil
+		var reply hub.Message
+		if json.Unmarshal(scanner.Bytes(), &reply) == nil && (reply.T == "done" || reply.T == "error" || reply.T == "uncertain") {
+			return reply, nil
 		}
 	}
 	return hub.Message{}, errors.New("the hub did not answer")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,8 +18,12 @@ import (
 const hostWindow = "host"
 
 func runHost(args []string) int {
+	if len(args) == 1 && args[0] == "request" {
+		json.NewEncoder(os.Stdout).Encode(answerRequest(os.Stdin))
+		return 0
+	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: factory host run")
+		fmt.Fprintln(os.Stderr, "usage: factory host run | factory host request")
 		return 2
 	}
 	cfg, err := state.LoadConfig()
