@@ -257,7 +257,7 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, key := range settingsKeys(values["qa.mode"]) {
+			for _, key := range SettingsKeys(values["qa.mode"]) {
 				if !again.Present[key] || again.Values[key] != values[key] {
 					t.Errorf("%s = %q, present %v", key, again.Values[key], again.Present[key])
 				}
@@ -275,5 +275,22 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(RepoConfigPath(repo), []byte("coderabbit:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := ReadRepoSettings(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Values["coderabbit"] != "true" {
+		t.Errorf("coderabbit = %q; the pipeline treats a null as on, so the form must show on", settings.Values["coderabbit"])
 	}
 }

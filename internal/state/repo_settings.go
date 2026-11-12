@@ -34,12 +34,14 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	s := &RepoSettings{path: path, original: data, Values: map[string]string{}, Present: map[string]bool{}}
-	for _, key := range settingsKeys("browser") {
+	for _, key := range SettingsKeys("browser") {
 		node := settingsNode(file, key)
 		s.Present[key] = node != nil
 		value := ""
 		if node != nil {
-			if key == "coderabbit" {
+			if key == "coderabbit" && node.Type() == ast.NullType {
+				value = "true"
+			} else if key == "coderabbit" {
 				var enabled bool
 				err = yaml.NodeToValue(node, &enabled)
 				value = fmt.Sprint(enabled)
@@ -59,7 +61,7 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 	return s, nil
 }
 
-func settingsKeys(mode string) []string {
+func SettingsKeys(mode string) []string {
 	keys := []string{"commands.build", "commands.lint", "commands.test", "qa.mode"}
 	if mode == "browser" {
 		keys = append(keys, "qa.start", "qa.health")
@@ -69,7 +71,7 @@ func settingsKeys(mode string) []string {
 
 func (s *RepoSettings) Changes(values map[string]string) []string {
 	var keys []string
-	for _, key := range settingsKeys(values["qa.mode"]) {
+	for _, key := range SettingsKeys(values["qa.mode"]) {
 		if !s.Present[key] || s.Values[key] != values[key] {
 			keys = append(keys, key)
 		}
@@ -85,7 +87,7 @@ func parseRepoSettings(data []byte) (*ast.File, error) {
 	if len(file.Docs) > 1 {
 		return nil, fmt.Errorf("settings need a single YAML document")
 	}
-	if len(file.Docs) == 0 || file.Docs[0].Body == nil || (file.Docs[0].Body.Type() == ast.CommentGroupType || file.Docs[0].Body.Type() == ast.CommentType) {
+	if isEmptyDocument(file) {
 		return file, nil
 	}
 	root, ok := file.Docs[0].Body.(*ast.MappingNode)
@@ -108,7 +110,7 @@ func parseRepoSettings(data []byte) (*ast.File, error) {
 			return nil, err
 		}
 	}
-	for _, key := range settingsKeys("browser") {
+	for _, key := range SettingsKeys("browser") {
 		node := settingsNode(file, key)
 		if node == nil {
 			continue
@@ -120,6 +122,14 @@ func parseRepoSettings(data []byte) (*ast.File, error) {
 		}
 	}
 	return file, nil
+}
+
+func isEmptyDocument(file *ast.File) bool {
+	if len(file.Docs) == 0 || file.Docs[0].Body == nil {
+		return true
+	}
+	bodyType := file.Docs[0].Body.Type()
+	return bodyType == ast.CommentGroupType || bodyType == ast.CommentType
 }
 
 func editableMapping(mapping *ast.MappingNode, prefix string) error {
@@ -148,7 +158,7 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	empty := len(file.Docs) == 0 || file.Docs[0].Body == nil || (file.Docs[0].Body.Type() == ast.CommentGroupType || file.Docs[0].Body.Type() == ast.CommentType)
+	empty := isEmptyDocument(file)
 	if empty {
 		file, _ = parser.ParseBytes([]byte("{}\n"), parser.ParseComments)
 	}
