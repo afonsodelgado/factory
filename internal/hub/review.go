@@ -258,33 +258,30 @@ func openThrough(cfg *state.Config, tunnels *remote.Tunnels, chrome *review.Brow
 	if err != nil {
 		return err
 	}
-	health := ""
 	if o.Health != "" {
-		if health, err = client.Resolve(ctx, tunnels, home, o.Health); err != nil {
-			return err
+		health, err := client.Resolve(ctx, tunnels, home, o.Health)
+		if err == nil {
+			err = host.WaitHealthy(health, stackReadyWait)
 		}
-	}
-	var endpoint review.Endpoint
-	if chrome != nil && home != "" {
-		api, err := client.Resolve(ctx, tunnels, home, home)
 		if err != nil {
 			return err
 		}
-		endpoint = remote.EndpointOf(api)
 	}
-	if health != "" {
-		if err := host.WaitHealthy(health, stackReadyWait); err != nil {
-			return err
-		}
-	}
-	f := review.Factory{Key: o.Key, Label: o.Factory + " on " + name}
-	switch {
-	case endpoint.Origin != "" && review.Live(o.Page):
-		_, err = chrome.OpenAppAt(endpoint, url, f, o.Page, o.Cookies)
-	case endpoint.Origin != "" && strings.HasPrefix(url, endpoint.Origin+"/r/"):
-		err = chrome.OpenPageAt(endpoint, url, f)
-	default:
+	served := strings.HasPrefix(o.URL, "file://") || strings.HasPrefix(o.URL, strings.TrimSuffix(home, "/"))
+	if chrome == nil || home == "" || !(review.Live(o.Page) || served) {
 		open(url)
+		return nil
+	}
+	api, err := client.Resolve(ctx, tunnels, home, home)
+	if err != nil {
+		open(url)
+		return nil
+	}
+	endpoint, f := remote.EndpointOf(api), review.Factory{Key: o.Key, Label: o.Factory + " on " + name}
+	if review.Live(o.Page) {
+		_, err = chrome.OpenAppAt(endpoint, url, f, o.Page, o.Cookies)
+	} else {
+		err = chrome.OpenPageAt(endpoint, url, f)
 	}
 	if err != nil {
 		open(url)
