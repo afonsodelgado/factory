@@ -452,10 +452,17 @@ func (m *Model) answered(msg answeredMsg) {
 		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
 		delete(m.panel.sent, key)
-		m.panel.refused[key] = "Not sent. " + msg.err.Error()
+		m.panel.refused[key] = "Not sent. " + withFullStop(msg.err.Error())
 	default:
 		m.recordSent(msg.mark, msg.at)
 	}
+}
+
+func withFullStop(sentence string) string {
+	if strings.HasSuffix(sentence, ".") {
+		return sentence
+	}
+	return sentence + "."
 }
 
 func proxySlug(f factory.Factory) string { return f.Label() + "+" + f.Remote.Name }
