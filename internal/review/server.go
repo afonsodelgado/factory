@@ -156,7 +156,11 @@ func (s *Server) locate(path string) (Factory, string, bool) {
 }
 
 func (s *Server) pageURL(key, rel string) string {
-	return s.Home() + url.PathEscape(key) + "/" + escapePath(filepath.ToSlash(rel))
+	return s.Origin() + s.pagePath(key, rel)
+}
+
+func (s *Server) pagePath(key, rel string) string {
+	return "/r/" + s.token + "/" + url.PathEscape(key) + "/" + escapePath(filepath.ToSlash(rel))
 }
 
 func escapePath(p string) string {
@@ -325,7 +329,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(&b, "<section><h2>%s</h2><ul>", html.EscapeString(f.Label))
 		for _, rel := range pages {
-			fmt.Fprintf(&b, `<li><a href="%s">%s</a></li>`, html.EscapeString(s.pageURL(f.Key, rel)), html.EscapeString(filepath.ToSlash(rel)))
+			fmt.Fprintf(&b, `<li><a href="%s">%s</a></li>`, html.EscapeString(s.pagePath(f.Key, rel)), html.EscapeString(filepath.ToSlash(rel)))
 		}
 		b.WriteString("</ul></section>")
 	}
