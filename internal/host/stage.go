@@ -292,6 +292,9 @@ func LiveStagePane(pane tmux.Pane, found bool) (tmux.Pane, bool) {
 }
 
 func (m *Runtime) QueueType(q QueuedType) {
+	if pane, ok := byID(m.currentPanes(), q.Pane); ok && q.Token == "" {
+		q.Token = pane.Token
+	}
 	m.typeQueue = append(m.typeQueue, q)
 	if m.saveQueue(m.typeQueue) {
 		m.FlushTypeQueue()
@@ -316,7 +319,7 @@ func (m *Runtime) FlushTypeQueue() {
 			continue
 		}
 		pane, found := byID(m.snap.Panes, q.Pane)
-		if !found || pane.Dead {
+		if !found || pane.Dead || pane.Token != q.Token {
 			m.notice = "The " + q.Label + " pane closed before its message was typed."
 			if q.Answers != nil {
 				m.dropAnswer(*q.Answers, m.notice)
@@ -367,14 +370,16 @@ func (m *Runtime) settleInterrupted(q QueuedType) {
 		m.recordSent(*q.Answers, q.TypingAt)
 		return
 	}
-	hook := m.HookOf(q)
-	submitted := hook != nil && hook.Submit != nil && !hook.Submit.At.Before(q.TypingAt)
-	if submitted && q.Delivers != "" {
+	if q.Delivers != "" {
 		MarkDelivered(q.Record, q.Delivers)
+	}
+	hook := m.HookOf(q)
+	if hook != nil && hook.Submit != nil && !hook.Submit.At.Before(q.TypingAt) {
 		return
 	}
-	if !submitted {
-		m.notice = "Typing into the " + q.Label + " pane was interrupted, so it was not typed again. Check that session and send the message yourself if it is missing."
+	m.notice = "Typing into the " + q.Label + " pane was interrupted, so it was not typed again. Check that session and send the message yourself if it is missing."
+	if it, ok := m.ItemForStage(q.Token, ""); ok && m.Loader != nil {
+		m.Loader.Note(it.Factory, "a message to "+q.Label+" was interrupted while typing and was not typed again")
 	}
 }
 

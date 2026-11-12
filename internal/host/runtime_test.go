@@ -232,17 +232,11 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatalf("first %+v, retry %+v, runs %+v", first, retry, runs)
 		}
 	})
-	t.Run("typing cut short by a restart is not typed again", func(t *testing.T) {
-		f := newFixture(t)
-		message := filepath.Join(f.dir, "inbox", "ci.json")
-		if err := WriteFile(message, `{"text":"CI passed"}`); err != nil {
-			t.Fatal(err)
-		}
+	recovered := func(t *testing.T, f fixture, entry QueuedType) (chan string, *Runtime) {
+		t.Helper()
 		calls := make(chan string, 8)
 		r := f.runtime(t, recordingTypist{calls})
-		record := DeliveredPath(f.cfg.StateDir, f.cfg.Repos[0], "csv")
-		interrupted := []QueuedType{{TypingAt: time.Now(), Pane: f.supervisor.ID, Token: f.supervisor.Token, Label: "csv", Text: "CI passed", Delivers: message, Record: record}}
-		if err := savePrivate(r.queuePath(), interrupted); err != nil {
+		if err := savePrivate(r.queuePath(), []QueuedType{entry}); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.Recover(); err != nil {
@@ -250,8 +244,36 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 		}
 		r.Tick()
 		r.Tick()
-		if len(calls) != 0 || r.Notice() == "" {
-			t.Fatalf("typed %d messages after an interrupted delivery, notice %q", len(calls), r.Notice())
+		return calls, r
+	}
+	t.Run("typing cut short by a restart is not typed again, even after the next restart", func(t *testing.T) {
+		f := newFixture(t)
+		message := filepath.Join(f.dir, "inbox", "ci.json")
+		if err := WriteFile(message, `{"text":"CI passed"}`); err != nil {
+			t.Fatal(err)
+		}
+		entry := QueuedType{TypingAt: time.Now(), Pane: f.supervisor.ID, Token: f.supervisor.Token, Label: "csv", Text: "CI passed", Delivers: message, Record: DeliveredPath(f.cfg.StateDir, f.cfg.Repos[0], "csv")}
+		calls, r := recovered(t, f, entry)
+		if len(calls) != 0 || r.TakeNotice() == "" {
+			t.Fatalf("typed %d messages after an interrupted delivery", len(calls))
+		}
+		calls = make(chan string, 8)
+		again := f.runtime(t, recordingTypist{calls})
+		if err := again.Recover(); err != nil {
+			t.Fatal(err)
+		}
+		again.Tick()
+		again.Tick()
+		if len(calls) != 0 {
+			t.Fatal("a second restart typed the interrupted message again")
+		}
+	})
+	t.Run("a recovered message is not typed into a new pane that reuses its pane id", func(t *testing.T) {
+		f := newFixture(t)
+		answer := &Answer{Factory: state.Key(f.cfg.Repos[0], "csv"), ItemID: "q1"}
+		calls, _ := recovered(t, f, QueuedType{Pane: f.supervisor.ID, Token: "before-reboot", Label: "csv", Text: "approve", Answers: answer})
+		if len(calls) != 0 {
+			t.Fatal("typed a recovered message into a pane that belongs to someone else")
 		}
 	})
 }

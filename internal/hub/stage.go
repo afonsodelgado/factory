@@ -43,7 +43,7 @@ func (m *Model) queueType(q queuedType) { m.execution().QueueType(q) }
 func (m *Model) flushTypeQueue() {
 	r := m.execution()
 	r.FlushTypeQueue()
-	if notice := r.Notice(); notice != "" {
+	if notice := r.TakeNotice(); notice != "" {
 		m.notice = problem(notice)
 	}
 }

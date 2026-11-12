@@ -66,7 +66,11 @@ func (m *Runtime) SetSnapshot(s Snapshot) { m.snap = s }
 
 func (m *Runtime) Snapshot() Snapshot { return m.snap }
 
-func (m *Runtime) Notice() string { return m.notice }
+func (m *Runtime) TakeNotice() string {
+	notice := m.notice
+	m.notice = ""
+	return notice
+}
 
 func (m *Runtime) Tick() {
 	if m.Loader != nil {
