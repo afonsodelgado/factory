@@ -351,6 +351,9 @@ func (m *Model) queueType(q queuedType) {
 func (m *Model) flushTypeQueue() {
 	var waiting []queuedType
 	for _, q := range m.typeQueue {
+		if q.Answers != nil && !m.stillQueued(*q.Answers) {
+			continue
+		}
 		if m.Now().Before(q.NotBefore) {
 			waiting = append(waiting, q)
 			continue
@@ -358,17 +361,27 @@ func (m *Model) flushTypeQueue() {
 		pane, found := byID(m.snap.Panes, q.Pane)
 		if !found || pane.Dead {
 			m.notice = "The " + q.Label + " pane closed before its message was typed."
+			if q.Answers != nil {
+				m.dropAnswer(*q.Answers, m.notice)
+			}
 			continue
 		}
-		hook := queuedHook(q, m.snap.Hooks)
+		hook := m.hookOf(q)
 		if m.awaitingSubmit(q.Pane, hook) {
 			waiting = append(waiting, q)
 			continue
 		}
+		target := Target{Label: q.Label, Pane: &pane, Hook: hook}
+		if q.Answers != nil {
+			target = m.refreshed(target)
+		}
 		typedAt := m.Now()
-		reason, err := Deliver(m.Typist, Target{Label: q.Label, Pane: &pane, Hook: hook}, q.Text)
+		reason, err := Deliver(m.Typist, target, q.Text)
 		if err != nil {
 			m.notice = err.Error()
+			if q.Answers != nil {
+				m.dropAnswer(*q.Answers, err.Error())
+			}
 			continue
 		}
 		if reason != "" {
@@ -392,6 +405,16 @@ func (m *Model) awaitingSubmit(pane string, hook *state.HookFile) bool {
 		return false
 	}
 	return hook == nil || hook.Submit == nil || hook.Submit.At.Before(typed)
+}
+
+func (m *Model) hookOf(q queuedType) *state.HookFile {
+	if q.Answers == nil {
+		return queuedHook(q, m.snap.Hooks)
+	}
+	if it, ok := m.snap.Find(q.Answers.factory); ok {
+		return it.Hook
+	}
+	return nil
 }
 
 func queuedHook(q queuedType, hooks []*state.HookFile) *state.HookFile {

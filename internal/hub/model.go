@@ -64,6 +64,7 @@ type Model struct {
 	pending      []tea.Cmd
 	panel        panelState
 	statuses     map[string]factory.Status
+	loaded       map[string]factory.Status
 	dialogs      map[string]json.RawMessage
 	dialog       string
 	notice       string
@@ -217,6 +218,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = ""
 		cmd = m.selectorKey(msg.String())
 	}
+	m.settle()
 	m.arrange()
 	m.publish()
 	return m, cmd
@@ -235,10 +237,15 @@ func (m *Model) apply(s Snapshot) {
 	first := len(m.snap.Items) == 0 && m.GitHub != nil
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
+	m.loaded = map[string]factory.Status{}
+	for _, it := range s.Items {
+		m.loaded[it.Factory.Key()] = it.Status
+	}
 	m.forgetClosedItems()
 	m.checkReceipts()
 	m.queueInbox()
 	m.flushTypeQueue()
+	m.settle()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
 	for _, it := range s.Items {
@@ -788,8 +795,8 @@ func (m *Model) row(it Item) selector.Row {
 		row.Stage += " · " + name
 	}
 	if f.State != nil {
-		_, answered := m.shownItems(it)
-		row.Items = len(f.State.OpenAttention()) - len(answered)
+		_, settled := m.shownItems(it)
+		row.Items = len(f.State.OpenAttention()) - len(settled)
 	}
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)
@@ -1016,9 +1023,6 @@ func (m *Model) panelHints() []footer.Hint {
 	it, item, ok := m.currentAttention()
 	if !ok {
 		return hints("tab", "next tab", "esc", "back to factories")
-	}
-	if item.Answerable() && m.isSent(it.Factory, item) {
-		return hints("ctrl+d", "clear and answer again", "ctrl+n/p", "item", "esc", "back")
 	}
 	editing := item.Answerable() && m.draft(it.Factory, item).Editing
 	back := "back, keep draft"

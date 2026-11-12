@@ -37,6 +37,10 @@ func Retry() string {
 	return "/factory resume"
 }
 
+func Handled(id string) string {
+	return id + " handled: settled outside the panel"
+}
+
 func Instruction(id, text string) string {
 	return id + " " + strings.TrimSpace(text)
 }

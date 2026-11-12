@@ -50,3 +50,11 @@ func Deliver(typist Typist, t Target, text string) (string, error) {
 	}
 	return "", typist.Type(t.Pane.ID, text)
 }
+
+func unqueueable(t Target) string {
+	waitsForItsTurn := t.Pane != nil && !t.Pane.Dead && !factory.IsShell(t.Pane.Command) && !t.Pane.InMode && t.Hook != nil
+	if waitsForItsTurn {
+		return ""
+	}
+	return Refusal(t)
+}

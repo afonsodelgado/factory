@@ -56,6 +56,8 @@ func run(args []string) int {
 		return runStage(args[1:])
 	case "review":
 		return runReview(args[1:])
+	case "attention":
+		return runAttention(args[1:])
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -118,6 +120,9 @@ commands:
               run the stack that factory-qa wrote to review/stack.json in a
               window of its own, then open the app signed in for the
               walkthrough
+  attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <id>
+              set an attention item's resolved_at in state.json, and
+              waiting_on when given (run by the supervisor)
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap

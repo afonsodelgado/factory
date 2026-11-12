@@ -13,11 +13,12 @@ import (
 )
 
 type Item struct {
-	Factory factory.Factory
-	Status  factory.Status
-	Hook    *state.HookFile
-	Pane    *tmux.Pane
-	Stage   *StageView
+	Factory   factory.Factory
+	Status    factory.Status
+	Unblocked factory.Status
+	Hook      *state.HookFile
+	Pane      *tmux.Pane
+	Stage     *StageView
 }
 
 type Snapshot struct {
@@ -98,8 +99,10 @@ func (l *Loader) Load() Snapshot {
 		stage := runningStage(f, runs[f.Key()], panes, hooks)
 		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.hook()}
 		status := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
+		live.Answered = true
+		unblocked := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		l.logHook(f, hook)
-		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Hook: hook, Pane: pane, Stage: stage})
+		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage})
 	}
 	return snap
 }

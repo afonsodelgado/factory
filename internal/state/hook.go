@@ -18,10 +18,13 @@ type HookFile struct {
 	Main           *HookEvent     `json:"main,omitempty"`
 	Last           HookEvent      `json:"last"`
 	Submit         *HookEvent     `json:"submit,omitempty"`
+	Submits        []HookEvent    `json:"submits,omitempty"`
 	Prompt         *PendingPrompt `json:"prompt,omitempty"`
 }
 
 const promptHeadLength = 120
+
+const keptSubmits = 8
 
 type PendingPrompt struct {
 	At      time.Time `json:"at"`
@@ -151,6 +154,7 @@ func RecordHook(stateDir string, payload []byte, token string, now time.Time) er
 	if p.HookEventName == "UserPromptSubmit" {
 		event.PromptHead = PromptHead(p.Prompt)
 		file.Submit = &event
+		file.Submits = append(file.Submits, event)[max(len(file.Submits)+1-keptSubmits, 0):]
 	}
 	if token != "" {
 		file.Token = token

@@ -38,7 +38,8 @@ func questionFactory(hookEvent string, at time.Time) Snapshot {
 	}
 	f := factory.Factory{Repo: "/r/cowork", Slug: "eng-7452-auth-limits", State: &state.State{ID: "ENG-7452", Stage: "requirements", WaitingOn: "user", Attention: []state.Attention{batch}}}
 	hook := &state.HookFile{Main: &state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}, Last: state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}}
-	return Snapshot{At: at, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &tmux.Pane{ID: "%9", Command: "claude"}}}}
+	pane := tmux.Pane{ID: "%9", Command: "claude"}
+	return Snapshot{At: at, Panes: []tmux.Pane{pane}, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &pane}}}
 }
 
 func panelKeys(tm *teatest.TestModel, keys ...string) {
@@ -132,6 +133,7 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	turnEnded := &state.HookEvent{Event: "Stop", At: now.Add(3 * time.Second)}
 	misrouted := &state.HookEvent{Event: "UserPromptSubmit", AgentID: "a1", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
 	changesReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "gate-7452-plan changes: darker header", At: now.Add(time.Second)}
+	idleAgain := &state.HookEvent{Event: "Stop", At: now.Add(time.Second)}
 
 	cases := []struct {
 		name  string
@@ -145,19 +147,21 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		also  *state.Attention
 		sends string
 	}{
-		{"gate approve while busy is refused out loud", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Not sent.", "", nil, ""},
-		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sent at", "", nil, ""},
+		{"gate approve while busy waits out of the way", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Queued gate-7452-plan", "Approve", nil, ""},
+		{"a queued approval is sent once the supervisor is idle", &gate, "UserPromptSubmit", []string{"ctrl+a"}, []later{{2 * time.Second, nil, nil, idleAgain}}, 1, "Sending gate-7452-plan", "", nil, "/factory approve plan gate-7452-plan"},
+		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sending", "", nil, ""},
+		{"an item settled elsewhere is closed with one key", &gate, "Stop", []string{"ctrl+k"}, nil, 1, "Sending gate-7452-plan", "", nil, "gate-7452-plan handled: settled outside the panel"},
 		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", "", nil, ""},
-		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sent at", "", nil, ""},
-		{"a sent answer cannot be edited under its Sent line", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sent at", "xxx", nil, ""},
-		{"enter picks each answer and moves on until it sends", nil, "Stop", append(append([]string{"down", "enter", "enter"}, keystrokes("5,000 entries")...), "enter", "enter"), nil, 1, "Sent at", "", nil, "1) 30 per minute per IP\n2) recommended\n3) 5,000 entries"},
+		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sending", "", nil, ""},
+		{"a sent answer leaves the panel at once", nil, "Stop", []string{"ctrl+s", "x", "x", "x", "ctrl+s"}, nil, 1, "Sending q-7452-1", "How many failed auth", nil, ""},
+		{"enter picks each answer and moves on until it sends", nil, "Stop", append(append([]string{"down", "enter", "enter"}, keystrokes("5,000 entries")...), "enter", "enter"), nil, 1, "Sending", "", nil, "1) 30 per minute per IP\n2) recommended\n3) 5,000 entries"},
 		{"a question with no recommendation needs an answer", &unrecommended, "Stop", []string{"ctrl+s"}, nil, 0, "Question 1 has no recommended answer", "", nil, ""},
 		{"a received answer leaves the panel before the supervisor resolves it", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, nil, nil}}, 1, "Answered q-7452-1", "How many failed auth", nil, ""},
-		{"a received answer the supervisor left open comes back to send again", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, []string{"ctrl+s"}, turnEnded}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"a received answer the supervisor left open comes back to send again", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, received, nil, nil}, {4 * time.Second, received, []string{"ctrl+s"}, turnEnded}}, 2, "Sending", "", nil, ""},
 		{"an answer a stage agent took is not received", nil, "Stop", []string{"ctrl+s"}, []later{{2 * time.Second, misrouted, nil, nil}}, 1, "Not received by the supervisor", "Answered", nil, ""},
-		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}, nil}}, 2, "waiting for the supervisor", "", nil, ""},
+		{"an answer never received can be sent again", nil, "Stop", []string{"ctrl+s"}, []later{{11 * time.Second, nil, []string{"ctrl+s"}, nil}}, 2, "Sending", "", nil, ""},
 		{"a received change request clears the gate's notes", &gate, "Stop", append(keystrokes("darker header"), "ctrl+s"), []later{{2 * time.Second, changesReceived, nil, nil}, {4 * time.Second, changesReceived, nil, turnEnded}}, 1, "✓ Approve", "darker header", nil, "gate-7452-plan changes: darker header"},
-		{"enter on the Approve row approves with the notes", &gate, "Stop", append(keystrokes("ship it"), "esc", "down", "down", "enter"), nil, 1, "Sent at", "", nil, "/factory approve plan gate-7452-plan ship it"},
+		{"enter on the Approve row approves with the notes", &gate, "Stop", append(keystrokes("ship it"), "esc", "down", "down", "enter"), nil, 1, "Sending", "", nil, "/factory approve plan gate-7452-plan ship it"},
 		{"a bracket typed at a gate goes into its notes", &gate, "Stop", []string{"["}, nil, 0, "[█", "", nil, ""},
 		{"ctrl+n moves to the next item from inside a form", nil, "Stop", []string{"ctrl+n"}, nil, 0, "gate-7452-plan", "q-7452-1", &gate, ""},
 	}
@@ -204,6 +208,50 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	}
 }
 
+func TestAnsweringTakesTheFactoryOffNeedsYouUntilTheAnswerIsLost(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	received := state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
+	agentMessage := state.HookEvent{Event: "UserPromptSubmit", PromptHead: `<agent-message from="a1">`, At: now.Add(2 * time.Second)}
+	cases := []struct {
+		name    string
+		after   time.Duration
+		submits []state.HookEvent
+		status  factory.Status
+		shows   string
+	}{
+		{"received, then an agent message", 3 * time.Second, []state.HookEvent{received, agentMessage}, factory.Running, "Answered q-7452-1"},
+		{"never received", 11 * time.Second, nil, factory.NeedsYou, "Not received by the supervisor"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snapshot := func(at time.Time) Snapshot {
+				snap := questionFactory("Stop", now)
+				snap.At = at
+				snap.Items[0].Unblocked = factory.Running
+				return snap
+			}
+			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: &fakeTypist{}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+			model.SetSnapshot(snapshot(now))
+			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+			panelKeys(tm, "ctrl+s")
+			later := snapshot(now.Add(c.after))
+			later.Items[0].Hook.Submits = c.submits
+			if len(c.submits) > 0 {
+				later.Items[0].Hook.Submit = &c.submits[len(c.submits)-1]
+			}
+			tm.Send(snapshotMsg(later))
+			if err := tm.Quit(); err != nil {
+				t.Fatal(err)
+			}
+			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
+			if got := final.snap.Items[0].Status; got != c.status || !strings.Contains(view, c.shows) {
+				t.Errorf("status %s, panel:\n%s\nwant %s and %q: the factory list must follow the panel, and a lost answer must ask again", got, view, c.status, c.shows)
+			}
+		})
+	}
+}
+
 func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	withCap := func(created time.Time, at time.Time) Snapshot {
@@ -211,15 +259,19 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 		snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa_fixes", Kind: "cap", Title: "QA rounds 3 of 3", CreatedAt: state.Time{Time: created}}}
 		return snap
 	}
+	firstReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "cap-7452-qa_fixes continue: raise qa_rounds by one for this factory", At: now.Add(time.Second / 2)}
 	resolved := questionFactory("Stop", now.Add(time.Second))
 	resolved.Items[0].Factory.State.Attention = []state.Attention{}
+	resolved.Items[0].Hook.Submit = firstReceived
+	reRaised := withCap(now.Add(2*time.Second), now.Add(2*time.Second))
+	reRaised.Items[0].Hook.Submit = firstReceived
 	typist := &fakeTypist{}
 	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
 	model.SetSnapshot(withCap(now.Add(-time.Hour), now))
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
 	panelKeys(tm, "ctrl+r")
 	tm.Send(snapshotMsg(resolved))
-	tm.Send(snapshotMsg(withCap(now.Add(2*time.Second), now.Add(2*time.Second))))
+	tm.Send(snapshotMsg(reRaised))
 	panelKeys(tm, "ctrl+r")
 	if err := tm.Quit(); err != nil {
 		t.Fatal(err)
@@ -293,7 +345,7 @@ func TestQuestionBatchPanel(t *testing.T) {
 		send bool
 	}{
 		{"answering while claude works", "PreToolUse", false},
-		{"refused while busy", "UserPromptSubmit", true},
+		{"queued while busy", "UserPromptSubmit", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			typist := &fakeTypist{}

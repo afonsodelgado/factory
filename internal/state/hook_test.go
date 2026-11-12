@@ -81,6 +81,15 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 	if file.Submit == nil || file.Submit.PromptHead != "q-1-1 answers:" {
 		t.Errorf("submit = %+v; want the head of the pasted answer, or the panel never sees the supervisor receive it", file.Submit)
 	}
+
+	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"UserPromptSubmit","prompt":"<agent-message from=\"a1\">done</agent-message>"}`, at.Add(time.Hour+time.Second))
+	file, err = ReadHookFile(filepath.Join(SessionsDir(stateDir), "s1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Submits) != 2 || file.Submits[0].PromptHead != "q-1-1 answers:" {
+		t.Errorf("submits = %+v; want the answer kept after an agent message arrives, or the panel reports a received answer as lost", file.Submits)
+	}
 }
 
 func TestFactoriesInReposWithTheSameNameKeepSeparateFiles(t *testing.T) {

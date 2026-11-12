@@ -463,7 +463,7 @@ func (m *Model) wake(key string) error {
 		}
 		m.typeAfterStart(plan, pane, it)
 	case WakeShell:
-		if now := m.freshTarget(it).Pane; now == nil || !factory.IsShell(now.Command) {
+		if now := m.refreshed(m.target(it)).Pane; now == nil || !factory.IsShell(now.Command) {
 			return fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
 		}
 		if err := m.typeSupervisor(it.Pane.ID, it.Factory, plan.Command); err != nil {
@@ -471,7 +471,7 @@ func (m *Model) wake(key string) error {
 		}
 		m.typeAfterStart(plan, it.Pane.ID, it)
 	case WakeResume:
-		reason, err := Deliver(m.Engine, m.freshTarget(it), plan.Command)
+		reason, err := Deliver(m.Engine, m.refreshed(m.target(it)), plan.Command)
 		if err != nil {
 			return err
 		}

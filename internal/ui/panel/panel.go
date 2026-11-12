@@ -163,9 +163,11 @@ func ago(now, then time.Time) string {
 }
 
 func renderAttention(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
-	if len(v.Items) == 0 && len(v.Answered) > 0 {
-		c.Put(x, y, "✓ Answered "+strings.Join(v.Answered, ", ")+".", theme.FgInk(theme.Green))
-		c.Put(x, y+2, "The supervisor received the answer and is working on it.", theme.Muted)
+	if len(v.Items) == 0 && len(v.Settled) > 0 {
+		for i, s := range v.Settled {
+			c.Spans(x, y+i, settledLine(s))
+		}
+		c.Put(x, y+len(v.Settled)+1, "Nothing else needs you here. The supervisor closes each item once it has acted on it.", theme.Muted)
 		return
 	}
 	if len(v.Items) == 0 {
@@ -217,6 +219,23 @@ func renderList(c *theme.Canvas, v View, ic theme.Icons, x, y, h int) {
 		}
 		r++
 	}
+	for _, s := range v.Settled {
+		if r >= y+h {
+			return
+		}
+		place(c, x+2, r, ListWidth-2, settledLine(s))
+		r++
+	}
+}
+
+func settledLine(s Settled) line {
+	switch s.State {
+	case Queued:
+		return line{{Text: "◷ Queued " + s.ID, Ink: theme.FgInk(theme.Cyan)}, {Text: "  sends when the supervisor is idle", Ink: theme.Muted}}
+	case Sending:
+		return line{{Text: "… Sending " + s.ID, Ink: theme.Muted}}
+	}
+	return line{{Text: "✓ Answered " + s.ID, Ink: theme.FgInk(theme.Green)}, {Text: "  the supervisor is on it", Ink: theme.Muted}}
 }
 
 func header(it Item, ic theme.Icons, v View) line {
@@ -253,13 +272,13 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), unlessSent(v, gateHints(it, v))), 1 + v.Draft.Artifact
+		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), gateHints(it, v)), 1 + v.Draft.Artifact
 	case it.Kind == "comment":
-		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), unlessSent(v, commentHints(it, v))), 0
+		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), commentHints(it, v)), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it"))), 0
+		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it")), 0
 	case it.Kind == "failure":
-		return top, freeText(v, w), withStatus(v, w, unlessSent(v, choiceHints(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "an instruction instead, then ctrl+s sends it"))), 0
+		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "an instruction instead, then ctrl+s sends it")), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -427,13 +446,6 @@ func padTo(s string, w int) string {
 	return s + strings.Repeat(" ", max(w-theme.Width(s), 0))
 }
 
-func unlessSent(v View, lines []line) []line {
-	if !v.Send.SentAt.IsZero() {
-		return nil
-	}
-	return lines
-}
-
 func withStatus(v View, w int, blocks ...[]line) []line {
 	var lines []line
 	for _, b := range blocks {
@@ -444,24 +456,22 @@ func withStatus(v View, w int, blocks ...[]line) []line {
 
 func sendStatus(v View, w int) []line {
 	lines := []line{text(strings.Repeat("─", max(w, 0)), theme.Line)}
+	handled := append(hints("ctrl+k", "already handled"), theme.Span{Text: "  tells the supervisor to close it without acting on it", Ink: theme.Muted})
 	switch {
 	case v.Send.Refused != "":
-		return append(lines, warning(v.Send.Refused+" Draft kept.", w)...)
-	case !v.Send.SentAt.IsZero():
-		waiting := text("Sent at "+v.Send.SentAt.Local().Format("15:04")+", waiting for the supervisor to receive it…", theme.Muted)
-		return append(lines, waiting, hints("ctrl+d", "clear and answer again"))
+		return append(append(lines, warning(v.Send.Refused+" Draft kept.", w)...), handled)
 	case v.Send.Ready:
-		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
+		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)), handled)
 	}
-	return append(lines, warning(v.Send.Reason, w)...)
+	return append(append(lines, warning(v.Send.Reason, w)...), handled)
 }
 
 func questionFooter(v View, w int) []line {
 	lines := sendStatus(v, w)
 	switch {
 	case v.Send.Refused != "":
-		return append(lines, hints("ctrl+s", "send once it is idle", "ctrl+d", "discard draft"))
-	case !v.Send.SentAt.IsZero() || v.Send.Preview == "":
+		return append(lines, hints("ctrl+s", "send again", "ctrl+d", "discard draft"))
+	case v.Send.Preview == "":
 		return lines
 	}
 	return append(lines, line{{Text: "preview  ", Ink: theme.Quiet}, {Text: strings.ReplaceAll(v.Send.Preview, "\n", " · "), Ink: theme.Text}})

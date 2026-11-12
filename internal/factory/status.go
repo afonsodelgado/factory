@@ -50,9 +50,10 @@ type Pane struct {
 }
 
 type Live struct {
-	Pane  Pane
-	Hook  *state.HookFile
-	Stage *state.HookFile
+	Pane     Pane
+	Hook     *state.HookFile
+	Stage    *state.HookFile
+	Answered bool
 }
 
 var shells = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -71,7 +72,7 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Exited
 	case f.State == nil && live.Hook == nil:
 		return startingStatus(f, now)
-	case needsYou(f, live.Hook), PermissionPrompt(live.Stage):
+	case needsYou(f, live), PermissionPrompt(live.Stage):
 		return NeedsYou
 	case stalled(f, live, now, stalledAfter):
 		return Stalled
@@ -94,15 +95,15 @@ func startingStatus(f Factory, now time.Time) Status {
 	return Starting
 }
 
-func needsYou(f Factory, hook *state.HookFile) bool {
-	if PermissionPrompt(hook) {
+func needsYou(f Factory, live Live) bool {
+	if PermissionPrompt(live.Hook) {
 		return true
 	}
 	if f.State != nil && f.State.HasAttentionField() {
-		return len(f.State.OpenAttention()) > 0
+		return !live.Answered && len(f.State.OpenAttention()) > 0
 	}
 	waitingOnUser := f.WaitingOn() == "user" || f.WaitingOn() == ""
-	return idle(hook) && waitingOnUser
+	return idle(live.Hook) && waitingOnUser
 }
 
 func stalled(f Factory, live Live, now time.Time, after time.Duration) bool {

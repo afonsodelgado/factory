@@ -145,9 +145,9 @@ Write every role to `state.agents`, including the ones that run on their frontma
 
 Every question, gate, tripped cap and second failure follows the same order, so the factory app can show that the factory needs the user:
 
-1. Write `state.json` first: `waiting_on: "user"`, a one-sentence `waiting_reason`, and an open item in `attention` (format and ids: `references/attention.md`).
+1. Write `state.json` first: `waiting_on: "user"`, a one-sentence `waiting_reason`, and an open item in `attention` with the current `stage` (format and ids: `references/attention.md`).
 2. Then ask, and send the push notification.
-3. When the answer arrives, whether it came from the factory panel or was typed in the session, set the item's `resolved_at`, set `waiting_on` to what you wait on next (`"agent"`, `"ci"` or `null`), and only then act on it.
+3. When the answer arrives, whether it came from the factory panel or was typed in the session, resolve the item first with one Bash call, `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> --waiting-on <agent|ci|none> <item id>`, which sets `resolved_at` and `waiting_on` without you editing the file, and only then act on it. A message in the session that settles an open item answers it even without the id, and so does `<item id> handled:`, which means the user settled it outside the panel, in the session or in a stage agent's pane: resolve it, then carry on from where things stand, and ask again only if you still cannot go on.
 
 **Under the factory app** (`FACTORY=1` in your environment; check with `echo $FACTORY`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
 
