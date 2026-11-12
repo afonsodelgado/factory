@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -156,11 +157,11 @@ func (s *RepoSettings) Save(values map[string]string) error {
 		if key == "coderabbit" {
 			value = values[key] == "true"
 		}
-		encoded, err := yaml.Marshal(value)
+		encoded, err := encodeSetting(value)
 		if err != nil {
 			return err
 		}
-		if err := editSetting(file, key, string(encoded)); err != nil {
+		if err := editSetting(file, key, encoded); err != nil {
 			return err
 		}
 	}
@@ -198,6 +199,14 @@ func (s *RepoSettings) Save(values map[string]string) error {
 		return closeErr
 	}
 	return os.Rename(temp.Name(), s.path)
+}
+
+func encodeSetting(value any) (string, error) {
+	if text, ok := value.(string); ok && strings.ContainsAny(text, ",[]{}") {
+		return strconv.Quote(text) + "\n", nil
+	}
+	encoded, err := yaml.Marshal(value)
+	return string(encoded), err
 }
 
 func editSetting(file *ast.File, key, encoded string) error {

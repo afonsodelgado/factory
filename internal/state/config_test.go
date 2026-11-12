@@ -164,12 +164,14 @@ func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.
 func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 	for _, tc := range []struct {
 		name, input string
-		mode        string
+		mode, build string
 		refuse      bool
 		contains    []string
 	}{
 		{name: "block comments and order", input: "# header\ncommands:\n  # build head\n  build: old # inline\n  migrate: keep\nqa:\n  mode: browser\n  start: original # start\n  health: original-health # health\n  notes: keep notes\nports: [42, 43]\n# footer\n", mode: "terminal", contains: []string{"# header", "# build head", "build: new # inline", "migrate: keep", "start: original # start", "health: original-health # health", "notes: keep notes", "ports: [42, 43]", "# footer"}},
 		{name: "flow mapping", input: "commands: {test: old, migrate: keep}\nqa: {notes: keep}\ncoderabbit: true # rabbit\n", mode: "browser", contains: []string{"test: \"\"", "migrate: keep", "notes: keep", "# rabbit"}},
+		{name: "flow punctuation in a value", input: "commands: {}\nqa: {mode: terminal}\n", build: "go build -tags=a,b ./... {x} [y]"},
+		{name: "flow punctuation under a missing parent", input: "design: {source: terminal}\n", build: "go test -run 'A,B' ./..."},
 		{name: "missing parents", input: "design: {source: terminal}\n", contains: []string{"design: {source: terminal}"}},
 		{name: "null parents", input: "commands: null # commands\nqa: # qa\n", contains: []string{"# commands", "# qa"}},
 		{name: "comment only", input: "# header\n# footer\n", contains: []string{"# header\n# footer"}},
@@ -215,6 +217,9 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 				t.Fatal(err)
 			}
 			values := map[string]string{"commands.build": "new", "commands.lint": "", "commands.test": "", "qa.mode": tc.mode, "qa.start": "new-start", "qa.health": "new-health", "coderabbit": "false"}
+			if tc.build != "" {
+				values["commands.build"] = tc.build
+			}
 			if values["qa.mode"] == "" {
 				values["qa.mode"] = "terminal"
 			}
