@@ -160,3 +160,48 @@ func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.
 		t.Errorf("with both files present the repo config reads stalled_after %q; want .factory/config.yml's 45m, or edits there are ignored", profile.StalledAfter)
 	}
 }
+
+func TestRemoteConfigRefusesWhatSSHWouldMisread(t *testing.T) {
+	cases := map[string]string{
+		"a default naming no remote":     "default_remote: homelab\n",
+		"a host that ssh reads as flag":  "remotes:\n  homelab:\n    host: -oProxyCommand=sh\n",
+		"a host with shell syntax":       "remotes:\n  homelab:\n    host: \"homelab;rm -rf ~\"\n",
+		"a user with a space":            "remotes:\n  homelab:\n    host: homelab\n    user: \"a b\"\n",
+		"a port out of range":            "remotes:\n  homelab:\n    host: homelab\n    port: 70000\n",
+		"the reserved name local":        "remotes:\n  local:\n    host: homelab\n",
+		"a push server that is not http": "push:\n  server: file:///etc\n",
+	}
+	for name, config := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(config), 0o644)
+			t.Setenv("FACTORY_CONFIG_DIR", dir)
+			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+			if _, err := LoadConfig(); err == nil {
+				t.Error("loaded; want it refused before any ssh command is built from it")
+			}
+		})
+	}
+}
+
+func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
+	dir := t.TempDir()
+	original := "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  old:\n    host: old\n"
+	os.WriteFile(filepath.Join(dir, "config.yml"), []byte(original), 0o644)
+	err := UpdateMachine(dir, func(m *Machine) error {
+		delete(m.Remotes, "old")
+		m.Remotes["homelab"] = Remote{Host: "homelab", Port: 2222}
+		m.DefaultRemote = "homelab"
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "config.yml"))
+	t.Setenv("FACTORY_CONFIG_DIR", dir)
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	cfg, err := LoadConfig()
+	if err != nil || !strings.Contains(string(data), "# main repo") || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" {
+		t.Fatalf("config after adding a remote:\n%s\nerr %v; want the user's comments kept and only homelab listed", data, err)
+	}
+}

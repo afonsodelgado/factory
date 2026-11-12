@@ -28,6 +28,8 @@ type Config struct {
 	Supervisor      AgentSetting            `yaml:"supervisor"`
 	Codex           Codex                   `yaml:"codex"`
 
+	Machine `yaml:",inline"`
+
 	ConfigDir string `yaml:"-"`
 	StateDir  string `yaml:"-"`
 }
@@ -95,6 +97,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if err := ValidateSupervisor(path, cfg.Supervisor); err != nil {
 		return nil, err
+	}
+	if err := cfg.Machine.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.applyDefaults()
 	if err := cfg.addKnownRepos(); err != nil {
