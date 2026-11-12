@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -42,8 +43,13 @@ func runHost(args []string) int {
 	return 0
 }
 
+func hostLockPath(cfg *state.Config) string { return filepath.Join(cfg.StateDir, "host.lock") }
+
 func startHost(cfg *state.Config, tm tmux.Client) error {
 	if hubRunning(cfg) {
+		if !fileLocked(hostLockPath(cfg)) {
+			return errors.New("the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run")
+		}
 		return nil
 	}
 	bin, err := os.Executable()
@@ -73,6 +79,11 @@ func startHost(cfg *state.Config, tm tmux.Client) error {
 }
 
 func serveHost(cfg *state.Config) error {
+	unlockHost, err := lockHub(hostLockPath(cfg))
+	if err != nil {
+		return err
+	}
+	defer unlockHost()
 	unlock, err := lockHub(cfg.LockPath())
 	if err != nil {
 		return err

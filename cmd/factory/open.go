@@ -282,8 +282,10 @@ func cwdRepo(cfg *state.Config) string {
 	return ""
 }
 
-func hubRunning(cfg *state.Config) bool {
-	f, err := os.OpenFile(cfg.LockPath(), os.O_CREATE|os.O_RDWR, 0o644)
+func hubRunning(cfg *state.Config) bool { return fileLocked(cfg.LockPath()) }
+
+func fileLocked(path string) bool {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return false
 	}

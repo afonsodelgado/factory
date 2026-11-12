@@ -188,6 +188,21 @@ func TestNewFactoriesFollowTheDefaultAndExistingOnesStayWhereTheyRun(t *testing.
 	}
 }
 
+func TestARemoteRequestFailsAtOnceWhileAnInteractiveHubHoldsTheServerRuntime(t *testing.T) {
+	cfg := &state.Config{StateDir: t.TempDir()}
+	unlock, err := lockHub(cfg.LockPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	for _, op := range []string{"", uuid.NewString()} {
+		_, status, err := forward(cfg, "open", op, nil)
+		if status != remote.Failed || err == nil || !strings.Contains(err.Error(), "factory host run") {
+			t.Fatalf("a request with op %q got %q, %v; want a failure naming factory host run, since the hub would create panes without the server environment", op, status, err)
+		}
+	}
+}
+
 func TestRemoteDoctorSkipsWhatNeedsAWorkingLink(t *testing.T) {
 	s := newStandIn(t)
 	out, err := s.factory(t, s.root, []string{"FACTORY_SSH_STANDIN_DOWN=1"}, "doctor", "--remote", "homelab")
