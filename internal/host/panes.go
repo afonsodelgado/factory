@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
@@ -53,7 +54,10 @@ func (e *Panes) NewFactoryPane(n NewPane) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return pane, e.tag(pane, [][2]string{{"@factory_repo", n.Repo}, {"@factory_slug", n.Slug}, {"@factory_token", token}})
+	if err := e.tag(pane, [][2]string{{"@factory_repo", n.Repo}, {"@factory_slug", n.Slug}, {"@factory_token", token}}); err != nil {
+		return "", err
+	}
+	return pane, e.putOpenersFirst(pane)
 }
 
 func (e *Panes) NewStagePane(s StagePane) (string, error) {
@@ -62,14 +66,25 @@ func (e *Panes) NewStagePane(s StagePane) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return pane, e.tag(pane, [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}})
+	if err := e.tag(pane, [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}}); err != nil {
+		return "", err
+	}
+	return pane, e.putOpenersFirst(pane)
 }
 
 func (e *Panes) serverEnv() []string {
 	if e.Openers == "" {
 		return nil
 	}
-	return []string{"FACTORY_SERVER=1", "PATH=" + e.Openers + string(os.PathListSeparator) + os.Getenv("PATH")}
+	return []string{"FACTORY_SERVER=1"}
+}
+
+// tmux replaces a PATH given with -e by its client's, and login profiles rebuild PATH, so only the running shell can put the shims first.
+func (e *Panes) putOpenersFirst(pane string) error {
+	if e.Openers == "" {
+		return nil
+	}
+	return e.Type(pane, "export PATH="+factory.ShellQuote(e.Openers)+`:"$PATH"`)
 }
 
 func (e *Panes) tag(pane string, options [][2]string) error {

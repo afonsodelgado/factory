@@ -483,6 +483,16 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	url := "https://git.example/acme/app.git"
 	src := gitRepo(t, s.root, url)
 	s.serveGit(t, url, filepath.Join(s.root, "origin.git"))
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "app") }))
+	t.Cleanup(app.Close)
+	appURL := strings.Replace(app.URL, "127.0.0.1", "localhost", 1) + "/contacts?tab=export"
+	bypassed := filepath.Join(s.root, "bypassed")
+	for _, opener := range []string{"open", "xdg-open"} {
+		writeFile(t, filepath.Join(s.bin, opener), "#!/bin/sh\necho \"$@\" >>"+bypassed+"\n")
+		os.Chmod(filepath.Join(s.bin, opener), 0o755)
+	}
+	writeFile(t, filepath.Join(s.bin, "claude"), "#!/bin/sh\nxdg-open "+factory.ShellQuote(appURL)+"\nexec sleep 600\n")
+	os.Chmod(filepath.Join(s.bin, "claude"), 0o755)
 	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -496,17 +506,13 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	dir := filepath.Join(csv.Worktree, ".claude", "factory", "csv")
 	writeFile(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
 	writeFile(t, filepath.Join(dir, "state.json"), `{"id": "csv", "stage": "plan"}`)
-	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "app") }))
-	t.Cleanup(app.Close)
-	appURL := strings.Replace(app.URL, "127.0.0.1", "localhost", 1) + "/contacts?tab=export"
 
-	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
-	if out, err := s.factory(t, dir, onServer, "review", "link", appURL); err != nil || !strings.Contains(out, "Queued") {
-		t.Fatalf("an agent's link on the server: %v\n%s", err, out)
-	}
 	var view remote.View
-	if err := homelab.Read(context.Background(), "view", nil, &view); err != nil || len(view.Opens) != 1 {
-		t.Fatalf("the server holds %d open requests (%v); want the agent's link kept for the laptop", len(view.Opens), err)
+	waitFor(t, "the agent's xdg-open to reach the server's queue", func() bool {
+		return homelab.Read(context.Background(), "view", nil, &view) == nil && len(view.Opens) == 1
+	})
+	if opened := readOr(bypassed); opened != "" || view.Opens[0].URL != appURL {
+		t.Fatalf("the agent's xdg-open ran the server's own opener with %q and queued %v; want its link queued for the laptop", opened, view.Opens)
 	}
 
 	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
