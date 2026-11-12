@@ -28,10 +28,10 @@ const (
 )
 
 type StageRequest struct {
-	Action string   `json:"action"`
-	Token  string   `json:"token"`
-	Cwd    string   `json:"cwd"`
-	Role   string   `json:"role"`
+	Action  string   `json:"action"`
+	Token   string   `json:"token"`
+	Cwd     string   `json:"cwd"`
+	Role    string   `json:"role"`
 	Text    string   `json:"text"`
 	PRs     []string `json:"prs,omitempty"`
 	Factory string   `json:"factory,omitempty"`
@@ -151,6 +151,9 @@ func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 }
 
 func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
+	if _, profile := m.repoConfig(it.Factory.Repo); r.Role == "qa" && profile.BrowserQA() && m.clonedForLaptop(it.Factory.Repo) {
+		return StageReply{}, errors.New("browser QA for a factory created from a laptop runs on that laptop, which this server can't hand it to yet; it stays held here. Run the QA from the laptop's own checkout, or update both machines")
+	}
 	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
@@ -264,7 +267,7 @@ func (m *Runtime) StageLaunch(it Item, run state.StageRun, sessionID string) fac
 	launch := factory.StageLaunch{Setting: run.Setting, Kickoff: KickoffFor(run), SessionID: sessionID}
 	cfg, profile := m.repoConfig(it.Factory.Repo)
 	if run.Role == "qa" {
-		launch.Chrome = profile.BrowserQA()
+		launch.Chrome = m.chrome(it.Factory.Repo, profile)
 	}
 	if run.Setting.ToolName() == state.ToolCodex {
 		launch.AddDirs = factory.CodexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)

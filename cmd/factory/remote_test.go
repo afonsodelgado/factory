@@ -140,6 +140,61 @@ func gitState(t *testing.T, repo string) string {
 	return string(out) + string(head)
 }
 
+func TestNewFactoriesFollowTheDefaultAndExistingOnesStayWhereTheyRun(t *testing.T) {
+	stateDir := t.TempDir()
+	registry, _ := state.LoadRegistry(filepath.Join(stateDir, "registry.json"))
+	registry.Upsert(state.Entry{Repo: "/repo", Slug: "legacy"})
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	remote.UpdateCache(stateDir, "homelab", func(c *remote.Cache) error {
+		c.Inventory = []remote.Listing{{ID: "csv", Incarnation: "i-1"}}
+		return nil
+	})
+	cfg := &state.Config{StateDir: stateDir, Machine: state.Machine{Remotes: map[string]state.Remote{"homelab": {Host: "homelab"}, "attic": {Host: "attic"}}, DefaultRemote: "homelab"}}
+	cases := []struct {
+		name, id, remote string
+		local            bool
+		want             string
+		refused          bool
+	}{
+		{name: "a new factory goes to the default remote", id: "new", want: "homelab"},
+		{name: "--local overrides the default for a new factory", id: "new", local: true, want: ""},
+		{name: "a legacy record without a location stays local despite the default", id: "legacy", want: ""},
+		{name: "a known remote factory routes to its remote without a selector", id: "csv", want: "homelab"},
+		{name: "--remote and --local together are refused", id: "new", remote: "homelab", local: true, refused: true},
+		{name: "--remote without an id is refused", remote: "homelab", refused: true},
+		{name: "--remote cannot move a local factory", id: "legacy", remote: "homelab", refused: true},
+		{name: "--local cannot shadow a remote factory's id", id: "csv", local: true, refused: true},
+		{name: "another remote cannot reuse a known id", id: "csv", remote: "attic", refused: true},
+		{name: "an unknown remote is refused", id: "new", remote: "nowhere", refused: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := whereToRun(cfg, c.id, c.remote, c.local)
+			if c.refused != (err != nil) || (!c.refused && got != c.want) {
+				t.Errorf("got %q, %v; want %q, refused %v", got, err, c.want, c.refused)
+			}
+		})
+	}
+}
+
+func TestRemoteDoctorSkipsWhatNeedsAWorkingLink(t *testing.T) {
+	s := newStandIn(t)
+	out, err := s.factory(t, s.root, []string{"FACTORY_SSH_STANDIN_DOWN=1"}, "doctor", "--remote", "homelab")
+	if err == nil || !strings.Contains(out, "✗ ssh") || !strings.Contains(out, "– claude") || !strings.Contains(out, "skipped") {
+		t.Fatalf("an unreachable remote reported:\n%s\nwant ssh failing and the server checks skipped, not failed", out)
+	}
+	remote.UpdateCache(filepath.Join(s.root, "client", "state"), "homelab", func(c *remote.Cache) error {
+		c.Server = "the-server-this-name-used-to-reach"
+		return nil
+	})
+	out, _ = s.factory(t, s.root, nil, "doctor", "--remote", "homelab")
+	if !strings.Contains(out, "✓ ssh") || !strings.Contains(out, "✗ factory") || !strings.Contains(out, "not the server") {
+		t.Fatalf("a replaced server reported:\n%s\nwant the identity mismatch, so actions never reach the wrong machine", out)
+	}
+}
+
 func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	s := newStandIn(t)
 	url := "https://git.example/acme/app.git"

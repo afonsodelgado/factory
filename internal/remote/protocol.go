@@ -64,8 +64,12 @@ type Listing struct {
 }
 
 type Target struct {
-	ID     string `json:"id"`
-	GitURL string `json:"git_url,omitempty"`
+	ID string `json:"id"`
+}
+
+type Removal struct {
+	What string `json:"what"`
+	Risk string `json:"risk,omitempty"`
 }
 
 func ServerID(stateDir string) (string, error) {

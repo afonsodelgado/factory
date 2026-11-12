@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -8,14 +9,17 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const resultPoll = 2 * time.Second
 
-const stageUsage = `usage: factory stage start --role <role> --task <file> [--wait]
-       factory stage send --role <role> --message <file> [--wait]
+const stageUsage = `usage: factory stage start --role <role> --task <file> [--factory id [--remote name]] [--wait]
+       factory stage send --role <role> --message <file> [--factory id [--remote name]] [--wait]
        factory stage ci <pr number>...`
 
 func runStage(args []string) int {
@@ -31,10 +35,16 @@ func runStage(args []string) int {
 	role := flags.String("role", "", "the stage agent's role, such as engineer")
 	text := flags.String(map[string]string{"start": "task", "send": "message"}[action], "", "a file with the task or the follow-up message")
 	wait := flags.Bool("wait", false, "wait for the stage's result file, then print it")
+	id := flags.String("factory", "", "the factory, when this is not its supervisor's pane")
+	remoteFlag := flags.String("remote", "", "the remote the factory runs on")
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}
-	result, err := stage(action, *role, *text)
+	if *remoteFlag != "" && *id == "" {
+		fmt.Fprintln(os.Stderr, "factory stage: name the factory on "+*remoteFlag+" with --factory")
+		return 2
+	}
+	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id, Remote: *remoteFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
@@ -43,9 +53,33 @@ func runStage(args []string) int {
 		fmt.Println(result)
 		return 0
 	}
-	data := waitForFile(result)
+	data, err := waitForResult(*remoteFlag, result)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory stage:", err)
+		return 1
+	}
 	fmt.Printf("%s\n%s\n", result, data)
 	return 0
+}
+
+type stageCall struct {
+	Action, Role, TextFile, Factory, Remote string
+}
+
+func waitForResult(remoteName, path string) ([]byte, error) {
+	if remoteName == "" {
+		return waitForFile(path), nil
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	client, err := remote.For(cfg, remoteName)
+	if err != nil {
+		return nil, err
+	}
+	var data json.RawMessage
+	return data, client.Read(context.Background(), "result", path, &data)
 }
 
 func runStageCI(prs []string) int {
@@ -62,15 +96,28 @@ func runStageCI(prs []string) int {
 	return 0
 }
 
-func stage(action, role, textFile string) (string, error) {
-	if role == "" || textFile == "" {
+func stage(c stageCall) (string, error) {
+	if c.Role == "" || c.TextFile == "" {
 		return "", errors.New("give --role and the file with the task or message")
 	}
-	text, err := os.ReadFile(textFile)
+	text, err := os.ReadFile(c.TextFile)
 	if err != nil {
 		return "", err
 	}
-	return ask(hub.StageRequest{Action: action, Role: role, Text: string(text)})
+	r := hub.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory}
+	if c.Remote == "" {
+		return ask(r)
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	client, err := remote.For(cfg, c.Remote)
+	if err != nil {
+		return "", err
+	}
+	var reply hub.StageReply
+	return reply.Result, client.Mutate(context.Background(), "stage", uuid.NewString(), r, &reply)
 }
 
 func ask(r hub.StageRequest) (string, error) {

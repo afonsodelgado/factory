@@ -105,11 +105,18 @@ func remoteList() error {
 			line += "  default"
 		}
 		if cache.Release != "" {
-			line += fmt.Sprintf("  %s, %d factories", cache.Release, len(cache.Shown()))
+			line += fmt.Sprintf("  %s, %s", cache.Release, factories(len(cache.Shown())))
 		}
 		fmt.Println(line)
 	}
 	return nil
+}
+
+func factories(n int) string {
+	if n == 1 {
+		return "1 factory"
+	}
+	return fmt.Sprintf("%d factories", n)
 }
 
 func remoteRemove(name string) error {
@@ -325,6 +332,7 @@ func createRemote(cfg *state.Config, name string, r hub.OpenRequest, gitRemote s
 	ctx, cancel := context.WithTimeout(context.Background(), createWait)
 	defer cancel()
 	create := remote.Create{ID: r.Name, GitURL: gitURL, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, Profile: profile}
+	fmt.Printf("Creating %s on %s: the server clones or fetches %s first, which can take a while.\n", r.Name, name, gitURL)
 	var listing remote.Listing
 	err = client.Mutate(ctx, "create", reservation.Op, create, &listing)
 	if errors.Is(err, remote.ErrUncertain) {
@@ -361,4 +369,84 @@ func factoryRepo(named string) (string, error) {
 		return "", fmt.Errorf("%s is not inside a git repo; run factory open --remote from the repo, or pass --repo", abs)
 	}
 	return repo, nil
+}
+
+var serverCheckNames = []string{"factory", "tmux", "git", "gh", "gh-stack", "claude", "git access", "bundle", "hooks", "forwarding"}
+
+func remotesToCheck(cfg *state.Config, only string) []string {
+	if only != "" {
+		return []string{only}
+	}
+	return slices.Sorted(maps.Keys(cfg.Remotes))
+}
+
+func remoteDoctor(cfg *state.Config, name string) (string, []install.Check) {
+	header := fmt.Sprintf("factory doctor · %s · over ssh, checks only, changes nothing", name)
+	client, err := remote.For(cfg, name)
+	if err != nil {
+		return header, []install.Check{{Name: "remote", Mark: install.Fail, Detail: err.Error(), Fix: "factory remote list"}}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	start := time.Now()
+	hello, err := client.Hello(ctx)
+	var unreachable *remote.TransportError
+	if errors.As(err, &unreachable) {
+		checks := []install.Check{{Name: "ssh", Mark: install.Fail, Detail: unreachable.Error(), Fix: "check " + client.Remote.Host + " is on and reachable: ssh " + client.Endpoint()}}
+		return header, append(checks, skipped(serverCheckNames, "skipped, needs ssh")...)
+	}
+	checks := []install.Check{{Name: "ssh", Mark: install.Pass, Detail: fmt.Sprintf("%s in %.1fs", client.Endpoint(), time.Since(start).Seconds())}}
+	if err != nil {
+		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: err.Error(), Fix: "ssh " + name + " factory --version"})
+		return header, append(checks, skipped(serverCheckNames[1:], "skipped, needs a matching factory")...)
+	}
+	header = fmt.Sprintf("factory doctor · %s · %s · %s · over ssh, checks only, changes nothing", name, hello.Release, hello.Platform)
+	if hello.Release == version {
+		checks = append(checks, install.Check{Name: "factory", Mark: install.Pass, Detail: hello.Release + ", the same as this machine"})
+	} else {
+		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: fmt.Sprintf("%s on %s, %s here", hello.Release, name, version), Fix: "factory update && ssh " + name + " factory update  so both run the same release"})
+	}
+	var urls []string
+	if repo, err := factoryRepo(""); err == nil {
+		if url, err := remote.GitURL(repo, ""); err == nil {
+			urls = append(urls, url)
+		}
+	}
+	var server []install.Check
+	if err := client.Read(ctx, "doctor", urls, &server); err != nil {
+		return header, append(checks, install.Check{Name: "server", Mark: install.Fail, Detail: err.Error()})
+	}
+	for _, c := range server {
+		checks = append(checks, onServer(name, c))
+	}
+	if cfg.Push.On() {
+		return header, append(checks, install.Check{Name: "push", Mark: install.Pass, Detail: "on, through " + cfg.Push.ServerURL()})
+	}
+	return header, append(checks, install.Check{Name: "push", Mark: install.Warn, Detail: "off, so your phone hears nothing while this laptop sleeps", Fix: "factory remote push"})
+}
+
+func skipped(names []string, why string) []install.Check {
+	checks := make([]install.Check, len(names))
+	for i, name := range names {
+		checks[i] = install.Check{Name: name, Mark: install.Skip, Detail: why}
+	}
+	return checks
+}
+
+var serverCommands = []string{"factory", "gh", "claude", "codex", "opencode", "git", "cat", "curl", "sudo"}
+
+func onServer(name string, c install.Check) install.Check {
+	command, note, _ := strings.Cut(c.Fix, "  ")
+	program, _, _ := strings.Cut(command, " ")
+	switch {
+	case c.Fix == "":
+	case slices.Contains(serverCommands, program):
+		c.Fix = "ssh -t " + name + " " + shellQuote(command)
+		if note != "" {
+			c.Fix += "  " + note
+		}
+	default:
+		c.Fix = "on " + name + ": " + c.Fix
+	}
+	return c
 }

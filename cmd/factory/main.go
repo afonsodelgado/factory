@@ -88,7 +88,15 @@ commands:
               [--supervisor tool/model:effort]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
-  delete <id> [--repo path] [--yes]
+  open … --remote <name> | --local [--git-remote name]
+              --remote creates a new factory on that remote, --local here;
+              without either, new factories go to default_remote
+  remote add <name> <host> [--user name] [--port n] [--identity file]
+  remote list | remove <name> | default <name | local>
+  remote push [--server url | --off]
+              add, list and remove remotes, pick where new factories run,
+              and set up phone push through ntfy
+  delete <id> [--repo path] [--remote name | --local] [--yes]
               delete a factory: its pane, worktree, local branches, state,
               activity log, drafts and registry entry, so the id can be used
               again; pushed PRs and remote branches stay. --yes skips the first
@@ -98,9 +106,12 @@ commands:
               in .git/info/exclude and list it in the hub; nothing is
               committed. factory and factory open do this by themselves
               in a repo the hub does not list yet
-  forget <path>
-              stop listing a repo in the hub; its files stay
-  doctor      check what the factory needs and print the fix commands
+  forget <path> | --remote <name> <id>
+              stop listing a repo in the hub; its files stay. With
+              --remote, hide a remote factory here; the remote keeps it
+  doctor [--remote name]
+              check what the factory needs and print the fix commands;
+              --remote checks only that remote, over ssh
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]
@@ -136,6 +147,9 @@ commands:
   host run    run the factories without the hub, in a window of the factory
               tmux session that keeps going after you disconnect (on a
               server)
+  host request
+              answer one JSON request from another machine on stdin (run
+              over ssh by the factory on that machine)
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a hook event (run by Claude Code, Codex and OpenCode)

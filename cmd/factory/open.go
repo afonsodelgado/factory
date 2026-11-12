@@ -86,7 +86,11 @@ func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote strin
 	if where != "" {
 		if cache, _ := remote.LoadCache(cfg.StateDir, where); slices.ContainsFunc(cache.Inventory, func(l remote.Listing) bool { return l.ID == r.Name }) {
 			fmt.Printf("%s runs on %s.\n", r.Name, where)
-			return nil
+			return remote.UpdateCache(cfg.StateDir, where, func(c *remote.Cache) error {
+				shown := slices.IndexFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == r.Name })
+				c.Forgotten = slices.DeleteFunc(c.Forgotten, func(incarnation string) bool { return incarnation == c.Inventory[shown].Incarnation })
+				return nil
+			})
 		}
 		return createRemote(cfg, where, r, gitRemote)
 	}

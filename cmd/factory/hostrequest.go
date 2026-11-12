@@ -83,7 +83,30 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 			return nil, remote.Rejected, fmt.Errorf("%s is not a stage result of a factory on this server", path)
 		}
 		return waitForFile(path), remote.Completed, nil
-	case "open", "delete", "stage", "review", "wake", "pause", "archive", "unarchive":
+	case "doctor":
+		var urls []string
+		if err := json.Unmarshal(req.Data, &urls); err != nil {
+			return nil, remote.Rejected, err
+		}
+		return completed(install.ServerDoctor(doctorOptions(), withClones(cfg, urls)))
+	case "removal":
+		f, err := targetFactory(cfg, req.Data)
+		if err != nil {
+			return nil, remote.Failed, err
+		}
+		removal := factory.PlanRemoval(f, cfg)
+		preview := remote.Removal{What: whatGoes(f, removal)}
+		if work := factory.CheckWork(removal); !work.Empty() {
+			preview.Risk = workAtRisk(f, work)
+		}
+		return completed(preview)
+	case "delete":
+		f, err := targetFactory(cfg, req.Data)
+		if err != nil {
+			return nil, remote.Failed, err
+		}
+		return forward(cfg, "delete", req.Op, mustJSON(hub.DeleteRequest{Repo: f.Repo, Slug: f.Slug}))
+	case "stage", "review":
 		return forward(cfg, req.Action, req.Op, req.Data)
 	}
 	return nil, remote.Rejected, fmt.Errorf("this server does not know the action %q; run factory update on both machines", req.Action)
@@ -200,6 +223,24 @@ func writeProfile(clone string, profile []byte) error {
 		return err
 	}
 	return state.WriteFileAtomic(state.RepoConfigPath(clone), profile)
+}
+
+func targetFactory(cfg *state.Config, data json.RawMessage) (factory.Factory, error) {
+	var target remote.Target
+	if err := json.Unmarshal(data, &target); err != nil {
+		return factory.Factory{}, err
+	}
+	return findFactory(cfg, "", target.ID)
+}
+
+func withClones(cfg *state.Config, urls []string) []string {
+	for _, repo := range cfg.Repos {
+		if url := originOf(repo); url != "" && strings.HasPrefix(repo, filepath.Join(cfg.StateDir, "repos")) {
+			urls = append(urls, url)
+		}
+	}
+	slices.Sort(urls)
+	return slices.Compact(urls)
 }
 
 func mustJSON(value any) json.RawMessage {
