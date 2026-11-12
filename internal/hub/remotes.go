@@ -137,6 +137,7 @@ func (m *Model) pollRemotes() tea.Cmd {
 	if m.Config.StateDir == "" {
 		return nil
 	}
+	m.followMachine()
 	var cmds []tea.Cmd
 	for _, name := range m.remoteNames() {
 		l := m.link(name)
@@ -144,7 +145,7 @@ func (m *Model) pollRemotes() tea.Cmd {
 			continue
 		}
 		l.busy = true
-		cfg := m.Config
+		cfg := new(*m.Config)
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 			defer cancel()
@@ -185,12 +186,32 @@ func fetchView(ctx context.Context, cfg *state.Config, name string) (remote.View
 	return view, cache.Server, err
 }
 
+func (m *Model) followMachine() {
+	if m.Config.ConfigDir == "" {
+		return
+	}
+	if fresh, err := state.LoadMachine(m.Config.ConfigDir); err == nil && !fresh.Equal(m.Config.Machine) {
+		m.Config.Machine = fresh
+		m.refresh()
+	}
+}
+
+func pushOnDisk(cfg *state.Config) state.Push {
+	if cfg.ConfigDir == "" {
+		return cfg.Push
+	}
+	if fresh, err := state.LoadMachine(cfg.ConfigDir); err == nil {
+		return fresh.Push
+	}
+	return cfg.Push
+}
+
 func listen(ctx context.Context, cfg *state.Config, name string) *remote.Events {
 	client, err := remote.For(cfg, name)
 	if err != nil {
 		return nil
 	}
-	client.SyncPush(ctx, cfg.Push)
+	client.SyncPush(ctx, pushOnDisk(cfg))
 	w, _ := remote.LoadWatch(cfg.StateDir, name)
 	events, err := client.Events(ctx, w.Cursor)
 	if err != nil {

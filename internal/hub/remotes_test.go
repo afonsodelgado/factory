@@ -97,6 +97,36 @@ func TestAServerLinkOpensOnceAcrossPollsAndHubRestarts(t *testing.T) {
 	}
 }
 
+func TestTheHubFollowsRemoteAndPushChangesMadeOutsideIt(t *testing.T) {
+	root := t.TempDir()
+	requests := filepath.Join(root, "requests.log")
+	writeTestFile(t, filepath.Join(root, "bin", "ssh"), "#!/bin/sh\ncat >>"+requests+"\necho >>"+requests+"\necho '{\"protocol\":1,\"status\":\"completed\",\"data\":{}}'\n")
+	os.Chmod(filepath.Join(root, "bin", "ssh"), 0o755)
+	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	configDir := filepath.Join(root, "config")
+	startup := state.Machine{Remotes: map[string]state.Remote{"homelab": {Host: "homelab"}}, Push: state.Push{Topic: "atStartup"}}
+	m := NewModel(Model{Config: &state.Config{ConfigDir: configDir, StateDir: filepath.Join(root, "state"), Machine: startup}, Now: func() time.Time { return remoteNow }, Icons: theme.Nerd})
+	poll := func() string {
+		t.Helper()
+		os.Remove(requests)
+		drain(m.pollRemotes())
+		for _, l := range m.links {
+			l.busy = false
+		}
+		data, _ := os.ReadFile(requests)
+		return string(data)
+	}
+
+	writeTestFile(t, filepath.Join(configDir, "config.yml"), "remotes:\n  homelab:\n    host: homelab\npush:\n  topic: fromTheCLI\n")
+	if sent := poll(); !strings.Contains(sent, "fromTheCLI") || strings.Contains(sent, "atStartup") {
+		t.Fatalf("the hub sent:\n%s\nwant the push settings factory remote push wrote, not the copy it loaded at start", sent)
+	}
+	writeTestFile(t, filepath.Join(configDir, "config.yml"), "push: {}\n")
+	if sent := poll(); sent != "" {
+		t.Fatalf("after factory remote remove the hub still sent:\n%s", sent)
+	}
+}
+
 func drain(cmd tea.Cmd) {
 	if cmd == nil {
 		return

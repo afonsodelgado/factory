@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -52,6 +53,25 @@ var (
 	sshUser    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 	pushTopic  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
+
+func LoadMachine(configDir string) (Machine, error) {
+	var m Machine
+	data, err := os.ReadFile(filepath.Join(configDir, "config.yml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return m, nil
+	}
+	if err != nil {
+		return m, err
+	}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return m, err
+	}
+	return m, m.Validate()
+}
+
+func (m Machine) Equal(other Machine) bool {
+	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push
+}
 
 func (m Machine) Validate() error {
 	for name, r := range m.Remotes {
