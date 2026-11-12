@@ -6,10 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -23,8 +28,13 @@ func runHost(args []string) int {
 		json.NewEncoder(os.Stdout).Encode(answerRequest(os.Stdin))
 		return 0
 	}
+	if len(args) == 2 && args[0] == "attach" {
+		err := attachView(args[1])
+		fmt.Fprintln(os.Stderr, "factory host attach:", err)
+		return 1
+	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: factory host run | factory host request")
+		fmt.Fprintln(os.Stderr, "usage: factory host run | factory host request | factory host attach <view>")
 		return 2
 	}
 	cfg, err := state.LoadConfig()
@@ -44,6 +54,23 @@ func runHost(args []string) int {
 }
 
 func hostLockPath(cfg *state.Config) string { return filepath.Join(cfg.StateDir, "host.lock") }
+
+func attachView(id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return errors.New("a view id is a UUID from factory host request")
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return err
+	}
+	cmd := tmux.Client{Socket: cfg.Tmux.Socket}.Command("attach-session", "-t", "="+host.ViewSession(id))
+	path, err := exec.LookPath(cmd.Path)
+	if err != nil {
+		return err
+	}
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "TMUX=") })
+	return syscall.Exec(path, cmd.Args, env)
+}
 
 func startHost(cfg *state.Config, tm tmux.Client) error {
 	if hubRunning(cfg) {

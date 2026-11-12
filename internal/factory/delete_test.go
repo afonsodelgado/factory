@@ -136,7 +136,7 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 	gitRun(t, repo, "worktree", "lock", "--reason", "claude session eng-5-x (pid 1)", worktree)
 	refLock := filepath.Join(repo, ".git", "refs", "heads", "stack-2.lock")
 	writeFile(t, refLock, "")
-	if _, stopped := FirstFailure(Run(r, update)); !stopped || registry.Find(repo, "eng-5-x") == nil {
+	if _, stopped := FirstFailure(Run(PanesClosed("eng-5-x", nil), r, update)); !stopped || registry.Find(repo, "eng-5-x") == nil {
 		t.Fatal("a delete that failed on a locked branch left no registry entry, so nothing can find the factory to finish it")
 	}
 	if err := os.Remove(refLock); err != nil {
@@ -144,7 +144,7 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 	}
 
 	r = PlanRemoval(discover(), cfg)
-	steps := Run(r, update)
+	steps := Run(PanesClosed("eng-5-x", nil), r, update)
 	if failed, ok := FirstFailure(steps); ok {
 		t.Fatalf("delete failed at %s %s: %v\n%s", failed.Name, failed.Detail, failed.Err, Report(steps))
 	}
@@ -168,8 +168,8 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 		t.Error("the pushed stack-1 is gone from the remote: delete must never touch remote branches")
 	}
 
-	again := Run(r, update)
-	for _, s := range again {
+	again := Run(PanesClosed("eng-5-x", nil), r, update)
+	for _, s := range again[1:] {
 		if s.State != Skipped {
 			t.Errorf("second delete: %s %s %s; want every step skipped, so a delete that stopped half way can be finished", s.State, s.Name, s.Detail)
 		}
@@ -185,11 +185,11 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 	registry.Upsert(state.Entry{Repo: repo, Slug: "eng-5-x", Created: true})
 	stranger := filepath.Join(root, "not-a-factory")
 	writeFile(t, filepath.Join(stranger, "keep.md"), "")
-	orphaned := Run(PlanRemoval(discover(), cfg), update)
+	orphaned := Run(PanesClosed("eng-5-x", nil), PlanRemoval(discover(), cfg), update)
 	if failed, ok := FirstFailure(orphaned); ok || exists(worktree) || registry.Find(repo, "eng-5-x") != nil {
 		t.Fatalf("delete of a worktree folder git no longer tracks: failed %+v, folder there %v; it fails forever and the factory can never be deleted\n%s", failed, exists(worktree), Report(orphaned))
 	}
-	Run(Removal{Repo: repo, Slug: "eng-5-x", Worktree: stranger}, update)
+	Run(PanesClosed("eng-5-x", nil), Removal{Repo: repo, Slug: "eng-5-x", Worktree: stranger}, update)
 	if !exists(filepath.Join(stranger, "keep.md")) {
 		t.Error("delete removed an untracked folder outside the factory's own worktrees slot")
 	}
@@ -227,7 +227,7 @@ func TestDeleteFinishesAFactoryWhoseLockedWorktreeFolderIsGone(t *testing.T) {
 	}
 
 	f := Discover([]string{repo}, registry)[0]
-	steps := Run(PlanRemoval(f, cfg), update)
+	steps := Run(PanesClosed("x", nil), PlanRemoval(f, cfg), update)
 	if failed, ok := FirstFailure(steps); ok {
 		t.Fatalf("delete failed at %s %s: %v; a locked worktree removed by hand keeps its branch checked out, so delete fails on every retry\n%s", failed.Name, failed.Detail, failed.Err, Report(steps))
 	}

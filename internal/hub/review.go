@@ -103,7 +103,7 @@ func (m *Model) openLive(url string) tea.Cmd {
 	if m.Chrome == nil || !strings.HasPrefix(url, "http") {
 		return nil
 	}
-	for _, it := range m.snap.Items {
+	for _, it := range localOnly(m.snap).Items {
 		if it.Factory.State == nil {
 			continue
 		}

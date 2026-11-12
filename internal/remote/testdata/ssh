@@ -16,7 +16,12 @@ done
 [ $# -gt 0 ] || { echo "ssh stand-in: no host" >&2 && exit 255; }
 host=$1
 shift
-if [ "${FACTORY_SSH_STANDIN_DOWN:-}" = 1 ]; then
+case "$host" in
+*[!a-z0-9]*) echo "ssh stand-in: name hosts with lowercase letters and digits" >&2 && exit 255 ;;
+esac
+eval "root=\${FACTORY_SSH_STANDIN_ROOT_$host:-\$root}"
+eval "socket=\${FACTORY_SSH_STANDIN_TMUX_$host:-\${FACTORY_SSH_STANDIN_TMUX:-factory-standin}}"
+if [ "${FACTORY_SSH_STANDIN_DOWN:-}" = 1 ] || [ -e "$root/down" ]; then
 	echo "ssh: connect to host $host port 22: Operation timed out" >&2
 	exit 255
 fi
@@ -24,14 +29,20 @@ if [ "${FACTORY_SSH_STANDIN_NO_FACTORY:-}" = 1 ]; then
 	echo "bash: line 1: factory: command not found" >&2
 	exit 127
 fi
+server() {
+	exec env HOME="$root/home" FACTORY_CONFIG_DIR="$root/config" FACTORY_STATE_DIR="$root/state" \
+		CLAUDE_CONFIG_DIR="$root/claude" FACTORY_TMUX_SOCKET="$socket" TMUX= "$FACTORY_SSH_STANDIN_BIN" "$@"
+}
 case "$*" in
 "factory host request") ;;
+"factory host attach "*)
+	[ $# -eq 4 ] || exit 255
+	server host attach "$4"
+	;;
 *) echo "ssh stand-in: refusing the remote command: $*" >&2 && exit 255 ;;
 esac
 request=$(cat)
-reply=$(printf '%s' "$request" | env HOME="$root/home" FACTORY_CONFIG_DIR="$root/config" FACTORY_STATE_DIR="$root/state" \
-	CLAUDE_CONFIG_DIR="$root/claude" FACTORY_TMUX_SOCKET="${FACTORY_SSH_STANDIN_TMUX:-factory-standin}" TMUX= \
-	"$FACTORY_SSH_STANDIN_BIN" host request)
+reply=$(printf '%s' "$request" | server host request)
 case "$request" in
 *"\"action\":\"${FACTORY_SSH_STANDIN_DROP:-}\""*)
 	echo "Connection to $host closed by remote host." >&2

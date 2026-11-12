@@ -43,7 +43,7 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 	}
 	f, err := findFactory(cfg, *repoFlag, id)
 	where := *remoteFlag
-	if elsewhere := holders(cfg, id); where == "" && !*local && errors.Is(err, errNoFactory) && len(elsewhere) > 0 {
+	if elsewhere := remote.Holders(cfg, id); where == "" && !*local && errors.Is(err, errNoFactory) && len(elsewhere) > 0 {
 		if len(elsewhere) > 1 {
 			fmt.Fprintf(os.Stderr, "factory delete: %s exists on %s; pick one with --remote\n", id, strings.Join(elsewhere, " and "))
 			return 1
@@ -101,7 +101,7 @@ func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out
 	if err != nil {
 		return fail(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), createWait)
+	ctx, cancel := context.WithTimeout(context.Background(), remote.CreateWait)
 	defer cancel()
 	var preview remote.Removal
 	if err := client.Read(ctx, "removal", remote.Target{ID: id}, &preview); err != nil {
@@ -259,10 +259,8 @@ func deleteFactory(cfg *state.Config, f factory.Factory, r factory.Removal) (str
 		json.Unmarshal(reply.Data, &report)
 		return report, reply.T == "error", nil
 	}
-	if err := hub.CloseFactoryPanes(tmux.Client{Socket: cfg.Tmux.Socket}, f.Repo, f.Slug); err != nil {
-		return "", false, err
-	}
-	steps := factory.Run(r, func(change func(*state.Registry)) error {
+	closed := factory.PanesClosed(f.Label(), hub.CloseFactoryPanes(tmux.Client{Socket: cfg.Tmux.Socket}, f.Repo, f.Slug))
+	steps := factory.Run(closed, r, func(change func(*state.Registry)) error {
 		registry, err := state.LoadRegistry(cfg.RegistryPath())
 		if err != nil {
 			return err

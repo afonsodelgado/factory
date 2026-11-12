@@ -31,7 +31,7 @@ func (m *Model) execution() *host.Runtime {
 		r.TM = m.Engine.TM
 		r.Session = m.Engine.Session
 	}
-	r.SetSnapshot(m.snap)
+	r.SetSnapshot(localOnly(m.snap))
 	r.Pages = m.Review
 	r.Queued = func(a host.Answer) {
 		if it, ok := m.snap.Find(a.Factory); ok {

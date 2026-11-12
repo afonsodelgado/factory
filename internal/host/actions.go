@@ -68,14 +68,13 @@ func (m *Runtime) Delete(r DeleteRequest) ([]factory.RemovalStep, error) {
 }
 
 func (m *Runtime) DeleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
+	var closeErr error
 	if m.Engine != nil {
 		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)
-		if err := m.Engine.Pause(f.Repo, f.Slug); err != nil {
-			return nil, err
-		}
+		closeErr = m.Engine.Pause(f.Repo, f.Slug)
 		Terminate(strays)
 	}
-	steps := factory.Run(factory.PlanRemoval(f, m.Config), m.Loader.UpdateRegistry)
+	steps := factory.Run(factory.PanesClosed(f.Label(), closeErr), factory.PlanRemoval(f, m.Config), m.Loader.UpdateRegistry)
 	m.Loader.Forget(f.Key())
 	if failed, stopped := factory.FirstFailure(steps); stopped {
 		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", f.Label(), failed.Name, failed.Detail, failed.Err)

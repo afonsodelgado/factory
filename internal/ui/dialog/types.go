@@ -17,6 +17,7 @@ type Existing struct {
 	Stage    string `json:"stage"`
 	Archived bool   `json:"archived"`
 	Retired  bool   `json:"retired"`
+	Remote   string `json:"remote,omitempty"`
 }
 
 const UnarchiveAdvice = "In the factory list, H shows archived factories and a on the row unarchives it."
@@ -36,6 +37,8 @@ type RepoOption struct {
 
 	RemoteControl bool               `json:"remote_control"`
 	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
+	GitURL        string             `json:"git_url,omitempty"`
+	NoGitRemote   string             `json:"no_git_remote,omitempty"`
 }
 
 type AgentOption struct {
@@ -44,10 +47,13 @@ type AgentOption struct {
 }
 
 type NewContext struct {
-	Repos []RepoOption `json:"repos"`
-	Repo  int          `json:"repo"`
-	Here  bool         `json:"here,omitempty"`
-	Tools []ToolOption `json:"tools,omitempty"`
+	Repos     []RepoOption `json:"repos"`
+	Repo      int          `json:"repo"`
+	Here      bool         `json:"here,omitempty"`
+	Tools     []ToolOption `json:"tools,omitempty"`
+	Remotes   []string     `json:"remotes,omitempty"`
+	Default   string       `json:"default,omitempty"`
+	Elsewhere []Existing   `json:"elsewhere,omitempty"`
 }
 
 type ToolOption struct {
@@ -67,6 +73,7 @@ type NewResult struct {
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 	Select     string                        `json:"select,omitempty"`
 	Wake       bool                          `json:"wake,omitempty"`
+	Remote     string                        `json:"remote,omitempty"`
 }
 
 type SwitchRow struct {
@@ -123,6 +130,9 @@ type DeleteContext struct {
 	Branches     []string            `json:"branches"`
 	Dirty        []string            `json:"dirty"`
 	Unpushed     map[string][]string `json:"unpushed"`
+	Remote       string              `json:"remote,omitempty"`
+	Repo         string              `json:"repo,omitempty"`
+	Unreachable  bool                `json:"unreachable,omitempty"`
 }
 
 func (c DeleteContext) HasWork() bool {
@@ -132,6 +142,42 @@ func (c DeleteContext) HasWork() bool {
 type DeleteResult struct {
 	Key       string `json:"key"`
 	Confirmed bool   `json:"confirmed"`
+	Forget    bool   `json:"forget,omitempty"`
+}
+
+type RemotesContext struct {
+	Remotes []RemoteRow `json:"remotes"`
+	Default string      `json:"default"`
+	Local   int         `json:"local"`
+	Push    state.Push  `json:"push"`
+}
+
+type RemoteRow struct {
+	Name      string `json:"name"`
+	Endpoint  string `json:"endpoint"`
+	Link      string `json:"link"`
+	Factories int    `json:"factories"`
+	NeedsYou  int    `json:"needs_you"`
+}
+
+type CheckRow struct {
+	Name   string `json:"name"`
+	Mark   string `json:"mark"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix"`
+}
+
+type RemoteActions interface {
+	Add(name, target, identity string) error
+	Check(name string) []CheckRow
+	SetDefault(name string) error
+	Remove(name string) error
+	SetPush(p state.Push) error
+	NewTopic() string
+}
+
+type KeysContext struct {
+	Remotes bool `json:"remotes"`
 }
 
 type Dialog interface {
@@ -162,7 +208,9 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		json.Unmarshal(context, &c)
 		return &Delete{Context: c}, true
 	case "keys":
-		return &Keys{}, true
+		var c KeysContext
+		json.Unmarshal(context, &c)
+		return &Keys{Context: c}, true
 	}
 	return nil, false
 }

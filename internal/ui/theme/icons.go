@@ -14,6 +14,8 @@ func IconsFor(setting string) Icons {
 var glyphs = map[string][2]string{
 	"app":       {"▣", ""},
 	"repo":      {"▪", ""},
+	"remote":    {"↔", "\U000F04E1"},
+	"lost":      {"↮", "\U000F0318"},
 	"starting":  {"◌", "\U000F051F"},
 	"running":   {"●", ""},
 	"needs":     {"◆", "\U000F009E"},

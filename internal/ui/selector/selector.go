@@ -28,10 +28,15 @@ func (r Row) Done() bool {
 }
 
 type Group struct {
-	Name string
-	Path string
-	Rows []Row
+	Name   string
+	Path   string
+	Remote string
+	Link   string
+	Lost   string
+	Rows   []Row
 }
+
+func (g Group) unreachable() bool { return g.Link == "unreachable" }
 
 type Data struct {
 	Groups       []Group
@@ -61,7 +66,8 @@ func Arrange(groups []Group) []Group {
 			}
 			active = append(active, r)
 		}
-		arranged[i] = Group{Name: g.Name, Path: g.Path, Rows: append(active, done...)}
+		g.Rows = append(active, done...)
+		arranged[i] = g
 	}
 	return arranged
 }
@@ -132,9 +138,7 @@ func renderList(c *theme.Canvas, d Data, w, h int) {
 		}
 		group := g
 		items = append(items, item{height: 1, draw: func(c *theme.Canvas, y int) {
-			x := c.Put(2, y, ic.Icon("repo"), theme.Focused)
-			x = c.Put(x, y, group.Name, theme.Focused.B())
-			c.Put(x+2, y, theme.KeepTail(group.Path, inner-x-2), theme.Muted)
+			groupHeader(c, y, inner, group, ic)
 		}})
 		for _, r := range group.Rows {
 			row := r
@@ -196,6 +200,23 @@ func scrollOffset(items []item, selected string, visible int) int {
 		y += it.height
 	}
 	return 0
+}
+
+func groupHeader(c *theme.Canvas, y, inner int, g Group, ic theme.Icons) {
+	x := c.Put(2, y, ic.Icon("repo"), theme.Focused)
+	x = c.Put(x, y, g.Name, theme.Focused.B())
+	switch {
+	case g.Remote == "":
+		c.Put(x+2, y, theme.KeepTail(g.Path, inner-x-2), theme.Muted)
+	case g.unreachable():
+		end := c.Right(inner-1, y, "lost "+g.Lost, theme.Muted)
+		c.PutMax(x+2, y, ic.Icon("lost")+g.Remote, theme.Quiet, end-x-3)
+	default:
+		x = c.Put(x+2, y, ic.Icon("remote")+g.Remote, theme.FgInk(theme.Cyan))
+		if g.Link == "connecting" {
+			c.PutMax(x+1, y, "connecting…", theme.Muted, inner-x-1)
+		}
+	}
 }
 
 func factoryRow(c *theme.Canvas, y, inner int, r Row, d Data) {
@@ -324,7 +345,14 @@ func renderNarrow(c *theme.Canvas, d Data) {
 		if len(g.Rows) == 0 {
 			continue
 		}
-		c.Put(3, y, d.Icons.Icon("repo"), theme.Focused)
+		glyph, ink := "repo", theme.Focused
+		switch {
+		case g.unreachable():
+			glyph, ink = "lost", theme.Quiet
+		case g.Remote != "":
+			glyph, ink = "remote", theme.FgInk(theme.Cyan)
+		}
+		c.Put(3, y, d.Icons.Icon(glyph), ink)
 		y++
 		for _, r := range g.Rows {
 			sel := r.Key == d.Selected

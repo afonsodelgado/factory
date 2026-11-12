@@ -6,11 +6,54 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 )
+
+type View struct {
+	Home      string    `json:"home"`
+	Factories []Factory `json:"factories"`
+}
+
+type Factory struct {
+	ID          string                `json:"id"`
+	Slug        string                `json:"slug"`
+	Incarnation string                `json:"incarnation"`
+	Repo        string                `json:"repo"`
+	RepoName    string                `json:"repo_name,omitempty"`
+	Worktree    string                `json:"worktree,omitempty"`
+	State       *state.State          `json:"state,omitempty"`
+	StateError  string                `json:"state_error,omitempty"`
+	StateMod    time.Time             `json:"state_mod,omitzero"`
+	Entry       *state.Entry          `json:"entry,omitempty"`
+	Status      factory.Status        `json:"status"`
+	Unblocked   factory.Status        `json:"unblocked"`
+	Hook        *state.HookFile       `json:"hook,omitempty"`
+	Pane        *Pane                 `json:"pane,omitempty"`
+	Stage       *Stage                `json:"stage,omitempty"`
+	Activity    []state.ActivityEntry `json:"activity,omitempty"`
+}
+
+type Pane struct {
+	ID    string `json:"id"`
+	Token string `json:"token"`
+	Path  string `json:"path,omitempty"`
+}
+
+type Stage struct {
+	Run  state.StageRun `json:"run"`
+	Pane *Pane          `json:"pane,omitempty"`
+}
+
+type PaneTarget struct {
+	Target
+	Role  string `json:"role,omitempty"`
+	Token string `json:"token"`
+}
 
 const Protocol = 1
 
@@ -65,12 +108,18 @@ type Listing struct {
 }
 
 type Target struct {
-	ID string `json:"id"`
+	ID          string `json:"id"`
+	Incarnation string `json:"incarnation,omitempty"`
 }
 
 type Removal struct {
-	What string `json:"what"`
-	Risk string `json:"risk,omitempty"`
+	What         string              `json:"what"`
+	Risk         string              `json:"risk,omitempty"`
+	Worktree     string              `json:"worktree,omitempty"`
+	WorktreeGone bool                `json:"worktree_gone,omitempty"`
+	Branches     []string            `json:"branches,omitempty"`
+	Dirty        []string            `json:"dirty,omitempty"`
+	Unpushed     map[string][]string `json:"unpushed,omitempty"`
 }
 
 func ServerID(stateDir string) (string, error) {

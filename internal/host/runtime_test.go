@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -297,6 +298,37 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatal("typed a recovered message into a pane that belongs to someone else")
 		}
 	})
+}
+
+type stuckPanes struct{ StageEngine }
+
+func (stuckPanes) Pause(string, string) error { return errors.New("tmux could not kill the window") }
+
+func TestADeleteThatCouldNotClosePanesKeepsItsRecordAndFinishesOnRetry(t *testing.T) {
+	f := newFixture(t)
+	if out, err := exec.Command("git", "init", "-q", f.cfg.Repos[0]).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	r := f.runtime(t, recordingTypist{make(chan string, 8)})
+	r.Tick()
+	it, ok := r.Snapshot().Named("csv")
+	if !ok {
+		t.Fatal("the fixture factory is not listed")
+	}
+	working := r.Engine
+	r.Engine = stuckPanes{working}
+	steps, err := r.DeleteFactory(it.Factory)
+	activity := state.ActivityPath(f.cfg.ActivityDir(), it.Factory.Repo, "csv")
+	if err == nil || !r.Loader.Known(it.Factory.Repo, "csv") || len(steps) < 2 {
+		t.Fatalf("a delete whose panes stayed returned %v with %d steps; want the failure, the other cleanup attempted and the record kept for d again", err, len(steps))
+	}
+	r.Engine = working
+	if _, err := r.DeleteFactory(it.Factory); err != nil || r.Loader.Known(it.Factory.Repo, "csv") {
+		t.Fatalf("the retry left %v; want the factory gone", err)
+	}
+	if _, err := os.Stat(activity); err == nil {
+		t.Fatal("the retry left the activity log behind")
+	}
 }
 
 func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {

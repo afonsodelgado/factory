@@ -316,8 +316,10 @@ func (d *Delete) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return d, nil
 	}
-	confirmed := key.String() == "y"
+	confirmed := key.String() == "y" && !d.Context.Unreachable
 	switch {
+	case key.String() == "f" && d.Context.Remote != "":
+		d.result = &DeleteResult{Key: d.Context.Key, Forget: true}
 	case confirmed && d.step == 0 && d.Context.HasWork():
 		d.step = 1
 		return d, nil
@@ -329,12 +331,37 @@ func (d *Delete) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (d *Delete) View() tea.View {
 	c := theme.NewCanvas(d.width, d.height)
-	if d.step == 0 {
+	switch {
+	case d.Context.Unreachable:
+		d.drawUnreachable(c)
+	case d.step == 0:
 		d.drawWhatGoes(c)
-	} else {
+	default:
 		d.drawWork(c)
 	}
 	return view(c)
+}
+
+func (d *Delete) drawUnreachable(c *theme.Canvas) {
+	ctx := d.Context
+	c.PutMax(1, 0, ctx.Remote+" is unreachable, so "+ctx.Label+" can't be deleted now", theme.Bright.B(), c.W-2)
+	y := 2
+	for _, text := range []string{
+		"Nothing was deleted. Its panes, worktree and state stay on " + ctx.Remote + ", and it may still be running there. Delete it once " + ctx.Remote + " is back.",
+		"",
+		"Forget removes it from this hub only. " + ctx.Remote + " is not touched.",
+		"factory open " + ctx.Label + " --remote " + ctx.Remote + " lists it again.",
+	} {
+		for _, line := range theme.Wrap(text, c.W-2) {
+			c.Put(1, y, line, theme.Text)
+			y++
+		}
+		if text == "" {
+			y++
+		}
+	}
+	line := []theme.Span{{Text: "f", Ink: theme.Key}, {Text: "  forget " + ctx.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
 }
 
 func (d *Delete) drawWhatGoes(c *theme.Canvas) {
@@ -344,7 +371,11 @@ func (d *Delete) drawWhatGoes(c *theme.Canvas) {
 		name += " · " + strings.TrimRight(ctx.Title, ".")
 	}
 	const indent = 12
-	c.PutMax(1, 0, "Deletes "+name+" for good:", theme.Bright.B(), c.W-2)
+	where := ""
+	if ctx.Remote != "" {
+		where = ", on " + ctx.Remote
+	}
+	c.PutMax(1, 0, "Deletes "+name+" for good"+where+":", theme.Bright.B(), c.W-2)
 	worktree, worktreeInk := pathTail(ctx.Worktree, c.W-indent-1), theme.Bright
 	if ctx.WorktreeGone || ctx.Worktree == "" {
 		worktree, worktreeInk = "already removed", theme.Muted
@@ -357,21 +388,36 @@ func (d *Delete) drawWhatGoes(c *theme.Canvas) {
 		name, value string
 		ink         theme.Ink
 	}{
-		{"session", "its Claude and stage panes, and what they started", theme.Text},
+		{"session", "its Claude and stage panes" + onRemote(ctx.Remote) + ", and what they started", theme.Text},
 		{"worktree", worktree, worktreeInk},
 		{"branches", branches, branchesInk},
-		{"state", "its factory and QA directories, logs, drafts and hook records", theme.Text},
+		{"state", "its factory and QA directories" + onRemote(ctx.Remote) + ", logs, drafts and hook records", theme.Text},
 	}
 	for i, r := range rows {
 		c.Put(3, 2+i, r.name, theme.Text)
 		c.PutMax(indent+2, 2+i, r.value, r.ink, c.W-indent-3)
 	}
 	c.Put(1, 7, "Pushed PRs and remote branches stay. The id can be used again.", theme.Muted)
+	y := 8
+	if ctx.Remote != "" {
+		c.Put(1, y, ctx.Remote+" keeps its clone of "+ctx.Repo+" for the next factory.", theme.Muted)
+		y++
+	}
 	if ctx.HasWork() {
-		c.Put(1, 8, "It has unpushed or uncommitted work: y shows it and asks again.", theme.FgInk(theme.Yellow))
+		c.Put(1, y, "It has unpushed or uncommitted work: y shows it and asks again.", theme.FgInk(theme.Yellow))
 	}
 	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete " + ctx.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	if ctx.Remote != "" {
+		line = []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete on " + ctx.Remote + "      ", Ink: theme.Text}, {Text: "f", Ink: theme.Key}, {Text: "  forget here only      ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	}
 	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
+}
+
+func onRemote(name string) string {
+	if name == "" {
+		return ""
+	}
+	return " on " + name
 }
 
 func (d *Delete) drawWork(c *theme.Canvas) {
@@ -405,6 +451,7 @@ func (d *Delete) drawWork(c *theme.Canvas) {
 }
 
 type Keys struct {
+	Context KeysContext
 	size
 }
 
@@ -443,9 +490,14 @@ var answerKeys = [][2]string{
 
 func (k *Keys) View() tea.View {
 	c := theme.NewCanvas(k.width, k.height)
-	col := max((c.W-2)/len(keyColumns), 20)
+	columns := keyColumns
+	if k.Context.Remotes {
+		columns = slices.Clone(keyColumns)
+		columns[0] = append(slices.Clone(columns[0]), [2]string{"R", "remotes"})
+	}
+	col := max((c.W-2)/len(columns), 20)
 	rows := 0
-	for i, column := range keyColumns {
+	for i, column := range columns {
 		x := 1 + i*col
 		rows = max(rows, len(column))
 		for y, row := range column {

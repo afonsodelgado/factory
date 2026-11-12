@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -84,7 +84,7 @@ func (m *Runtime) Tick() {
 }
 
 func (m *Runtime) clonedForLaptop(repo string) bool {
-	return strings.HasPrefix(repo, filepath.Join(m.Config.StateDir, "repos")+string(filepath.Separator))
+	return remote.IsClone(m.Config.StateDir, repo)
 }
 
 func (m *Runtime) chrome(repo string, profile state.Profile) bool {

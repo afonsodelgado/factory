@@ -309,8 +309,16 @@ type RemovalStep struct {
 	Err    error
 }
 
-func Run(r Removal, registry func(func(*state.Registry)) error) []RemovalStep {
-	steps := []RemovalStep{removeWorktree(r)}
+func PanesClosed(label string, err error) RemovalStep {
+	step := RemovalStep{Name: "close panes", Detail: label, State: Ran}
+	if err != nil {
+		step.State, step.Err = Failed, err
+	}
+	return step
+}
+
+func Run(closed RemovalStep, r Removal, registry func(func(*state.Registry)) error) []RemovalStep {
+	steps := []RemovalStep{closed, removeWorktree(r)}
 	worktrees, _ := listWorktrees(r.Repo)
 	for _, branch := range r.Branches {
 		steps = append(steps, deleteBranch(r.Repo, branch, worktrees))

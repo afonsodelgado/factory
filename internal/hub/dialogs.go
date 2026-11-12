@@ -15,6 +15,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
@@ -30,6 +31,7 @@ var popupSizes = map[string][2]int{
 	"archive": {80, 12},
 	"delete":  {84, 14},
 	"keys":    {124, 17},
+	"remotes": {90, 26},
 }
 
 var popupTitles = map[string]string{
@@ -39,6 +41,7 @@ var popupTitles = map[string]string{
 	"archive": " ▭ Archive ",
 	"delete":  " ✕ Delete ",
 	"keys":    " Keys ",
+	"remotes": " ↔ Remotes ",
 }
 
 type dialogClosedMsg struct {
@@ -79,6 +82,9 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 }
 
 func (m *Model) dialogClosed(msg dialogClosedMsg) {
+	if msg.kind == "remotes" {
+		m.reloadRemotes()
+	}
 	if m.dialog == msg.kind {
 		m.dialog = ""
 		m.focus = footer.Factories
@@ -126,7 +132,10 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		}
 	case "delete":
 		var r dialog.DeleteResult
-		if err = json.Unmarshal(e.Data, &r); err == nil && r.Confirmed {
+		switch err = json.Unmarshal(e.Data, &r); {
+		case err == nil && r.Forget:
+			err = m.forgetRemote(r.Key)
+		case err == nil && r.Confirmed:
 			_, err = m.delete(r.Key)
 		}
 	}
@@ -140,7 +149,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 }
 
 func (m *Model) newContext() dialog.NewContext {
-	c := dialog.NewContext{Tools: m.toolOptions()}
+	c := dialog.NewContext{Tools: m.toolOptions(), Remotes: m.remoteNames(), Default: m.Config.DefaultRemote, Elsewhere: m.knownElsewhere()}
 	selectedRepo := m.here
 	if it, ok := m.selectedItem(); ok && !slices.Contains(m.Config.Repos, m.here) {
 		selectedRepo = it.Factory.Repo
@@ -160,7 +169,12 @@ func (m *Model) newContext() dialog.NewContext {
 				option.Agents = append(option.Agents, dialog.AgentOption{Role: role, AgentSetting: agents[role]})
 			}
 		}
-		for _, it := range m.snap.Items {
+		if url, err := remote.GitURL(repo, ""); err != nil {
+			option.NoGitRemote = err.Error()
+		} else {
+			option.GitURL = url
+		}
+		for _, it := range localOnly(m.snap).Items {
 			if it.Factory.Repo != repo {
 				continue
 			}
@@ -190,7 +204,7 @@ func (m *Model) switchContext() dialog.SwitchContext {
 		if stage == "" {
 			stage = "no state yet"
 		}
-		c.Rows = append(c.Rows, dialog.SwitchRow{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), Repo: it.Factory.RepoName(), Stage: stage, Status: it.Status.String(), Needs: it.Status == factory.NeedsYou})
+		c.Rows = append(c.Rows, dialog.SwitchRow{Key: it.Factory.Key(), Label: it.Factory.Placed(), Title: it.Factory.Title(), Repo: it.Factory.RepoName(), Stage: stage, Status: it.Status.String(), Needs: it.Status == factory.NeedsYou})
 	}
 	return c
 }
@@ -240,6 +254,9 @@ func (m *Model) deleteContext(it Item) dialog.DeleteContext {
 }
 
 func (m *Model) archiveContext(it Item) dialog.ArchiveContext {
+	if f := it.Factory; f.Remote != nil {
+		return dialog.ArchiveContext{Key: f.Key(), Label: f.Label(), Worktree: remotePath(f, f.Worktree), FactoryDir: factoryDir(f), Problem: "its worktree is on " + f.Remote.Name + ", so archiving here keeps it there"}
+	}
 	c := dialog.ArchiveContext{Key: it.Factory.Key(), Label: it.Factory.Label(), Worktree: tilde(it.Factory.Worktree), FactoryDir: factoryDir(it.Factory)}
 	if it.Factory.Worktree == "" {
 		c.Problem = "this factory has no worktree on record"
@@ -267,6 +284,9 @@ func (m *Model) newResult(r dialog.NewResult) (tea.Cmd, error) {
 		}
 		return nil, nil
 	}
+	if r.Remote != "" {
+		return nil, m.createRemote(r)
+	}
 	return nil, m.create(r)
 }
 
@@ -279,6 +299,9 @@ func (m *Model) selectExisting(key string) error {
 }
 
 func (m *Model) unarchive(it Item) error {
+	if it.Factory.Remote != nil {
+		return m.remoteAct(it, "unarchive", nil)
+	}
 	if err := m.execution().Unarchive(it); err != nil {
 		return err
 	}
@@ -296,7 +319,12 @@ func (m *Model) create(r dialog.NewResult) error {
 
 func retired(f factory.Factory) bool { return host.Retired(f) }
 
-func (m *Model) wake(key string) error { return m.execution().Wake(key) }
+func (m *Model) wake(key string) error {
+	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
+		return m.remoteAct(it, "wake", nil)
+	}
+	return m.execution().Wake(key)
+}
 
 func (m *Model) wakeSelected() {
 	if it, ok := m.selectedItem(); ok && it.Status == factory.Done {
@@ -306,12 +334,28 @@ func (m *Model) wakeSelected() {
 	m.report(m.wake(m.selected))
 }
 
-func (m *Model) wakeAll() error { return m.execution().WakeAll() }
+func (m *Model) wakeAll() error {
+	var errs []error
+	for _, it := range m.snap.Items {
+		if it.Factory.Remote != nil && it.Status.Asleep() {
+			errs = append(errs, m.remoteAct(it, "wake", nil))
+		}
+	}
+	return errors.Join(append(errs, m.execution().WakeAll())...)
+}
 
-func (m *Model) pause(key string) error { return m.execution().Pause(key) }
+func (m *Model) pause(key string) error {
+	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
+		return m.remoteAct(it, "pause", nil)
+	}
+	return m.execution().Pause(key)
+}
 
 func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 	it, ok := m.snap.Find(key)
+	if ok && it.Factory.Remote != nil {
+		return nil, m.remoteAct(it, "delete", nil)
+	}
 	if !ok || m.Loader == nil {
 		return nil, fmt.Errorf("the hub does not list %s", key)
 	}
@@ -356,6 +400,9 @@ func (m *Model) forgetFactory(key string) {
 }
 
 func (m *Model) archive(r dialog.ArchiveResult) error {
+	if it, ok := m.snap.Find(r.Key); ok && it.Factory.Remote != nil {
+		return m.remoteAct(it, "archive", map[string]any{"Remove": false})
+	}
 	return m.execution().Archive(host.ArchiveRequest{Key: r.Key, Remove: r.Remove})
 }
 

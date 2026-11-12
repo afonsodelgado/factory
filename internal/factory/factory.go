@@ -28,13 +28,43 @@ type Factory struct {
 	StateMod  time.Time
 	Heartbeat time.Time
 	Entry     *state.Entry
+	Remote    *Location
+}
+
+type Location struct {
+	Name        string
+	Server      string
+	Incarnation string
+	Home        string
+	Repo        string
+	Creating    time.Time
 }
 
 func (f Factory) Key() string {
+	if f.Remote != nil {
+		return "remote:" + f.Remote.Name + "/" + f.Remote.Server + "/" + f.Remote.Incarnation
+	}
 	return state.Key(f.Repo, f.Slug)
 }
 
+func (f Factory) Where() string {
+	if f.Remote == nil {
+		return ""
+	}
+	return f.Remote.Name
+}
+
+func (f Factory) Placed() string {
+	if f.Remote == nil {
+		return f.Label()
+	}
+	return f.Label() + " ↔ " + f.Remote.Name
+}
+
 func (f Factory) RepoName() string {
+	if f.Remote != nil && f.Remote.Repo != "" {
+		return f.Remote.Repo
+	}
 	return filepath.Base(f.Repo)
 }
 
