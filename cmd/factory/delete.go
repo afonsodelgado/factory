@@ -28,7 +28,7 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 	yes := flags.Bool("yes", false, "skip the first confirmation; unpushed or uncommitted work still asks")
 	remoteFlag := flags.String("remote", "", "the remote the factory runs on")
 	local := flags.Bool("local", false, "the factory runs on this machine")
-	if err := flags.Parse(reorder(args)); err != nil {
+	if err := flags.Parse(reorder(flags, args)); err != nil {
 		return 2
 	}
 	if flags.NArg() != 1 || (*remoteFlag != "" && *local) {

@@ -61,7 +61,7 @@ func remoteAdd(args []string) error {
 	user := flags.String("user", "", "the ssh user; default: what ssh uses for this host")
 	port := flags.Int("port", 0, "the ssh port; default: what ssh uses for this host")
 	identity := flags.String("identity", "", "the ssh key file; default: ssh-agent and your ssh config")
-	if err := flags.Parse(reorder(args)); err != nil || flags.NArg() != 2 {
+	if err := flags.Parse(reorder(flags, args)); err != nil || flags.NArg() != 2 {
 		return errors.New(remoteUsage)
 	}
 	name := flags.Arg(0)

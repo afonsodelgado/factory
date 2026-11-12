@@ -201,6 +201,33 @@ func TestNewFactoriesFollowTheDefaultAndExistingOnesStayWhereTheyRun(t *testing.
 	}
 }
 
+func TestRemoteAddTakesItsFlagsInAnyOrder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	for _, args := range [][]string{
+		{"add", "box", "boxhost", "--identity", "keyfile"},
+		{"add", "attic", "attic.lan", "--user", "bob", "--port", "2222"},
+		{"add", "--user", "bob", "--port", "2222", "cellar", "cellar.lan"},
+	} {
+		if code := runRemote(args); code != 0 {
+			t.Fatalf("factory remote %v exited %d", args, code)
+		}
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]state.Remote{
+		"box":    {Host: "boxhost", Identity: "keyfile"},
+		"attic":  {Host: "attic.lan", User: "bob", Port: 2222},
+		"cellar": {Host: "cellar.lan", User: "bob", Port: 2222},
+	}
+	if !maps.Equal(cfg.Remotes, want) {
+		t.Fatalf("remotes %+v; want %+v, so ssh reaches the host the developer named with the key, user and port given", cfg.Remotes, want)
+	}
+}
+
 func TestARemoteRequestFailsAtOnceWhileAnInteractiveHubHoldsTheServerRuntime(t *testing.T) {
 	cfg := &state.Config{StateDir: t.TempDir()}
 	unlock, err := lockHub(cfg.LockPath())
