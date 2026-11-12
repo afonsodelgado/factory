@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -100,13 +101,10 @@ func (a Attention) Open() bool {
 }
 
 func (a Attention) Stage() string {
-	if a.StageKey != "" {
-		return a.StageKey
-	}
 	namesItsStage := strings.HasPrefix(a.ID, "gate-") || strings.HasPrefix(a.ID, "cap-") || strings.HasPrefix(a.ID, "fail-")
 	i := strings.LastIndex(a.ID, "-")
 	if !namesItsStage || i < 0 {
-		return ""
+		return a.StageKey
 	}
 	return a.ID[i+1:]
 }
@@ -120,7 +118,9 @@ func (s *State) Moot(a Attention) bool {
 		return false
 	}
 	status := s.Stages[stage].Status
-	return status == "done" || status == "skipped"
+	finished := status == "done" || status == "skipped"
+	movedOn := slices.Index(StageKeys, s.Stage) > slices.Index(StageKeys, stage)
+	return finished && movedOn
 }
 
 func (s *State) HasAttentionField() bool {
@@ -268,9 +268,12 @@ func ResolveAttention(path, id, waitingOn string, now time.Time) error {
 	default:
 		doc["waiting_on"], _ = json.Marshal(waitingOn)
 	}
-	out, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(doc); err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, append(out, '\n'))
+	return WriteFileAtomic(path, out.Bytes())
 }

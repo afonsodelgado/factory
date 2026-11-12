@@ -60,7 +60,7 @@ Address panes by id (`%12`) and windows by name. Never assume a window or pane i
 - No comments. Clear names and small functions instead.
 - Readable conditionals: name the condition when it is not obvious.
 - Measure terminal widths with `lipgloss.Width`, never `len()`.
-- The app never writes `state.json`; the factory supervisor is its only writer.
+- The app never writes `state.json`; the factory supervisor is its only writer, including through `factory attention resolve`.
 - A factory is an id and a prompt. There are no tickets: never add tracker integration to the app or the bundle. The skill reads a tracker only when the user's prompt asks it to.
 - `state.json` once had `ticket` where it now has `id`; `state.ParseState` reads both.
 

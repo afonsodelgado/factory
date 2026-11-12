@@ -28,6 +28,12 @@ type panelState struct {
 	refused map[string]string
 	sent    map[string]sentMark
 	prs     map[string][]panel.PR
+	press   lastPress
+}
+
+type lastPress struct {
+	key string
+	at  time.Time
 }
 
 type sentMark struct {
@@ -42,6 +48,8 @@ type sentMark struct {
 }
 
 const receiptWait = 10 * time.Second
+
+const repeatWindow = time.Second
 
 const notReceived = "Not received by the supervisor. The session is probably showing a stage agent's transcript: open the session (esc, then ⏎), leave that view, then send again."
 
@@ -501,9 +509,20 @@ func (m *Model) deliver(action string) {
 	mark := m.answerMark(it.Factory, item.ID, item.Since, text)
 	mark.leavesOpen = item.Kind == "gate" && action == "changes"
 	m.queueAnswer(it, mark, text)
+	m.panel.press = lastPress{key: key, at: m.Now()}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
+}
+
+func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool {
+	switch key {
+	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+x", "ctrl+k", "enter":
+	default:
+		return false
+	}
+	p := m.panel.press
+	return p.key != "" && p.key != draftKey(it.Factory, item.ID) && m.Now().Sub(p.at) < repeatWindow
 }
 
 func (m *Model) queueAnswer(it Item, mark sentMark, text string) {
@@ -713,6 +732,9 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 	d := m.draft(it.Factory, item)
 	if key == "tab" || key == "shift+tab" {
 		return nil, false
+	}
+	if m.repeatedOntoNextItem(it, item, key) {
+		return nil, true
 	}
 	if cmd, isAction := m.answerAction(item, d, key); isAction {
 		return cmd, true

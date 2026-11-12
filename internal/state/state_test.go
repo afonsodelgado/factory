@@ -10,7 +10,7 @@ import (
 
 func TestResolveAttentionKeepsWhatItDoesNotKnow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	original := `{"id":"ENG-1","waiting_on":"user","waiting_reason":"plan gate","future_field":{"kept":true},"attention":[{"id":"q-ENG-1-1","kind":"question","resolved_at":null,"note":"x"}]}`
+	original := `{"id":"ENG-1","waiting_on":"user","waiting_reason":"plan & <design> gate","future_field":{"kept":true},"attention":[{"id":"q-ENG-1-1","kind":"question","resolved_at":null,"note":"x"}]}`
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestResolveAttentionKeepsWhatItDoesNotKnow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kept := strings.Contains(string(data), `"future_field"`) && strings.Contains(string(data), `"note": "x"`)
+	kept := strings.Contains(string(data), `"future_field"`) && strings.Contains(string(data), `"note": "x"`) && strings.Contains(string(data), "plan & <design> gate")
 	if len(st.OpenAttention()) != 0 || st.WaitingOn != "agent" || !kept {
 		t.Errorf("state after resolve:\n%s\nwant the item resolved, waiting_on agent and unknown fields kept", data)
 	}

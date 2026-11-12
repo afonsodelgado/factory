@@ -121,6 +121,7 @@ var escapes = regexp.MustCompile("\x1b\\[[0-9;:]*m")
 func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	gate := state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+	designGate := state.Attention{ID: "gate-7452-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-30 * time.Second)}}
 	unrecommended := state.Attention{ID: "q-7452-2", Kind: "question", Title: "1 question", Questions: []string{"Which region?"}, CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 
 	type later struct {
@@ -150,6 +151,7 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 		{"gate approve while busy waits out of the way", &gate, "UserPromptSubmit", []string{"ctrl+a"}, nil, 0, "Queued gate-7452-plan", "Approve", nil, ""},
 		{"a queued approval is sent once the supervisor is idle", &gate, "UserPromptSubmit", []string{"ctrl+a"}, []later{{2 * time.Second, nil, nil, idleAgain}}, 1, "Sending gate-7452-plan", "", nil, "/factory approve plan gate-7452-plan"},
 		{"gate approve pressed twice sends once", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sending", "", nil, ""},
+		{"a second press does not approve the gate that moved under the cursor", &gate, "Stop", []string{"ctrl+a", "ctrl+a"}, nil, 1, "Sending gate-7452-plan", "Queued gate-7452-design", &designGate, "/factory approve plan"},
 		{"an item settled elsewhere is closed with one key", &gate, "Stop", []string{"ctrl+k"}, nil, 1, "Sending gate-7452-plan", "", nil, "gate-7452-plan handled: settled outside the panel"},
 		{"prose typed at an unsent gate goes into its notes", &gate, "Stop", keystrokes("change the colour"), nil, 0, "change the colour", "", nil, ""},
 		{"question batch sent twice sends once", nil, "Stop", []string{"ctrl+s", "ctrl+s"}, nil, 1, "Sending", "", nil, ""},

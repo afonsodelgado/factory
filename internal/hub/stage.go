@@ -372,7 +372,7 @@ func (m *Model) flushTypeQueue() {
 			continue
 		}
 		target := Target{Label: q.Label, Pane: &pane, Hook: hook}
-		if q.Answers != nil {
+		if q.Answers != nil && Refusal(target) == "" {
 			target = m.refreshed(target)
 		}
 		typedAt := m.Now()
