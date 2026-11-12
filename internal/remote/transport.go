@@ -123,6 +123,9 @@ func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]b
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
+	}
 	if ctx.Err() != nil {
 		return nil, &TransportError{Remote: t.Name, Detail: "no answer in time"}
 	}
