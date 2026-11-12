@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/google/uuid"
 
@@ -75,7 +76,7 @@ func TestAServerLinkOpensOnceAcrossPollsAndHubRestarts(t *testing.T) {
 	withLink := func(m *Model) *Model {
 		m.Tunnels = &remote.Tunnels{StateDir: m.Config.StateDir}
 		m.Open = func(url string) { opened = append(opened, url) }
-		m.links["homelab"].view.Opens = []remote.Open{{ID: "o-1", Factory: "csv-export", URL: "https://github.com/acme/app/pull/7"}}
+		m.links["homelab"].view.Opens = []remote.Open{{ID: "o-1", Factory: "csv-export", URL: "https://github.com/acme/app/pull/7"}, {ID: "o-2", Factory: "csv-export", URL: "http://localhost:5173/"}}
 		return m
 	}
 	withLink(m)
@@ -84,14 +85,26 @@ func TestAServerLinkOpensOnceAcrossPollsAndHubRestarts(t *testing.T) {
 	if first == nil || second != nil {
 		t.Fatal("a second poll before the first open finished started another open")
 	}
-	first()
+	drain(first)
 	restarted := withLink(mixedModel(t))
 	restarted.Config.StateDir = m.Config.StateDir
-	if cmd := restarted.settleOpens("homelab"); cmd != nil {
-		cmd()
-	}
+	drain(restarted.settleOpens("homelab"))
 	if len(opened) != 1 || opened[0] != "https://github.com/acme/app/pull/7" {
 		t.Fatalf("opened %v; want the PR link once, as it is, even though the server never heard the acknowledgement", opened)
+	}
+	if !restarted.opening["o-2"] {
+		t.Fatal("a link whose tunnel failed was dropped; want it kept on the server and tried again after a restart")
+	}
+}
+
+func drain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if batch, ok := cmd().(tea.BatchMsg); ok {
+		for _, c := range batch {
+			drain(c)
+		}
 	}
 }
 
