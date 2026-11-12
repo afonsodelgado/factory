@@ -30,7 +30,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | `recommended` | `question` only: one recommended answer per question |
 | `stage` | the stage key the item belongs to, normally the current `stage`; gate, cap and failure ids also end with it |
 | `artifact_url`, `thread_id` | `gate` and `comment`: the artifact, and the thread for a comment. Factories started before the review page have `comment` items; new ones do not |
-| `created_at`, `resolved_at` | ISO 8601 UTC |
+| `created_at`, `resolved_at` | ISO 8601 UTC. Set `created_at` when you write the item and never change it: on a server, the id and `created_at` together tell the laptop and the phone that an item is new |
 
 ## Ids
 

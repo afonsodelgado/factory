@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,6 +374,54 @@ func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {
 	}
 	if profile, _ := state.ReadProfile(clone); r.chrome(clone, profile) {
 		t.Fatal("a server launch would pass --chrome for a factory created from a laptop")
+	}
+}
+
+func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
+	var mu sync.Mutex
+	var received []string
+	answers := []int{http.StatusBadGateway}
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, r.URL.Path+" "+r.Header.Get("Title")+" "+string(body))
+		if len(answers) > 0 {
+			w.WriteHeader(answers[0])
+			answers = answers[1:]
+		}
+	}))
+	t.Cleanup(ntfy.Close)
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)
+	pusher := &Pusher{StateDir: dir, Now: func() time.Time { return now }}
+	settings := remote.PushSettings{Server: ntfy.URL, Topic: "factory-q7rk2m9x", Label: "homelab", Revision: 2}
+	if acked, err := pusher.Configure(settings); err != nil || acked != 2 {
+		t.Fatalf("configure: %d %v", acked, err)
+	}
+	if acked, _ := pusher.Configure(remote.PushSettings{Server: ntfy.URL, Label: "homelab", Revision: 1}); acked != 2 {
+		t.Fatal("an older settings revision turned push off after a newer one")
+	}
+	secret := state.Attention{ID: "q-csv-1", Kind: "question", Title: "Paste the prod token sk-live-123?", Body: "sk-live-123", CreatedAt: state.Time{Time: now}}
+	m := New(Runtime{Config: &state.Config{StateDir: dir}, Log: LoadEventLog(EventLogPath(dir)), Push: pusher, Now: func() time.Time { return now }})
+	m.SetSnapshot(Snapshot{Items: []Item{{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv-export", ID: "csv-export", State: &state.State{ID: "csv-export", Attention: []state.Attention{secret}}}}}})
+
+	m.watch()
+	pusher.Flush()
+	now = now.Add(pushFirstGap)
+	pusher.Flush()
+	pusher.Flush()
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := "/factory-q7rk2m9x factory csv-export on homelab: question"
+	if len(received) != 2 || received[0] != want || received[1] != want {
+		t.Fatalf("ntfy received %q; want the id, remote and kind only, retried once after the failure and then never again", received)
+	}
+	stored, _ := os.ReadFile(filepath.Join(dir, "push.json"))
+	journal, _ := os.ReadFile(EventLogPath(dir))
+	if bytes.Contains(stored, []byte("sk-live")) || bytes.Contains(journal, []byte("sk-live")) {
+		t.Fatal("the question's text reached the push outbox or the event journal")
 	}
 }
 

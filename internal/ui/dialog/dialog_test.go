@@ -198,6 +198,7 @@ func (f *fakeRemoteActions) SetDefault(string) error  { return nil }
 func (f *fakeRemoteActions) Remove(string) error      { return nil }
 func (f *fakeRemoteActions) SetPush(state.Push) error { return nil }
 func (f *fakeRemoteActions) NewTopic() string         { return "factory-q7rk2m9xw4tzc3vb" }
+func (f *fakeRemoteActions) TestPush() string         { return "" }
 
 func remotesPopup(c RemotesContext, actions RemoteActions) *Remotes {
 	r := NewRemotes(c, actions)

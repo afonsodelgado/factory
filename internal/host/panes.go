@@ -48,7 +48,7 @@ func loginShell() string {
 
 func (e *Panes) NewFactoryPane(n NewPane) (string, error) {
 	token := uuid.NewString()
-	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token}, e.openerPath())
+	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token}, e.serverEnv())
 	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
@@ -57,7 +57,7 @@ func (e *Panes) NewFactoryPane(n NewPane) (string, error) {
 }
 
 func (e *Panes) NewStagePane(s StagePane) (string, error) {
-	env := slices.Concat([]string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}, e.openerPath())
+	env := slices.Concat([]string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}, e.serverEnv())
 	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: StageParkName(s.Slug, s.Role), Dir: s.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
@@ -65,11 +65,11 @@ func (e *Panes) NewStagePane(s StagePane) (string, error) {
 	return pane, e.tag(pane, [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}})
 }
 
-func (e *Panes) openerPath() []string {
+func (e *Panes) serverEnv() []string {
 	if e.Openers == "" {
 		return nil
 	}
-	return []string{"PATH=" + e.Openers + string(os.PathListSeparator) + os.Getenv("PATH")}
+	return []string{"FACTORY_SERVER=1", "PATH=" + e.Openers + string(os.PathListSeparator) + os.Getenv("PATH")}
 }
 
 func (e *Panes) tag(pane string, options [][2]string) error {

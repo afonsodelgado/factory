@@ -95,7 +95,7 @@ func (m *Model) checkReceipts() {
 			mark.Received = receipt
 			m.panel.sent[key] = mark
 			os.Remove(mark.Draft)
-		case misroutedIn(mark, submits) || m.snap.At.Sub(mark.At) > receiptWait:
+		case misroutedIn(mark, submits) || m.clockOf(mark.Factory).Sub(mark.At) > receiptWait:
 			delete(m.panel.sent, key)
 			m.panel.refused[key] = notReceived
 			it, ok := m.snap.Find(mark.Factory)
@@ -643,6 +643,7 @@ func (m *Model) activity(it Item) []panel.ActivityRow {
 		items = m.snap.Items
 	}
 	var rows []panel.ActivityRow
+	remotes := map[string]bool{}
 	for _, i := range items {
 		var logged []state.ActivityEntry
 		switch {
@@ -653,6 +654,13 @@ func (m *Model) activity(it Item) []panel.ActivityRow {
 		}
 		for _, a := range factory.Activity(i.Factory, logged) {
 			rows = append(rows, panel.ActivityRow{At: a.At, Factory: i.Factory.Label(), Key: i.Factory.Key(), Stage: a.Stage, Source: a.Source, Text: a.Text})
+		}
+		if i.Factory.Remote != nil && !remotes[i.Factory.Remote.Name] && m.Config.StateDir != "" {
+			remotes[i.Factory.Remote.Name] = true
+			logged, _ := state.ReadActivity(linkActivityPath(m.Config.StateDir, i.Factory.Remote.Name))
+			for _, a := range logged {
+				rows = append(rows, panel.ActivityRow{At: a.At, Factory: i.Factory.Remote.Name, Stage: a.Stage, Source: a.Source, Text: a.Text})
+			}
 		}
 	}
 	sort.SliceStable(rows, func(a, b int) bool { return rows[a].At.After(rows[b].At) })
@@ -1019,7 +1027,7 @@ func (m *Model) listKey(key string) tea.Cmd {
 	case "o":
 		return m.openRow(v)
 	case "enter":
-		if m.panel.tab == panel.Activity && m.panel.row < len(v.Activity) {
+		if m.panel.tab == panel.Activity && m.panel.row < len(v.Activity) && v.Activity[m.panel.row].Key != "" {
 			m.choose(v.Activity[m.panel.row].Key)
 		}
 	}

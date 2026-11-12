@@ -153,11 +153,12 @@ type RemotesContext struct {
 }
 
 type RemoteRow struct {
-	Name      string `json:"name"`
-	Endpoint  string `json:"endpoint"`
-	Link      string `json:"link"`
-	Factories int    `json:"factories"`
-	NeedsYou  int    `json:"needs_you"`
+	Name        string `json:"name"`
+	Endpoint    string `json:"endpoint"`
+	Link        string `json:"link"`
+	Factories   int    `json:"factories"`
+	NeedsYou    int    `json:"needs_you"`
+	PushPending bool   `json:"push_pending,omitempty"`
 }
 
 type CheckRow struct {
@@ -174,6 +175,7 @@ type RemoteActions interface {
 	Remove(name string) error
 	SetPush(p state.Push) error
 	NewTopic() string
+	TestPush() string
 }
 
 type KeysContext struct {

@@ -56,6 +56,14 @@ func (remoteActions) SetPush(p state.Push) error {
 	return err
 }
 
+func (remoteActions) TestPush() string {
+	lines, err := pushTests()
+	if err != nil {
+		return err.Error()
+	}
+	return strings.Join(lines, "; ")
+}
+
 func (remoteActions) NewTopic() string {
 	return newTopic()
 }

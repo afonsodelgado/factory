@@ -272,13 +272,15 @@ func (r *Remotes) pushKey(msg tea.KeyPressMsg) {
 		r.editingServer = true
 	case key == "r" && pushOff:
 		r.topic = r.actions.NewTopic()
+	case key == "t" && !pushOff:
+		r.problem = r.actions.TestPush()
 	}
 }
 
 func (r *Remotes) togglePush() {
-	push := state.Push{}
+	push := state.Push{Server: r.Context.Push.Server}
 	if !r.Context.Push.On() {
-		push.Topic = r.topic
+		push.Topic, push.Server = r.topic, ""
 		if server := strings.TrimSpace(r.server); server != state.DefaultPushServer {
 			push.Server = server
 		}
@@ -526,7 +528,10 @@ func (r *Remotes) drawRemoteRow(c *theme.Canvas, y, i int, row RemoteRow) {
 	c.Put(linkX, y, link, ink)
 	x := c.Put(factoriesX, y, fmt.Sprint(row.Factories), theme.Text)
 	if row.NeedsYou > 0 {
-		c.Put(x, y, fmt.Sprintf(" · %d needs you", row.NeedsYou), theme.FgInk(theme.Orange))
+		x = c.Put(x, y, fmt.Sprintf(" · %d needs you", row.NeedsYou), theme.FgInk(theme.Orange))
+	}
+	if row.PushPending {
+		c.Put(x, y, " · push settings pending", theme.FgInk(theme.Yellow))
 	}
 	r.drawDefaultMark(c, y, row.Name)
 }
@@ -643,7 +648,7 @@ func (r *Remotes) drawPush(c *theme.Canvas) {
 func (r *Remotes) pushHints() string {
 	switch {
 	case r.Context.Push.On():
-		return "⏎ turn push off   esc back"
+		return "⏎ turn push off   t send a test push   esc back"
 	case r.editingServer:
 		return "⏎ turn push on   tab or esc done"
 	}
