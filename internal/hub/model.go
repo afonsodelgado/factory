@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -29,6 +30,7 @@ const (
 )
 
 type Model struct {
+	host   *host.Runtime
 	Config *state.Config
 	Engine *Engine
 	Layout Layout
@@ -70,9 +72,6 @@ type Model struct {
 	notice        notice
 	wakes         map[string]Wake
 	pipelines     map[string]string
-	typeQueue     []queuedType
-	typedAt       map[string]time.Time
-	inboxQueued   map[string]bool
 	toldReturnKey bool
 	here          string
 }
@@ -113,8 +112,6 @@ func NewModel(m Model) *Model {
 	model.share = PanelShare
 	model.panel = newPanelState()
 	model.dialogs = map[string]json.RawMessage{}
-	model.typedAt = map[string]time.Time{}
-	model.inboxQueued = map[string]bool{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}

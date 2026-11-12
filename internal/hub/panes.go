@@ -3,17 +3,11 @@ package hub
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
-
-const pasteSettle = 150 * time.Millisecond
 
 func (e *Engine) Tag(pane, repo, slug string) error {
 	for name, value := range map[string]string{"@factory_repo": repo, "@factory_slug": slug} {
@@ -22,23 +16,6 @@ func (e *Engine) Tag(pane, repo, slug string) error {
 		}
 	}
 	return nil
-}
-
-func FactoryPane(panes []tmux.Pane, repo, slug string) (tmux.Pane, bool) {
-	for _, p := range panes {
-		if p.Repo == repo && p.Slug == slug {
-			return p, true
-		}
-	}
-	return tmux.Pane{}, false
-}
-
-func LivePane(panes []tmux.Pane, f factory.Factory) factory.Pane {
-	p, ok := FactoryPane(panes, f.Repo, f.Slug)
-	if !ok || p.Dead {
-		return factory.Pane{}
-	}
-	return factory.Pane{Found: true, Shell: factory.IsShell(p.Command)}
 }
 
 func (e *Engine) Select(l *Layout, incoming string) error {
@@ -81,7 +58,7 @@ func parkingName(p tmux.Pane) string {
 	if p.Slug == "" {
 		return SlotParking
 	}
-	return ParkName(p.Slug)
+	return host.ParkName(p.Slug)
 }
 
 func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
@@ -108,13 +85,13 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 		if !known {
 			continue
 		}
-		if _, tagged := FactoryPane(panes, repo, session); tagged {
+		if _, tagged := host.FactoryPane(panes, repo, session); tagged {
 			continue
 		}
 		if err := e.Tag(pane.ID, repo, session); err != nil {
 			return adopted, err
 		}
-		if err := e.TM.Break(pane.ID, e.Session, ParkName(session)); err != nil {
+		if err := e.TM.Break(pane.ID, e.Session, host.ParkName(session)); err != nil {
 			return adopted, err
 		}
 		adopted = append(adopted, session)
@@ -170,64 +147,28 @@ func firstPane(panes []tmux.Pane, session string) (tmux.Pane, bool) {
 	return tmux.Pane{}, false
 }
 
-type NewPane struct {
-	Repo string
-	Slug string
-	Dir  string
-	Env  []string
-}
+type NewPane = host.NewPane
+type StagePane = host.StagePane
+
+func (e *Engine) panes() *host.Panes { return &host.Panes{TM: e.TM, Session: e.Session} }
 
 func (e *Engine) NewFactoryPane(l Layout, n NewPane) (string, error) {
-	token := uuid.NewString()
-	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token})
-	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: env, Command: loginShell()})
+	pane, err := e.panes().NewFactoryPane(n)
 	if err != nil {
-		return "", err
-	}
-	if err := e.Tag(pane, n.Repo, n.Slug); err != nil {
-		return pane, err
-	}
-	if err := e.TM.SetPaneOption(pane, "@factory_token", token); err != nil {
 		return pane, err
 	}
 	return pane, e.FitParking(l)
-}
-
-type StagePane struct {
-	Repo  string
-	Slug  string
-	Role  string
-	Token string
-	Dir   string
-}
-
-func StageParkName(slug, role string) string {
-	return StageParking + slug + "-" + role
 }
 
 func (e *Engine) NewStagePane(l Layout, s StagePane) (string, error) {
-	env := []string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}
-	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: StageParkName(s.Slug, s.Role), Dir: s.Dir, Env: env, Command: loginShell()})
+	pane, err := e.panes().NewStagePane(s)
 	if err != nil {
-		return "", err
-	}
-	options := [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}}
-	for _, o := range options {
-		if err := e.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
-			return pane, err
-		}
+		return pane, err
 	}
 	return pane, e.FitParking(l)
 }
 
-func stagePaneOf(panes []tmux.Pane, f factory.Factory, role, token string) (tmux.Pane, bool) {
-	for _, p := range panes {
-		if p.Repo == f.Repo && p.StageOf == f.Slug && p.Stage == role && p.Token == token {
-			return p, true
-		}
-	}
-	return tmux.Pane{}, false
-}
+func (e *Engine) Type(pane, text string) error { return e.panes().Type(pane, text) }
 
 func (e *Engine) KillStages(repo, slug, role string) error {
 	panes, err := e.TM.Panes()
@@ -264,35 +205,6 @@ func (e *Engine) killStage(p tmux.Pane) error {
 	return e.TM.KillWindow(p.WindowID)
 }
 
-func InHubWindow(panes []tmux.Pane, p tmux.Pane) bool {
-	for _, q := range panes {
-		if q.UI == "selector" && q.WindowID == p.WindowID {
-			return true
-		}
-	}
-	return false
-}
-
-func loginShell() string {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-	return shell + " -l"
-}
-
-func (e *Engine) Type(pane, text string) error {
-	if err := e.TM.Paste(pane, bufferName(pane), text); err != nil {
-		return err
-	}
-	time.Sleep(pasteSettle)
-	return e.TM.SendKeys(pane, "Enter")
-}
-
-func bufferName(pane string) string {
-	return "factory-" + strings.TrimPrefix(pane, "%")
-}
-
 func (e *Engine) Pause(l *Layout, repo, slug string) error {
 	if err := e.hideStageOf(l, repo, slug); err != nil {
 		return err
@@ -304,7 +216,7 @@ func (e *Engine) Pause(l *Layout, repo, slug string) error {
 	if err != nil {
 		return err
 	}
-	pane, ok := FactoryPane(panes, repo, slug)
+	pane, ok := host.FactoryPane(panes, repo, slug)
 	if !ok {
 		return nil
 	}

@@ -32,6 +32,8 @@ func run(args []string) int {
 		return 0
 	case "hook":
 		return runHook(os.Stdin)
+	case "host":
+		return runHost(args[1:])
 	case "hub":
 		return runHub(args[1:])
 	case "view":
@@ -127,6 +129,9 @@ commands:
               --version prints only the local version
   update      install the latest release, then run its bootstrap
   hub         run the hub in the factory tmux session
+  host run    run the factories without the hub, in a window of the factory
+              tmux session that keeps going after you disconnect (on a
+              server)
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a hook event (run by Claude Code, Codex and OpenCode)

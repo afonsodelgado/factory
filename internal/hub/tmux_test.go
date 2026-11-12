@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -117,7 +118,7 @@ func TestParkedPaneKeepsTheSlotSizeAcrossSwaps(t *testing.T) {
 	if err := e.Select(&l, viewer); err != nil {
 		t.Fatal(err)
 	}
-	if name := pane(t, e.TM, created).WindowName; name != ParkName("eng-1-x") {
+	if name := pane(t, e.TM, created).WindowName; name != host.ParkName("eng-1-x") {
 		t.Errorf("deselected factory pane is in %q, want its own parking window", name)
 	}
 	sized("parked again", created)
@@ -172,7 +173,7 @@ func TestSplitsStayWithTheFactoryTheyWereMadeIn(t *testing.T) {
 	}
 	framed(t, e, l, "with b shown")
 	for _, id := range split.cell.Leaves() {
-		if name := pane(t, e.TM, id).WindowName; name != ParkName("a") {
+		if name := pane(t, e.TM, id).WindowName; name != host.ParkName("a") {
 			t.Errorf("a's pane %s is in %q, want it parked with a", id, name)
 		}
 	}
@@ -318,7 +319,7 @@ func TestInPlaceHubStaysInItsPaneAndLeavesNothingBehind(t *testing.T) {
 	if len(left) != 2 || pane(t, tm, self).UI != "" {
 		t.Errorf("window holds %v (selector tag %q) after quitting, want only the editor and the user's own pane, untagged", left, pane(t, tm, self).UI)
 	}
-	if parked := pane(t, tm, created); parked.Session != "factory" || parked.WindowName != ParkName("eng-3-z") {
+	if parked := pane(t, tm, created); parked.Session != "factory" || parked.WindowName != host.ParkName("eng-3-z") {
 		t.Errorf("factory pane = %+v, want it parked in the factory session so it keeps running after the hub quits", parked)
 	}
 	if lines, _ := tm.LocalWindowOption(l.Window, "pane-border-lines"); lines != "" {
@@ -358,8 +359,8 @@ func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, ok := FactoryPane(panes, repo, "eng-2-y")
-	if !ok || p.WindowName != ParkName("eng-2-y") || p.Session != "factory" {
+	p, ok := host.FactoryPane(panes, repo, "eng-2-y")
+	if !ok || p.WindowName != host.ParkName("eng-2-y") || p.Session != "factory" {
 		t.Errorf("adopted pane = %+v, want it tagged to %s, whose worktree it runs in, and parked: the first repo with the slug would get a second claude on wake", p, repo)
 	}
 }
@@ -367,7 +368,7 @@ func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 func TestDeliverTypesIntoAnIdlePaneAndRefusesCopyMode(t *testing.T) {
 	e, l := hubFixture(t)
 	out := filepath.Join(t.TempDir(), "typed")
-	id, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("eng-3-z"), Command: "exec cat > " + out})
+	id, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: host.ParkName("eng-3-z"), Command: "exec cat > " + out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestDeliverTypesIntoAnIdlePaneAndRefusesCopyMode(t *testing.T) {
 func TestWakeTypesNothingIntoAPaneThatLeftItsShell(t *testing.T) {
 	e, l := hubFixture(t)
 	out := filepath.Join(t.TempDir(), "typed")
-	id, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("eng-3-z"), Command: "exec cat > " + out})
+	id, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: host.ParkName("eng-3-z"), Command: "exec cat > " + out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +459,7 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 	if _, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "exited", Dir: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
-	running, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: ParkName("running"), Command: "exec sleep 600"})
+	running, err := e.TM.NewWindow(tmux.Window{Session: "factory", Name: host.ParkName("running"), Command: "exec sleep 600"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +475,7 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 	cases := map[string]factory.Status{"exited": factory.Exited, "running": factory.Running, "gone": factory.Gone}
 	for slug, want := range cases {
 		f := factory.Factory{Repo: "/repo", Slug: slug, State: &state.State{Stage: "implement"}}
-		live := factory.Live{Pane: LivePane(panes, f), Hook: &state.HookFile{Main: &state.HookEvent{Event: "PreToolUse", At: time.Now()}}}
+		live := factory.Live{Pane: host.LivePane(panes, f), Hook: &state.HookFile{Main: &state.HookEvent{Event: "PreToolUse", At: time.Now()}}}
 		if got := factory.StatusOf(f, live, time.Now(), time.Hour); got != want {
 			t.Errorf("%s: status = %s, want %s", slug, got, want)
 		}
@@ -501,7 +502,7 @@ func TestPausingTheShownFactoryKeepsTheHubWhenItsViewerIsGone(t *testing.T) {
 	if _, ok := byID(panes, l.Selector); !ok {
 		t.Fatal("pausing or deleting the shown factory killed the hub window, because no viewer was left to swap back into the slot")
 	}
-	if _, ok := FactoryPane(panes, "/repo", "x"); ok {
+	if _, ok := host.FactoryPane(panes, "/repo", "x"); ok {
 		t.Error("the factory pane survived the pause")
 	}
 }

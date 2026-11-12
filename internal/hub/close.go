@@ -1,89 +1,15 @@
 package hub
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"slices"
-	"strings"
-	"syscall"
-
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-func ofFactory(p tmux.Pane, repo, slug string) bool {
-	return p.Repo == repo && (p.Slug == slug || p.StageOf == slug)
-}
-
+func ofFactory(p tmux.Pane, repo, slug string) bool { return host.OfFactory(p, repo, slug) }
 func FactoryProcesses(panes []tmux.Pane, repo, slug string) []int {
-	var roots []int
-	for _, p := range panes {
-		if ofFactory(p, repo, slug) && p.PID > 0 {
-			roots = append(roots, p.PID)
-		}
-	}
-	return descendants(roots)
+	return host.FactoryProcesses(panes, repo, slug)
 }
-
-func descendants(roots []int) []int {
-	out, err := exec.Command("ps", "-A", "-o", "pid=,ppid=").Output()
-	if err != nil || len(roots) == 0 {
-		return nil
-	}
-	parents, children := map[int]int{}, map[int][]int{}
-	for _, line := range strings.Split(string(out), "\n") {
-		var pid, ppid int
-		if _, err := fmt.Sscan(line, &pid, &ppid); err == nil {
-			parents[pid] = ppid
-			children[ppid] = append(children[ppid], pid)
-		}
-	}
-	spared := map[int]bool{}
-	for pid := os.Getpid(); pid > 1 && !spared[pid]; pid = parents[pid] {
-		spared[pid] = true
-	}
-	var found []int
-	queue := slices.Clone(roots)
-	for len(queue) > 0 {
-		pid := queue[0]
-		queue = queue[1:]
-		for _, child := range children[pid] {
-			if !spared[child] {
-				found = append(found, child)
-			}
-		}
-		queue = append(queue, children[pid]...)
-	}
-	return found
-}
-
-func Terminate(pids []int) {
-	for _, pid := range pids {
-		syscall.Kill(pid, syscall.SIGTERM)
-	}
-}
-
+func Terminate(pids []int) { host.Terminate(pids) }
 func CloseFactoryPanes(tm tmux.Client, repo, slug string) error {
-	panes, err := tm.Panes()
-	if err != nil {
-		return err
-	}
-	strays := FactoryProcesses(panes, repo, slug)
-	closed := map[string]bool{}
-	for _, p := range panes {
-		if !ofFactory(p, repo, slug) || closed[p.WindowID] {
-			continue
-		}
-		if InHubWindow(panes, p) {
-			err = tm.KillPane(p.ID)
-		} else {
-			closed[p.WindowID] = true
-			err = tm.KillWindow(p.WindowID)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	Terminate(strays)
-	return nil
+	return host.CloseFactoryPanes(tm, repo, slug)
 }
