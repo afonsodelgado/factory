@@ -9,8 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -117,7 +115,7 @@ func stage(c stageCall) (string, error) {
 		return "", err
 	}
 	var reply hub.StageReply
-	return reply.Result, client.Mutate(context.Background(), "stage", uuid.NewString(), r, &reply)
+	return reply.Result, client.MutateOnce(context.Background(), "stage", r, &reply)
 }
 
 func ask(r hub.StageRequest) (string, error) {

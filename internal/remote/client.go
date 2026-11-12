@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +15,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
 var ErrUncertain = errors.New("outcome unknown; run the same command again once the remote answers, to see what happened")
+
+var ErrNotSent = errors.New("Nothing was sent")
+
+const pendingLife = 24 * time.Hour
+
+type ServerError struct{ Message string }
+
+func (e *ServerError) Error() string { return e.Message }
 
 type Client struct {
 	Transport
@@ -36,6 +48,7 @@ type Cache struct {
 	Inventory    []Listing     `json:"inventory,omitempty"`
 	Reservations []Reservation `json:"reservations,omitempty"`
 	Forgotten    []string      `json:"forgotten,omitempty"`
+	Pending      []PendingOp   `json:"pending,omitempty"`
 	CheckedAt    time.Time     `json:"checked_at,omitzero"`
 }
 
@@ -44,6 +57,12 @@ type Reservation struct {
 	GitURL string    `json:"git_url"`
 	Op     string    `json:"op"`
 	At     time.Time `json:"at"`
+}
+
+type PendingOp struct {
+	Key string    `json:"key"`
+	Op  string    `json:"op"`
+	At  time.Time `json:"at"`
 }
 
 func (c Cache) Shown() []Listing {
@@ -138,7 +157,7 @@ func (c Client) Read(ctx context.Context, action string, payload, reply any) err
 
 func (c Client) Mutate(ctx context.Context, action, op string, payload, reply any) error {
 	if _, err := c.Hello(ctx); err != nil {
-		return fmt.Errorf("%w. Nothing was sent", err)
+		return fmt.Errorf("%w. %w", err, ErrNotSent)
 	}
 	data, err := c.call(ctx, action, op, payload)
 	var unreachable *TransportError
@@ -149,6 +168,46 @@ func (c Client) Mutate(ctx context.Context, action, op string, payload, reply an
 		return err
 	}
 	return json.Unmarshal(data, reply)
+}
+
+func (c Client) MutateOnce(ctx context.Context, action string, payload, reply any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(append([]byte(action+"\x00"), body...))
+	key := hex.EncodeToString(sum[:])
+	var op string
+	err = UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
+		cache.Pending = slices.DeleteFunc(cache.Pending, func(p PendingOp) bool { return time.Since(p.At) > pendingLife })
+		if i := slices.IndexFunc(cache.Pending, func(p PendingOp) bool { return p.Key == key }); i >= 0 {
+			op = cache.Pending[i].Op
+			return nil
+		}
+		op = uuid.NewString()
+		cache.Pending = append(cache.Pending, PendingOp{Key: key, Op: op, At: time.Now()})
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = c.Mutate(ctx, action, op, payload, reply)
+	if !answered(err) {
+		return err
+	}
+	settled := UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
+		cache.Pending = slices.DeleteFunc(cache.Pending, func(p PendingOp) bool { return p.Key == key })
+		return nil
+	})
+	if err == nil {
+		return settled
+	}
+	return err
+}
+
+func answered(err error) bool {
+	var refused *ServerError
+	return err == nil || (errors.As(err, &refused) && !errors.Is(err, ErrNotSent))
 }
 
 func (c Client) call(ctx context.Context, action, op string, payload any) (json.RawMessage, error) {
@@ -181,7 +240,7 @@ func (c Client) call(ctx context.Context, action, op string, payload any) (json.
 	case Uncertain:
 		return nil, ErrUncertain
 	}
-	return nil, errors.New(reply.Error)
+	return nil, &ServerError{Message: reply.Error}
 }
 
 func firstLine(out []byte) string {

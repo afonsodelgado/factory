@@ -9,8 +9,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
@@ -154,7 +152,7 @@ func (o reviewOwner) ask(r hub.ReviewRequest) (hub.ReviewReply, error) {
 	if r.Action == "threads" {
 		return reply, client.Read(context.Background(), "review", r, &reply)
 	}
-	return reply, client.Mutate(context.Background(), "review", uuid.NewString(), r, &reply)
+	return reply, client.MutateOnce(context.Background(), "review", r, &reply)
 }
 
 func askReview(r hub.ReviewRequest) (hub.ReviewReply, error) {

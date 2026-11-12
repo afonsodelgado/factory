@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/term"
-	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/hub"
@@ -123,7 +122,7 @@ func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out
 		}
 	}
 	var report string
-	err = client.Mutate(ctx, "delete", uuid.NewString(), remote.Target{ID: id}, &report)
+	err = client.MutateOnce(ctx, "delete", remote.Target{ID: id}, &report)
 	fmt.Fprint(out, report)
 	if err != nil {
 		return fail(fmt.Errorf("%s on %s is not fully deleted: %w. Run factory delete --remote %s %s again to finish", id, name, err, name, id))
