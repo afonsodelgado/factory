@@ -19,7 +19,7 @@ type NewFactoryModel struct {
 	Context   NewContext
 	repo      int
 	name      string
-	prompt    string
+	prompt    textEditor
 	pipeline  string
 	chosen    []string
 	overrides map[string]state.AgentSetting
@@ -388,6 +388,8 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.PasteMsg:
 		m.typeText(DecodeKeys(msg.Content))
+	case promptEdited:
+		m.promptEdited(msg)
 	case tea.KeyPressMsg:
 		switch m.step {
 		case 1:
@@ -405,7 +407,7 @@ func (m *NewFactoryModel) typeText(text string) {
 	case 1:
 		m.name += strings.ReplaceAll(text, "\n", " ")
 	case 3:
-		m.prompt += text
+		m.prompt.insert(text)
 	}
 }
 
@@ -469,16 +471,24 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Quit
 	case "ctrl+s":
 		return m.start()
-	case "enter", "ctrl+j":
-		m.prompt += "\n"
-	case "backspace":
-		m.prompt = dropLast(m.prompt)
-	case "ctrl+u":
-		m.prompt = ""
+	case "ctrl+g":
+		return editExternally(m.prompt.text)
 	default:
-		m.prompt += DecodeKeys(msg.Text)
+		m.prompt.key(msg, m.promptWidth())
 	}
 	return nil
+}
+
+func (m *NewFactoryModel) promptEdited(msg promptEdited) {
+	if msg.err != nil {
+		m.problem = fmt.Sprintf("The prompt is unchanged: %s could not edit it (%v).", externalEditor(), msg.err)
+		return
+	}
+	m.prompt.replace(msg.text)
+}
+
+func (m *NewFactoryModel) promptWidth() int {
+	return max(m.width-10, 1)
 }
 
 func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -516,7 +526,7 @@ func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *NewFactoryModel) start() tea.Cmd {
-	if strings.TrimSpace(m.prompt) == "" {
+	if strings.TrimSpace(m.prompt.text) == "" {
 		m.problem = "The prompt is empty. Write at least a sentence about what this factory should do; it won't start without one."
 		return nil
 	}
@@ -525,7 +535,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole]}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole]}
 	return tea.Quit
 }
 
@@ -591,7 +601,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	y++
 	c.Put(1, y, "Factory id", theme.Bright.B())
 	y++
-	drawInput(c, 1, y, w, "", []string{m.name}, true)
+	drawInput(c, 1, y, w, "", []string{m.name + "█"}, true)
 	y += 3
 	for _, l := range m.notice(w) {
 		c.Spans(1, y, l)
@@ -681,31 +691,43 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 		y++
 	}
 	y++
-	var lines []string
-	for i, raw := range strings.Split(m.prompt, "\n") {
-		for j, l := range theme.Wrap(raw, w-8) {
-			number := "   "
-			if j == 0 {
-				number = fmt.Sprintf("%2d ", i+1)
-			}
-			lines = append(lines, number+l)
-		}
-	}
-	room := c.H - y - 5
-	if len(lines) > room && room > 0 {
-		lines = lines[len(lines)-room:]
-	}
-	drawInput(c, 1, y, w, "prompt", lines, true)
-	y += len(lines) + 2
+	y += m.drawPromptInput(c, y, w, max(c.H-y-5, 1)) + 2
 	if m.problem != "" {
 		for _, l := range theme.Wrap("✗ "+m.problem, w) {
 			y++
 			c.Put(1, y, l, theme.FgInk(theme.Red))
 		}
 	}
-	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt, "\n")+1, uniseg.GraphemeClusterCount(m.prompt))
-	c.Put(1, c.H-1, count, theme.Muted)
-	c.Right(c.W-2, c.H-1, "ctrl+s start factory   ctrl+j or ⏎ new line   esc back", theme.Text)
+	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt.text, "\n")+1, uniseg.GraphemeClusterCount(m.prompt.text))
+	hintsStart := c.Right(c.W-2, c.H-1, "ctrl+s start   ⏎ new line   ctrl+g open in editor   esc back", theme.Text)
+	if theme.Width(count)+2 < hintsStart {
+		c.Put(1, c.H-1, count, theme.Muted)
+	}
+}
+
+func (m *NewFactoryModel) drawPromptInput(c *theme.Canvas, y, w, room int) int {
+	e := &m.prompt
+	rows := wrapRows(e.text, m.promptWidth())
+	row, col := e.locate(rows)
+	e.scroll(row, room, len(rows))
+	visible := rows[e.top:min(e.top+room, len(rows))]
+	lines := make([]string, len(visible))
+	for i, r := range visible {
+		number := "   "
+		if r.first {
+			number = fmt.Sprintf("%2d ", r.line+1)
+		}
+		lines[i] = number + e.text[r.start:r.end]
+	}
+	drawInput(c, 1, y, w, "prompt", lines, true)
+	under := " "
+	if e.cursor < rows[row].end {
+		if cluster := e.text[e.cursor:nextGrapheme(e.text, e.cursor)]; theme.Width(cluster) > 0 {
+			under = cluster
+		}
+	}
+	c.Put(6+col, y+1+row-e.top, under, theme.Ink{FG: theme.Black, BG: theme.Hi})
+	return len(lines)
 }
 
 func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
@@ -824,9 +846,6 @@ func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focus
 	}
 	c.Put(x, y, "╭"+head+strings.Repeat("─", max(w-2-theme.Width(head), 0))+"╮", border)
 	for i, l := range lines {
-		if i == len(lines)-1 && focused {
-			l += "█"
-		}
 		c.Put(x, y+1+i, "│ ", border)
 		c.PutMax(x+2, y+1+i, l, theme.Bright, w-4)
 		c.Put(x+w-1, y+1+i, "│", border)

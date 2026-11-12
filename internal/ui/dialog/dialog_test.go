@@ -99,7 +99,7 @@ func TestNewFactorySwitchesRolesToCodexButKeepsQAOnClaude(t *testing.T) {
 	codex := ToolOption{Name: state.ToolCodex, Models: []catalog.Model{{ID: "gpt-5.6-sol", Efforts: []string{"low", "high"}}}}
 	notInstalled := ToolOption{Name: state.ToolOpenCode, Problem: "opencode is not installed."}
 	m := NewFactory(NewContext{Repos: []RepoOption{{Name: "cowork", Path: "/r/cowork"}}, Tools: []ToolOption{{Name: state.ToolClaude, Models: catalog.Claude()}, codex, notInstalled}})
-	m.name, m.prompt, m.step = "csv", "Export contacts.", 2
+	m.name, m.prompt.text, m.step = "csv", "Export contacts.", 2
 	press := func(row int, key string) {
 		m.row = row
 		m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
@@ -154,5 +154,29 @@ func TestCyclingARolesToolPicksThatToolsDefaultModelAndEffort(t *testing.T) {
 		if got := tool(s.stage); got != s.want {
 			t.Errorf("t on %s gave %+v; want %+v: %s", s.stage, got, s.want, s.why)
 		}
+	}
+}
+
+func TestNewFactoryPromptEditsWhereTheCursorIs(t *testing.T) {
+	m := NewFactory(NewContext{Repos: []RepoOption{{Name: "cowork", Path: "/r/cowork"}}})
+	m.name, m.step = "ssrf", 3
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	press := func(keys ...tea.KeyPressMsg) {
+		for _, k := range keys {
+			m.Update(k)
+			m.View()
+		}
+	}
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	m.Update(tea.PasteMsg{Content: "fix it\nreject  private addresses in the webhook fetcher"})
+	press(up)
+	m.Update(tea.PasteMsg{Content: "X"})
+	press(up, tea.KeyPressMsg{Code: tea.KeyBackspace, Mod: tea.ModAlt})
+	m.Update(tea.PasteMsg{Content: "the bug"})
+	m.start()
+
+	r, _ := m.Result()
+	if got, want := r.(NewResult).Prompt, "fix the bug\nreject  private addXresses in the webhook fetcher"; got != want {
+		t.Errorf("editing above a wrapped line gave %q; want %q: the cursor must land where it is drawn, or edits go to the wrong place", got, want)
 	}
 }
