@@ -373,11 +373,15 @@ func (m *Model) remoteAct(it Item, action string, fields map[string]any) error {
 }
 
 func mutate(cfg *state.Config, name, action string, payload, reply any) error {
+	return mutateWithin(cfg, name, action, remoteWait, payload, reply)
+}
+
+func mutateWithin(cfg *state.Config, name, action string, wait time.Duration, payload, reply any) error {
 	client, err := remote.For(cfg, name)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	return client.MutateOnce(ctx, action, payload, reply)
 }

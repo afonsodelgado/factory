@@ -178,6 +178,11 @@ func TestOnlyReportsAndAWalkthroughsStackFilesGoBackToTheServer(t *testing.T) {
 	if err := CheckQAFiles(QAJob{Kind: "qa"}, back.Files); err == nil {
 		t.Fatal("a QA job accepted stack files it never asked for")
 	}
+	write(".claude/qa/huge.png", strings.Repeat("x", qaFileLimit+1))
+	write(job.Result, `{"status": "done", "outputs": ["`+filepath.Join(dir, ".claude/qa/huge.png")+`"]}`)
+	if _, _, err := QAReport(dir, job); err == nil {
+		t.Fatal("an oversized screenshot was sent; the host would drop the connection and the laptop would resend it forever")
+	}
 	forged := NewQAFile(".claude/factory/csv/inbox/forged.json", []byte("{}"))
 	if err := CheckQAFiles(job, []QAFile{forged}); err == nil {
 		t.Fatal("the server accepted a file from the laptop that its supervisor would read as an inbox message")

@@ -220,6 +220,9 @@ func QAReport(dir string, job QAJob) (QAReturn, bool, error) {
 		}
 		r.Files = append(r.Files, NewQAFile(rel, file))
 	}
+	if err := CheckQAFiles(job, r.Files); err != nil {
+		return QAReturn{}, false, err
+	}
 	return r, true, nil
 }
 

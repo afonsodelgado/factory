@@ -22,6 +22,7 @@ import (
 const (
 	qaPrepareWait = 5 * time.Minute
 	qaLaunchGrace = 30 * time.Second
+	qaUploadRate  = 256 << 10
 	laptopStage   = "qa · laptop"
 )
 
@@ -251,10 +252,18 @@ func (m *Model) returnQA(run remote.QARun, report remote.QAReturn) {
 	}
 	m.returning[run.Job.ID] = true
 	cfg := m.Config
-	failure := remote.Failure(report)
+	failure, wait := remote.Failure(report), qaUploadWait(report)
 	m.later = append(m.later, func() tea.Msg {
-		return qaReturnedMsg{run: run, failure: failure, err: mutate(cfg, run.Remote, "qa-return", report, nil)}
+		return qaReturnedMsg{run: run, failure: failure, err: mutateWithin(cfg, run.Remote, "qa-return", wait, report, nil)}
 	})
+}
+
+func qaUploadWait(report remote.QAReturn) time.Duration {
+	size := 0
+	for _, f := range report.Files {
+		size += len(f.Data)
+	}
+	return remoteWait + time.Duration(size/qaUploadRate)*time.Second
 }
 
 func (m *Model) qaReturned(msg qaReturnedMsg) {
