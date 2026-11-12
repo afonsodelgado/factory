@@ -241,6 +241,18 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatalf("first %+v, retry %+v, runs %+v", first, retry, runs)
 		}
 	})
+	t.Run("a create cut short resumes on retry and a finished one is not run again", func(t *testing.T) {
+		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"id":"csv"}`)
+		if err := savePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "create", Data: data, Status: "accepted"}); err != nil {
+			t.Fatal(err)
+		}
+		runs := 0
+		effect := func() Message { runs++; return Message{T: "done"} }
+		first, retry := Journal(dir, op, "create", data, true, effect), Journal(dir, op, "create", data, true, effect)
+		if runs != 1 || first.T != "done" || retry.T != "done" {
+			t.Fatalf("ran the create %d times, replies %+v %+v", runs, first, retry)
+		}
+	})
 	recovered := func(t *testing.T, f fixture, entry QueuedType) (chan string, *Runtime) {
 		t.Helper()
 		calls := make(chan string, 8)

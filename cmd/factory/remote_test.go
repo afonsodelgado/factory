@@ -207,6 +207,7 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	before := gitState(t, src)
 	pwned := filepath.Join(s.root, "pwned")
 	prompt := "Add CSV export $(touch " + pwned + ")"
+	writeFile(t, filepath.Join(s.root, "client", "config", "rules.md"), "Write no comments.")
 
 	out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=create"}, "open", "--remote", "homelab", "csv", "--prompt", prompt)
 	if err == nil || !strings.Contains(out, "outcome unknown") {
@@ -230,6 +231,12 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	}
 	if _, err := os.Stat(pwned); err == nil {
 		t.Fatal("the prompt ran as shell on the server")
+	}
+	if rules := readOr(filepath.Join(s.server, "config", "rules.md")); rules != "Write no comments." {
+		t.Fatalf("the server's stage agents follow %q, not the developer's rules", rules)
+	}
+	if info, err := os.Stat(filepath.Join(s.root, "client", "state", "ssh")); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatal("the ssh control sockets are not in a private directory under FACTORY_STATE_DIR, so runs touch the real machine")
 	}
 
 	private := "https://git.example/acme/private.git"

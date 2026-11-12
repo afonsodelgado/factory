@@ -304,6 +304,10 @@ func createRemote(cfg *state.Config, name string, r hub.OpenRequest, gitRemote s
 	if _, err := state.ReadProfile(repo); err != nil {
 		return fmt.Errorf("%s: %w", state.ProfilePath(repo), err)
 	}
+	rules, err := os.ReadFile(cfg.RulesPath())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	var reservation remote.Reservation
 	err = withCreationLock(cfg, func() error {
 		refreshInventories(cfg)
@@ -331,7 +335,7 @@ func createRemote(cfg *state.Config, name string, r hub.OpenRequest, gitRemote s
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), createWait)
 	defer cancel()
-	create := remote.Create{ID: r.Name, GitURL: gitURL, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, Profile: profile}
+	create := remote.Create{ID: r.Name, GitURL: gitURL, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, Profile: profile, Rules: rules}
 	fmt.Printf("Creating %s on %s: the server clones or fetches %s first, which can take a while.\n", r.Name, name, gitURL)
 	var listing remote.Listing
 	err = client.Mutate(ctx, "create", reservation.Op, create, &listing)

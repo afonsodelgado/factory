@@ -55,6 +55,7 @@ type Create struct {
 	Agents     map[string]state.AgentSetting `json:"agents,omitempty"`
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 	Profile    []byte                        `json:"profile,omitempty"`
+	Rules      []byte                        `json:"rules,omitempty"`
 }
 
 type Listing struct {

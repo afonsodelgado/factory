@@ -22,10 +22,14 @@ type Operation struct {
 }
 
 func (m *Runtime) Execute(id, action string, data json.RawMessage, effect func() Message) Message {
+	return Journal(m.Config.StateDir, id, action, data, false, effect)
+}
+
+func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, effect func() Message) Message {
 	if _, err := uuid.Parse(id); err != nil {
 		return Message{T: "error", Error: "operation id must be a UUID"}
 	}
-	path := filepath.Join(m.Config.StateDir, "operations", id+".json")
+	path := filepath.Join(stateDir, "operations", id+".json")
 	var op Operation
 	previous, err := os.ReadFile(path)
 	switch {
@@ -36,10 +40,12 @@ func (m *Runtime) Execute(id, action string, data json.RawMessage, effect func()
 		if op.Action != action || !sameJSON(op.Data, data) {
 			return Message{T: "error", Error: "operation id already belongs to a different request"}
 		}
-		if op.Status == "accepted" {
+		if op.Status == "accepted" && !resumable {
 			return Message{T: "uncertain", Error: "outcome unknown; inspect the accepted operation before retrying"}
 		}
-		return op.Reply
+		if op.Status != "accepted" {
+			return op.Reply
+		}
 	case !errors.Is(err, os.ErrNotExist):
 		return Message{T: "error", Error: err.Error()}
 	}

@@ -69,11 +69,16 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		if err := json.Unmarshal(req.Data, &c); err != nil {
 			return nil, remote.Rejected, err
 		}
-		listing, err := createHere(cfg, c)
-		if err != nil {
-			return nil, remote.Failed, err
+		if req.Op == "" {
+			return nil, remote.Rejected, errors.New("a create needs an operation id")
 		}
-		return completed(listing)
+		return settled(host.Journal(cfg.StateDir, req.Op, req.Action, req.Data, true, func() host.Message {
+			listing, err := createHere(cfg, c)
+			if err != nil {
+				return host.Message{T: "error", Error: err.Error()}
+			}
+			return host.Message{T: "done", Data: mustJSON(listing)}
+		}))
 	case "result":
 		var path string
 		if err := json.Unmarshal(req.Data, &path); err != nil {
@@ -135,9 +140,15 @@ func forward(cfg *state.Config, kind, op string, data json.RawMessage) (json.Raw
 		return nil, remote.Uncertain, err
 	case err != nil:
 		return nil, remote.Failed, err
-	case reply.T == "done":
+	}
+	return settled(reply)
+}
+
+func settled(reply host.Message) (json.RawMessage, remote.Status, error) {
+	switch reply.T {
+	case "done":
 		return reply.Data, remote.Completed, nil
-	case reply.T == "uncertain":
+	case "uncertain":
 		return nil, remote.Uncertain, errors.New(reply.Error)
 	}
 	return nil, remote.Failed, errors.New(reply.Error)
@@ -189,6 +200,11 @@ func createHere(cfg *state.Config, c remote.Create) (remote.Listing, error) {
 	}
 	if err := writeProfile(clone, c.Profile); err != nil {
 		return remote.Listing{}, err
+	}
+	if len(c.Rules) > 0 {
+		if err := state.WriteFileAtomic(cfg.RulesPath(), c.Rules); err != nil {
+			return remote.Listing{}, err
+		}
 	}
 	if _, err := install.Init(clone, cfg.StateDir); err != nil {
 		return remote.Listing{}, err

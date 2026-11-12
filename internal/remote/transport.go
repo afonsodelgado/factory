@@ -61,15 +61,30 @@ func (t Transport) Endpoint() string {
 
 const unreachable = 255
 
-func controlDir() string { return filepath.Join("/tmp", "factory-ssh-"+strconv.Itoa(os.Getuid())) }
+const (
+	socketPathLimit = 100
+	sshBindSuffix   = len(".0123456789abcdef")
+	socketName      = 16
+)
+
+func (t Transport) controlDir() string {
+	dir := filepath.Join(t.StateDir, "ssh")
+	if len(dir)+1+socketName+sshBindSuffix <= socketPathLimit {
+		return dir
+	}
+	return filepath.Join("/tmp", "factory-ssh-"+strconv.Itoa(os.Getuid()))
+}
 
 func (t Transport) controlPath() string {
 	sum := sha256.Sum256([]byte(t.StateDir + "\x00" + t.Endpoint() + "\x00" + t.Remote.Identity))
-	return filepath.Join(controlDir(), hex.EncodeToString(sum[:8]))
+	return filepath.Join(t.controlDir(), hex.EncodeToString(sum[:socketName/2]))
 }
 
-func privateControlDir() error {
-	dir := controlDir()
+func (t Transport) privateControlDir() error {
+	dir := t.controlDir()
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return err
+	}
 	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
@@ -114,7 +129,7 @@ func (t Transport) Args(tty bool, command []string) []string {
 }
 
 func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]byte, error) {
-	if err := privateControlDir(); err != nil {
+	if err := t.privateControlDir(); err != nil {
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, "ssh", t.Args(false, command)...)
