@@ -25,21 +25,23 @@ import (
 )
 
 var popupSizes = map[string][2]int{
-	"new":     {88, 30},
-	"switch":  {112, 14},
-	"pause":   {68, 9},
-	"archive": {80, 12},
-	"delete":  {84, 14},
-	"keys":    {124, 17},
+	"new":      {88, 30},
+	"settings": {88, 30},
+	"switch":   {112, 14},
+	"pause":    {68, 9},
+	"archive":  {80, 12},
+	"delete":   {84, 14},
+	"keys":     {124, 17},
 }
 
 var popupTitles = map[string]string{
-	"new":     " + New factory ",
-	"switch":  " ⌕ Factories ",
-	"pause":   " ‖ Pause ",
-	"archive": " ▭ Archive ",
-	"delete":  " ✕ Delete ",
-	"keys":    " Keys ",
+	"new":      " + New factory ",
+	"settings": " " + dialog.SettingsTitle() + " ",
+	"switch":   " ⌕ Factories ",
+	"pause":    " ‖ Pause ",
+	"archive":  " ▭ Archive ",
+	"delete":   " ✕ Delete ",
+	"keys":     " Keys ",
 }
 
 type dialogClosedMsg struct {
@@ -48,7 +50,7 @@ type dialogClosedMsg struct {
 }
 
 func (m *Model) openDialog(kind string, context any) tea.Cmd {
-	if m.Engine == nil || m.DialogCommand == nil {
+	if m.dialog != "" || m.Engine == nil || m.DialogCommand == nil {
 		return nil
 	}
 	data, err := json.Marshal(context)
@@ -79,14 +81,42 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 	}
 }
 
-func (m *Model) dialogClosed(msg dialogClosedMsg) {
-	if m.dialog == msg.kind {
-		m.dialog = ""
-		m.focus = footer.Factories
+type dialogTransition struct {
+	settings *dialog.SettingsContext
+	back     *dialog.SettingsResult
+}
+
+func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
+	if m.dialog != msg.kind {
+		return nil
 	}
+	m.dialog = ""
+	m.focus = footer.Factories
+	delete(m.dialogs, msg.kind)
+	next := m.dialogNext
+	m.dialogNext = nil
 	if msg.err != nil {
 		m.notice = problem(msg.err.Error())
+		return nil
 	}
+	if next == nil {
+		return nil
+	}
+	if next.settings != nil {
+		return m.openDialog("settings", *next.settings)
+	}
+	context := m.newContext()
+	context.Here = false
+	for i, repo := range context.Repos {
+		if repo.Path == next.back.Repo {
+			context.Repo, context.Here = i, repo.Path == m.here
+			break
+		}
+	}
+	if next.back.Saved {
+		context.Notice = "✓ Saved repo settings."
+	}
+	return m.openDialog("new", context)
 }
 
 func (m *Model) dialogHello(e Event) {
@@ -102,13 +132,24 @@ func (m *Model) dialogHello(e Event) {
 func (m *Model) dialogResult(e Event) tea.Cmd {
 	kind := strings.TrimPrefix(e.Pane, "dialog:")
 	delete(m.dialogs, kind)
+	m.dialogNext = nil
 	var err error
 	var cmd tea.Cmd
 	switch kind {
 	case "new":
 		var r dialog.NewResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
-			cmd, err = m.newResult(r)
+			if r.Settings != nil {
+				m.addRepo(RepoRequest{Repo: r.Settings.Repo})
+				m.dialogNext = &dialogTransition{settings: r.Settings}
+			} else {
+				cmd, err = m.newResult(r)
+			}
+		}
+	case "settings":
+		var r dialog.SettingsResult
+		if err = json.Unmarshal(e.Data, &r); err == nil {
+			m.dialogNext = &dialogTransition{back: &r}
 		}
 	case "switch":
 		var r dialog.KeyResult
@@ -136,12 +177,12 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		reply = Message{T: "error", Error: err.Error()}
 		m.notice = problem(err.Error())
 	}
-	e.From.Send(reply)
+	e.respond(reply)
 	return tea.Batch(cmd, m.load())
 }
 
 func (m *Model) newContext() dialog.NewContext {
-	c := dialog.NewContext{Tools: m.toolOptions()}
+	c := dialog.NewContext{Tools: m.toolOptions(), StateDir: m.Config.StateDir}
 	selectedRepo := m.here
 	if it, ok := m.selectedItem(); ok && !slices.Contains(m.Config.Repos, m.here) {
 		selectedRepo = it.Factory.Repo

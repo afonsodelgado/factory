@@ -86,7 +86,7 @@ Each repo has `.factory/config.yml` (template: `templates/factory.yml`). You and
 | `agents` | optional; override the global agent settings for this repo (see "Agent tools and models") |
 | `supervisor`, `stalled_after`, `claude.remote_control`, `codex.writable_dirs` | optional; override the global config for this repo. The factory app reads them, not you |
 
-When it is missing everywhere, stop at preflight and ask the user to run `factory init <main checkout>`.
+When it is missing everywhere, stop at preflight and ask the user to add the repo from the hub: press n, then + add a repo…, and enter the main checkout.
 
 ## Commands
 
