@@ -31,6 +31,7 @@ var pushKinds = map[string]string{
 	"cap":        "cap tripped",
 	"failure":    "failure",
 	"permission": "permission",
+	"qa":         "QA waits for laptop",
 	"test":       "test",
 }
 

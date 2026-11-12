@@ -1,8 +1,10 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
@@ -199,6 +202,186 @@ func TestRemoteAnswerKeepsTheDraftWhenTheServerIsAwayOrSilent(t *testing.T) {
 	m.answered(answeredMsg{mark: mark, err: remote.ErrUncertain})
 	if _, still := m.panel.sent[key]; still || !strings.Contains(m.panel.refused[key], "Outcome unknown") {
 		t.Fatalf("a lost reply reads %q; want outcome unknown, never a claim that it was sent or not", m.panel.refused[key])
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestLaptopQARequiresOneExplicitStartPerJob(t *testing.T) {
+	root := t.TempDir()
+	url, origin := "https://git.example/acme/cowork.git", filepath.Join(root, "origin.git")
+	t.Setenv("HOME", root)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	writeTestFile(t, filepath.Join(root, ".gitconfig"), "[user]\n\tname = t\n\temail = t@example.com\n[url \""+origin+"\"]\n\tinsteadOf = "+url+"\n")
+	writeTestFile(t, filepath.Join(root, "bin", "claude"), "#!/bin/sh\nexec sleep 600\n")
+	os.Chmod(filepath.Join(root, "bin", "claude"), 0o755)
+	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	server, laptop := filepath.Join(root, "server"), filepath.Join(root, "laptop")
+	gitIn(t, root, "init", "-q", "--bare", "-b", "main", origin)
+	gitIn(t, root, "init", "-q", "-b", "main", server)
+	gitIn(t, server, "commit", "-q", "--allow-empty", "-m", "first")
+	gitIn(t, server, "remote", "add", "origin", url)
+	gitIn(t, server, "checkout", "-q", "-b", "rate-limits")
+	gitIn(t, server, "push", "-q", "origin", "main", "rate-limits")
+	gitIn(t, root, "clone", "-q", url, laptop)
+
+	h := host.New(host.Runtime{Config: &state.Config{StateDir: filepath.Join(root, "server-state")}, Now: func() time.Time { return remoteNow }})
+	f := factory.Factory{Repo: server, Slug: "rate-limits", ID: "rate-limits", Worktree: server, Dir: filepath.Join(server, ".claude", "factory", "rate-limits"), Entry: &state.Entry{Incarnation: "inc-rate-limits"}, State: &state.State{ID: "rate-limits"}}
+	runs, _ := state.LoadStageRuns(filepath.Join(root, "runs.json"))
+	hold := func(stage string) remote.QAJob {
+		t.Helper()
+		f.State.Stage = stage
+		it := host.Item{Factory: f}
+		run := h.NewRun(it, runs, "qa", state.AgentSetting{Tool: "claude", Model: "opus"}, uuid.NewString())
+		if _, err := h.HoldQA(it, runs, run, "Test it. The brief is "+filepath.Join(f.Dir, "brief.md")+"."); err != nil {
+			t.Fatal(err)
+		}
+		jobs := h.QAJobs()
+		return jobs[len(jobs)-1]
+	}
+	writeTestFile(t, filepath.Join(f.Dir, "brief.md"), "csv brief")
+
+	m := mixedModel(t)
+	m.Config.Repos = append(m.Config.Repos, laptop)
+	key := "remote:homelab/s-1/inc-rate-limits"
+	arrive := func(job remote.QAJob) {
+		view := m.links["homelab"].view
+		w := wired("rate-limits", f.State.Stage, factory.NeedsYou)
+		public := job.Public()
+		w.QA = &public
+		view.Factories = []remote.Factory{w}
+		m.remoteArrived(remoteMsg{name: "homelab", view: view, server: "s-1"})
+	}
+	startItem := func() string {
+		it, _ := m.snap.Find(key)
+		for _, item := range m.qaItems(it) {
+			return item.Action
+		}
+		return ""
+	}
+	enter := func() {
+		m.choose(key)
+		m.panel.tab = panel.Attention
+		m.panelKey("enter", "")
+	}
+
+	first := hold("qa")
+	arrive(first)
+	if len(m.later) != 0 || startItem() != "⏎ Start QA on this laptop" {
+		t.Fatalf("connecting queued %d calls and shows %q; want QA held behind its start item until ⏎", len(m.later), startItem())
+	}
+	m.links["homelab"].ok = false
+	enter()
+	if len(m.later) != 0 || !strings.Contains(m.notice.text, "Nothing is queued") {
+		t.Fatalf("⏎ while disconnected queued %d calls and said %q; want a refusal that sends nothing later", len(m.later), m.notice.text)
+	}
+	m.links["homelab"].ok = true
+	enter()
+	enter()
+	pending, claiming := m.claiming[first.ID]
+	if len(m.later) != 1 || !claiming || startItem() != "starting…" {
+		t.Fatalf("two ⏎ queued %d claims; want exactly one while the first is pending", len(m.later))
+	}
+
+	claim := func(run remote.QARun, runner string) remote.QARun {
+		t.Helper()
+		if err := remote.CheckOutQA(context.Background(), run.Repo, run.Dir, run.Job); err != nil {
+			t.Fatal(err)
+		}
+		job, err := h.ClaimQA(remote.QAClaim{Job: run.Job.ID, Runner: runner})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run.Job = job
+		if err := remote.WriteQAInputs(run.Dir, job); err != nil {
+			t.Fatal(err)
+		}
+		m.qaClaimed(qaClaimedMsg{run: run})
+		return run
+	}
+	run := claim(pending, m.runner())
+	if again, err := h.ClaimQA(remote.QAClaim{Job: first.ID, Runner: m.runner()}); err != nil || again.Token != run.Job.Token {
+		t.Fatalf("a repeated claim from this laptop got %v; want the same authorization back", err)
+	}
+	if _, err := h.ClaimQA(remote.QAClaim{Job: first.ID, Runner: "another-laptop"}); err == nil {
+		t.Fatal("a second laptop claimed a job this one runs")
+	}
+	if head := gitIn(t, run.Dir, "rev-parse", "HEAD"); head != first.SHA || gitIn(t, laptop, "branch", "--show-current") != "main" {
+		t.Fatalf("the QA worktree is at %s; want the held commit %s, with the laptop checkout left on main", head, first.SHA)
+	}
+	if brief, _ := os.ReadFile(filepath.Join(run.Dir, ".claude", "factory", "rate-limits", "brief.md")); string(brief) != "csv brief" {
+		t.Fatalf("the brief reached the laptop as %q", brief)
+	}
+
+	claimed := run.Job
+	m.links["homelab"].ok = false
+	arrive(claimed)
+	if it, _ := m.snap.Find(key); startItem() != "" || len(m.later) != 1 || m.row(it).Stage != laptopStage {
+		t.Fatalf("a reconnect shows %q and queued %d calls; want the running job kept as qa · laptop with no new start", startItem(), len(m.later)-1)
+	}
+
+	report := filepath.Join(run.Dir, ".claude", "qa", "rate-limits-report.md")
+	writeTestFile(t, report, "no findings")
+	writeTestFile(t, filepath.Join(run.Dir, run.Job.Result), `{"status":"done","outputs":["`+report+`"]}`)
+	arrive(claimed)
+	back, ready, err := remote.QAReport(run.Dir, run.Job)
+	if len(m.later) != 2 || !ready || err != nil {
+		t.Fatalf("a finished run queued %d returns (%v)", len(m.later)-1, err)
+	}
+	stale := back
+	stale.Token = "forged"
+	if h.ReturnQA(stale) == nil {
+		t.Fatal("the server accepted a report with the wrong token")
+	}
+	stale = back
+	stale.SHA = "0000000"
+	if h.ReturnQA(stale) == nil {
+		t.Fatal("the server accepted a report for another commit")
+	}
+	for range 2 {
+		if err := h.ReturnQA(back); err != nil {
+			t.Fatalf("returning the report (again, after a lost reply): %v", err)
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(server, ".claude", "qa", "rate-limits-report.md")); string(data) != "no findings" {
+		t.Fatalf("the server's report reads %q", data)
+	}
+	if result, _ := os.ReadFile(filepath.Join(server, run.Job.Result)); !strings.Contains(string(result), filepath.Join(server, ".claude", "qa")) {
+		t.Fatalf("the published result %s still names laptop paths", result)
+	}
+	m.qaReturned(qaReturnedMsg{run: run})
+
+	recheck := hold("qa_fixes")
+	arrive(recheck)
+	if len(m.later) != 3 || startItem() != "⏎ Start re-check" {
+		t.Fatalf("a new re-check queued %d calls and shows %q; want it to wait for its own ⏎", len(m.later)-3, startItem())
+	}
+	enter()
+	run = claim(m.claiming[recheck.ID], m.runner())
+	walkthrough := hold("walkthrough")
+	if h.ReturnQA(remote.FailedQA(run.Job, "late")) == nil {
+		t.Fatal("a cancelled job's report was accepted")
+	}
+	arrive(walkthrough)
+	if _, still := m.qaRunOf(key); still || startItem() != "⏎ Start walkthrough" {
+		t.Fatalf("after the server replaced the re-check the laptop still runs it, or shows %q", startItem())
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

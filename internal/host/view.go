@@ -71,6 +71,10 @@ func (m *Runtime) wire(it Item) remote.Factory {
 	if it.Stage != nil {
 		w.Stage = &remote.Stage{Run: it.Stage.Run, Pane: wirePane(it.Stage.Pane)}
 	}
+	if it.QA != nil {
+		job := it.QA.Public()
+		w.QA = &job
+	}
 	if m.Config.StateDir != "" {
 		logged, _ := state.ReadActivity(state.ActivityPath(m.Config.ActivityDir(), f.Repo, f.Slug))
 		w.Activity = logged[max(0, len(logged)-activityKept):]

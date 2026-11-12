@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -155,7 +156,7 @@ func misroutedIn(s sentMark, submits []state.HookEvent) bool {
 }
 
 func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled) {
-	for _, item := range attentionItems(it, m.snap.At, m.threadCounter(it.Factory)) {
+	for _, item := range slices.Concat(attentionItems(it, m.snap.At, m.threadCounter(it.Factory)), m.qaItems(it)) {
 		mark, sent := m.panel.sent[draftKey(it.Factory, item.ID)]
 		if item.ID == "" || !sent {
 			shown = append(shown, item)
@@ -724,6 +725,8 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	switch {
 	case hasItem && item.Kind == "permission" && key == "enter":
 		m.focusSession()
+	case hasItem && item.Kind == "qa" && key == "enter":
+		m.startQA(it)
 	case !hasItem && key == "enter":
 		m.nextNeedingYou()
 	}

@@ -34,7 +34,7 @@ doors to the same action that may not share the gate.
 
 ## Setup
 The QA mode from the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`), and what the environment needs: flags,
-migrations, seed data, principals, stub tools, terminal sizes, environment variables.
+migrations, seed data, principals, stub tools, terminal sizes, environment variables. For a factory on a server with browser QA, QA runs on the developer's laptop from a fresh worktree of the pushed commit, so name every untracked file or secret the stack needs.
 
 ## Out of scope
 Known gaps deliberately left for later, so they aren't reported as bugs.

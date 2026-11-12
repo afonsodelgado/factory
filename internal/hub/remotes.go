@@ -220,6 +220,8 @@ func (m *Model) remoteArrived(msg remoteMsg) tea.Cmd {
 	}
 	m.refresh()
 	m.heard(msg.name, msg.server, msg.events)
+	m.checkouts = nil
+	m.tendQA(msg.name)
 	if back {
 		return tea.Batch(m.restoreTunnels(msg.name), m.settleOpens(msg.name))
 	}
@@ -315,6 +317,7 @@ func remoteItem(name string, l *link, w remote.Factory) Item {
 	if w.Stage != nil {
 		it.Stage = &host.StageView{Run: w.Stage.Run}
 	}
+	it.QA = w.QA
 	return it
 }
 
@@ -438,6 +441,9 @@ func (m *Model) remoteTargets(it Item) (string, string) {
 		return target, ""
 	}
 	roomForTwo := m.window[0] == 0 || m.window[0] > NarrowAt
+	if qa, here := m.laptopQAPane(it.Factory.Key()); here && roomForTwo {
+		return p.ID, qa
+	}
 	if w.Stage == nil || w.Stage.Pane == nil || !roomForTwo {
 		return p.ID, ""
 	}
@@ -538,7 +544,7 @@ func (m *Model) dropProxies() {
 		return
 	}
 	for _, p := range m.snap.Panes {
-		if !strings.HasPrefix(p.Repo, "remote:") {
+		if !strings.HasPrefix(p.Repo, "remote:") || m.ranHere(p.Token) {
 			continue
 		}
 		if _, listed := m.snap.Find(p.Repo); !listed {

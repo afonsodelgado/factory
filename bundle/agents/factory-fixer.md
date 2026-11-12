@@ -37,6 +37,8 @@ Each `review-<id>-<n> comments:` batch lists threads with the page URL, the elem
 2. A question: answer it from the code without changing anything.
 3. Answer the thread with `factory review reply`, resolving it when the change is in.
 
+When the factory runs on a server and the stack on the developer's laptop, that stack does not reload your fixes: push them, and say in each reply that the next walkthrough start shows the change.
+
 After each batch, run the focused checks, commit with `commit-and-pr` conventions, push the layer, and add a line per change to the PR description. Never restart or stop the stack: its window belongs to the developer.
 
 ## Test-gap mode

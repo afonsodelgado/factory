@@ -31,6 +31,7 @@ var kindLook = map[string]struct {
 	"cap":        {"cap", theme.FgInk(theme.Yellow), "cap tripped"},
 	"failure":    {"failure", theme.FgInk(theme.Red), "failure"},
 	"permission": {"perm", theme.FgInk(theme.Orange), "permission"},
+	"qa":         {"remote", theme.FgInk(theme.Cyan), "laptop QA"},
 	"unreadable": {"warn", theme.FgInk(theme.Red), "unreadable"},
 }
 
