@@ -822,7 +822,8 @@ func (m *Model) focusSession() {
 	if !ok || m.Engine == nil {
 		return
 	}
-	if it.Pane == nil {
+	proxied := it.Factory.Remote != nil && m.Layout.Slot != m.slotViewer()
+	if it.Pane == nil && !proxied {
 		m.notice = problem(noSessionToEnter(it))
 		return
 	}

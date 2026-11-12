@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
@@ -413,6 +414,33 @@ func TestRemoteAttachKeepsPaneIdentityAndAgentAlive(t *testing.T) {
 	if alive := serverTmux("display-message", "-p", "-t", csvPane.ID, "#{pane_dead}"); alive != "0" {
 		t.Fatalf("closing the proxy left csv's pane %q; want the agent still running", alive)
 	}
+
+	act := func(action string, fields map[string]any) {
+		t.Helper()
+		payload := map[string]any{"id": "csv", "incarnation": csv.Incarnation}
+		maps.Copy(payload, fields)
+		if err := homelab.Mutate(context.Background(), action, uuid.NewString(), payload, nil); err != nil {
+			t.Fatalf("%s on homelab: %v", action, err)
+		}
+	}
+	windows := func() string { return serverTmux("list-windows", "-t", "=factory", "-F", "#{window_name}") }
+	act("pause", nil)
+	waitFor(t, "pause to close csv's window on homelab", func() bool { return !strings.Contains(windows(), "p-csv") })
+	archived := func() bool {
+		var view remote.View
+		homelab.Read(context.Background(), "view", nil, &view)
+		i := slices.IndexFunc(view.Factories, func(f remote.Factory) bool { return f.ID == "csv" })
+		return i >= 0 && view.Factories[i].Entry != nil && view.Factories[i].Entry.Archived
+	}
+	act("archive", map[string]any{"Remove": false})
+	waitFor(t, "archive to reach homelab", archived)
+	act("unarchive", nil)
+	waitFor(t, "unarchive to reach homelab", func() bool { return !archived() })
+	if err := os.MkdirAll(csv.Worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	act("wake", nil)
+	waitFor(t, "wake to reopen csv on homelab", func() bool { return strings.Contains(windows(), "p-csv") })
 }
 
 func waitFor(t *testing.T, what string, done func() bool) {

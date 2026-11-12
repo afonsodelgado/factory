@@ -300,6 +300,30 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 	})
 }
 
+func TestARemoteAnswerIsTypedOnceAndOnlyIntoTheItemItAnswers(t *testing.T) {
+	f := newFixture(t)
+	since := time.Date(2026, 11, 12, 14, 2, 0, 123456789, time.UTC)
+	withQuestion := `{"id":"csv","stage":"requirements","attention":[{"id":"q1","kind":"question","title":"Scope","created_at":"` + since.Format(time.RFC3339Nano) + `"}]}`
+	if err := WriteFile(filepath.Join(f.dir, "state.json"), withQuestion); err != nil {
+		t.Fatal(err)
+	}
+	calls := make(chan string, 8)
+	r := f.runtime(t, recordingTypist{calls})
+	r.Tick()
+	answer := func(item string, at time.Time) Message {
+		data, _ := json.Marshal(map[string]any{"Key": state.Key(f.cfg.Repos[0], "csv"), "ItemID": item, "ItemSince": at, "Text": "q1 answers: yes"})
+		return r.Handle(Message{T: "answer", Data: data})
+	}
+	if reply := answer("q1", since); reply.T != "done" || len(calls) != 1 {
+		t.Fatalf("an answer from a laptop gave %+v and typed %d times; want it typed once", reply, len(calls))
+	}
+	for name, reply := range map[string]Message{"a stale item": answer("q1", since.Add(time.Second)), "an unknown item": answer("q9", since)} {
+		if reply.T != "error" || len(calls) != 1 {
+			t.Errorf("%s gave %+v; want a refusal with nothing typed", name, reply)
+		}
+	}
+}
+
 type stuckPanes struct{ StageEngine }
 
 func (stuckPanes) Pause(string, string) error { return errors.New("tmux could not kill the window") }
