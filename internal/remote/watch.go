@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,7 +96,14 @@ func PushRevision(stateDir string, push state.Push) (int, error) {
 	if r.Revision > 0 && r.Push == push {
 		return r.Revision, nil
 	}
-	r = pushRevision{Revision: r.Revision + 1, Push: push}
+	return savePushRevision(stateDir, pushRevision{Revision: r.Revision + 1, Push: push})
+}
+
+func raisePushRevision(stateDir string, push state.Push, revision int) (int, error) {
+	return savePushRevision(stateDir, pushRevision{Revision: revision, Push: push})
+}
+
+func savePushRevision(stateDir string, r pushRevision) (int, error) {
 	path := pushRevisionPath(stateDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
@@ -113,22 +121,31 @@ func (c Client) SyncPush(ctx context.Context, push state.Push) error {
 		return err
 	}
 	cache, err := LoadCache(c.StateDir, c.Name)
-	if err != nil || cache.Push >= revision {
+	if err != nil || cache.Push == revision {
 		return err
 	}
-	var acked int
-	settings := PushSettings{Server: push.ServerURL(), Topic: push.Topic, Label: c.Name, Revision: revision}
-	if err := c.Read(ctx, "push", settings, &acked); err != nil {
-		return err
+	for range 2 {
+		var acked int
+		settings := PushSettings{Server: push.ServerURL(), Topic: push.Topic, Label: c.Name, Revision: revision}
+		if err := c.Read(ctx, "push", settings, &acked); err != nil {
+			return err
+		}
+		if acked > revision {
+			if revision, err = raisePushRevision(c.StateDir, push, acked+1); err != nil {
+				return err
+			}
+			continue
+		}
+		return UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
+			cache.Push = acked
+			return nil
+		})
 	}
-	return UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
-		cache.Push = acked
-		return nil
-	})
+	return fmt.Errorf("%s keeps a newer push setting than this machine can number past", c.Name)
 }
 
 func PushPending(stateDir, name string, push state.Push) bool {
 	r := loadPushRevision(stateDir)
 	cache, _ := LoadCache(stateDir, name)
-	return r.Push != push || cache.Push < r.Revision
+	return r.Push != push || cache.Push != r.Revision
 }
