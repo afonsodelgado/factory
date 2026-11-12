@@ -163,7 +163,7 @@ func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T)
 	shown, answered := fx.m.shownItems(fx.m.snap.Items[0])
 	refused := fx.m.panel.refused[draftKey(fx.f, "gate-csv-design")]
 	if len(fx.typist.typed) != 1 || len(shown) != 0 || len(answered) != 1 || refused != "" {
-		t.Errorf("typed %q, panel shows %+v, answered %q, refused %q; want the approval typed once the supervisor was idle and the gate closed in the panel", fx.typist.typed, shown, answered, refused)
+		t.Errorf("typed %q, panel shows %+v, answered %+v, refused %q; want the approval typed once the supervisor was idle and the gate closed in the panel", fx.typist.typed, shown, answered, refused)
 	}
 }
 

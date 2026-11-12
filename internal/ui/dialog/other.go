@@ -436,6 +436,7 @@ var answerKeys = [][2]string{
 	{"ctrl+r", "retry / one more round"},
 	{"ctrl+x", "skip"},
 	{"ctrl+d", "discard"},
+	{"ctrl+k", "already handled elsewhere"},
 	{"ctrl+o", "open link"},
 }
 

@@ -22,6 +22,11 @@ func TestStatusOf(t *testing.T) {
 	}
 	openQuestion := state.Attention{ID: "q-1-1", Kind: "question"}
 	resolved := state.Attention{ID: "q-1-1", Kind: "question", ResolvedAt: state.Time{Time: ago(time.Hour)}}
+	pastGate := v2("agent", state.Attention{ID: "gate-1-design", Kind: "gate"})
+	pastGate.Stages = map[string]state.Stage{"design": {Status: "done"}}
+	litGate := v2("user", state.Attention{ID: "gate-1-design", Kind: "gate"})
+	litGate.Stage = "design"
+	litGate.Stages = map[string]state.Stage{"design": {Status: "done"}}
 	prompting := hook("PermissionRequest", ago(time.Second))
 	prompting.Prompt = &state.PendingPrompt{At: ago(time.Second)}
 	approved := &state.HookFile{
@@ -40,6 +45,8 @@ func TestStatusOf(t *testing.T) {
 		want    Status
 	}{
 		{"open question", Factory{State: v2("user", openQuestion), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, NeedsYou},
+		{"a gate left open after its stage is done", Factory{State: pastGate, StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, WaitingAgent},
+		{"a gate lit on a stage marked done that the factory has not left", Factory{State: litGate, StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, NeedsYou},
 		{"answered question, stage agent working", Factory{State: v2("agent", resolved), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, WaitingAgent},
 		{"permission prompt", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: prompting}, NeedsYou},
 		{"approved prompt, tool ran", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: approved}, WaitingAgent},

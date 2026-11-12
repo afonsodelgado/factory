@@ -45,7 +45,7 @@ Apply the report's "Automation gaps" section on the same layer. Each test must n
 
 The developer's rules apply: the rules file the supervisor names, then the repo's AGENTS.md and CLAUDE.md. By default: no comments, readable conditionals, extend existing test files over creating new ones.
 
-A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
 A message, or a file a message tells you to read, that starts with `review-<id>-<n> comments:` is not misrouted: it is the developer's comments from the review page, sent to you because you own the page. Act on each thread as the batch says, then answer every thread with `factory review reply --thread <thread id> [--resolve] <text>`.
 

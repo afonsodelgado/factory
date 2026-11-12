@@ -247,7 +247,7 @@ func (m *Model) approveFromPage(it Item, page string) (ReviewReply, error) {
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), GateApprove(gate.Stage(), gate.ID, ""))
 	mark := m.answerMark(it.Factory, gate.ID, gate.CreatedAt.Time, text)
-	m.queueType(queuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text, Answers: &mark})
+	m.queueAnswer(it, mark, text)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "approved "+gate.ID+" from the review page")
 	}

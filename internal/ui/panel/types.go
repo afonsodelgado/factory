@@ -161,7 +161,19 @@ type Send struct {
 	Reason  string
 	Preview string
 	Refused string
-	SentAt  time.Time
+}
+
+type Progress int
+
+const (
+	Queued Progress = iota
+	Sending
+	Answered
+)
+
+type Settled struct {
+	ID    string
+	State Progress
 }
 
 type View struct {
@@ -172,12 +184,12 @@ type View struct {
 	Dim       bool
 	Now       time.Time
 
-	Items    []Item
-	Answered []string
-	Item     int
-	Draft    Draft
-	Send     Send
-	Counts   [3]int
+	Items   []Item
+	Settled []Settled
+	Item    int
+	Draft   Draft
+	Send    Send
+	Counts  [3]int
 
 	PRs       []PR
 	Checked   time.Time

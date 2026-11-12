@@ -1,6 +1,6 @@
 # Attention items
 
-An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and sets `resolved_at` when the answer arrives. The factory app shows open items (no `resolved_at`) in its panel and never writes them.
+An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and resolves it with `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <item id>` when the answer arrives. The factory app shows open items (no `resolved_at`) in its panel and never writes them. It stops showing an item once its stage is `done` or `skipped`, or the factory is done.
 
 ```json
 {
@@ -13,6 +13,7 @@ An attention item is something the user must act on. The supervisor writes it to
   "questions": ["How many failed auth attempts before a client is refused?", "What does a rate-limited request get back?", "How big may the negative cache grow?"],
   "artifact_url": null,
   "thread_id": null,
+  "stage": "requirements",
   "created_at": "2026-10-22T14:38:00Z",
   "resolved_at": null
 }
@@ -27,6 +28,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | `questions` | `question` only: the questions in order |
 | `options` | `question` only: one list of options per question, empty for free text |
 | `recommended` | `question` only: one recommended answer per question |
+| `stage` | the stage key the item belongs to, normally the current `stage`; gate, cap and failure ids also end with it |
 | `artifact_url`, `thread_id` | `gate` and `comment`: the artifact, and the thread for a comment. Factories started before the review page have `comment` items; new ones do not |
 | `created_at`, `resolved_at` | ISO 8601 UTC |
 
@@ -55,13 +57,14 @@ The app delivers answers into the session as one message, in exactly these forms
 | cap, one more round | `<id> continue: raise <coderabbit_rounds\|qa_rounds> by one for this factory` |
 | cap or failure, skip | `/factory skip <stage>` |
 | failure, retry | `/factory resume` |
+| any item, already handled | `<id> handled: settled outside the panel` (resolve it, do not ask it again) |
 | review page, send | `review-<id>-<n> comments: <batch file>` |
 
 Slash commands are always one line. Free text may span several lines.
 
 A `review-<id>-<n> comments:` message comes from the review page, not from an attention item. The hub sends the batch straight to the agent that owns the page when that agent has run in its own pane, and to you only when it has not. When it reaches you, send the batch file to the owning agent as a follow-up (the designer for `design/`, the architect for `plan.html` and `schematic.html`), and resolve nothing: the agent answers each thread itself with `factory review reply`. The page's Approve button sends `/factory approve <stage> <gate id>`, the same as the panel.
 
-The panel keeps the user's draft until the supervisor's session has received the message, which it reads from the session's own `UserPromptSubmit` hook. When the message does not arrive, for example because the session was showing a stage agent's transcript and the agent got it instead, the panel says so and the user sends it again.
+The panel hides an item as soon as the user sends it, and holds the message until your session is idle at its prompt. It keeps the user's draft until your session has received the message, which it reads from the session's own `UserPromptSubmit` hook. When the message does not arrive, for example because the session was showing a stage agent's transcript and the agent got it instead, the panel says so and the user sends it again.
 
 Example of a question answer:
 
