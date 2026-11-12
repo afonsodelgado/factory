@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/remote"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -368,5 +371,34 @@ func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {
 	}
 	if profile, _ := state.ReadProfile(clone); r.chrome(clone, profile) {
 		t.Fatal("a server launch would pass --chrome for a factory created from a laptop")
+	}
+}
+
+func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
+	cfg := &state.Config{StateDir: t.TempDir()}
+	listen := func() *review.Server {
+		pages, err := review.Listen(0, "token", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { pages.Close() })
+		return pages
+	}
+	if _, err := New(Runtime{Config: cfg, Pages: listen()}).Link(remote.LinkRequest{Port: 52817}); err != nil {
+		t.Fatal(err)
+	}
+	restarted := listen()
+	if err := New(Runtime{Config: cfg, Pages: restarted}).Recover(); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("GET", restarted.Origin()+"/favicon.ico", nil)
+	req.Host = "127.0.0.1:52817"
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode == http.StatusForbidden {
+		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
 	}
 }

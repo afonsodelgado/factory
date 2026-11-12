@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"errors"
 	"net"
 	"strconv"
@@ -88,5 +89,17 @@ func TestOnlyLoopbackLinksGoThroughTheTunnel(t *testing.T) {
 		if loopback && ThroughTunnel(raw, 52817) != want {
 			t.Errorf("%s became %s; want %s", raw, ThroughTunnel(raw, 52817), want)
 		}
+	}
+}
+
+func TestAServerCannotMakeTheLaptopOpenAnythingButAWebLink(t *testing.T) {
+	var client Client
+	for _, raw := range []string{"-a Terminal", "/System/Applications/Utilities/Terminal.app", "vscode://file/etc/passwd", "ftp://example.com/x", "https://"} {
+		if got, err := client.Resolve(context.Background(), nil, "", raw); err == nil {
+			t.Errorf("%q resolved to %q; want a refusal, since the laptop's opener would run it", raw, got)
+		}
+	}
+	if got, err := client.Resolve(context.Background(), nil, "", "https://github.com/acme/app/pull/7"); err != nil || got != "https://github.com/acme/app/pull/7" {
+		t.Errorf("a public link resolved to %q, %v; want it unchanged", got, err)
 	}
 }

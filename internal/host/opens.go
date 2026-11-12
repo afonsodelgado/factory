@@ -15,7 +15,38 @@ import (
 
 var openers = []string{"open", "xdg-open"}
 
+const rememberedTunnels = 32
+
 func (m *Runtime) opensPath() string { return filepath.Join(m.Config.StateDir, "opens.json") }
+
+func (m *Runtime) tunnelsPath() string { return filepath.Join(m.Config.StateDir, "tunnels.json") }
+
+func (m *Runtime) forwardedPorts() []int {
+	var ports []int
+	if data, err := os.ReadFile(m.tunnelsPath()); err == nil {
+		json.Unmarshal(data, &ports)
+	}
+	return ports
+}
+
+func (m *Runtime) allowForwarded(port int) error {
+	m.Pages.Allow(port)
+	ports := m.forwardedPorts()
+	if slices.Contains(ports, port) {
+		return nil
+	}
+	ports = append(ports, port)
+	return savePrivate(m.tunnelsPath(), ports[max(0, len(ports)-rememberedTunnels):])
+}
+
+func (m *Runtime) allowRememberedTunnels() {
+	if m.Pages == nil {
+		return
+	}
+	for _, port := range m.forwardedPorts() {
+		m.Pages.Allow(port)
+	}
+}
 
 func (m *Runtime) Opens() []remote.Open {
 	var opens []remote.Open
@@ -47,7 +78,9 @@ func (m *Runtime) Link(r remote.LinkRequest) (string, error) {
 		return "", errors.New("the review server is not running")
 	}
 	if r.Port != 0 {
-		m.Pages.Allow(r.Port)
+		if err := m.allowForwarded(r.Port); err != nil {
+			return "", err
+		}
 	}
 	if page, ok := m.Pages.PageURL(r.URL); ok {
 		return page, nil

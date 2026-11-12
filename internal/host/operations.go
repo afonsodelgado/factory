@@ -101,6 +101,7 @@ func (m *Runtime) saveQueue(queue []QueuedType) bool {
 }
 
 func (m *Runtime) Recover() error {
+	m.allowRememberedTunnels()
 	data, err := os.ReadFile(m.queuePath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

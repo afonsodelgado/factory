@@ -39,11 +39,19 @@ func ThroughTunnel(raw string, local int) string {
 	return u.String()
 }
 
+func openable(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return "", fmt.Errorf("only web links open on this laptop, and %q is not one", raw)
+	}
+	return raw, nil
+}
+
 func isFile(raw string) bool { return strings.HasPrefix(raw, "file://") }
 
 func (c Client) Resolve(ctx context.Context, tunnels *Tunnels, home, raw string) (string, error) {
 	if _, loopback := LoopbackPort(raw); !loopback && !isFile(raw) {
-		return raw, nil
+		return openable(raw)
 	}
 	hello, err := c.Hello(ctx)
 	if err != nil {
@@ -69,7 +77,7 @@ func (c Client) Resolve(ctx context.Context, tunnels *Tunnels, home, raw string)
 	}
 	port, ok := LoopbackPort(target)
 	if !ok {
-		return target, nil
+		return openable(target)
 	}
 	local, err := tunnels.Open(c.Name, hello.Server, port, c.Forward)
 	if err != nil {
