@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -151,6 +152,9 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if holdsOnlyComments(file) {
+		return afterComments(data, m)
+	}
 	remotes := m.Remotes
 	if remotes == nil {
 		remotes = map[string]Remote{}
@@ -170,6 +174,28 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 		}
 	}
 	return []byte(file.String()), nil
+}
+
+func holdsOnlyComments(file *ast.File) bool {
+	for _, doc := range file.Docs {
+		switch doc.Body.(type) {
+		case nil, *ast.CommentGroupNode, *ast.CommentNode:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func afterComments(comments []byte, m Machine) ([]byte, error) {
+	if m.Equal(Machine{}) {
+		return comments, nil
+	}
+	settings, err := yaml.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(bytes.TrimRight(comments, "\n"), []byte("\n"), settings), nil
 }
 
 func setKey(file *ast.File, name string, value any, zero bool) error {
