@@ -421,10 +421,10 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var keyColumns = [][][2]string{
-	{{"+Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
-	{{"+Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
-	{{"+Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "all factories (Activity)"}},
-	{{"+Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
+	{{"Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
+	{{"Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
+	{{"Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "Activity: all factories"}},
+	{{"Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"?", "these keys"}},
 }
 
 var answerKeys = [][2]string{
@@ -438,6 +438,7 @@ var answerKeys = [][2]string{
 	{"ctrl+d", "discard"},
 	{"ctrl+k", "already handled elsewhere"},
 	{"ctrl+o", "open link"},
+	{"⏎", "next factory, once nothing is left"},
 }
 
 func (k *Keys) View() tea.View {
@@ -457,7 +458,7 @@ func (k *Keys) View() tea.View {
 		}
 	}
 	heading := rows + 1
-	c.Put(1, heading, "+Answering in the panel", theme.FgInk(theme.Magenta).B())
+	c.Put(1, heading, "Answering in the panel", theme.FgInk(theme.Magenta).B())
 	x, y := 1, heading+1
 	for _, pair := range answerKeys {
 		entry := []theme.Span{{Text: pair[0], Ink: theme.Key}, {Text: " ➜ " + pair[1] + "    ", Ink: theme.Text}}

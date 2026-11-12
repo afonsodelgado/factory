@@ -95,7 +95,7 @@ func (m *Model) addRepo(r RepoRequest) {
 		m.here = r.Repo
 	}
 	if r.Notice != "" {
-		m.notice = r.Notice
+		m.notice = news(r.Notice)
 	}
 	if r.Repo == "" || slices.Contains(m.Config.Repos, r.Repo) {
 		return

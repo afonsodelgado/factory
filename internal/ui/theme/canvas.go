@@ -211,6 +211,20 @@ func Truncate(text string, limit int) string {
 	return b.String() + "…"
 }
 
+func KeepTail(text string, limit int) string {
+	if Width(text) <= limit {
+		return text
+	}
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	for len(runes) > 0 && Width(string(runes)) > limit-1 {
+		runes = runes[1:]
+	}
+	return "…" + string(runes)
+}
+
 func Wrap(text string, width int) []string {
 	var lines []string
 	for _, para := range strings.Split(text, "\n") {

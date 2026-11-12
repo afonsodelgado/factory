@@ -237,7 +237,8 @@ func attentionItems(it Item, now time.Time, counter threadCounter) []panel.Item 
 			Action: "⏎ answer in the session",
 		})
 	}
-	if it.Status.Asleep() {
+	slotExplainsIt := it.Status == factory.Gone
+	if it.Status.Asleep() && !slotExplainsIt {
 		items = append(items, asleepItem(it, now))
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Since.Before(items[j].Since) })
@@ -577,6 +578,9 @@ func (m *Model) panelView() panel.View {
 	f := it.Factory
 	v.Label = f.Label()
 	v.Items, v.Settled = m.shownItems(it)
+	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
+		v.Next = next.Factory.Label()
+	}
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
@@ -712,8 +716,11 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	if m.panel.tab != panel.Attention {
 		return m.listKey(key)
 	}
-	if hasItem && item.Kind == "permission" && key == "enter" {
+	switch {
+	case hasItem && item.Kind == "permission" && key == "enter":
 		m.focusSession()
+	case !hasItem && key == "enter":
+		m.nextNeedingYou()
 	}
 	return nil
 }
@@ -863,7 +870,7 @@ func (m *Model) sendTyped(item panel.Item, d *panel.Draft) {
 		return
 	}
 	if strings.TrimSpace(d.Text) == "" {
-		m.notice = nothingTyped(item.Kind)
+		m.notice = problem(nothingTyped(item.Kind))
 		return
 	}
 	m.deliver(textAction(item.Kind))

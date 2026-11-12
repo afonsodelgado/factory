@@ -360,9 +360,9 @@ func (m *Model) flushTypeQueue() {
 		}
 		pane, found := byID(m.snap.Panes, q.Pane)
 		if !found || pane.Dead {
-			m.notice = "The " + q.Label + " pane closed before its message was typed."
+			m.notice = problem("The " + q.Label + " pane closed before its message was typed.")
 			if q.Answers != nil {
-				m.dropAnswer(*q.Answers, m.notice)
+				m.dropAnswer(*q.Answers, m.notice.text)
 			}
 			continue
 		}
@@ -378,7 +378,7 @@ func (m *Model) flushTypeQueue() {
 		typedAt := m.Now()
 		reason, err := Deliver(m.Typist, target, q.Text)
 		if err != nil {
-			m.notice = err.Error()
+			m.notice = problem(err.Error())
 			if q.Answers != nil {
 				m.dropAnswer(*q.Answers, err.Error())
 			}

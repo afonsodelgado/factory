@@ -123,7 +123,12 @@ func place(c *theme.Canvas, x, y, w int, l line) {
 	}
 }
 
+const formRows = 3
+
 func block(c *theme.Canvas, x, y, w, h int, top, middle, bottom []line, focus int) {
+	keep := min(len(middle), formRows)
+	bottom = bottom[max(0, len(bottom)-max(h-1-keep, 0)):]
+	top = top[:max(1, min(len(top), h-len(bottom)-keep))]
 	for i, l := range top {
 		if i < h {
 			place(c, x, y+i, w, l)
@@ -167,20 +172,21 @@ func renderAttention(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		for i, s := range v.Settled {
 			c.Spans(x, y+i, settledLine(s))
 		}
-		c.Put(x, y+len(v.Settled)+1, "Nothing else needs you here. The supervisor closes each item once it has acted on it.", theme.Muted)
+		y = paragraph(c, x, y+len(v.Settled)+1, w, "Nothing else needs you here. The supervisor closes each item once it has acted on it.")
+		nextLine(c, v, x, y+1)
 		return
 	}
 	if len(v.Items) == 0 {
 		c.Put(x, y, "Nothing needs you here.", theme.Bright)
-		c.Put(x, y+2, "Open items appear here when the supervisor asks, a gate lights, a cap trips,", theme.Muted)
-		c.Put(x, y+3, "a stage fails twice, or the session waits on a permission prompt.", theme.Muted)
+		y = paragraph(c, x, y+2, w, "Open items appear here when the supervisor asks, a gate lights, a cap trips, a stage fails twice, or the session waits on a permission prompt.")
+		nextLine(c, v, x, y+1)
 		return
 	}
 	renderList(c, v, ic, x, y, h)
 	c.VLine(x+ListWidth+1, y, h, theme.Line)
 	dx, dw := x+ListWidth+3, w-ListWidth-3
 	it := v.Items[max(0, min(v.Item, len(v.Items)-1))]
-	top, middle, bottom, focus := detail(v, it, ic, dw)
+	top, middle, bottom, focus := detail(v, it, ic, dw, h)
 	block(c, dx, y, dw, h, top, middle, bottom, focus)
 }
 
@@ -228,6 +234,21 @@ func renderList(c *theme.Canvas, v View, ic theme.Icons, x, y, h int) {
 	}
 }
 
+func paragraph(c *theme.Canvas, x, y, w int, text string) int {
+	for _, l := range theme.Wrap(text, w) {
+		c.Put(x, y, l, theme.Muted)
+		y++
+	}
+	return y
+}
+
+func nextLine(c *theme.Canvas, v View, x, y int) {
+	if v.Next == "" {
+		return
+	}
+	c.Spans(x, y, line{{Text: "⏎", Ink: theme.Key}, {Text: " next: ", Ink: theme.Text}, {Text: v.Next, Ink: theme.Bright.B()}, {Text: " needs you", Ink: theme.FgInk(theme.Orange)}})
+}
+
 func settledLine(s Settled) line {
 	switch s.State {
 	case Queued:
@@ -258,7 +279,13 @@ func wrapped(s string, w int, ink theme.Ink) []line {
 	return lines
 }
 
-func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int) {
+const roomyPanel = 14
+
+func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, int) {
+	field := textBox
+	if h < roomyPanel {
+		field = textLine
+	}
 	top := []line{header(it, ic, v)}
 	top = append(top, wrapped(it.Body, w, theme.Text)...)
 	switch {
@@ -272,13 +299,14 @@ func detail(v View, it Item, ic theme.Icons, w int) ([]line, []line, []line, int
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
-		return top, gateForm(v, it, ic, w), withStatus(v, w, textBox("notes", v.Draft, w), gateHints(it, v)), 1 + v.Draft.Artifact
+		return top, gateForm(v, it, ic, w), withStatus(v, w, field("notes", v.Draft, w)), 1 + v.Draft.Artifact
 	case it.Kind == "comment":
-		return top, nil, withStatus(v, w, textBox("reply", v.Draft, w), commentHints(it, v)), 0
+		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
+		return top, nil, withStatus(v, w, field("reply", v.Draft, w)), 0
 	case it.Kind == "cap":
-		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "something else, then ctrl+s sends it")), 0
+		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
 	case it.Kind == "failure":
-		return top, freeText(v, w), withStatus(v, w, choiceHints(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage, "an instruction instead, then ctrl+s sends it")), 0
+		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -441,6 +469,18 @@ func textBox(title string, d Draft, w int) []line {
 	return lines
 }
 
+func textLine(title string, d Draft, w int) []line {
+	label := title + "  "
+	shown, ink := strings.ReplaceAll(d.Text, "\n", " · "), theme.Bright
+	if d.Editing {
+		shown += "█"
+	}
+	if shown == "" {
+		shown, ink = "type to add "+title, theme.Muted
+	}
+	return []line{{{Text: label, Ink: theme.Quiet}, {Text: theme.KeepTail(shown, w-theme.Width(label)), Ink: ink}}}
+}
+
 func padTo(s string, w int) string {
 	s = theme.Truncate(s, w)
 	return s + strings.Repeat(" ", max(w-theme.Width(s), 0))
@@ -456,22 +496,19 @@ func withStatus(v View, w int, blocks ...[]line) []line {
 
 func sendStatus(v View, w int) []line {
 	lines := []line{text(strings.Repeat("─", max(w, 0)), theme.Line)}
-	handled := append(hints("ctrl+k", "already handled"), theme.Span{Text: "  tells the supervisor to close it without acting on it", Ink: theme.Muted})
 	switch {
 	case v.Send.Refused != "":
-		return append(append(lines, warning(v.Send.Refused+" Draft kept.", w)...), handled)
+		return append(lines, warning(v.Send.Refused+" Draft kept.", w)...)
 	case v.Send.Ready:
-		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)), handled)
+		return append(lines, text("✓ "+v.Send.Reason, theme.FgInk(theme.Green)))
 	}
-	return append(append(lines, warning(v.Send.Reason, w)...), handled)
+	return append(lines, warning(v.Send.Reason, w)...)
 }
 
 func questionFooter(v View, w int) []line {
 	lines := sendStatus(v, w)
 	switch {
-	case v.Send.Refused != "":
-		return append(lines, hints("ctrl+s", "send again", "ctrl+d", "discard draft"))
-	case v.Send.Preview == "":
+	case v.Send.Refused != "" || v.Send.Preview == "":
 		return lines
 	}
 	return append(lines, line{{Text: "preview  ", Ink: theme.Quiet}, {Text: strings.ReplaceAll(v.Send.Preview, "\n", " · "), Ink: theme.Text}})
@@ -530,24 +567,6 @@ func shortURL(url string) string {
 	return url
 }
 
-func gateHints(it Item, v View) []line {
-	pick := ""
-	if len(it.Artifacts) > 1 && v.Draft.Artifact < len(it.Artifacts) {
-		pick = " " + it.Artifacts[v.Draft.Artifact].Title
-	}
-	return []line{
-		append(hints("ctrl+a", "approve"+pick), theme.Span{Text: "  sends /factory approve " + it.Stage + " with these notes", Ink: theme.Muted}),
-		hints("ctrl+s", "send notes as change requests", "ctrl+o", "open artifact", "↑↓", "pick"),
-	}
-}
-
-func commentHints(it Item, v View) []line {
-	return []line{
-		append(hints("ctrl+s", "send"), theme.Span{Text: "  tells the supervisor to reply on thread " + it.ThreadID + " with this text", Ink: theme.Muted}),
-		hints("type", "your reply", "ctrl+o", "open the thread in the browser", "esc", "back, keep draft"),
-	}
-}
-
 func freeText(v View, w int) []line {
 	if v.Draft.Text == "" && !v.Draft.Editing {
 		return nil
@@ -555,15 +574,12 @@ func freeText(v View, w int) []line {
 	return append([]line{blank()}, textBox("instruction", v.Draft, w)...)
 }
 
-func choiceHints(v View, k1, d1, m1, k2, d2, m2, other string) []line {
-	lines := []line{
+func choices(v View, k1, d1, m1, k2, d2, m2 string) []line {
+	return []line{
+		blank(),
 		append(hints(k1, d1), theme.Span{Text: "  " + m1, Ink: theme.Muted}),
 		append(hints(k2, d2), theme.Span{Text: "  " + m2, Ink: theme.Muted}),
 	}
-	if v.Draft.Text != "" || v.Draft.Editing {
-		return append(lines, hints("ctrl+s", "send the instruction", "esc", "stop typing"))
-	}
-	return append(lines, hints("type", other))
 }
 
 func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
@@ -577,7 +593,7 @@ func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 	}
 	c.Put(x+2, y+2, "#  PR      title", theme.Quiet)
 	c.Right(x+w-1, y+2, "state   CI         checks                ", theme.Quiet)
-	titleWidth := w - 2 - 11 - 42
+	titleWidth := w - 2 - 11 - 42 - 1
 	for i, pr := range v.PRs {
 		r := y + 3 + i
 		if r >= y+h-1 {

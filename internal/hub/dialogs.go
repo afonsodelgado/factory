@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,7 +30,7 @@ var popupSizes = map[string][2]int{
 	"pause":   {68, 9},
 	"archive": {80, 12},
 	"delete":  {84, 14},
-	"keys":    {116, 16},
+	"keys":    {124, 17},
 }
 
 var popupTitles = map[string]string{
@@ -84,7 +85,7 @@ func (m *Model) dialogClosed(msg dialogClosedMsg) {
 		m.focus = footer.Factories
 	}
 	if msg.err != nil {
-		m.notice = msg.err.Error()
+		m.notice = problem(msg.err.Error())
 	}
 }
 
@@ -133,7 +134,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 	reply := Message{T: "done"}
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error()}
-		m.notice = err.Error()
+		m.notice = problem(err.Error())
 	}
 	e.From.Send(reply)
 	return tea.Batch(cmd, m.load())
@@ -180,7 +181,9 @@ func (m *Model) newContext() dialog.NewContext {
 
 func (m *Model) switchContext() dialog.SwitchContext {
 	var c dialog.SwitchContext
-	for _, it := range m.snap.Items {
+	items := slices.Clone(m.snap.Items)
+	sort.SliceStable(items, func(i, j int) bool { return urgency(items[i].Status) < urgency(items[j].Status) })
+	for _, it := range items {
 		if it.Factory.Archived() {
 			continue
 		}
@@ -191,6 +194,20 @@ func (m *Model) switchContext() dialog.SwitchContext {
 		c.Rows = append(c.Rows, dialog.SwitchRow{Key: it.Factory.Key(), Label: it.Factory.Label(), Title: it.Factory.Title(), Repo: it.Factory.RepoName(), Stage: stage, Status: it.Status.String(), Needs: it.Status == factory.NeedsYou})
 	}
 	return c
+}
+
+func urgency(s factory.Status) int {
+	switch s {
+	case factory.NeedsYou:
+		return 0
+	case factory.Running, factory.Starting:
+		return 1
+	case factory.WaitingAgent, factory.WaitingCI:
+		return 2
+	case factory.Done:
+		return 4
+	}
+	return 3
 }
 
 func factoryDir(f factory.Factory) string {
@@ -275,7 +292,7 @@ func (m *Model) unarchive(it Item) error {
 		return err
 	}
 	m.Loader.Note(it.Factory, "unarchived")
-	m.notice = it.Factory.Label() + " is back in the list."
+	m.notice = news(it.Factory.Label() + " is back in the list.")
 	return nil
 }
 
@@ -487,7 +504,7 @@ func (m *Model) wake(key string) error {
 
 func (m *Model) wakeSelected() {
 	if it, ok := m.selectedItem(); ok && it.Status == factory.Done {
-		m.notice = it.Factory.Label() + " is done, so there is nothing to wake."
+		m.notice = problem(it.Factory.Label() + " is done, so there is nothing to wake.")
 		return
 	}
 	m.report(m.wake(m.selected))
@@ -552,7 +569,7 @@ func (m *Model) deleteFactory(f factory.Factory) ([]factory.RemovalStep, error) 
 	if failed, stopped := factory.FirstFailure(steps); stopped {
 		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", f.Label(), failed.Name, failed.Detail, failed.Err)
 	}
-	m.notice = f.Label() + " is deleted."
+	m.notice = news(f.Label() + " is deleted.")
 	return steps, nil
 }
 

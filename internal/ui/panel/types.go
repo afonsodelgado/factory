@@ -186,6 +186,7 @@ type View struct {
 
 	Items   []Item
 	Settled []Settled
+	Next    string
 	Item    int
 	Draft   Draft
 	Send    Send
