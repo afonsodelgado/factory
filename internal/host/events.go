@@ -117,7 +117,7 @@ func (m *Runtime) watch() {
 		}
 	}
 	if m.Log.Seq != before {
-		savePrivate(EventLogPath(m.Config.StateDir), m.Log)
+		saveOrReport(EventLogPath(m.Config.StateDir), m.Log)
 	}
 }
 
@@ -128,7 +128,7 @@ func (m *Runtime) Events(cursor int64) remote.Events {
 	acked := m.Log.Acked
 	events := m.Log.After(cursor)
 	if m.Log.Acked != acked {
-		savePrivate(EventLogPath(m.Config.StateDir), m.Log)
+		saveOrReport(EventLogPath(m.Config.StateDir), m.Log)
 	}
 	return events
 }

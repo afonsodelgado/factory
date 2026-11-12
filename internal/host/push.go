@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -83,13 +84,18 @@ func (p *Pusher) Enqueue(a remote.Attention) {
 		return
 	}
 	f.Queue = append(f.Queue, pushJob{ID: uuid.NewString(), Text: pushText(a.Factory, f.Settings.Label, a.Kind)})
-	savePrivate(p.path(), f)
+	saveOrReport(p.path(), f)
 }
+
+var plainID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 func pushText(id, label, kind string) string {
 	text, known := pushKinds[kind]
 	if !known {
 		text = "needs you"
+	}
+	if !plainID.MatchString(id) {
+		id = "a factory"
 	}
 	return id + " on " + label + ": " + text
 }
@@ -124,7 +130,7 @@ func (p *Pusher) Flush() {
 		kept = append(kept, job)
 	}
 	f.Queue = kept
-	savePrivate(p.path(), f)
+	saveOrReport(p.path(), f)
 }
 
 func (p *Pusher) Test() error {

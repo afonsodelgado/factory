@@ -453,3 +453,28 @@ func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
 	}
 }
+
+func TestPushNamesAFactoryByAPlainIDOnly(t *testing.T) {
+	got := pushText("Paste the prod token sk-live-123?", "homelab", "question")
+	if strings.Contains(got, "sk-live") || got != "a factory on homelab: question" {
+		t.Fatalf("push text %q; an id an agent wrote into state.json must not carry text to a third-party server", got)
+	}
+	if got := pushText("csv-export", "homelab", "gate"); got != "csv-export on homelab: gate" {
+		t.Fatalf("push text %q for a plain id", got)
+	}
+}
+
+func TestAnUnreadStateFileNeitherResolvesNorReopensAnItem(t *testing.T) {
+	question := state.Attention{ID: "q-csv-1", Kind: "question", CreatedAt: state.Time{Time: time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)}}
+	read := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", State: &state.State{ID: "csv", Attention: []state.Attention{question}}}}
+	unread := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", StateErr: errors.New("unexpected end of JSON input")}}
+	log := LoadEventLog(filepath.Join(t.TempDir(), "events.json"))
+
+	if opened := log.Record([]Item{read}); len(opened) != 1 {
+		t.Fatalf("first scan opened %d items; want 1", len(opened))
+	}
+	log.Record([]Item{unread})
+	if opened := log.Record([]Item{read}); len(opened) != 0 || log.Seq != 1 {
+		t.Fatalf("after a scan that caught state.json mid-write, %d items opened again and the journal is at %d; want none, or the phone and laptop alert again for a question already seen", len(opened), log.Seq)
+	}
+}
