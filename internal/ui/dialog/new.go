@@ -659,7 +659,7 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 
 func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	repo := m.selectedRepo()
-	c.Put(x, y, "Will run, from "+repo.Display, theme.Quiet)
+	c.Put(x, y, "Will run, from "+theme.KeepTail(repo.Display, w-theme.Width("Will run, from ")), theme.Quiet)
 	y++
 	launch := m.launch()
 	command := strings.SplitN(launch.CreateCommand(), "; cd ", 2)[0]
@@ -670,12 +670,12 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
-	reason := "no --chrome: " + repo.Name + "'s repo config uses terminal QA."
+	reason := "no --chrome: the " + repo.Name + " repo config uses terminal QA."
 	switch {
 	case !launch.Supervisor.OnClaude():
 		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
 	case repo.Browser:
-		reason = "--chrome because " + repo.Name + "'s repo config uses browser QA."
+		reason = "--chrome because the " + repo.Name + " repo config uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
 }
@@ -698,7 +698,7 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 			c.Put(1, y, l, theme.FgInk(theme.Red))
 		}
 	}
-	count := fmt.Sprintf("%d lines · %d characters", strings.Count(m.prompt.text, "\n")+1, uniseg.GraphemeClusterCount(m.prompt.text))
+	count := plural(strings.Count(m.prompt.text, "\n")+1, "line") + " · " + plural(uniseg.GraphemeClusterCount(m.prompt.text), "character")
 	hintsStart := c.Right(c.W-2, c.H-1, "ctrl+s start   ⏎ new line   ctrl+g open in editor   esc back", theme.Text)
 	if theme.Width(count)+2 < hintsStart {
 		c.Put(1, c.H-1, count, theme.Muted)
@@ -851,4 +851,11 @@ func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focus
 		c.Put(x+w-1, y+1+i, "│", border)
 	}
 	c.Put(x, y+1+len(lines), "╰"+strings.Repeat("─", max(w-2, 0))+"╯", border)
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

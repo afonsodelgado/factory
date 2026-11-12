@@ -17,6 +17,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
@@ -254,6 +255,39 @@ func TestAnsweringTakesTheFactoryOffNeedsYouUntilTheAnswerIsLost(t *testing.T) {
 	}
 }
 
+func TestAfterTheLastAnswerEnterGoesToTheNextFactoryThatNeedsYou(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	snap := questionFactory("Stop", now)
+	other := snap.Items[0]
+	other.Factory.Slug = "eng-7460-exports"
+	other.Factory.State = &state.State{ID: "ENG-7460", Stage: "plan", WaitingOn: "user", Attention: []state.Attention{{ID: "gate-7460-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}}}
+	snap.Items = append(snap.Items, other)
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: &fakeTypist{}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	model.SetSnapshot(snap)
+	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+	panelKeys(tm, "ctrl+s", "enter")
+	if err := tm.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+	if final.selected != other.Factory.Key() || final.focus != footer.Panel {
+		t.Errorf("selected %q with focus %s, want %q with the panel focused: answering one factory after another must not dead-end in an empty panel", final.selected, final.focus, other.Factory.Key())
+	}
+}
+
+func TestASmallPanelKeepsTheItemAndItsApproveRow(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	snap := questionFactory("Stop", now)
+	snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", Body: "The architect wrote plan.html.", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+	snap.Items[0].Factory.State.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "plan.html", Title: "Implementation plan"}}}}
+	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	model.SetSnapshot(snap)
+	view := escapes.ReplaceAllString(model.PanelView(84, 10), "")
+	if !strings.Contains(view, "gate-7452-plan") || !strings.Contains(view, "Approve") {
+		t.Errorf("panel at laptop size:\n%s\nwant the item and its Approve row, not only the notes box and its status", view)
+	}
+}
+
 func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	withCap := func(created time.Time, at time.Time) Snapshot {
@@ -305,8 +339,8 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	model.SetSnapshot(Snapshot{At: now.Add(2 * time.Second), Items: []Item{nowAsking, asking}})
 	opened = append(opened, model.panel.tab)
 
-	if want := []panel.Tab{panel.PRs, panel.Attention, panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) {
-		t.Errorf("tabs on start, choosing the asking and the quiet factory, a question arriving, then the next poll after tab = %v, want %v: nothing open opens on PRs (A1), an arriving item opens Attention once (R24)", opened, want)
+	if want := []panel.Tab{panel.Attention, panel.Attention, panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) || model.selected != nowAsking.Factory.Key() {
+		t.Errorf("tabs on start, choosing the asking and the quiet factory, a question arriving, then the next poll after tab = %v, want %v: the hub starts on the factory that needs you, nothing open opens on PRs (A1), an arriving item opens Attention once (R24)", opened, want)
 	}
 }
 

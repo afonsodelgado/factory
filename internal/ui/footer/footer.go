@@ -23,6 +23,7 @@ var modeColor = map[Mode]theme.Color{
 type Hint struct {
 	Key  string
 	Does string
+	Good bool
 }
 
 func Render(mode Mode, context string, hints []Hint, width int) string {
@@ -35,12 +36,20 @@ func Render(mode Mode, context string, hints []Hint, width int) string {
 	right := []theme.Span{{Text: "?", Ink: theme.Key}, {Text: " keys ", Ink: theme.Quiet}}
 	limit := width - theme.SpansWidth(right) - 1
 	x++
-	for _, h := range hints {
+	for i, h := range hints {
 		segment := theme.Width(h.Key) + 1 + theme.Width(h.Does)
+		if i == 0 && x+1+segment > limit {
+			h.Does = theme.Truncate(h.Does, limit-x-2-theme.Width(h.Key))
+			segment = theme.Width(h.Key) + 1 + theme.Width(h.Does)
+		}
 		if x+1+segment > limit {
 			break
 		}
-		x = c.Put(x+1, 0, h.Key, theme.Key)
+		key := theme.Key
+		if h.Good {
+			key = theme.FgInk(theme.Green).B()
+		}
+		x = c.Put(x+1, 0, h.Key, key)
 		x = c.Put(x+1, 0, h.Does, theme.Text) + 1
 	}
 	c.Spans(width-theme.SpansWidth(right), 0, right)

@@ -76,17 +76,6 @@ func drawTop(c *theme.Canvas, labels Labels, border theme.Ink, focused bool) {
 	}
 	c.Put(1, 0, " ✻ "+theme.Truncate(title, end-theme.Width("─ ✻  ─"))+" ", titleInk)
 	if path != "" {
-		c.Right(end-2, 0, " "+keepTail(path, pathRoom)+" ", theme.Muted)
+		c.Right(end-2, 0, " "+theme.KeepTail(path, pathRoom)+" ", theme.Muted)
 	}
-}
-
-func keepTail(path string, width int) string {
-	if theme.Width(path) <= width {
-		return path
-	}
-	runes := []rune(path)
-	for len(runes) > 0 && theme.Width(string(runes)) > width-1 {
-		runes = runes[1:]
-	}
-	return "…" + string(runes)
 }

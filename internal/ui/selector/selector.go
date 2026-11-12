@@ -134,7 +134,7 @@ func renderList(c *theme.Canvas, d Data, w, h int) {
 		items = append(items, item{height: 1, draw: func(c *theme.Canvas, y int) {
 			x := c.Put(2, y, ic.Icon("repo"), theme.Focused)
 			x = c.Put(x, y, group.Name, theme.Focused.B())
-			c.PutMax(x+2, y, group.Path, theme.Muted, inner-x-1)
+			c.Put(x+2, y, theme.KeepTail(group.Path, inner-x-2), theme.Muted)
 		}})
 		for _, r := range group.Rows {
 			row := r
@@ -300,7 +300,8 @@ func renderEmpty(c *theme.Canvas, d Data, w int) {
 	for _, g := range d.Groups {
 		x := c.Put(2, y, d.Icons.Icon("repo"), theme.Focused)
 		x = c.Put(x, y, g.Name, theme.Focused)
-		c.PutMax(x+nameWidth-theme.Width(g.Name)+2, y, g.Path, theme.Muted, w-2-x)
+		start := x + nameWidth - theme.Width(g.Name) + 2
+		c.Put(start, y, theme.KeepTail(g.Path, w-2-start), theme.Muted)
 		y++
 	}
 	y++

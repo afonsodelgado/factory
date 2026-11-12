@@ -48,32 +48,33 @@ type Model struct {
 	Now           func() time.Time
 	Icons         theme.Icons
 
-	snap         Snapshot
-	selected     string
-	focus        footer.Mode
-	showArchived bool
-	width        int
-	height       int
-	sizes        map[string][2]int
-	sent         map[string]string
-	header       [2]string
-	share        float64
-	collapsed    bool
-	arranged     Shape
-	window       [2]int
-	pending      []tea.Cmd
-	panel        panelState
-	statuses     map[string]factory.Status
-	loaded       map[string]factory.Status
-	dialogs      map[string]json.RawMessage
-	dialog       string
-	notice       string
-	wakes        map[string]Wake
-	pipelines    map[string]string
-	typeQueue    []queuedType
-	typedAt      map[string]time.Time
-	inboxQueued  map[string]bool
-	here         string
+	snap          Snapshot
+	selected      string
+	focus         footer.Mode
+	showArchived  bool
+	width         int
+	height        int
+	sizes         map[string][2]int
+	sent          map[string]string
+	header        [2]string
+	share         float64
+	collapsed     bool
+	arranged      Shape
+	window        [2]int
+	pending       []tea.Cmd
+	panel         panelState
+	statuses      map[string]factory.Status
+	loaded        map[string]factory.Status
+	dialogs       map[string]json.RawMessage
+	dialog        string
+	notice        notice
+	wakes         map[string]Wake
+	pipelines     map[string]string
+	typeQueue     []queuedType
+	typedAt       map[string]time.Time
+	inboxQueued   map[string]bool
+	toldReturnKey bool
+	here          string
 }
 
 type snapshotMsg Snapshot
@@ -82,7 +83,27 @@ type focusPollMsg struct{}
 type activeMsg string
 type eventMsg Event
 type changedMsg struct{}
-type noticeMsg string
+type noticeMsg notice
+
+type notice struct {
+	text string
+	ok   bool
+}
+
+func news(text string) notice {
+	return notice{text: text, ok: true}
+}
+
+func problem(text string) notice {
+	return notice{text: text}
+}
+
+func (n notice) mark() string {
+	if n.ok {
+		return "✓"
+	}
+	return "!"
+}
 
 func NewModel(m Model) *Model {
 	model := &m
@@ -212,10 +233,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		cmd = tea.Batch(m.handleEvent(Event(msg)), m.waitEvent())
 	case noticeMsg:
-		m.notice = string(msg)
+		m.notice = notice(msg)
 	case tea.KeyPressMsg:
 		m.focus = footer.Factories
-		m.notice = ""
+		m.notice = notice{}
 		cmd = m.selectorKey(msg.String())
 	}
 	m.settle()
@@ -235,6 +256,7 @@ func (m *Model) apply(s Snapshot) {
 		return
 	}
 	first := len(m.snap.Items) == 0 && m.GitHub != nil
+	starting := m.selected == ""
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
 	m.loaded = map[string]factory.Status{}
@@ -256,11 +278,7 @@ func (m *Model) apply(s Snapshot) {
 	m.closeFinishedStages()
 	rows := selector.Visible(m.data())
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
-		topRow := ""
-		if len(rows) > 0 {
-			topRow = rows[0].Key
-		}
-		m.choose(topRow)
+		m.choose(m.landing(rows, starting))
 	} else if m.itemArrived(m.selected, shownBefore) {
 		m.panel.tab = panel.Attention
 	}
@@ -272,6 +290,16 @@ func (m *Model) apply(s Snapshot) {
 	if first {
 		m.pending = append(m.pending, m.refreshPRs(false))
 	}
+}
+
+func (m *Model) landing(rows []selector.Row, starting bool) string {
+	if key, ok := m.nextNeeding(); starting && ok {
+		return key
+	}
+	if len(rows) > 0 {
+		return rows[0].Key
+	}
+	return ""
 }
 
 func (m *Model) itemsOf(key string) map[string]bool {
@@ -543,7 +571,7 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 }
 
 func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
-	m.notice = ""
+	m.notice = notice{}
 	switch {
 	case pane == "panel" && key == "w" && m.asleepItemShown():
 		m.wakeSelected()
@@ -569,7 +597,7 @@ func (m *Model) asleepItemShown() bool {
 
 func (m *Model) report(err error) {
 	if err != nil {
-		m.notice = err.Error()
+		m.notice = problem(err.Error())
 	}
 }
 
@@ -579,7 +607,7 @@ func (m *Model) askPause() tea.Cmd {
 	case !ok:
 		return nil
 	case it.Pane == nil:
-		m.notice = it.Factory.Label() + " has no pane to pause."
+		m.notice = problem(it.Factory.Label() + " has no pane to pause.")
 		return nil
 	}
 	return m.openDialog("pause", m.pauseContext(it))
@@ -602,7 +630,7 @@ func (m *Model) askArchive() tea.Cmd {
 		m.report(m.unarchive(it))
 		return m.load()
 	case !archivable(it):
-		m.notice = "Only done, gone or exited factories can be archived. Pause " + it.Factory.Label() + " first."
+		m.notice = problem("Only done, gone or exited factories can be archived. Pause " + it.Factory.Label() + " first.")
 		return nil
 	}
 	return m.openDialog("archive", m.archiveContext(it))
@@ -664,6 +692,18 @@ func (m *Model) openingTab(it Item) panel.Tab {
 }
 
 func (m *Model) nextNeedingYou() {
+	key, ok := m.nextNeeding()
+	if !ok {
+		m.notice = news("Nothing needs you right now.")
+		return
+	}
+	m.choose(key)
+	if _, item, open := m.currentAttention(); open && item.Answerable() && m.panel.tab == panel.Attention {
+		m.focusPanel()
+	}
+}
+
+func (m *Model) nextNeeding() (string, bool) {
 	type candidate struct {
 		key   string
 		since time.Time
@@ -675,7 +715,7 @@ func (m *Model) nextNeedingYou() {
 		}
 	}
 	if len(candidates) == 0 {
-		return
+		return "", false
 	}
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].since.Before(candidates[j].since) })
 	next := 0
@@ -684,7 +724,15 @@ func (m *Model) nextNeedingYou() {
 			next = (i + 1) % len(candidates)
 		}
 	}
-	m.choose(candidates[next].key)
+	return candidates[next].key, true
+}
+
+func (m *Model) nextElsewhere() (Item, bool) {
+	key, ok := m.nextNeeding()
+	if !ok || key == m.selected {
+		return Item{}, false
+	}
+	return m.snap.Find(key)
 }
 
 func needsSince(it Item) time.Time {
@@ -707,11 +755,26 @@ func needsSince(it Item) time.Time {
 
 func (m *Model) focusSession() {
 	it, ok := m.snap.Find(m.selected)
-	if !ok || it.Pane == nil || m.Engine == nil {
+	if !ok || m.Engine == nil {
+		return
+	}
+	if it.Pane == nil {
+		m.notice = problem(noSessionToEnter(it))
 		return
 	}
 	m.Engine.TM.SelectPane(m.Layout.Slot)
 	m.focus = footer.Session
+	if !m.toldReturnKey {
+		m.toldReturnKey = true
+		m.notice = news("In the " + it.Factory.Label() + " session. " + m.Config.Hub.ReturnKey + " brings you back to the factory list from any pane.")
+	}
+}
+
+func noSessionToEnter(it Item) string {
+	if it.Status == factory.Done {
+		return it.Factory.Label() + " is done and has no session pane."
+	}
+	return it.Factory.Label() + " has no session pane. w wakes it."
 }
 
 func (m *Model) focusSlot() {
@@ -964,8 +1027,8 @@ func hints(pairs ...string) []footer.Hint {
 
 func (m *Model) hints() []footer.Hint {
 	var notice []footer.Hint
-	if m.notice != "" {
-		notice = hints("!", m.notice)
+	if m.notice.text != "" {
+		notice = []footer.Hint{{Key: m.notice.mark(), Does: m.notice.text, Good: m.notice.ok}}
 	}
 	switch m.focus {
 	case footer.Session:
@@ -1021,6 +1084,9 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("j/k", "scroll", "t", "all factories", "⏎", "jump to factory", "tab", "next tab", "esc", "back")
 	}
 	it, item, ok := m.currentAttention()
+	if next, found := m.nextElsewhere(); !ok && found {
+		return hints("⏎", "next: "+next.Factory.Label(), "tab", "next tab", "esc", "back to factories")
+	}
 	if !ok {
 		return hints("tab", "next tab", "esc", "back to factories")
 	}
@@ -1030,26 +1096,34 @@ func (m *Model) panelHints() []footer.Hint {
 		back = "stop typing"
 	}
 	if item.Kind == "question" && len(item.Questions) == 0 {
-		return hints("type", "your answer", "ctrl+s", "send", "ctrl+d", "discard", "esc", back)
+		return hints("type", "your answer", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
 	}
-	approving := item.Answerable() && !editing && onApproveRow(item, m.draft(it.Factory, item))
+	d := &panel.Draft{}
+	if item.Answerable() {
+		d = m.draft(it.Factory, item)
+	}
+	approve := "approve"
+	if item.Kind == "gate" && len(item.Artifacts) > 1 && d.Artifact < len(item.Artifacts) {
+		approve = "approve " + item.Artifacts[d.Artifact].Title
+	}
+	approving := item.Answerable() && !editing && onApproveRow(item, d)
 	switch {
 	case item.Kind == "question" && editing:
 		return hints("⏎", "confirm", "ctrl+s", "send", "esc", back)
-	case onSendRow(item, m.draft(it.Factory, item)):
-		return hints("⏎", "send", "↑", "back to the questions", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+	case onSendRow(item, d):
+		return hints("⏎", "send", "↑", "back to the questions", "ctrl+k", "already handled", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "question":
-		return hints("↑↓", "move", "⏎", "pick", "←→", "question", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+		return hints("↑↓", "move", "⏎", "pick", "←→", "question", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case approving:
-		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+n/p", "item", "esc", back)
+		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "gate":
-		return hints("ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+a", approve, "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "comment":
-		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+n/p", "item", "esc", back)
+		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "cap":
-		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "failure":
-		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	}
@@ -1104,7 +1178,7 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 		if it.Factory.Worktree != "" {
 			y++
 			c.Put(x, y, "worktree  ", theme.Quiet)
-			end := c.PutMax(x+10, y, tilde(it.Factory.Worktree), theme.Text, c.W-x-22)
+			end := c.Put(x+10, y, theme.KeepTail(tilde(it.Factory.Worktree), c.W-x-22), theme.Text)
 			if !dirExists(it.Factory.Worktree) {
 				c.Put(end+2, y, "removed", theme.FgInk(theme.Red))
 			}
@@ -1114,7 +1188,7 @@ func (m *Model) drawNoPane(c *theme.Canvas, it Item) {
 	y++
 	c.Put(x, y, "Wake recreates the pane in the worktree and resumes the same conversation:", theme.Text)
 	y += 2
-	c.PutMax(x+2, y, "$ cd "+tilde(it.Factory.Worktree), theme.Bright, c.W-x-4)
+	c.Put(x+2, y, "$ cd "+theme.KeepTail(tilde(it.Factory.Worktree), c.W-x-9), theme.Bright)
 	y++
 	for i, l := range theme.Wrap(wake.Command, c.W-x-6) {
 		lead := "$ "

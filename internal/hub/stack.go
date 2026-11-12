@@ -74,16 +74,16 @@ func (m *Model) startStack(e Event, r ReviewRequest) tea.Cmd {
 	e.respond(Message{T: "done", Data: data})
 	if m.Chrome == nil {
 		return func() tea.Msg {
-			return noticeMsg(stack.URL + " is starting; open it with factory review open once it answers.")
+			return noticeMsg(news(stack.URL + " is starting; open it with factory review open once it answers."))
 		}
 	}
 	chrome, f := m.Chrome, reviewFactory(it)
 	return func() tea.Msg {
 		if err := waitHealthy(stack.healthURL(), stackReadyWait); err != nil {
-			return noticeMsg(it.Factory.Label() + "'s stack did not come up: " + err.Error() + ". Its window shows why.")
+			return noticeMsg(problem(it.Factory.Label() + "'s stack did not come up: " + err.Error() + ". Its window shows why."))
 		}
 		if _, err := chrome.OpenApp(stack.URL, f, livePage(r.Page), stack.Cookies); err != nil {
-			return noticeMsg(err.Error())
+			return noticeMsg(problem(err.Error()))
 		}
 		return nil
 	}
