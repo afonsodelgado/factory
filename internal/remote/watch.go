@@ -125,19 +125,19 @@ func (c Client) SyncPush(ctx context.Context, push state.Push) error {
 		return err
 	}
 	for range 2 {
-		var acked int
+		var held PushSettings
 		settings := PushSettings{Server: push.ServerURL(), Topic: push.Topic, Label: c.Name, Revision: revision}
-		if err := c.Read(ctx, "push", settings, &acked); err != nil {
+		if err := c.Read(ctx, "push", settings, &held); err != nil {
 			return err
 		}
-		if acked > revision {
-			if revision, err = raisePushRevision(c.StateDir, push, acked+1); err != nil {
+		if held.Revision >= revision && !held.Matches(settings) {
+			if revision, err = raisePushRevision(c.StateDir, push, held.Revision+1); err != nil {
 				return err
 			}
 			continue
 		}
 		return UpdateCache(c.StateDir, c.Name, func(cache *Cache) error {
-			cache.Push = acked
+			cache.Push = revision
 			return nil
 		})
 	}

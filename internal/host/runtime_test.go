@@ -396,10 +396,10 @@ func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
 	now := time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)
 	pusher := &Pusher{StateDir: dir, Now: func() time.Time { return now }}
 	settings := remote.PushSettings{Server: ntfy.URL, Topic: "factory-q7rk2m9x", Label: "homelab", Revision: 2}
-	if acked, err := pusher.Configure(settings); err != nil || acked != 2 {
-		t.Fatalf("configure: %d %v", acked, err)
+	if held, err := pusher.Configure(settings); err != nil || held.Revision != 2 {
+		t.Fatalf("configure: %+v %v", held, err)
 	}
-	if acked, _ := pusher.Configure(remote.PushSettings{Server: ntfy.URL, Label: "homelab", Revision: 1}); acked != 2 {
+	if held, _ := pusher.Configure(remote.PushSettings{Server: ntfy.URL, Label: "homelab", Revision: 1}); held.Revision != 2 || held.Topic != settings.Topic {
 		t.Fatal("an older settings revision turned push off after a newer one")
 	}
 	secret := state.Attention{ID: "q-csv-1", Kind: "question", Title: "Paste the prod token sk-live-123?", Body: "sk-live-123", CreatedAt: state.Time{Time: now}}

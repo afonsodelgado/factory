@@ -61,18 +61,18 @@ func (p *Pusher) load() pushFile {
 	return f
 }
 
-func (p *Pusher) Configure(s remote.PushSettings) (int, error) {
+func (p *Pusher) Configure(s remote.PushSettings) (remote.PushSettings, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	f := p.load()
 	if s.Revision <= f.Settings.Revision {
-		return f.Settings.Revision, nil
+		return f.Settings, nil
 	}
 	f.Settings = s
 	if s.Topic == "" {
 		f.Queue = nil
 	}
-	return s.Revision, savePrivate(p.path(), f)
+	return s, savePrivate(p.path(), f)
 }
 
 func (p *Pusher) Enqueue(a remote.Attention) {
@@ -169,9 +169,9 @@ func send(s remote.PushSettings, text string) error {
 	return nil
 }
 
-func (m *Runtime) configurePush(s remote.PushSettings) (int, error) {
+func (m *Runtime) configurePush(s remote.PushSettings) (remote.PushSettings, error) {
 	if m.Push == nil {
-		return 0, fmt.Errorf("phone push runs only in a server's host")
+		return remote.PushSettings{}, fmt.Errorf("phone push runs only in a server's host")
 	}
 	return m.Push.Configure(s)
 }

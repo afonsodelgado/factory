@@ -60,6 +60,10 @@ type PushSettings struct {
 	Revision int    `json:"revision"`
 }
 
+func (s PushSettings) Matches(other PushSettings) bool {
+	return s.Server == other.Server && s.Topic == other.Topic && s.Label == other.Label
+}
+
 type LinkRequest struct {
 	URL  string `json:"url"`
 	Port int    `json:"port,omitempty"`

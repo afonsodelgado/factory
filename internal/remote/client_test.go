@@ -38,13 +38,15 @@ case "$req" in
 	echo '{"protocol":1,"server":"s1","status":"completed","data":{"server":"s1","release":"x","protocol":1,"platform":"linux"}}'
 	;;
 *'"action":"push"'*)
-	sent=$(printf '%s' "$req" | sed -n 's/.*"revision":\([0-9]*\).*/\1/p')
-	have=$(cat "$FACTORY_TEST_PUSH" 2>/dev/null || echo 0)
-	if [ "$sent" -gt "$have" ]; then
-		echo "$sent" >"$FACTORY_TEST_PUSH"
-		have=$sent
+	sent=$(printf '%s' "$req" | sed -n 's/.*"data":\(.*\)}$/\1/p')
+	sent_revision=$(printf '%s' "$sent" | sed -n 's/.*"revision":\([0-9]*\).*/\1/p')
+	held=$(cat "$FACTORY_TEST_PUSH")
+	held_revision=$(printf '%s' "$held" | sed -n 's/.*"revision":\([0-9]*\).*/\1/p')
+	if [ "$sent_revision" -gt "$held_revision" ]; then
+		printf '%s' "$sent" >"$FACTORY_TEST_PUSH"
+		held=$sent
 	fi
-	echo '{"protocol":1,"server":"s1","status":"completed","data":'"$have"'}'
+	echo '{"protocol":1,"server":"s1","status":"completed","data":'"$held"'}'
 	;;
 esac
 `
@@ -103,32 +105,40 @@ func TestRetryAfterALostAnswerReusesTheOperation(t *testing.T) {
 	}
 }
 
-func TestPushSettingsReachAServerThatCountsAheadOfThisLaptop(t *testing.T) {
-	bin, work := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(keepsRevisionSSH), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	serverRevision := filepath.Join(work, "revision")
-	t.Setenv("FACTORY_TEST_PUSH", serverRevision)
-	if err := os.WriteFile(serverRevision, []byte("5\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	short, err := os.MkdirTemp("/tmp", "frp-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(short) })
-	client := Client{Transport{Name: "homelab", Remote: state.Remote{Host: "homelab"}, StateDir: short}}
-	push := state.Push{Topic: "factory-rotated-topic"}
+func TestPushSettingsReachAServerWhoseRevisionIsAheadOfOrEqualToThisLaptops(t *testing.T) {
+	for name, held := range map[string]string{
+		"a server counting ahead":    `{"server":"https://ntfy.sh","topic":"factory-old-topic","label":"homelab","revision":5}`,
+		"a server at the same count": `{"server":"https://ntfy.sh","topic":"factory-old-topic","label":"homelab","revision":1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin, work := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(keepsRevisionSSH), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			server := filepath.Join(work, "settings")
+			t.Setenv("FACTORY_TEST_PUSH", server)
+			if err := os.WriteFile(server, []byte(held), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			short, err := os.MkdirTemp("/tmp", "frp-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(short) })
+			client := Client{Transport{Name: "homelab", Remote: state.Remote{Host: "homelab"}, StateDir: short}}
+			push := state.Push{Topic: "factory-rotated-topic"}
 
-	if err := client.SyncPush(context.Background(), push); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(serverRevision); strings.TrimSpace(string(got)) != "6" {
-		t.Fatalf("the server counts %q; want the rotated setting numbered past its own 5", got)
-	}
-	if PushPending(short, "homelab", push) {
-		t.Fatal("the laptop still lists the setting as pending after the server took it")
+			if err := client.SyncPush(context.Background(), push); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := os.ReadFile(server)
+			if !strings.Contains(string(got), "factory-rotated-topic") {
+				t.Fatalf("the server holds %s; want the rotated topic, since a leaked topic must stop receiving alerts", got)
+			}
+			if PushPending(short, "homelab", push) {
+				t.Fatal("the laptop still lists the setting as pending after the server took it")
+			}
+		})
 	}
 }
