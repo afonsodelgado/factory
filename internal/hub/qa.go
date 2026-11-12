@@ -243,7 +243,7 @@ func (m *Model) qaEnded(run remote.QARun) bool {
 		return false
 	}
 	p, found := m.proxyPane(run.Key, "qa", run.Job.Token)
-	return !found || factory.IsShell(p.Command)
+	return !found || (factory.IsShell(p.Command) && host.ShellInForeground(p.PID))
 }
 
 func (m *Model) returnQA(run remote.QARun, report remote.QAReturn) {
