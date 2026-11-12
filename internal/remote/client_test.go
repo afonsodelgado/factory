@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,5 +204,25 @@ func TestTheLaptopRefusesQAJobFieldsThatWouldRunOrWriteOutsideItsWorktree(t *tes
 		if bad.Validate() == nil {
 			t.Errorf("accepted %s", name)
 		}
+	}
+}
+
+func TestLaptopQAFindsTheCheckoutByAnyOfItsRemotes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"remote", "add", "origin", "https://git.example/fork/app.git"},
+		{"remote", "add", "upstream", "https://git.example/acme/app.git"},
+	} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if found, ok := LocalCheckout([]string{t.TempDir(), repo}, "https://git.example/acme/app.git"); !ok || found != repo {
+		t.Fatalf("LocalCheckout found %q, %v; want the checkout whose upstream remote is the factory's, since --git-remote can pick it", found, ok)
+	}
+	if _, ok := LocalCheckout([]string{repo}, "https://git.example/other/app.git"); ok {
+		t.Fatal("a checkout matched a URL none of its remotes has")
 	}
 }

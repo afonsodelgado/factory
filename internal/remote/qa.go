@@ -137,11 +137,24 @@ func returnable(job QAJob, rel string) bool {
 
 func LocalCheckout(repos []string, gitURL string) (string, bool) {
 	for _, repo := range repos {
-		if url, err := GitURL(repo, ""); err == nil && url == gitURL {
+		if hasRemoteURL(repo, gitURL) {
 			return repo, true
 		}
 	}
 	return "", false
+}
+
+func hasRemoteURL(repo, gitURL string) bool {
+	names, err := git(context.Background(), repo, "remote")
+	if err != nil {
+		return false
+	}
+	for _, name := range strings.Fields(names) {
+		if url, err := git(context.Background(), repo, "config", "--get", "remote."+name+".url"); err == nil && url == gitURL {
+			return true
+		}
+	}
+	return false
 }
 
 func qaRef(job QAJob) string { return "refs/factory-qa/" + job.ID }
