@@ -417,7 +417,7 @@ func (m *Model) deliverRemote(it Item, mark sentMark, text string) {
 	f := it.Factory
 	key := mark.Factory + "|" + mark.ItemID
 	if m.unreachable(f) {
-		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable. Draft kept."
+		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable."
 		return
 	}
 	m.panel.sent[key] = mark
@@ -435,10 +435,10 @@ func (m *Model) answered(msg answeredMsg) {
 	switch {
 	case errors.Is(msg.err, remote.ErrUncertain):
 		delete(m.panel.sent, key)
-		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again. Draft kept."
+		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
 		delete(m.panel.sent, key)
-		m.panel.refused[key] = "Not sent. " + msg.err.Error() + " Draft kept."
+		m.panel.refused[key] = "Not sent. " + msg.err.Error()
 	default:
 		m.recordSent(msg.mark, msg.at)
 	}

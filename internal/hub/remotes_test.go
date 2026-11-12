@@ -232,7 +232,7 @@ func TestRemoteAnswerKeepsTheDraftWhenTheServerIsAwayOrSilent(t *testing.T) {
 	m.links["homelab"].ok = false
 	m.links["homelab"].contact = remoteNow.Add(-time.Minute)
 	m.deliver("handled")
-	if len(m.later) != 0 || !strings.Contains(m.panel.refused[key], "unreachable. Draft kept.") {
+	if len(m.later) != 0 || !strings.Contains(m.panel.refused[key], "is unreachable.") {
 		t.Fatalf("an answer to an unreachable server queued %d sends and said %q; want nothing sent and the draft kept", len(m.later), m.panel.refused[key])
 	}
 
