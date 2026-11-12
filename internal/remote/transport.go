@@ -3,13 +3,18 @@ package remote
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -20,6 +25,15 @@ type Transport struct {
 	Name     string
 	Remote   state.Remote
 	StateDir string
+}
+
+type CommandError struct {
+	Remote string
+	Detail string
+}
+
+func (e *CommandError) Error() string {
+	return e.Remote + " could not run factory over ssh: " + e.Detail
 }
 
 type TransportError struct {
@@ -45,7 +59,30 @@ func (t Transport) Endpoint() string {
 	return endpoint
 }
 
-func (t Transport) controlDir() string { return filepath.Join(t.StateDir, "ssh") }
+const unreachable = 255
+
+func controlDir() string { return filepath.Join("/tmp", "factory-ssh-"+strconv.Itoa(os.Getuid())) }
+
+func (t Transport) controlPath() string {
+	sum := sha256.Sum256([]byte(t.StateDir + "\x00" + t.Endpoint() + "\x00" + t.Remote.Identity))
+	return filepath.Join(controlDir(), hex.EncodeToString(sum[:8]))
+}
+
+func privateControlDir() error {
+	dir := controlDir()
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || info.Mode().Perm() != 0o700 || !ok || int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("%s holds ssh connections, so it must be a directory only you can open; remove it and try again", dir)
+	}
+	return nil
+}
 
 func (t Transport) Args(tty bool, command []string) []string {
 	args := []string{
@@ -54,7 +91,7 @@ func (t Transport) Args(tty bool, command []string) []string {
 		"-o", "ServerAliveInterval=15",
 		"-o", "ServerAliveCountMax=3",
 		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(t.controlDir(), "%C"),
+		"-o", "ControlPath=" + t.controlPath(),
 		"-o", "ControlPersist=10m",
 		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
@@ -77,11 +114,12 @@ func (t Transport) Args(tty bool, command []string) []string {
 }
 
 func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]byte, error) {
-	if err := os.MkdirAll(t.controlDir(), 0o700); err != nil {
+	if err := privateControlDir(); err != nil {
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, "ssh", t.Args(false, command)...)
 	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.WaitDelay = time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -89,8 +127,11 @@ func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]b
 		return nil, &TransportError{Remote: t.Name, Detail: "no answer in time"}
 	}
 	var exit *exec.ExitError
-	if errors.As(err, &exit) {
+	switch {
+	case errors.As(err, &exit) && exit.ExitCode() == unreachable:
 		return nil, &TransportError{Remote: t.Name, Detail: lastLine(stderr.String(), exit)}
+	case errors.As(err, &exit):
+		return nil, &CommandError{Remote: t.Name, Detail: lastLine(stderr.String(), exit)}
 	}
 	return out, err
 }

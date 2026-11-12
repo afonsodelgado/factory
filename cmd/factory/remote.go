@@ -396,6 +396,11 @@ func remoteDoctor(cfg *state.Config, name string) (string, []install.Check) {
 		return header, append(checks, skipped(serverCheckNames, "skipped, needs ssh")...)
 	}
 	checks := []install.Check{{Name: "ssh", Mark: install.Pass, Detail: fmt.Sprintf("%s in %.1fs", client.Endpoint(), time.Since(start).Seconds())}}
+	var missing *remote.CommandError
+	if errors.As(err, &missing) {
+		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: missing.Detail, Fix: "install factory where ssh commands find it: ssh " + name + " 'command -v factory'  must print its path"})
+		return header, append(checks, skipped(serverCheckNames[1:], "skipped, needs factory on "+name)...)
+	}
 	if err != nil {
 		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: err.Error(), Fix: "ssh " + name + " factory --version"})
 		return header, append(checks, skipped(serverCheckNames[1:], "skipped, needs a matching factory")...)

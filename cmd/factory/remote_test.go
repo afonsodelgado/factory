@@ -185,6 +185,10 @@ func TestRemoteDoctorSkipsWhatNeedsAWorkingLink(t *testing.T) {
 	if err == nil || !strings.Contains(out, "✗ ssh") || !strings.Contains(out, "– claude") || !strings.Contains(out, "skipped") {
 		t.Fatalf("an unreachable remote reported:\n%s\nwant ssh failing and the server checks skipped, not failed", out)
 	}
+	out, _ = s.factory(t, s.root, []string{"FACTORY_SSH_STANDIN_NO_FACTORY=1"}, "doctor", "--remote", "homelab")
+	if !strings.Contains(out, "✓ ssh") || !strings.Contains(out, "✗ factory") || !strings.Contains(out, "command not found") {
+		t.Fatalf("a server without factory on the ssh PATH reported:\n%s\nwant ssh fine and factory missing, not an unreachable host", out)
+	}
 	remote.UpdateCache(filepath.Join(s.root, "client", "state"), "homelab", func(c *remote.Cache) error {
 		c.Server = "the-server-this-name-used-to-reach"
 		return nil

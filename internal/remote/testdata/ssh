@@ -20,6 +20,10 @@ if [ "${FACTORY_SSH_STANDIN_DOWN:-}" = 1 ]; then
 	echo "ssh: connect to host $host port 22: Operation timed out" >&2
 	exit 255
 fi
+if [ "${FACTORY_SSH_STANDIN_NO_FACTORY:-}" = 1 ]; then
+	echo "bash: line 1: factory: command not found" >&2
+	exit 127
+fi
 case "$*" in
 "factory host request") ;;
 *) echo "ssh stand-in: refusing the remote command: $*" >&2 && exit 255 ;;
