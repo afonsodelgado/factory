@@ -514,6 +514,10 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	if opened := readOr(bypassed); opened != "" || view.Opens[0].URL != appURL {
 		t.Fatalf("the agent's xdg-open ran the server's own opener with %q and queued %v; want its link queued for the laptop", opened, view.Opens)
 	}
+	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+	if out, err := s.factory(t, dir, onServer, "review", "link", "file:///etc/passwd"); err == nil || strings.Contains(out, "Queued") {
+		t.Fatalf("a link the laptop never opens was accepted: %v\n%s\nwant it refused on the server, not queued to nag on every hub start", err, out)
+	}
 
 	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
 	t.Cleanup(tunnels.Close)

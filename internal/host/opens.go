@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,11 +58,25 @@ func (m *Runtime) Opens() []remote.Open {
 }
 
 func (m *Runtime) QueueOpen(it Item, o remote.Open) (ReviewReply, error) {
+	if !m.opensOnTheLaptop(o.URL) {
+		return ReviewReply{}, fmt.Errorf("only web links and factory pages open on the laptop, and %q is neither", o.URL)
+	}
 	o.ID, o.Factory, o.At = uuid.NewString(), it.Factory.Label(), m.Now()
 	if err := savePrivate(m.opensPath(), append(m.Opens(), o)); err != nil {
 		return ReviewReply{}, err
 	}
 	return ReviewReply{Target: "the laptop", Queued: true}, nil
+}
+
+func (m *Runtime) opensOnTheLaptop(raw string) bool {
+	if remote.WebLink(raw) {
+		return true
+	}
+	if m.Pages == nil {
+		return false
+	}
+	_, page := m.Pages.PageURL(raw)
+	return page
 }
 
 func (m *Runtime) Opened(ids []string) error {
