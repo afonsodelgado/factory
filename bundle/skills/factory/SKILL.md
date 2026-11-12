@@ -192,6 +192,8 @@ Designs and plans are HTML files in the factory directory. Never publish them as
 
 The factory app serves these files on its review page, on `127.0.0.1`. `o` on a file in the panel opens it. The user comments on the page's elements there and presses Send. The app types the batch straight into the pane of the agent that owns the page: the designer for `design/`, the architect for `plan.html` and `schematic.html`. That agent changes the page, which reloads by itself, and answers each thread with `factory review reply`. You do not relay comments and do not track threads; `"${FACTORY_BIN:-factory}" review threads [--open]` lists them with their answers when you need them.
 
+On a server, the developer's laptop shows these pages: its hub opens them through an ssh tunnel, and comments and approvals come back to this machine. `review open`, `review stack` and `review link <url>` (any other page you want the user to see) then wait for the laptop's hub instead of opening a browser here, so never start a browser on a server.
+
 For this, the designer and architect run in panes of their own, whatever their tool: start them with `"${FACTORY_BIN:-factory}" stage start`, as below, not with the Agent tool. A `review-<id>-<n> comments: <file>` message that reaches you means the owning agent never ran in a pane: send the file to it with `"${FACTORY_BIN:-factory}" stage send --role <role> --message <file>`.
 
 **Without the factory app** (`FACTORY` unset) there is no review page and no `stage start`. Spawn the designer and architect with the Agent tool, post the file paths, take feedback as plain messages, and forward it with SendMessage.

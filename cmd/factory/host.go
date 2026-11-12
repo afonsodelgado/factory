@@ -139,8 +139,16 @@ func serveHost(cfg *state.Config) error {
 	}
 	defer pages.Close()
 	pages.SetActions(host.ReviewActions(events))
+	bin, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	openers := filepath.Join(cfg.StateDir, "openers")
+	if err := host.WriteOpeners(openers, bin); err != nil {
+		return err
+	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	panes := &host.Panes{TM: tm, Session: cfg.Hub.Session}
+	panes := &host.Panes{TM: tm, Session: cfg.Hub.Session, Openers: openers}
 	loader := &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}
 	runtime := host.New(host.Runtime{Config: cfg, Loader: loader, Engine: panes, TM: tm, Session: cfg.Hub.Session, Typist: panes, Pages: pages})
 	return runtime.Run(ctx, events)

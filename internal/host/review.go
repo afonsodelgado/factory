@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -36,6 +37,7 @@ type ReviewReply struct {
 	Gate    string          `json:"gate,omitempty"`
 	Owner   string          `json:"owner,omitempty"`
 	Threads []review.Thread `json:"threads,omitempty"`
+	Queued  bool            `json:"queued,omitempty"`
 }
 
 func ReviewActions(events chan<- Event) func(review.Action) (any, error) {
@@ -86,8 +88,28 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 		return m.ReplyToThread(it, store, r)
 	case "threads":
 		return ReviewReply{Threads: store.Threads(r.Page)}, nil
+	case "open":
+		return m.QueueOpen(it, remote.Open{URL: r.URL, Page: r.Page, Key: ReviewKey(it.Factory)})
+	case "link":
+		return m.QueueOpen(it, remote.Open{URL: r.URL})
+	case "stack":
+		return m.queueStack(it, r.Page)
 	}
 	return ReviewReply{}, fmt.Errorf("unknown review action %q", r.Action)
+}
+
+func (m *Runtime) queueStack(it Item, page string) (ReviewReply, error) {
+	if it.Factory.Worktree == "" {
+		return ReviewReply{}, errors.New("no factory owns this session")
+	}
+	stack, err := ReadStack(it.Factory.Dir)
+	if err != nil {
+		return ReviewReply{}, err
+	}
+	if err := m.RunStack(it.Factory, stack); err != nil {
+		return ReviewReply{}, err
+	}
+	return m.QueueOpen(it, remote.Open{URL: stack.URL, Health: stack.HealthURL(), Page: page, Key: ReviewKey(it.Factory), Cookies: stack.Cookies})
 }
 
 func (m *Runtime) ReviewItem(r ReviewRequest) (Item, bool) {

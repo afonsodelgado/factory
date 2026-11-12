@@ -138,6 +138,9 @@ commands:
               run the stack that factory-qa wrote to review/stack.json in a
               window of its own, then open the app signed in for the
               walkthrough
+  review link <url>
+              open a link in the browser of the machine you work on; on a
+              server, the laptop's hub opens it through a tunnel
   attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <id>
               set an attention item's resolved_at in state.json, and
               waiting_on when given (run by the supervisor)

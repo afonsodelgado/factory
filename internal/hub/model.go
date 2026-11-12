@@ -31,19 +31,20 @@ const (
 )
 
 type Model struct {
-	host   *host.Runtime
-	Config *state.Config
-	Engine *Engine
-	Layout Layout
-	Server *Server
-	Loader *Loader
-	Events chan Event
-	Watch  *Watcher
-	GitHub *GitHub
-	Typist Typist
-	Open   func(url string)
-	Review *review.Server
-	Chrome *review.Browser
+	host    *host.Runtime
+	Config  *state.Config
+	Engine  *Engine
+	Layout  Layout
+	Server  *Server
+	Loader  *Loader
+	Events  chan Event
+	Watch   *Watcher
+	GitHub  *GitHub
+	Typist  Typist
+	Open    func(url string)
+	Review  *review.Server
+	Chrome  *review.Browser
+	Tunnels *remote.Tunnels
 
 	DialogCommand func(kind string) string
 	Bell          io.Writer
@@ -79,6 +80,7 @@ type Model struct {
 	links         map[string]*link
 	wires         map[string]remote.Factory
 	attempts      map[string]attempt
+	opening       map[string]bool
 	later         []tea.Cmd
 }
 
@@ -220,7 +222,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollMsg:
 		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes())
 	case remoteMsg:
-		m.remoteArrived(msg)
+		cmd = m.remoteArrived(msg)
 	case attachedMsg:
 		cmd = m.attached(msg)
 	case answeredMsg:

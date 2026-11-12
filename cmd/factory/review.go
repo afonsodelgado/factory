@@ -18,7 +18,8 @@ import (
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [--factory id --remote name] [text…]
        factory review threads [--page <path>] [--open] [--factory id --remote name]
        factory review open [--factory <id>] [--for design|walkthrough] <url>
-       factory review stack [--for design|walkthrough]`
+       factory review stack [--for design|walkthrough]
+       factory review link <url>`
 
 func runReview(args []string) int {
 	if len(args) == 0 {
@@ -34,6 +35,8 @@ func runReview(args []string) int {
 		return runReviewOpen(args[1:])
 	case "stack":
 		return runReviewStack(args[1:])
+	case "link":
+		return runReviewLink(args[1:])
 	}
 	fmt.Fprintln(os.Stderr, reviewUsage)
 	return 2
@@ -98,7 +101,27 @@ func runReviewOpen(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
+	if reply.Queued {
+		fmt.Printf("Queued %s for the laptop: its hub opens it through a tunnel once connected, and comments come back here.\n", flags.Arg(0))
+		return 0
+	}
 	fmt.Printf("Opened %s in the factory's Chrome; comments go to %s.\n", flags.Arg(0), reply.Target)
+	return 0
+}
+
+func runReviewLink(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, reviewUsage)
+		return 2
+	}
+	reply, err := askReview(hub.ReviewRequest{Action: "link", URL: args[0]})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory review:", err)
+		return 1
+	}
+	if reply.Queued {
+		fmt.Printf("Queued %s for the laptop.\n", args[0])
+	}
 	return 0
 }
 
@@ -119,6 +142,10 @@ func runReviewStack(args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
+	}
+	if reply.Queued {
+		fmt.Println("Starting the stack in its own window; the laptop's hub opens it through a tunnel once it answers.")
+		return 0
 	}
 	fmt.Printf("Starting the stack in its own window; the factory's Chrome opens %s once it answers.\n", reply.Target)
 	return 0

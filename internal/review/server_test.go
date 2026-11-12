@@ -3,9 +3,11 @@ package review
 import (
 	"bufio"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,90 @@ func TestCommentsSurviveAHubRestart(t *testing.T) {
 	if st, _ := s.Store(Factory{Key: "k", Dir: dir}); len(st.Threads("")) != 0 {
 		t.Error("a factory deleted and created again with the same id still shows the old factory's comments")
 	}
+}
+
+func TestForwardedReviewPreservesHostAndOriginChecks(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
+	s, err := Listen(0, "tok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
+	s.SetActions(func(a Action) (any, error) { return map[string]string{"did": a.Kind}, nil })
+	tunnel, local := forwardTo(t, s.ln.Addr().String()), forwardTo(t, s.ln.Addr().String())
+	s.Allow(tunnel)
+	origin := "http://127.0.0.1:" + strconv.Itoa(tunnel)
+
+	call := func(method, url, host, from, body string) int {
+		t.Helper()
+		req, _ := http.NewRequest(method, url, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if host != "" {
+			req.Host = host
+		}
+		if from != "" {
+			req.Header.Set("Origin", from)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	api := origin + "/r/tok/k/_api"
+	for name, status := range map[string]int{
+		"render":  call("GET", origin+"/r/tok/k/plan.html", "", "", ""),
+		"reload":  call("GET", origin+"/r/tok/k/plan.html", "localhost:"+strconv.Itoa(tunnel), "", ""),
+		"comment": call("POST", api+"/threads", "", origin, `{"page":"plan.html","intent":"question","text":"Why?","anchor":{"selector":"#q1"}}`),
+		"reply":   call("POST", api+"/threads/t-1/replies", "", origin, `{"text":"Because."}`),
+		"approve": call("POST", api+"/approve", "", origin, `{"page":"plan.html"}`),
+	} {
+		if status != http.StatusOK {
+			t.Errorf("%s through the tunnel answered %d; want 200", name, status)
+		}
+	}
+	for name, status := range map[string]int{
+		"an unregistered forwarded port": call("GET", "http://127.0.0.1:"+strconv.Itoa(local)+"/r/tok/k/plan.html", "", "", ""),
+		"a forged Host":                  call("GET", origin+"/r/tok/k/plan.html", "evil.example:"+strconv.Itoa(tunnel), "", ""),
+		"a forged Origin":                call("POST", api+"/approve", "", "http://evil.example", `{"page":"plan.html"}`),
+		"another local port as Origin":   call("POST", api+"/approve", "", "http://127.0.0.1:"+strconv.Itoa(local), `{"page":"plan.html"}`),
+		"a path escape":                  call("GET", origin+"/r/tok/k/..%2F..%2Fetc%2Fpasswd", "", "", ""),
+	} {
+		if status == http.StatusOK {
+			t.Errorf("%s was accepted through the tunnel", name)
+		}
+	}
+}
+
+func forwardTo(t *testing.T, dest string) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				d, err := net.Dial("tcp", dest)
+				if err != nil {
+					return
+				}
+				defer d.Close()
+				go io.Copy(d, c)
+				io.Copy(c, d)
+			}()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
 }
 
 func write(t *testing.T, path, content string) {

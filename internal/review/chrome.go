@@ -1,14 +1,15 @@
 package review
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -41,11 +42,17 @@ type Browser struct {
 	tabs   []*Tab
 }
 
+type Endpoint struct {
+	Origin string
+	Token  string
+}
+
 type Tab struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	factory Factory
-	app     bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	factory  Factory
+	app      bool
+	endpoint Endpoint
 
 	mu       sync.Mutex
 	console  []string
@@ -121,16 +128,26 @@ func (b *Browser) OpenPage(url string) error {
 	if !ok {
 		return fmt.Errorf("%s is not a review page", url)
 	}
-	_, err := b.open(url, f, "", nil)
+	return b.OpenPageAt(b.server.endpoint(), url, f)
+}
+
+func (b *Browser) OpenPageAt(e Endpoint, url string, f Factory) error {
+	_, err := b.open(e, url, f, "", nil)
 	return err
 }
 
 func (b *Browser) OpenApp(url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
+	return b.OpenAppAt(b.server.endpoint(), url, f, page, cookies)
+}
+
+func (b *Browser) OpenAppAt(e Endpoint, url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
 	if !Live(page) {
 		return nil, fmt.Errorf("%q is not a live page; use %s or %s", page, App, Prototype)
 	}
-	return b.open(url, f, page, cookies)
+	return b.open(e, url, f, page, cookies)
 }
+
+func (s *Server) endpoint() Endpoint { return Endpoint{Origin: s.Origin(), Token: s.token} }
 
 type Cookie struct {
 	Name   string `json:"name"`
@@ -139,14 +156,14 @@ type Cookie struct {
 	Path   string `json:"path,omitempty"`
 }
 
-func (b *Browser) open(url string, f Factory, livePage string, cookies []Cookie) (*Tab, error) {
+func (b *Browser) open(e Endpoint, url string, f Factory, livePage string, cookies []Cookie) (*Tab, error) {
 	app := livePage != ""
 	root, err := b.start()
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := chromedp.NewContext(root, chromedp.WithNewWindow(false))
-	tab := &Tab{ctx: ctx, cancel: cancel, factory: f, app: app, requests: map[network.RequestID]string{}}
+	tab := &Tab{ctx: ctx, cancel: cancel, factory: f, app: app, endpoint: e, requests: map[network.RequestID]string{}}
 	if err := chromedp.Listen(ctx, tab.listener(b)); err != nil {
 		cancel()
 		return nil, err
@@ -157,7 +174,7 @@ func (b *Browser) open(url string, f Factory, livePage string, cookies []Cookie)
 		call(runtime.AddBinding, runtime.AddBindingParams{Name: bindingName}),
 	}
 	if app {
-		steps = append(steps, call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: b.server.appPrelude(f, livePage) + string(b.server.overlay)}))
+		steps = append(steps, call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: appPrelude(e, f, livePage) + string(b.server.overlay)}))
 	}
 	for _, c := range cookies {
 		steps = append(steps, call(network.SetCookie, network.SetCookieParams{Name: c.Name, Value: c.Value, URL: url, Domain: c.Domain, Path: c.Path}))
@@ -182,9 +199,9 @@ func call[P, R any](cmd cdp.Command[P, R], params P) chromedp.Action[chromedp.Vo
 	})
 }
 
-func (s *Server) appPrelude(f Factory, page string) string {
+func appPrelude(e Endpoint, f Factory, page string) string {
 	config := map[string]string{
-		"api":  "/r/" + s.token + "/" + f.Key + "/_api",
+		"api":  "/r/" + e.Token + "/" + f.Key + "/_api",
 		"page": f.Key + "/" + page,
 		"file": page,
 	}
@@ -304,44 +321,44 @@ func (b *Browser) handleCall(t *Tab, payload string) {
 }
 
 func (b *Browser) forward(t *Tab, c bindingCall) (int, string) {
-	prefix := "/r/" + b.server.token + "/"
+	prefix := "/r/" + t.endpoint.Token + "/"
 	if !strings.HasPrefix(c.API, prefix) || strings.Contains(c.Path, "..") {
 		return http.StatusForbidden, "not a review API"
 	}
 	if c.Method == http.MethodPost && c.Path == "/send" {
 		b.attachConsole(t, c.API)
 	}
-	req, err := http.NewRequest(c.Method, b.server.Origin()+c.API+c.Path, strings.NewReader(string(c.Body)))
-	if err != nil {
-		return http.StatusBadRequest, err.Error()
+	status, data := t.call(c.Method, c.API+c.Path, c.Body)
+	if status == http.StatusOK && c.Method == http.MethodPost && c.Path == "/threads" {
+		b.shoot(t, c.API, data)
 	}
-	if len(c.Body) > 0 {
+	return status, string(data)
+}
+
+func (t *Tab) call(method, path string, body []byte) (int, []byte) {
+	req, err := http.NewRequest(method, t.endpoint.Origin+path, bytes.NewReader(body))
+	if err != nil {
+		return http.StatusBadRequest, []byte(err.Error())
+	}
+	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return http.StatusBadGateway, err.Error()
+		return http.StatusBadGateway, []byte(err.Error())
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusOK && c.Method == http.MethodPost && c.Path == "/threads" {
-		b.shoot(t, c.API, data)
-	}
-	return resp.StatusCode, string(data)
+	return resp.StatusCode, data
 }
 
 func (b *Browser) attachConsole(t *Tab, api string) {
-	f, ok := b.server.factoryOfAPI(api)
-	if !ok {
-		return
-	}
 	lines := t.takeConsole()
 	if len(lines) == 0 {
 		return
 	}
-	if st, err := b.server.Store(f); err == nil {
-		st.AddConsole(lines)
-	}
+	body, _ := json.Marshal(map[string][]string{"lines": lines})
+	t.call(http.MethodPost, api+"/console", body)
 }
 
 func (b *Browser) shoot(t *Tab, api string, created []byte) {
@@ -349,22 +366,12 @@ func (b *Browser) shoot(t *Tab, api string, created []byte) {
 	if json.Unmarshal(created, &thread) != nil || thread.ID == "" {
 		return
 	}
-	f, ok := b.server.factoryOfAPI(api)
-	if !ok {
-		return
-	}
 	png, err := b.capture(t, thread.Anchor)
 	if err != nil {
 		return
 	}
-	rel := "shots/" + thread.ID + ".png"
-	path := filepath.Join(f.Dir, "review", filepath.FromSlash(rel))
-	if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, png, 0o644) != nil {
-		return
-	}
-	if st, err := b.server.Store(f); err == nil && st.SetShot(thread.ID, rel) == nil {
-		b.server.ThreadsChanged(f)
-	}
+	body, _ := json.Marshal(map[string][]byte{"png": png})
+	t.call(http.MethodPost, api+"/threads/"+url.PathEscape(thread.ID)+"/shot", body)
 }
 
 func (b *Browser) capture(t *Tab, a Anchor) ([]byte, error) {

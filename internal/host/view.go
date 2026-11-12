@@ -34,7 +34,10 @@ func Incarnation(f factory.Factory) string {
 
 func (m *Runtime) View() remote.View {
 	home, _ := os.UserHomeDir()
-	view := remote.View{Home: home, Factories: []remote.Factory{}}
+	view := remote.View{Home: home, Factories: []remote.Factory{}, Opens: m.Opens()}
+	if m.Pages != nil {
+		view.Review = m.Pages.Home()
+	}
 	names := map[string]string{}
 	for _, it := range m.snap.Items {
 		w := m.wire(it)
@@ -58,7 +61,7 @@ func repoName(repo string) string {
 func (m *Runtime) wire(it Item) remote.Factory {
 	f := it.Factory
 	w := remote.Factory{
-		ID: f.Label(), Slug: f.Slug, Incarnation: Incarnation(f), Repo: f.Repo, Worktree: f.Worktree,
+		ID: f.Label(), Slug: f.Slug, Incarnation: Incarnation(f), Repo: f.Repo, Worktree: f.Worktree, ReviewKey: ReviewKey(f),
 		State: f.State, StateMod: f.StateMod, Entry: f.Entry, Status: it.Status, Unblocked: it.Unblocked, Hook: it.Hook,
 		Pane: wirePane(it.Pane),
 	}

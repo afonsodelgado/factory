@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/remote"
 )
 
 func (m *Runtime) Run(ctx context.Context, events <-chan Event) error {
@@ -92,6 +93,16 @@ func (m *Runtime) handle(request Message) Message {
 		var r RepoRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			m.AddRepo(r.Repo)
+		}
+	case "link":
+		var r remote.LinkRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Link(r)
+		}
+	case "opened":
+		var ids []string
+		if err = json.Unmarshal(request.Data, &ids); err == nil {
+			err = m.Opened(ids)
 		}
 	case "snapshot":
 		value = m.snap

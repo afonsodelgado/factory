@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,6 +46,9 @@ func newStandIn(t *testing.T) standIn {
 	if out, err := exec.Command("go", "build", "-o", filepath.Join(s.bin, "factory"), ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
+	if out, err := exec.Command("go", "build", "-o", filepath.Join(s.bin, "ssh-forward"), "../../internal/remote/testdata/forward").CombinedOutput(); err != nil {
+		t.Fatalf("build the stand-in forwarder: %v\n%s", err, out)
+	}
 	standInSSH, _ := filepath.Abs("../../internal/remote/testdata/ssh")
 	if err := os.Symlink(standInSSH, filepath.Join(s.bin, "ssh")); err != nil {
 		t.Fatal(err)
@@ -68,6 +74,7 @@ func newStandIn(t *testing.T) standIn {
 		"FACTORY_SSH_STANDIN_ROOT="+s.server,
 		"FACTORY_SSH_STANDIN_BIN="+filepath.Join(s.bin, "factory"),
 		"FACTORY_SSH_STANDIN_TMUX="+s.tmux,
+		"FACTORY_SSH_STANDIN_FORWARD="+filepath.Join(s.bin, "ssh-forward"),
 	)
 	server := exec.Command("tmux", "-L", s.tmux, "-f", "/dev/null", "new-session", "-d", "-s", "scratch", "exec sleep 600")
 	server.Env = s.env
@@ -441,6 +448,106 @@ func TestRemoteAttachKeepsPaneIdentityAndAgentAlive(t *testing.T) {
 	}
 	act("wake", nil)
 	waitFor(t, "wake to reopen csv on homelab", func() bool { return strings.Contains(windows(), "p-csv") })
+}
+
+func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
+	s := newStandIn(t)
+	url := "https://git.example/acme/app.git"
+	src := gitRepo(t, s.root, url)
+	s.serveGit(t, url, filepath.Join(s.root, "origin.git"))
+	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	s.inProcess(t)
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	homelab, _ := remote.For(cfg, "homelab")
+	csv, _ := paneOf(t, homelab, "csv")
+	dir := filepath.Join(csv.Worktree, ".claude", "factory", "csv")
+	writeFile(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
+	writeFile(t, filepath.Join(dir, "state.json"), `{"id": "csv", "stage": "plan"}`)
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "app") }))
+	t.Cleanup(app.Close)
+	appURL := strings.Replace(app.URL, "127.0.0.1", "localhost", 1) + "/contacts?tab=export"
+
+	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+	if out, err := s.factory(t, dir, onServer, "review", "link", appURL); err != nil || !strings.Contains(out, "Queued") {
+		t.Fatalf("an agent's link on the server: %v\n%s", err, out)
+	}
+	var view remote.View
+	if err := homelab.Read(context.Background(), "view", nil, &view); err != nil || len(view.Opens) != 1 {
+		t.Fatalf("the server holds %d open requests (%v); want the agent's link kept for the laptop", len(view.Opens), err)
+	}
+
+	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
+	t.Cleanup(tunnels.Close)
+	ctx := context.Background()
+	opened, err := homelab.Resolve(ctx, tunnels, view.Review, view.Opens[0].URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := fetch(t, opened); status != http.StatusOK || body != "app" || strings.Contains(opened, app.URL) {
+		t.Fatalf("the app link became %s and answered %d %q; want the app through a laptop port", opened, status, body)
+	}
+	page, err := homelab.Resolve(ctx, tunnels, view.Review, "file://"+filepath.Join(dir, "plan.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := fetch(t, page); status != http.StatusOK || !strings.Contains(body, "overlay.js") {
+		t.Fatalf("the plan through the tunnel answered %d %q; want the served page past the host check", status, body)
+	}
+	if err := homelab.Read(ctx, "opened", []string{view.Opens[0].ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var after remote.View
+	if homelab.Read(ctx, "view", nil, &after); len(after.Opens) != 0 {
+		t.Fatal("an acknowledged link is still queued, so the laptop would open it again")
+	}
+
+	tunnels.Close()
+	if status, _ := fetchOr(page); status == http.StatusOK {
+		t.Fatal("the page still answers after the tunnel closed; the drop was not simulated")
+	}
+	if err := homelab.Restore(ctx, tunnels, view.Review); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := fetch(t, page); status != http.StatusOK {
+		t.Fatalf("after reconnecting the open tab's URL %s answered %d; want the same port back", page, status)
+	}
+	if log := readOr(filepath.Join(s.server, "ssh.log")); !strings.Contains(log, "-N") || strings.Contains(tunnelLines(log), "ClearAllForwardings") {
+		t.Fatalf("tunnel ssh calls:\n%s\nwant -N without ClearAllForwardings, which would drop the -L", tunnelLines(log))
+	}
+}
+
+func tunnelLines(log string) string {
+	var lines []string
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, " -N ") {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fetch(t *testing.T, url string) (int, string) {
+	t.Helper()
+	status, body := fetchOr(url)
+	if status == 0 {
+		t.Fatalf("%s did not answer: %s", url, body)
+	}
+	return status, body
+}
+
+func fetchOr(url string) (int, string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
 }
 
 func waitFor(t *testing.T, what string, done func() bool) {

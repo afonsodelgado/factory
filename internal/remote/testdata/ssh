@@ -4,10 +4,17 @@ set -eu
 : "${FACTORY_SSH_STANDIN_BIN:?set it to the factory binary the server runs}"
 root=$FACTORY_SSH_STANDIN_ROOT
 printf '%s\n' "$*" >>"$root/ssh.log"
+cleared= forward= tunnel=
 while [ $# -gt 0 ]; do
 	case "$1" in
-	-o | -l | -p | -i | -F | -S | -O | -L | -R | -D | -J | -W | -E | -c | -m | -b | -e) shift 2 ;;
-	-T | -t | -tt | -N | -n | -q | -v | -4 | -6 | -C | -x | -a) shift ;;
+	-o)
+		[ "$2" = ClearAllForwardings=yes ] && cleared=1
+		shift 2
+		;;
+	-L) forward=$2 && shift 2 ;;
+	-N) tunnel=1 && shift ;;
+	-l | -p | -i | -F | -S | -O | -R | -D | -J | -W | -E | -c | -m | -b | -e) shift 2 ;;
+	-T | -t | -tt | -n | -q | -v | -4 | -6 | -C | -x | -a) shift ;;
 	--) shift && break ;;
 	-*) echo "ssh stand-in: unsupported option $1" >&2 && exit 255 ;;
 	*) break ;;
@@ -28,6 +35,14 @@ fi
 if [ "${FACTORY_SSH_STANDIN_NO_FACTORY:-}" = 1 ]; then
 	echo "bash: line 1: factory: command not found" >&2
 	exit 127
+fi
+if [ -n "$tunnel" ]; then
+	[ -n "$forward" ] && [ -z "$cleared" ] || { echo "ssh stand-in: -N without a forwarding, so this tunnel would forward nothing" >&2 && exit 255; }
+	: "${FACTORY_SSH_STANDIN_FORWARD:?set it to the stand-in forwarder}"
+	bind=${forward%%:*} rest=${forward#*:}
+	port=${rest%%:*} dest=${rest#*:}
+	[ "${dest%%:*}" = localhost ] && dest=127.0.0.1:${dest#*:}
+	exec "$FACTORY_SSH_STANDIN_FORWARD" "$bind:$port" "$dest"
 fi
 server() {
 	exec env HOME="$root/home" FACTORY_CONFIG_DIR="$root/config" FACTORY_STATE_DIR="$root/state" \

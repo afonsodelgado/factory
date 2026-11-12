@@ -16,6 +16,7 @@ const pasteSettle = 150 * time.Millisecond
 type Panes struct {
 	TM      tmux.Client
 	Session string
+	Openers string
 }
 
 type NewPane struct {
@@ -47,7 +48,7 @@ func loginShell() string {
 
 func (e *Panes) NewFactoryPane(n NewPane) (string, error) {
 	token := uuid.NewString()
-	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token})
+	env := slices.Concat(n.Env, []string{"FACTORY_PANE_TOKEN=" + token}, e.openerPath())
 	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: ParkName(n.Slug), Dir: n.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
@@ -56,12 +57,19 @@ func (e *Panes) NewFactoryPane(n NewPane) (string, error) {
 }
 
 func (e *Panes) NewStagePane(s StagePane) (string, error) {
-	env := []string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}
+	env := slices.Concat([]string{"FACTORY=1", "FACTORY_PANE_TOKEN=" + s.Token, factoryBin()}, e.openerPath())
 	pane, err := e.TM.NewWindow(tmux.Window{Session: e.Session, Name: StageParkName(s.Slug, s.Role), Dir: s.Dir, Env: env, Command: loginShell()})
 	if err != nil {
 		return "", err
 	}
 	return pane, e.tag(pane, [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", s.Repo}, {"@factory_stage_of", s.Slug}, {"@factory_stage", s.Role}, {"@factory_token", s.Token}})
+}
+
+func (e *Panes) openerPath() []string {
+	if e.Openers == "" {
+		return nil
+	}
+	return []string{"PATH=" + e.Openers + string(os.PathListSeparator) + os.Getenv("PATH")}
 }
 
 func (e *Panes) tag(pane string, options [][2]string) error {
