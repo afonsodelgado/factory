@@ -57,7 +57,11 @@ func attentions(it Item) []remote.Attention {
 
 func (j *EventLog) Record(items []Item) []remote.Attention {
 	current := map[string]remote.Attention{}
+	unread := map[string]bool{}
 	for _, it := range items {
+		if it.Factory.State == nil || it.Factory.StateErr != nil {
+			unread[Incarnation(it.Factory)] = true
+		}
 		for _, a := range attentions(it) {
 			current[a.Key()] = a
 		}
@@ -72,7 +76,7 @@ func (j *EventLog) Record(items []Item) []remote.Attention {
 		opened = append(opened, a)
 	}
 	for _, key := range slices.Sorted(maps.Keys(j.Open)) {
-		if _, still := current[key]; still {
+		if _, still := current[key]; still || unread[j.Open[key].Incarnation] {
 			continue
 		}
 		resolved := j.Open[key]

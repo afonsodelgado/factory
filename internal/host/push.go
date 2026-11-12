@@ -23,7 +23,15 @@ const (
 	pushMaxGap   = 10 * time.Minute
 )
 
-var pushKinds = map[string]string{"cap": "cap tripped", "qa-hold": "QA waits for laptop"}
+var pushKinds = map[string]string{
+	"question":   "question",
+	"gate":       "gate",
+	"comment":    "comment",
+	"cap":        "cap tripped",
+	"failure":    "failure",
+	"permission": "permission",
+	"test":       "test",
+}
 
 type Pusher struct {
 	StateDir string
@@ -79,10 +87,11 @@ func (p *Pusher) Enqueue(a remote.Attention) {
 }
 
 func pushText(id, label, kind string) string {
-	if text, ok := pushKinds[kind]; ok {
-		kind = text
+	text, known := pushKinds[kind]
+	if !known {
+		text = "needs you"
 	}
-	return id + " on " + label + ": " + kind
+	return id + " on " + label + ": " + text
 }
 
 func (p *Pusher) Flush() {
