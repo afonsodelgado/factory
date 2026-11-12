@@ -207,7 +207,7 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 | `factory open csv-export --stages plan,implement,review` | creates it with exactly these stages, plus the ones that always run |
 | `factory open csv-export --agent engineer=sonnet:medium` | runs this factory's engineer on Sonnet at medium effort; repeat it for more agents |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
-| `factory init ~/dev/new-repo` | sets a repo up as the `n` dialog does, without opening the hub; with no path it uses the repo you are in |
+| `factory init ~/dev/new-repo` | non-interactive equivalent for scripts and headless setups; add and configure repos interactively from the hub’s `n` dialog |
 | `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 
 An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
