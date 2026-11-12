@@ -100,6 +100,8 @@ func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
 		context.Banner = "✓ Copied .claude/factory.yml to .factory/config.yml. The form edits the new file."
 	case listed:
 		context.Banner = "✓ Set up the missing repo config. Check these values, then save."
+	case !result.ProfileWritten:
+		context.Banner = "✓ Added " + filepath.Base(repo) + " to the hub. It already had a config; these are its values."
 	}
 	return context, nil
 }

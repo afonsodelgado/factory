@@ -53,11 +53,7 @@ func (m *Settings) Result() (any, bool) {
 }
 
 func (m *Settings) fields() []string {
-	fields := []string{"commands.build", "commands.lint", "commands.test", "qa.mode"}
-	if m.values["qa.mode"] == "browser" {
-		fields = append(fields, "qa.start", "qa.health")
-	}
-	return append(fields, "coderabbit")
+	return state.SettingsKeys(m.values["qa.mode"])
 }
 
 func settingChoice(key string) bool { return key == "qa.mode" || key == "coderabbit" }

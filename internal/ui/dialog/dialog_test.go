@@ -264,6 +264,21 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 			})
 		}
 	}
+	t.Run("unlisted repo with its own config", func(t *testing.T) {
+		repo := t.TempDir()
+		if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+			t.Fatalf("git: %s: %v", out, err)
+		}
+		os.MkdirAll(state.RepoDir(repo), 0o755)
+		os.WriteFile(state.RepoConfigPath(repo), []byte("commands: {build: mine}\n"), 0o644)
+		m := NewFactory(NewContext{StateDir: t.TempDir()})
+		m.repoPath = repo
+		m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		result, ok := m.Result()
+		if !ok || strings.Contains(result.(NewResult).Settings.Banner, "wrote") {
+			t.Fatalf("banner claims setup wrote an existing config: %+v, %s", result, m.problem)
+		}
+	})
 	t.Run("unlisted worktree and invalid paths", func(t *testing.T) {
 		repo := t.TempDir()
 		run := func(args ...string) {
