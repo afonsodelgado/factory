@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -211,5 +213,95 @@ func TestCreatingAFactoryKeepsTheConfiguredToolUnderAModelPickedInTheDialog(t *t
 	want := state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-6.1-sol", Effort: "high"}
 	if got := registry.Find(repo, "csv").Agents["engineer"]; got != want {
 		t.Errorf("the engineer was registered as %+v; want %+v", got, want)
+	}
+}
+
+func TestRepoSettingsWaitsForPopupCloseAndRefreshesTheSelectedRepo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	repo := t.TempDir()
+	os.MkdirAll(state.RepoDir(repo), 0o755)
+	os.WriteFile(state.RepoConfigPath(repo), []byte("qa: {mode: terminal}\ncoderabbit: false\n"), 0o644)
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{t.TempDir()}}
+	loader := &Loader{Config: cfg}
+	model := NewModel(Model{Config: cfg, Loader: loader, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }})
+	model.window = [2]int{100, 40}
+	model.here = cfg.Repos[0]
+	deliver := func(kind string, result any) {
+		t.Helper()
+		data, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := make(chan Message, 1)
+		model.dialogResult(Event{Message: Message{T: "result", Pane: "dialog:" + kind, Data: data}, Reply: response})
+		if reply := <-response; reply.T != "done" {
+			t.Fatalf("not acknowledged: %+v", reply)
+		}
+	}
+	if model.openDialog("new", model.newContext()) == nil {
+		t.Fatal("new did not open")
+	}
+	if model.openDialog("settings", dialog.SettingsContext{Repo: repo}) != nil || model.dialog != "new" {
+		t.Fatal("overlapping popup opened")
+	}
+	deliver("new", dialog.NewResult{Settings: &dialog.SettingsContext{Repo: repo, Banner: "added"}})
+	if model.dialog != "new" || model.dialogs["settings"] != nil || model.dialogNext == nil {
+		t.Fatal("result opened settings before popup closure")
+	}
+	if len(cfg.Repos) != 2 || !slices.Contains(loader.Config.Repos, repo) {
+		t.Fatal("repo not shared with loader")
+	}
+	if model.dialogClosed(dialogClosedMsg{kind: "new"}) == nil || model.dialog != "settings" || model.dialogNext != nil {
+		t.Fatal("closure did not consume settings transition")
+	}
+	if model.dialogClosed(dialogClosedMsg{kind: "new"}) != nil || model.dialog != "settings" {
+		t.Fatal("duplicate close consumed the next popup")
+	}
+	for _, saved := range []bool{true, false} {
+		os.WriteFile(state.RepoConfigPath(repo), []byte("qa: {mode: browser}\ncoderabbit: true\ndefault_pipeline: quick\nagents: {engineer: {model: sonnet}}\n"), 0o644)
+		deliver("settings", dialog.SettingsResult{Repo: repo, Saved: saved})
+		if model.dialog != "settings" || model.dialogs["new"] != nil {
+			t.Fatal("settings result reopened n too early")
+		}
+		if model.dialogClosed(dialogClosedMsg{kind: "settings"}) == nil {
+			t.Fatal("n did not reopen")
+		}
+		var context dialog.NewContext
+		if err := json.Unmarshal(model.dialogs["new"], &context); err != nil {
+			t.Fatal(err)
+		}
+		picked := context.Repos[context.Repo]
+		if picked.Path != repo || context.Here || !picked.Browser || !picked.CodeRabbit || picked.DefaultPipeline != "quick" || context.StateDir != cfg.StateDir {
+			t.Fatalf("stale return context: %+v", context)
+		}
+		engineer := slices.IndexFunc(picked.Agents, func(a dialog.AgentOption) bool { return a.Role == "engineer" })
+		if engineer < 0 || picked.Agents[engineer].Model != "sonnet" || (context.Notice != "") != saved {
+			t.Fatal("agents or notice stale")
+		}
+		if cmd := model.dialogClosed(dialogClosedMsg{kind: "new"}); cmd != nil || model.dialogNext != nil {
+			t.Fatal("plain cancel chained")
+		}
+		model.openDialog("settings", dialog.SettingsContext{Repo: repo})
+	}
+	deliver("settings", dialog.SettingsResult{Repo: repo, Saved: true})
+	if model.dialogClosed(dialogClosedMsg{kind: "settings", err: errors.New("popup failed")}) != nil || model.dialogNext != nil || model.dialog != "" {
+		t.Fatal("failed popup chained")
+	}
+	model.openDialog("new", model.newContext())
+	if model.dialogClosed(dialogClosedMsg{kind: "new"}) != nil {
+		t.Fatal("ordinary cancellation reused a failed transition")
+	}
+	model.here = repo
+	model.openDialog("settings", dialog.SettingsContext{Repo: repo})
+	deliver("settings", dialog.SettingsResult{Repo: repo})
+	model.dialogClosed(dialogClosedMsg{kind: "settings"})
+	var context dialog.NewContext
+	json.Unmarshal(model.dialogs["new"], &context)
+	if !context.Here || context.Repos[context.Repo].Path != repo {
+		t.Fatal("current repo lost Here on return")
 	}
 }

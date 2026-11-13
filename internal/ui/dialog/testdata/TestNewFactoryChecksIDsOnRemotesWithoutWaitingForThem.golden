@@ -1,5 +1,6 @@
  [1;38;2;192;202;245mRepo[m                                                                          [38;2;86;95;137m1 of 3[m 
  [1;38;2;122;162;247m❯[m [38;2;192;202;245m● cowork[m   [38;2;86;95;137m~/dev/cowork[m                  [38;2;115;122;162mbrowser QA · CodeRabbit off[m               
+     [38;2;115;122;162m+ add a repo…[m                                                                    
                                                                                       
  [1;38;2;192;202;245mRuns on[m                                                                              
    [38;2;192;202;245m● this machine[m  [38;2;86;95;137mdefault[m   [38;2;169;177;214m○ homelab[m                                                
@@ -22,5 +23,4 @@
                                                                                       
                                                                                       
                                                                                       
-                                                                                      
- [38;2;169;177;214m⏎ select it   ctrl+w select and wake it   esc cancel[m                                 
+ [38;2;169;177;214m⏎ select it   ctrl+w select and wake it   ctrl+e settings   esc cancel[m               
