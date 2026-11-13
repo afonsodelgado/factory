@@ -178,17 +178,19 @@ For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push or
 
 ## Add a repo
 
-The factory works in any git repo. Run `factory` anywhere inside it, or inside one of its worktrees. The first time, it sets the repo up before it opens the hub:
+The factory works in any git repo. In the hub, press `n`, then `+ add a repo…`. Type a path (`~` expands and `tab` completes directories), then press Enter to set it up and open its settings:
 
-- It writes the repo config, `.factory/config.yml`, from the bundled template, with build, lint and test commands detected from `go.mod` or `package.json`.
-- It adds `.factory/` and the factory's other files to the repo's `.git/info/exclude`, so nothing is committed to the repo.
-- It adds the repo to the hub's list, in `repos.json` in the state directory. A hub that is already running shows the repo at once.
+- It writes `.factory/config.yml`, with build, lint and test commands detected from `go.mod` or `package.json`.
+- It adds `.factory/` and the factory's other paths to `.git/info/exclude`.
+- It remembers the main checkout in the hub's list, even when you enter a worktree path.
 
-The hub then says what it did. Edit the repo config to match the repo; set `coderabbit: true` only if CodeRabbit reviews the repo. Later runs change nothing.
+A non-git path or a setup failure stays in the dialog so you can correct it and retry. Adding a listed repo with a current config opens settings without repeating setup. A listed repo with no current config is set up first.
 
-Inside the hub, `n` creates the factory in the repo you ran `factory` from, without a list of repos to choose from. `↑↓` still picks another repo. From outside any repo, the dialog lists them all.
+Press `ctrl+e` on any repo row to edit build, lint and test commands, QA mode, browser start and health, and CodeRabbit. `ctrl+s` saves; `esc` returns without saving. Both return to `n` with that repo selected. Saving preserves comments, existing key order and every other setting. Cleared commands remain as empty strings; terminal mode leaves start and health in the file. Set CodeRabbit on only if it reviews the repo.
 
-`factory init [path]` does the same setup without opening the hub. `factory forget <path>` removes a repo from the hub's list and leaves its files alone; a listed repo whose directory is gone drops out the next time the hub starts. Repos listed under `repos` in `config.yml` still show too.
+Running `factory` inside a repo still sets it up and opens the hub. In this Here mode, `n` shows that repo and the add row; `↑↓` opens the full list to pick another repo. From outside a repo, the dialog lists them all. With no repos, it starts on the path field.
+
+`factory forget <path>` removes a repo from the hub's list and leaves its files alone; a listed repo whose directory is gone drops out the next time the hub starts. Repos listed under `repos` in `config.yml` still show too.
 
 Worktrees have no copy of the repo config, so the skill and its agents read it from the main checkout.
 
@@ -205,6 +207,7 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 | `factory open csv-export --stages plan,implement,review` | creates it with exactly these stages, plus the ones that always run |
 | `factory open csv-export --agent engineer=sonnet:medium` | runs this factory's engineer on Sonnet at medium effort; repeat it for more agents |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
+| `factory init ~/dev/new-repo` | non-interactive equivalent for scripts and headless setups; add and configure repos interactively from the hub’s `n` dialog |
 | `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 
 An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
@@ -270,6 +273,8 @@ State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/fa
 
 ### Repo config
 
+Add and configure repos from the hub: press `n`, then `+ add a repo…`, or `ctrl+e` on a listed repo. `ctrl+s` saves only the form's keys; `esc` cancels. A malformed file is shown as an error and cannot be overwritten. If the file changes while settings are open, reopen the form before saving.
+
 Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA, design and CodeRabbit settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after`, `claude.remote_control` and `codex.writable_dirs`.
 
 ```yaml
@@ -292,7 +297,7 @@ design:
     css: apps/web/src/index.css
 ```
 
-`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it, and `factory init` copies it to `.factory/config.yml` and leaves the old file for factories already running there.
+`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
 
 ## Pipelines
 

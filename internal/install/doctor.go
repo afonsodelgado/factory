@@ -142,12 +142,12 @@ func Doctor(o Options) []Check {
 func repoChecks(o Options) []Check {
 	repos := o.Repos
 	if len(repos) == 0 {
-		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos set up, so there is nowhere to start a factory", Fix: "run factory inside a repo, or factory init <repo>"}}
+		return []Check{{Name: "repos", Mark: Fail, Detail: "no repos set up, so there is nowhere to start a factory", Fix: "in the hub, press n, then + add a repo…"}}
 	}
 	var checks []Check
 	for _, repo := range repos {
 		if _, err := os.Stat(state.ProfilePath(repo)); err != nil {
-			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": no repo config", Fix: "factory init " + tilde(repo)})
+			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": no repo config", Fix: "in the hub, press n, then + add a repo… and enter " + tilde(repo)})
 			continue
 		}
 		if o.Config == nil {
