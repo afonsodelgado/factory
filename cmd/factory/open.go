@@ -79,7 +79,7 @@ func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote strin
 	if r.Name != "" {
 		r.Name = factory.Slugify(r.Name)
 	}
-	where, err := whereToRun(cfg, r.Name, remoteFlag, local)
+	where, err := remote.Place(cfg, r.Name, remoteFlag, local)
 	if err != nil {
 		return err
 	}
@@ -94,8 +94,8 @@ func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote strin
 		}
 		return createRemote(cfg, where, r, gitRemote)
 	}
-	if r.Name != "" && !localFactory(cfg, r.Name) {
-		if err := withCreationLock(cfg, func() error { return refuseKnownID(cfg, r.Name) }); err != nil {
+	if r.Name != "" && !remote.Local(cfg, r.Name) {
+		if err := remote.WithCreationLock(cfg, func() error { return remote.RefuseKnownID(cfg, r.Name) }); err != nil {
 			return err
 		}
 	}

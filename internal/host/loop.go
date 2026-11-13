@@ -95,6 +95,13 @@ func (m *Runtime) handle(request Message) Message {
 		}
 	case "snapshot":
 		value = m.snap
+	case "view":
+		value = m.View()
+	case "answer":
+		var r AnswerRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.TypeAnswer(r)
+		}
 	default:
 		return Message{T: "error", Error: "unknown host action: " + request.T}
 	}

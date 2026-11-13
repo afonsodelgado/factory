@@ -18,7 +18,7 @@ import (
 
 func runDialog(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys|remotes> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)
@@ -54,9 +54,9 @@ func dialogMain(kind, socket string) error {
 	if context.T == "error" {
 		return fmt.Errorf("%s", context.Error)
 	}
-	d, ok := dialog.New(kind, context.Data, 0, 0)
-	if !ok {
-		return fmt.Errorf("no dialog called %q", kind)
+	d, err := newDialog(kind, context.Data)
+	if err != nil {
+		return err
 	}
 	final, err := tea.NewProgram(d).Run()
 	if err != nil {
@@ -81,6 +81,30 @@ func dialogMain(kind, socket string) error {
 		return fmt.Errorf("%s", done.Error)
 	}
 	return nil
+}
+
+func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
+	if kind == "remotes" {
+		var c dialog.RemotesContext
+		if err := json.Unmarshal(context, &c); err != nil {
+			return nil, err
+		}
+		return dialog.NewRemotes(c, remoteActions{}), nil
+	}
+	if kind == "new" {
+		var c dialog.NewContext
+		if err := json.Unmarshal(context, &c); err != nil {
+			return nil, err
+		}
+		d := dialog.NewFactory(c)
+		d.Probe = probeRemote
+		return d, nil
+	}
+	d, ok := dialog.New(kind, context, 0, 0)
+	if !ok {
+		return nil, fmt.Errorf("no dialog called %q", kind)
+	}
+	return d, nil
 }
 
 func reply(conn net.Conn, scanner *bufio.Scanner, wait time.Duration) (hub.Message, error) {

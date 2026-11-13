@@ -21,6 +21,7 @@ const (
 	Exited
 	Gone
 	Done
+	Unreachable
 )
 
 var statusWords = map[Status]string{
@@ -34,6 +35,7 @@ var statusWords = map[Status]string{
 	Exited:        "exited",
 	Gone:          "gone",
 	Done:          "done",
+	Unreachable:   "unreachable",
 }
 
 func (s Status) String() string {

@@ -100,8 +100,9 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 			return nil, remote.Failed, err
 		}
 		removal := factory.PlanRemoval(f, cfg)
-		preview := remote.Removal{What: whatGoes(f, removal)}
-		if work := factory.CheckWork(removal); !work.Empty() {
+		work := factory.CheckWork(removal)
+		preview := remote.Removal{What: whatGoes(f, removal), Worktree: removal.Worktree, WorktreeGone: !host.DirExists(removal.Worktree), Branches: removal.Branches, Dirty: work.Dirty, Unpushed: work.Unpushed}
+		if !work.Empty() {
 			preview.Risk = workAtRisk(f, work)
 		}
 		return completed(preview)
@@ -113,6 +114,32 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		return forward(cfg, "delete", req.Op, mustJSON(hub.DeleteRequest{Repo: f.Repo, Slug: f.Slug}))
 	case "stage", "review":
 		return forward(cfg, req.Action, req.Op, req.Data)
+	case "view":
+		return forward(cfg, "view", "", nil)
+	case "wake", "pause", "archive", "unarchive", "answer":
+		f, err := targetFactory(cfg, req.Data)
+		if err != nil {
+			return nil, remote.Failed, err
+		}
+		data, err := keyedFor(f, req.Data)
+		if err != nil {
+			return nil, remote.Rejected, err
+		}
+		return forward(cfg, req.Action, req.Op, data)
+	case "attach":
+		f, err := targetFactory(cfg, req.Data)
+		if err != nil {
+			return nil, remote.Failed, err
+		}
+		var pane remote.PaneTarget
+		if err := json.Unmarshal(req.Data, &pane); err != nil {
+			return nil, remote.Rejected, err
+		}
+		id, err := host.PrepareView(tmux.Client{Socket: cfg.Tmux.Socket}, f, pane.Role, pane.Token)
+		if err != nil {
+			return nil, remote.Failed, err
+		}
+		return completed(id)
 	}
 	return nil, remote.Rejected, fmt.Errorf("this server does not know the action %q; run factory update on both machines", req.Action)
 }
@@ -246,12 +273,27 @@ func targetFactory(cfg *state.Config, data json.RawMessage) (factory.Factory, er
 	if err := json.Unmarshal(data, &target); err != nil {
 		return factory.Factory{}, err
 	}
-	return findFactory(cfg, "", target.ID)
+	f, err := findFactory(cfg, "", target.ID)
+	if err == nil && target.Incarnation != "" && host.Incarnation(f) != target.Incarnation {
+		return f, fmt.Errorf("%s on this server is a newer factory than the one you acted on; nothing was done", target.ID)
+	}
+	return f, err
+}
+
+func keyedFor(f factory.Factory, data json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "id")
+	delete(fields, "incarnation")
+	fields["Key"] = mustJSON(f.Key())
+	return json.Marshal(fields)
 }
 
 func withClones(cfg *state.Config, urls []string) []string {
 	for _, repo := range cfg.Repos {
-		if url := originOf(repo); url != "" && strings.HasPrefix(repo, filepath.Join(cfg.StateDir, "repos")) {
+		if url := originOf(repo); url != "" && remote.IsClone(cfg.StateDir, repo) {
 			urls = append(urls, url)
 		}
 	}

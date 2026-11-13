@@ -12,11 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
@@ -25,13 +21,11 @@ import (
 )
 
 const (
-	remoteUsage = `usage: factory remote add <name> <host> [--user name] [--port n] [--identity file]
+	remoteUsage = `usage: factory remote add <name> <[user@]host[:port]> [--user name] [--port n] [--identity file]
        factory remote list
        factory remote remove <name>
        factory remote default <name | local>
        factory remote push [--server url | --off]`
-	refreshWait = 3 * time.Second
-	createWait  = 15 * time.Minute
 )
 
 func runRemote(args []string) int {
@@ -70,22 +64,36 @@ func remoteAdd(args []string) error {
 	if err := flags.Parse(reorder(args)); err != nil || flags.NArg() != 2 {
 		return errors.New(remoteUsage)
 	}
-	name, host := flags.Arg(0), flags.Arg(1)
-	err := state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
+	name := flags.Arg(0)
+	r, err := remote.ParseTarget(flags.Arg(1))
+	if err != nil {
+		return err
+	}
+	if *user != "" {
+		r.User = *user
+	}
+	if *port != 0 {
+		r.Port = *port
+	}
+	r.Identity = *identity
+	if err := addRemote(name, r); err != nil {
+		return err
+	}
+	fmt.Printf("Added %s. Check it with factory doctor --remote %s; create a factory there with factory open --remote %s <id>.\n", name, name, name)
+	return nil
+}
+
+func addRemote(name string, r state.Remote) error {
+	return state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
 		if _, taken := m.Remotes[name]; taken {
 			return fmt.Errorf("a remote is already named %s; remove it first to point it somewhere else", name)
 		}
 		if m.Remotes == nil {
 			m.Remotes = map[string]state.Remote{}
 		}
-		m.Remotes[name] = state.Remote{Host: host, User: *user, Port: *port, Identity: *identity}
+		m.Remotes[name] = r
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Added %s. Check it with factory doctor --remote %s; create a factory there with factory open --remote %s <id>.\n", name, name, name)
-	return nil
 }
 
 func remoteList() error {
@@ -120,17 +128,7 @@ func factories(n int) string {
 }
 
 func remoteRemove(name string) error {
-	wasDefault := false
-	err := state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
-		if _, ok := m.Remotes[name]; !ok {
-			return fmt.Errorf("no remote is named %s", name)
-		}
-		delete(m.Remotes, name)
-		if m.DefaultRemote == name {
-			m.DefaultRemote, wasDefault = "", true
-		}
-		return nil
-	})
+	wasDefault, err := removeRemote(name)
 	if err != nil {
 		return err
 	}
@@ -141,14 +139,25 @@ func remoteRemove(name string) error {
 	return nil
 }
 
+func removeRemote(name string) (wasDefault bool, err error) {
+	err = state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
+		if _, ok := m.Remotes[name]; !ok {
+			return fmt.Errorf("no remote is named %s", name)
+		}
+		delete(m.Remotes, name)
+		if m.DefaultRemote == name {
+			m.DefaultRemote, wasDefault = "", true
+		}
+		return nil
+	})
+	return wasDefault, err
+}
+
 func remoteDefault(name string) error {
 	if name == "local" {
 		name = ""
 	}
-	if err := state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
-		m.DefaultRemote = name
-		return nil
-	}); err != nil {
+	if err := setDefaultRemote(name); err != nil {
 		return err
 	}
 	if name == "" {
@@ -159,6 +168,13 @@ func remoteDefault(name string) error {
 	return nil
 }
 
+func setDefaultRemote(name string) error {
+	return state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
+		m.DefaultRemote = name
+		return nil
+	})
+}
+
 func remotePush(args []string) error {
 	flags := flag.NewFlagSet("remote push", flag.ContinueOnError)
 	server := flags.String("server", "", "the ntfy server; default "+state.DefaultPushServer)
@@ -166,19 +182,16 @@ func remotePush(args []string) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || (*off && *server != "") {
 		return errors.New(remoteUsage)
 	}
-	var push state.Push
-	err := state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
+	push, err := updatePush(func(p *state.Push) {
 		switch {
 		case *off:
-			m.Push.Topic = ""
-		case m.Push.Topic == "":
-			m.Push.Topic = newTopic()
+			p.Topic = ""
+		case p.Topic == "":
+			p.Topic = newTopic()
 		}
 		if *server != "" {
-			m.Push.Server = *server
+			p.Server = *server
 		}
-		push = m.Push
-		return nil
 	})
 	if err != nil {
 		return err
@@ -191,172 +204,29 @@ func remotePush(args []string) error {
 	return nil
 }
 
+func updatePush(change func(*state.Push)) (state.Push, error) {
+	var push state.Push
+	err := state.UpdateMachine(state.ConfigDir(), func(m *state.Machine) error {
+		change(&m.Push)
+		push = m.Push
+		return nil
+	})
+	return push, err
+}
+
 func newTopic() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func whereToRun(cfg *state.Config, id, remoteFlag string, local bool) (string, error) {
-	if remoteFlag != "" && local {
-		return "", errors.New("give --remote or --local, not both")
-	}
-	if remoteFlag != "" {
-		if _, ok := cfg.Remotes[remoteFlag]; !ok {
-			return "", fmt.Errorf("no remote is named %s; factory remote list shows them", remoteFlag)
-		}
-	}
-	if id == "" {
-		if remoteFlag != "" {
-			return "", fmt.Errorf("name the factory to create on %s", remoteFlag)
-		}
-		return "", nil
-	}
-	here, elsewhere := localFactory(cfg, id), holders(cfg, id)
-	switch {
-	case here && remoteFlag != "":
-		return "", fmt.Errorf("%s runs on this machine; open it without --remote", id)
-	case here:
-		return "", nil
-	case len(elsewhere) > 1 && remoteFlag == "":
-		return "", fmt.Errorf("%s exists on %s; pick one with --remote", id, strings.Join(elsewhere, " and "))
-	case len(elsewhere) > 0 && local:
-		return "", fmt.Errorf("%s runs on %s; open it with --remote %s, or pick another id", id, elsewhere[0], elsewhere[0])
-	case len(elsewhere) > 0 && remoteFlag != "" && !slices.Contains(elsewhere, remoteFlag):
-		return "", fmt.Errorf("%s runs on %s; pick another id to create one on %s", id, elsewhere[0], remoteFlag)
-	case len(elsewhere) > 0 && remoteFlag == "":
-		return elsewhere[0], nil
-	case remoteFlag != "" || local:
-		return remoteFlag, nil
-	}
-	return cfg.DefaultRemote, nil
-}
-
-func localFactory(cfg *state.Config, id string) bool {
-	registry, err := state.LoadRegistry(cfg.RegistryPath())
-	return err == nil && slices.ContainsFunc(registry.Factories, func(e state.Entry) bool { return e.Slug == id })
-}
-
-func holders(cfg *state.Config, id string) []string {
-	var names []string
-	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
-		if cache, err := remote.LoadCache(cfg.StateDir, name); err == nil && cache.Holds(id) {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-func refreshInventories(cfg *state.Config) {
-	ctx, cancel := context.WithTimeout(context.Background(), refreshWait)
-	defer cancel()
-	var wg sync.WaitGroup
-	for name := range cfg.Remotes {
-		client, err := remote.For(cfg, name)
-		if err != nil {
-			continue
-		}
-		wg.Go(func() { client.Inventory(ctx) })
-	}
-	wg.Wait()
-}
-
-func withCreationLock(cfg *state.Config, fn func() error) error {
-	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(filepath.Join(cfg.StateDir, "create.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	return fn()
-}
-
-func refuseKnownID(cfg *state.Config, id string) error {
-	refreshInventories(cfg)
-	if elsewhere := holders(cfg, id); len(elsewhere) > 0 {
-		return fmt.Errorf("%s already runs on %s; pick another id, or open that one with --remote %s", id, elsewhere[0], elsewhere[0])
-	}
-	return nil
-}
-
 func createRemote(cfg *state.Config, name string, r hub.OpenRequest, gitRemote string) error {
-	client, err := remote.For(cfg, name)
-	if err != nil {
-		return err
-	}
 	repo, err := factoryRepo(r.Repo)
 	if err != nil {
 		return err
 	}
-	gitURL, err := remote.GitURL(repo, gitRemote)
-	if err != nil {
-		return err
-	}
-	profile, err := os.ReadFile(state.ProfilePath(repo))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if _, err := state.ReadProfile(repo); err != nil {
-		return fmt.Errorf("%s: %w", state.ProfilePath(repo), err)
-	}
-	rules, err := os.ReadFile(cfg.RulesPath())
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	var reservation remote.Reservation
-	err = withCreationLock(cfg, func() error {
-		refreshInventories(cfg)
-		if localFactory(cfg, r.Name) {
-			return fmt.Errorf("%s runs on this machine; pick another id", r.Name)
-		}
-		if others := slices.DeleteFunc(holders(cfg, r.Name), func(n string) bool { return n == name }); len(others) > 0 {
-			return fmt.Errorf("%s already runs on %s; pick another id", r.Name, others[0])
-		}
-		return remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
-			if i := slices.IndexFunc(c.Reservations, func(res remote.Reservation) bool { return res.ID == r.Name }); i >= 0 {
-				reservation = c.Reservations[i]
-				return nil
-			}
-			reservation = remote.Reservation{ID: r.Name, GitURL: gitURL, Op: uuid.NewString(), At: time.Now()}
-			c.Reservations = append(c.Reservations, reservation)
-			return nil
-		})
-	})
-	if err != nil {
-		return err
-	}
-	if reservation.GitURL != gitURL {
-		return fmt.Errorf("a creation of %s from %s on %s has not finished; run it again from that repo to see what happened", r.Name, reservation.GitURL, name)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), createWait)
-	defer cancel()
-	create := remote.Create{ID: r.Name, GitURL: gitURL, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, Profile: profile, Rules: rules}
-	fmt.Printf("Creating %s on %s: the server clones or fetches %s first, which can take a while.\n", r.Name, name, gitURL)
-	var listing remote.Listing
-	err = client.Mutate(ctx, "create", reservation.Op, create, &listing)
-	if errors.Is(err, remote.ErrUncertain) {
-		return fmt.Errorf("%s on %s: %w", r.Name, name, err)
-	}
-	settle := remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
-		c.Reservations = slices.DeleteFunc(c.Reservations, func(res remote.Reservation) bool { return res.ID == r.Name })
-		if err == nil {
-			c.Inventory = append(slices.DeleteFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == r.Name }), listing)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("%s did not start on %s: %w", r.Name, name, err)
-	}
-	if settle != nil {
-		return settle
-	}
-	fmt.Printf("%s runs on %s, cloned from %s. It keeps going when this machine sleeps.\n", r.Name, name, gitURL)
-	return nil
+	create := remote.Create{ID: r.Name, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}
+	return remote.CreateOn(cfg, name, repo, gitRemote, create, func(line string) { fmt.Println(line) })
 }
 
 func factoryRepo(named string) (string, error) {
@@ -374,8 +244,6 @@ func factoryRepo(named string) (string, error) {
 	}
 	return repo, nil
 }
-
-var serverCheckNames = []string{"factory", "tmux", "git", "gh", "gh-stack", "claude", "git access", "bundle", "hooks", "forwarding"}
 
 func remotesToCheck(cfg *state.Config, only string) []string {
 	if only != "" {
@@ -397,17 +265,17 @@ func remoteDoctor(cfg *state.Config, name string) (string, []install.Check) {
 	var unreachable *remote.TransportError
 	if errors.As(err, &unreachable) {
 		checks := []install.Check{{Name: "ssh", Mark: install.Fail, Detail: unreachable.Error(), Fix: "check " + client.Remote.Host + " is on and reachable: ssh " + client.Endpoint()}}
-		return header, append(checks, skipped(serverCheckNames, "skipped, needs ssh")...)
+		return header, append(checks, skipped(remote.ServerChecks, "skipped, needs ssh")...)
 	}
 	checks := []install.Check{{Name: "ssh", Mark: install.Pass, Detail: fmt.Sprintf("%s in %.1fs", client.Endpoint(), time.Since(start).Seconds())}}
 	var missing *remote.CommandError
 	if errors.As(err, &missing) {
 		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: missing.Detail, Fix: "install factory where ssh commands find it: ssh " + name + " 'command -v factory'  must print its path"})
-		return header, append(checks, skipped(serverCheckNames[1:], "skipped, needs factory on "+name)...)
+		return header, append(checks, skipped(remote.ServerChecks[1:], "skipped, needs factory on "+name)...)
 	}
 	if err != nil {
 		checks = append(checks, install.Check{Name: "factory", Mark: install.Fail, Detail: err.Error(), Fix: "ssh " + name + " factory --version"})
-		return header, append(checks, skipped(serverCheckNames[1:], "skipped, needs a matching factory")...)
+		return header, append(checks, skipped(remote.ServerChecks[1:], "skipped, needs a matching factory")...)
 	}
 	header = fmt.Sprintf("factory doctor · %s · %s · %s · over ssh, checks only, changes nothing", name, hello.Release, hello.Platform)
 	if hello.Release == version {

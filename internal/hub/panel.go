@@ -16,6 +16,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 )
@@ -368,7 +369,11 @@ func draftKey(f factory.Factory, itemID string) string {
 }
 
 func (m *Model) draftPath(f factory.Factory, itemID string) string {
-	return filepath.Join(m.Config.DraftsDir(), state.FileStem(f.Repo, f.Slug), itemID+".json")
+	repo := f.Repo
+	if f.Remote != nil {
+		repo = f.Key()
+	}
+	return filepath.Join(m.Config.DraftsDir(), state.FileStem(repo, f.Slug), itemID+".json")
 }
 
 func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
@@ -417,6 +422,9 @@ func (m *Model) discardDraft() {
 }
 
 func (m *Model) target(it Item) Target {
+	if w := m.wires[it.Factory.Key()]; it.Factory.Remote != nil && w.Pane != nil {
+		return Target{Label: it.Factory.Label(), Pane: &tmux.Pane{ID: w.Pane.ID}, Hook: it.Hook}
+	}
 	return Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}
 }
 
@@ -474,7 +482,8 @@ func (m *Model) deliver(action string) {
 	if action != "handled" && unanswered(item, d) != "" {
 		return
 	}
-	if reason := unqueueable(m.target(it)); reason != "" {
+	remote := it.Factory.Remote != nil
+	if reason := unqueueable(m.target(it)); reason != "" && !remote {
 		m.panel.refused[key] = "Not sent. " + reason
 		m.saveDraft()
 		return
@@ -484,8 +493,12 @@ func (m *Model) deliver(action string) {
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
 	mark := m.answerMark(it.Factory, item.ID, item.Since, text)
 	mark.LeavesOpen = item.Kind == "gate" && action == "changes"
-	m.queueAnswer(it, mark, text)
 	m.panel.press = lastPress{key: key, at: m.Now()}
+	if remote {
+		m.deliverRemote(it, mark, text)
+		return
+	}
+	m.queueAnswer(it, mark, text)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
 	}
@@ -551,7 +564,7 @@ func (m *Model) panelView() panel.View {
 		return v
 	}
 	f := it.Factory
-	v.Label = f.Label()
+	v.Label = f.Placed()
 	v.Items, v.Settled = m.shownItems(it)
 	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
 		v.Next = next.Factory.Label()
@@ -593,6 +606,8 @@ func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	s.Reason = unqueueable(t)
 	switch {
 	case s.Reason != "":
+	case Refusal(t) != "" && it.Factory.Remote != nil:
+		s.Reason = Refusal(t) + " Send it once it is at its prompt."
 	case Refusal(t) != "":
 		s.Ready, s.Reason = true, fmt.Sprintf("%s is not at its prompt yet; the answer is sent once it is.", it.Factory.Label())
 	default:
@@ -626,7 +641,10 @@ func (m *Model) activity(it Item) []panel.ActivityRow {
 	var rows []panel.ActivityRow
 	for _, i := range items {
 		var logged []state.ActivityEntry
-		if m.Config.StateDir != "" {
+		switch {
+		case i.Factory.Remote != nil:
+			logged = m.wires[i.Factory.Key()].Activity
+		case m.Config.StateDir != "":
 			logged, _ = state.ReadActivity(state.ActivityPath(m.Config.ActivityDir(), i.Factory.Repo, i.Factory.Slug))
 		}
 		for _, a := range factory.Activity(i.Factory, logged) {
@@ -686,7 +704,7 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	case "q", "ctrl+c":
 		return m.quit()
 	case "?":
-		return m.openDialog("keys", nil)
+		return m.openDialog("keys", m.keysContext())
 	}
 	if m.panel.tab != panel.Attention {
 		return m.listKey(key)
@@ -1044,7 +1062,7 @@ func (m *Model) refreshPRs(force bool) tea.Cmd {
 		numbers []int
 	}
 	var jobs []job
-	for _, it := range m.snap.Items {
+	for _, it := range localOnly(m.snap).Items {
 		f := it.Factory
 		if f.State == nil || len(f.State.PRs) == 0 || f.Archived() {
 			continue
@@ -1085,7 +1103,7 @@ func (m *Model) alert(previous map[string]factory.Status) {
 	for _, it := range m.snap.Items {
 		key := it.Factory.Key()
 		was, known := previous[key]
-		if !known || was == factory.NeedsYou || it.Status != factory.NeedsYou || key == m.selected {
+		if !known || was == factory.NeedsYou || it.Status != factory.NeedsYou || key == m.selected || it.Factory.Remote != nil {
 			continue
 		}
 		label := it.Factory.Label()

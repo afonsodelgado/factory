@@ -15,6 +15,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -75,6 +76,11 @@ type Model struct {
 	pipelines     map[string]string
 	toldReturnKey bool
 	here          string
+	local         Snapshot
+	links         map[string]*link
+	wires         map[string]remote.Factory
+	attempts      map[string]attempt
+	later         []tea.Cmd
 }
 
 type snapshotMsg Snapshot
@@ -124,7 +130,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll(), m.refreshCatalog())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll(), m.refreshCatalog(), m.pollRemotes())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -159,7 +165,7 @@ func (m *Model) watchDirs() {
 	for _, repo := range m.Config.Repos {
 		dirs = append(dirs, factory.WorktreesDir(repo), filepath.Join(repo, ".claude", "factory"))
 	}
-	for _, it := range m.snap.Items {
+	for _, it := range localOnly(m.snap).Items {
 		dirs = append(dirs, it.Factory.Dir)
 		if it.Stage != nil {
 			dirs = append(dirs, filepath.Dir(it.Stage.Run.Result))
@@ -213,7 +219,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(m.pending...)
 		m.pending = nil
 	case pollMsg:
-		cmd = tea.Batch(m.load(), m.poll())
+		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes())
+	case remoteMsg:
+		m.remoteArrived(msg)
+	case attachedMsg:
+		cmd = m.attached(msg)
+	case answeredMsg:
+		m.answered(msg)
+	case removalMsg:
+		cmd = m.removalArrived(msg)
 	case changedMsg:
 		cmd = tea.Batch(m.load(), m.waitChange())
 	case prsMsg:
@@ -240,7 +254,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.settle()
 	m.arrange()
 	m.publish()
-	return m, cmd
+	return m, tea.Batch(cmd, m.attachSelected(), m.flushLater())
+}
+
+func (m *Model) flushLater() tea.Cmd {
+	later := m.later
+	m.later = nil
+	return tea.Batch(later...)
 }
 
 func (m *Model) View() tea.View {
@@ -250,9 +270,16 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) apply(s Snapshot) {
-	if s.At.Before(m.snap.At) {
+	if s.At.Before(m.local.At) {
 		return
 	}
+	m.local = s
+	m.refresh()
+}
+
+func (m *Model) refresh() {
+	s := m.local
+	s.Items = append(slices.Clone(s.Items), m.remoteItems()...)
 	first := len(m.snap.Items) == 0 && m.GitHub != nil
 	starting := m.selected == ""
 	shownBefore := m.itemsOf(m.selected)
@@ -281,6 +308,7 @@ func (m *Model) apply(s Snapshot) {
 		m.panel.tab = panel.Attention
 	}
 	m.ensureSlot()
+	m.dropProxies()
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
@@ -342,7 +370,7 @@ func (m *Model) ensureSlot() {
 func (m *Model) notePipelines() {
 	m.pipelines = map[string]string{}
 	defaults := map[string]string{}
-	for _, it := range m.snap.Items {
+	for _, it := range localOnly(m.snap).Items {
 		st := it.Factory.State
 		if st == nil || st.Pipeline == "" {
 			continue
@@ -365,7 +393,7 @@ func (m *Model) planWakes() {
 		hooks, _ = state.ReadHookFiles(m.Config.StateDir)
 		hooks = withoutTokens(hooks, m.snap.StageTokens)
 	}
-	for _, it := range m.snap.Items {
+	for _, it := range localOnly(m.snap).Items {
 		if !it.Status.Asleep() {
 			continue
 		}
@@ -414,6 +442,9 @@ func (m *Model) showSelected() {
 		target = it.Pane.ID
 	}
 	stage := m.shownStage(it, ok && target != m.slotViewer())
+	if ok && it.Factory.Remote != nil {
+		target, stage = m.remoteTargets(it)
+	}
 	if target == m.Layout.Slot && stage == m.Layout.Stage {
 		return
 	}
@@ -511,7 +542,9 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 	case "/":
 		return m.openDialog("switch", m.switchContext())
 	case "?":
-		return m.openDialog("keys", nil)
+		return m.openDialog("keys", m.keysContext())
+	case "R":
+		return m.openDialog("remotes", m.remotesContext())
 	case "p":
 		return m.askPause()
 	case "a":
@@ -567,6 +600,10 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		if strings.HasPrefix(e.Pane, "frame-") {
 			m.focusSlot()
 		}
+	default:
+		if e.Pane == "cli" {
+			e.Respond(Message{T: "error", Error: "the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run"})
+		}
 	}
 	return nil
 }
@@ -614,7 +651,7 @@ func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
 	case pane == "slot" && (key == "q" || key == "ctrl+c"):
 		return m.quit()
 	case pane == "slot" && key == "?":
-		return m.openDialog("keys", nil)
+		return m.openDialog("keys", m.keysContext())
 	}
 	return nil
 }
@@ -635,7 +672,7 @@ func (m *Model) askPause() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
-	case it.Pane == nil:
+	case it.Pane == nil && m.wires[it.Factory.Key()].Pane == nil:
 		m.notice = problem(it.Factory.Label() + " has no pane to pause.")
 		return nil
 	}
@@ -644,8 +681,11 @@ func (m *Model) askPause() tea.Cmd {
 
 func (m *Model) askDelete() tea.Cmd {
 	it, ok := m.selectedItem()
-	if !ok {
+	switch {
+	case !ok:
 		return nil
+	case it.Factory.Remote != nil:
+		return m.askRemoteDelete(it)
 	}
 	return m.openDialog("delete", m.deleteContext(it))
 }
@@ -787,7 +827,8 @@ func (m *Model) focusSession() {
 	if !ok || m.Engine == nil {
 		return
 	}
-	if it.Pane == nil {
+	proxied := it.Factory.Remote != nil && m.Layout.Slot != m.slotViewer()
+	if it.Pane == nil && !proxied {
 		m.notice = problem(noSessionToEnter(it))
 		return
 	}
@@ -842,7 +883,7 @@ func (m *Model) data() selector.Data {
 	var groups []selector.Group
 	byRepo := map[string]int{}
 	for _, repo := range m.Config.Repos {
-		byRepo[repo] = len(groups)
+		byRepo[filepath.Base(repo)+"||"+tilde(repo)] = len(groups)
 		groups = append(groups, selector.Group{Name: filepath.Base(repo), Path: tilde(repo)})
 	}
 	var archived []selector.Row
@@ -853,16 +894,17 @@ func (m *Model) data() selector.Data {
 			archived = append(archived, row)
 			continue
 		}
-		i, ok := byRepo[it.Factory.Repo]
+		group := m.groupOf(it.Factory)
+		i, ok := byRepo[group.Name+"|"+group.Remote+"|"+group.Path]
 		if !ok {
-			byRepo[it.Factory.Repo] = len(groups)
-			groups = append(groups, selector.Group{Name: it.Factory.RepoName(), Path: tilde(it.Factory.Repo)})
+			byRepo[group.Name+"|"+group.Remote+"|"+group.Path] = len(groups)
+			groups = append(groups, group)
 			i = len(groups) - 1
 		}
 		groups[i].Rows = append(groups[i].Rows, row)
 	}
 	return selector.Data{
-		Groups:       selector.Arrange(groups),
+		Groups:       selector.Arrange(besideLocal(groups)),
 		Archived:     archived,
 		ShowArchived: m.showArchived,
 		Selected:     m.selected,
@@ -892,6 +934,9 @@ func (m *Model) row(it Item) selector.Row {
 	}
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)
+	}
+	if f.Remote != nil && !f.Remote.Creating.IsZero() {
+		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
 	}
 	return row
 }
@@ -923,9 +968,12 @@ func (m *Model) publish() {
 func (m *Model) pushFrame() {
 	title, path, stage := "", "", ""
 	if it, ok := m.snap.Find(m.selected); ok {
-		title, path = paneTitle(it.Factory), it.Factory.Worktree
+		title, path = paneTitle(it.Factory), tilde(it.Factory.Worktree)
 		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
-			path = it.Pane.Path
+			path = tilde(it.Pane.Path)
+		}
+		if f := it.Factory; f.Remote != nil {
+			path = remotePath(f, f.Worktree)
 		}
 		if m.Layout.Stage != "" && it.Stage != nil {
 			stage = stageLabel(it.Stage.Run)
@@ -935,7 +983,7 @@ func (m *Model) pushFrame() {
 	for _, side := range slices.Concat(FrameSides, []string{"split"}) {
 		pane := "frame-" + side
 		width, height := m.size(pane)
-		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: tilde(path), Stage: stage}, focused))
+		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: path, Stage: stage}, focused))
 	}
 }
 
@@ -982,7 +1030,7 @@ func (m *Model) Header() (string, string) {
 	ic := m.Icons
 	left := appBadge(ic)
 	if len(m.snap.Items) == 0 {
-		return left + " #[fg=#737aa2]no factories yet", hostLabel
+		return left + " #[fg=#737aa2]no factories yet", m.linkLabels() + hostLabel
 	}
 	count := func(statuses ...factory.Status) int {
 		n := 0
@@ -1010,13 +1058,14 @@ func (m *Model) Header() (string, string) {
 		{"stalled", "#e0af68", "asleep", []factory.Status{factory.Stalled, factory.Exited, factory.Gone}},
 		{"starting", "#7dcfff", "starting", []factory.Status{factory.Starting}},
 		{"failstart", "#f7768e", "failed to start", []factory.Status{factory.FailedToStart}},
+		{"unreachable", "#565f89", "unreachable", []factory.Status{factory.Unreachable}},
 	}
 	for _, p := range parts {
 		if n := count(p.statuses...); n > 0 {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, m.ghLabel() + hostLabel
+	return left, m.linkLabels() + m.ghLabel() + hostLabel
 }
 
 func (m *Model) ghLabel() string {
@@ -1033,7 +1082,7 @@ func (m *Model) ghLabel() string {
 func (m *Model) FooterView(width, _ int) string {
 	context := ""
 	if it, ok := m.snap.Find(m.selected); ok {
-		context = it.Factory.Label()
+		context = it.Factory.Placed()
 	}
 	if m.focus == footer.Dialog {
 		context = strings.ReplaceAll(m.dialog, "new", "new factory")
@@ -1102,6 +1151,9 @@ func (m *Model) selectorHints() []footer.Hint {
 	case it.Status == factory.Done:
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
+	if len(m.Config.Remotes) > 0 {
+		return hints("j/k", "move", "⏎", "session", "i", "answer", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
+	}
 	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
 }
 
@@ -1164,11 +1216,14 @@ func (m *Model) panelHints() []footer.Hint {
 func (m *Model) SlotView(width, height int) string {
 	c := theme.NewCanvas(width, height)
 	it, ok := m.snap.Find(m.selected)
-	if !ok {
+	switch {
+	case !ok:
 		m.drawIntro(c)
-		return c.Render()
+	case it.Factory.Remote != nil:
+		m.drawRemote(c, it)
+	default:
+		m.drawNoPane(c, it)
 	}
-	m.drawNoPane(c, it)
 	return c.Render()
 }
 

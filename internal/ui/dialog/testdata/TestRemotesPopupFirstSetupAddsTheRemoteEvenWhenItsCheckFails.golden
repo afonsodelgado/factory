@@ -1,0 +1,24 @@
+ [1;38;2;192;202;245mChecked homelab[m                                                               [38;2;86;95;137m2 of 2[m 
+                                                                                      
+   [38;2;158;206;106m✓[m [38;2;169;177;214mssh[m          [38;2;169;177;214mafonso@homelab:22 in 0.4s[m                                           
+   [38;2;247;118;142m✗[m [38;2;169;177;214mclaude[m       [38;2;169;177;214m2.1.312, but not logged in[m                                          
+                  [38;2;86;95;137mfix[m  [38;2;192;202;245mssh -t homelab claude  then /login, and quit[m                   
+   [38;2;86;95;137m–[m [38;2;169;177;214mbundle[m       [38;2;86;95;137mskipped, needs claude[m                                               
+                                                                                      
+ [38;2;169;177;214m1 problem. homelab is added either way; factories won't start there until it passes.[m 
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+                                                                                      
+ [38;2;169;177;214m⏎ add homelab   d add it as the default for new factories   esc back[m                 

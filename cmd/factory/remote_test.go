@@ -1,17 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -180,7 +185,7 @@ func TestNewFactoriesFollowTheDefaultAndExistingOnesStayWhereTheyRun(t *testing.
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := whereToRun(cfg, c.id, c.remote, c.local)
+			got, err := remote.Place(cfg, c.id, c.remote, c.local)
 			if c.refused != (err != nil) || (!c.refused && got != c.want) {
 				t.Errorf("got %q, %v; want %q, refused %v", got, err, c.want, c.refused)
 			}
@@ -292,4 +297,157 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 func paneCommands(socket string) string {
 	out, _ := exec.Command("tmux", "-L", socket, "list-panes", "-a", "-F", "#{window_name} #{pane_current_command}").Output()
 	return string(out)
+}
+
+func (s standIn) secondServer(t *testing.T, name string) (string, string) {
+	t.Helper()
+	root, socket := filepath.Join(s.root, name), "frc-"+name+"-"+uuid.NewString()
+	for _, args := range [][]string{
+		{"-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "scratch", "exec sleep 600"},
+		{"-L", socket, "set-option", "-g", "base-index", "7"},
+		{"-L", socket, "set-option", "-g", "pane-base-index", "3"},
+	} {
+		cmd := exec.Command("tmux", args...)
+		cmd.Env = s.env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("tmux %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Cleanup(func() { exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	writeFile(t, filepath.Join(root, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\n", freePort(t)))
+	writeFile(t, filepath.Join(root, "home", ".gitconfig"), readOr(filepath.Join(s.server, "home", ".gitconfig")))
+	return root, socket
+}
+
+func (s standIn) inProcess(t *testing.T, extra ...string) {
+	t.Helper()
+	for _, kv := range append(slices.Clone(s.env), extra...) {
+		key, value, _ := strings.Cut(kv, "=")
+		if os.Getenv(key) != value {
+			t.Setenv(key, value)
+		}
+	}
+}
+
+func paneOf(t *testing.T, client remote.Client, id string) (remote.Factory, remote.Pane) {
+	t.Helper()
+	var view remote.View
+	if err := client.Read(context.Background(), "view", nil, &view); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range view.Factories {
+		if f.ID == id && f.Pane != nil {
+			return f, *f.Pane
+		}
+	}
+	t.Fatalf("%s has no live pane in the view: %+v", id, view.Factories)
+	return remote.Factory{}, remote.Pane{}
+}
+
+func TestRemoteAttachKeepsPaneIdentityAndAgentAlive(t *testing.T) {
+	s := newStandIn(t)
+	exec.Command("tmux", "-L", s.tmux, "set-option", "-g", "base-index", "1").Run()
+	url := "https://git.example/acme/app.git"
+	src := gitRepo(t, s.root, url)
+	s.serveGit(t, url, filepath.Join(s.root, "origin.git"))
+	buildRoot, buildTmux := s.secondServer(t, "build")
+	writeFile(t, filepath.Join(s.root, "client", "config", "config.yml"), "remotes:\n  homelab:\n    host: homelab\n  build:\n    host: build\n")
+	servers := []string{"FACTORY_SSH_STANDIN_ROOT_build=" + buildRoot, "FACTORY_SSH_STANDIN_TMUX_build=" + buildTmux}
+	for _, c := range [][]string{{"homelab", "csv"}, {"build", "api"}} {
+		if out, err := s.factory(t, src, servers, "open", "--remote", c[0], c[1], "--prompt", "work"); err != nil {
+			t.Fatalf("creating %s on %s: %v\n%s", c[1], c[0], err, out)
+		}
+	}
+	s.inProcess(t, servers...)
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	homelab, _ := remote.For(cfg, "homelab")
+	build, _ := remote.For(cfg, "build")
+	if out, err := exec.Command("tmux", "-L", s.tmux, "kill-window", "-t", "factory:host").CombinedOutput(); err != nil {
+		t.Fatalf("stopping homelab's host: %v\n%s", err, out)
+	}
+	csv, csvPane := paneOf(t, homelab, "csv")
+	_, apiPane := paneOf(t, build, "api")
+	if csvPane.ID != apiPane.ID {
+		t.Logf("pane ids differ (%s, %s); the token still has to keep the servers apart", csvPane.ID, apiPane.ID)
+	}
+
+	var view string
+	wrongHost := remote.PaneTarget{Target: remote.Target{ID: "csv", Incarnation: csv.Incarnation}, Token: csvPane.Token}
+	if err := build.Read(context.Background(), "attach", wrongHost, &view); err == nil {
+		t.Fatal("build attached to a factory that lives on homelab")
+	}
+	wrongPane := remote.PaneTarget{Target: remote.Target{ID: "csv", Incarnation: csv.Incarnation}, Token: apiPane.Token}
+	if err := homelab.Read(context.Background(), "attach", wrongPane, &view); err == nil {
+		t.Fatal("homelab attached with another server's pane token")
+	}
+	right := remote.PaneTarget{Target: remote.Target{ID: "csv", Incarnation: csv.Incarnation}, Token: csvPane.Token}
+	if err := homelab.Read(context.Background(), "attach", right, &view); err != nil {
+		t.Fatal(err)
+	}
+
+	words := slices.Concat([]string{"ssh"}, homelab.Args(true, []string{"factory", "host", "attach", view}))
+	for i, w := range words {
+		words[i] = factory.ShellQuote(w)
+	}
+	proxy := "frc-proxy-" + uuid.NewString()
+	start := exec.Command("tmux", "-L", proxy, "-f", "/dev/null", "new-session", "-d", "-x", "100", "-y", "30", "exec "+strings.Join(words, " "))
+	start.Env = os.Environ()
+	if out, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("tmux", "-L", proxy, "kill-server").Run() })
+	session := host.ViewSession(view)
+	serverTmux := func(args ...string) string {
+		out, _ := exec.Command("tmux", append([]string{"-L", s.tmux}, args...)...).Output()
+		return strings.TrimSpace(string(out))
+	}
+	waitFor(t, "the proxy to attach", func() bool { return strings.Contains(serverTmux("list-clients", "-F", "#{session_name}"), session) })
+	if shown := serverTmux("display-message", "-p", "-t", "="+session+":", "#{pane_id}"); shown != csvPane.ID {
+		t.Fatalf("the view shows %s; want csv's own pane %s", shown, csvPane.ID)
+	}
+
+	exec.Command("tmux", "-L", proxy, "kill-server").Run()
+	waitFor(t, "the view to close", func() bool { return !strings.Contains(serverTmux("list-sessions", "-F", "#{session_name}"), session) })
+	if alive := serverTmux("display-message", "-p", "-t", csvPane.ID, "#{pane_dead}"); alive != "0" {
+		t.Fatalf("closing the proxy left csv's pane %q; want the agent still running", alive)
+	}
+
+	act := func(action string, fields map[string]any) {
+		t.Helper()
+		payload := map[string]any{"id": "csv", "incarnation": csv.Incarnation}
+		maps.Copy(payload, fields)
+		if err := homelab.Mutate(context.Background(), action, uuid.NewString(), payload, nil); err != nil {
+			t.Fatalf("%s on homelab: %v", action, err)
+		}
+	}
+	windows := func() string { return serverTmux("list-windows", "-t", "=factory", "-F", "#{window_name}") }
+	act("pause", nil)
+	waitFor(t, "pause to close csv's window on homelab", func() bool { return !strings.Contains(windows(), "p-csv") })
+	archived := func() bool {
+		var view remote.View
+		homelab.Read(context.Background(), "view", nil, &view)
+		i := slices.IndexFunc(view.Factories, func(f remote.Factory) bool { return f.ID == "csv" })
+		return i >= 0 && view.Factories[i].Entry != nil && view.Factories[i].Entry.Archived
+	}
+	act("archive", map[string]any{"Remove": false})
+	waitFor(t, "archive to reach homelab", archived)
+	act("unarchive", nil)
+	waitFor(t, "unarchive to reach homelab", func() bool { return !archived() })
+	if err := os.MkdirAll(csv.Worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	act("wake", nil)
+	waitFor(t, "wake to reopen csv on homelab", func() bool { return strings.Contains(windows(), "p-csv") })
+}
+
+func waitFor(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !done(); time.Sleep(100 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
 }

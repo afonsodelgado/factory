@@ -59,6 +59,27 @@ func (t Transport) Endpoint() string {
 	return endpoint
 }
 
+func ParseTarget(target string) (state.Remote, error) {
+	var r state.Remote
+	if user, host, ok := strings.Cut(target, "@"); ok {
+		r.User, target = user, host
+	}
+	host, port, ok := strings.Cut(target, ":")
+	isIPv6 := strings.Contains(port, ":")
+	if !ok || isIPv6 {
+		r.Host = target
+		return r, nil
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return r, fmt.Errorf("the port in %s must be a number between 1 and 65535", target)
+	}
+	r.Host, r.Port = host, n
+	return r, nil
+}
+
+var ServerChecks = []string{"factory", "tmux", "git", "gh", "gh-stack", "claude", "git access", "bundle", "hooks", "forwarding"}
+
 const unreachable = 255
 
 const (

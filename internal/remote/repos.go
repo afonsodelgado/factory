@@ -64,7 +64,18 @@ func CheckCloneURL(raw string) error {
 
 func CloneDir(stateDir, gitURL string) string {
 	sum := sha256.Sum256([]byte(gitURL))
-	return filepath.Join(stateDir, "repos", hex.EncodeToString(sum[:8]))
+	return filepath.Join(resolved(stateDir), "repos", hex.EncodeToString(sum[:8]))
+}
+
+func IsClone(stateDir, repo string) bool {
+	return strings.HasPrefix(resolved(repo), filepath.Join(resolved(stateDir), "repos")+string(filepath.Separator))
+}
+
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }
 
 func EnsureClone(ctx context.Context, stateDir, gitURL string) (string, error) {

@@ -1,7 +1,9 @@
 package dialog
 
 import (
+	"cmp"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,12 +35,28 @@ type NewFactoryModel struct {
 	result         *NewResult
 	width          int
 	height         int
+	place          int
+	probes         map[string]probe
+	Probe          func(remote string) (string, error)
 }
 
 const supervisorRole = "supervisor"
 
+type probe struct {
+	done bool
+	text string
+	err  error
+}
+
+type probedMsg struct {
+	remote string
+	text   string
+	err    error
+}
+
 func NewFactory(c NewContext) *NewFactoryModel {
-	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, repoPath: sharedRepoDirectory(c.Repos)}
+	place := slices.Index(c.Remotes, c.Default) + 1
+	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, place: place, probes: map[string]probe{}, repoPath: sharedRepoDirectory(c.Repos)}
 }
 
 const firstStageRow = 1
@@ -70,7 +88,50 @@ func (m *NewFactoryModel) stageAgents() map[string]state.AgentSetting {
 	return agents
 }
 
-func (m *NewFactoryModel) Init() tea.Cmd { return nil }
+func (m *NewFactoryModel) Init() tea.Cmd { return m.probe() }
+
+func (m *NewFactoryModel) remote() string {
+	if m.place == 0 {
+		return ""
+	}
+	return m.Context.Remotes[m.place-1]
+}
+
+func (m *NewFactoryModel) probe() tea.Cmd {
+	name := m.remote()
+	if _, started := m.probes[name]; name == "" || started || m.Probe == nil {
+		return nil
+	}
+	m.probes[name] = probe{}
+	check := m.Probe
+	return func() tea.Msg {
+		text, err := check(name)
+		return probedMsg{remote: name, text: text, err: err}
+	}
+}
+
+func (m *NewFactoryModel) moveOn(delta int) tea.Cmd {
+	places := len(m.Context.Remotes) + 1
+	m.place = (m.place + delta + places) % places
+	return m.probe()
+}
+
+func (m *NewFactoryModel) choosesPlace() bool {
+	return len(m.Context.Remotes) > 0 && !m.addingRepo()
+}
+
+func (m *NewFactoryModel) remoteProblem() string {
+	name, repo := m.remote(), m.selectedRepo()
+	switch p := m.probes[name]; {
+	case name == "":
+		return ""
+	case repo.NoGitRemote != "":
+		return repo.Name + " has no git remote, so " + name + " has nothing to clone. Push it to one first (git remote add origin <url>, then git push), or pick this machine with ←."
+	case p.done && p.err != nil:
+		return m.id() + " can't start on " + name + " while it is unreachable. Pick this machine with ←, or run factory doctor --remote " + name + " to see why."
+	}
+	return ""
+}
 
 func (m *NewFactoryModel) Result() (any, bool) {
 	if m.result == nil {
@@ -98,6 +159,12 @@ func (m *NewFactoryModel) named(e Existing) bool {
 func (m *NewFactoryModel) existing() (Existing, bool) {
 	for _, e := range m.selectedRepo().Existing {
 		if !e.Retired && m.named(e) {
+			return e, true
+		}
+	}
+	for _, e := range m.Context.Elsewhere {
+		elsewhereMatters := e.Remote != "" || m.remote() != ""
+		if elsewhereMatters && !e.Retired && m.named(e) {
 			return e, true
 		}
 	}
@@ -130,7 +197,7 @@ func (m *NewFactoryModel) launch() factory.Launch {
 	name, stages := m.chosenPipeline()
 	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
 	if launch.Supervisor.OnClaude() {
-		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser, repo.RemoteControl
+		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser && m.remote() == "", repo.RemoteControl
 	}
 	return launch
 }
@@ -395,6 +462,8 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.typeText(DecodeKeys(msg.Content))
 	case promptEdited:
 		m.promptEdited(msg)
+	case probedMsg:
+		m.probes[msg.remote] = probe{done: true, text: msg.text, err: msg.err}
 	case tea.KeyPressMsg:
 		m.Context.Notice = ""
 		switch m.step {
@@ -466,8 +535,16 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		if !m.addingRepo() {
 			return m.prepareSettings(m.selectedRepo().Path)
 		}
+	case "left":
+		if m.choosesPlace() {
+			return m.moveOn(-1)
+		}
+	case "right":
+		if m.choosesPlace() {
+			return m.moveOn(1)
+		}
 	case "ctrl+w":
-		if e, ok := m.existing(); ok && !e.Archived {
+		if e, ok := m.existing(); ok && !e.Archived && e.Key != "" {
 			m.result = &NewResult{Select: e.Key, Wake: true}
 			return tea.Quit
 		}
@@ -491,12 +568,15 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.problem = factory.ReservedIDRefusal(m.name)
 		return nil
 	}
-	if e, ok := m.existing(); ok && e.Archived {
+	if e, ok := m.existing(); ok && (e.Archived || e.Key == "") {
 		return nil
 	}
 	if e, ok := m.existing(); ok {
 		m.result = &NewResult{Select: e.Key}
 		return tea.Quit
+	}
+	if problem := m.remoteProblem(); problem != "" {
+		return nil
 	}
 	m.pipeline = m.pipelineName()
 	m.step = 2
@@ -576,7 +656,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole]}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Remote: m.remote()}
 	return tea.Quit
 }
 
@@ -650,6 +730,9 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		m.drawRepoPath(c, y, w)
 		return
 	}
+	if len(m.Context.Remotes) > 0 {
+		y = m.drawPlaces(c, y, w)
+	}
 	c.Put(1, y, "Factory id", theme.Bright.B())
 	y++
 	drawInput(c, 1, y, w, "", []string{m.name + "█"}, true, theme.Focused)
@@ -662,13 +745,18 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		c.Spans(1, y, l)
 		y++
 	}
-	if m.problem != "" {
-		for _, l := range theme.Wrap("✗ "+m.problem, w) {
+	_, matched := m.existing()
+	problem := m.problem
+	if !matched && m.id() != "" {
+		problem = cmp.Or(problem, m.remoteProblem())
+	}
+	if problem != "" {
+		for _, l := range theme.Wrap("✗ "+problem, w) {
 			c.Put(1, y, l, theme.FgInk(theme.Red))
 			y++
 		}
 	}
-	if _, matched := m.existing(); !matched && m.id() != "" && !factory.IsReservedID(m.name) {
+	if !matched && problem == "" && m.id() != "" && !factory.IsReservedID(m.name) {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
@@ -676,10 +764,17 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	if m.Context.Here && len(m.Context.Repos) > 1 {
 		hints = "⏎ next: pipeline   ↑↓ another repo   ctrl+e settings   esc cancel"
 	}
-	if e, matched := m.existing(); matched && e.Archived {
+	if len(m.Context.Remotes) > 0 {
+		hints = "⏎ next: pipeline   ↑↓ repo   ←→ runs on   ctrl+e settings   esc cancel"
+	}
+	e, _ := m.existing()
+	switch {
+	case matched && (e.Archived || e.Key == ""):
 		hints = "ctrl+e settings   esc cancel"
-	} else if matched {
+	case matched:
 		hints = "⏎ select it   ctrl+w select and wake it   ctrl+e settings   esc cancel"
+	case problem != "" && m.remoteProblem() != "":
+		hints = "←→ runs on   ↑↓ repo   ctrl+e settings   esc cancel"
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
@@ -695,8 +790,16 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 		add(fmt.Sprintf("%s already has a factory, archived: %s in %s. %s", e.Label, e.Status, e.Stage, UnarchiveAdvice), theme.FgInk(theme.Yellow))
 		return spans
 	}
+	if e, ok := m.existing(); ok && e.Key == "" {
+		add(fmt.Sprintf("%s already runs on %s, which this hub has not listed yet. Pick another id.", e.Label, e.Remote), theme.FgInk(theme.Yellow))
+		return spans
+	}
 	if e, ok := m.existing(); ok {
-		add(fmt.Sprintf("%s already has a factory: %s in %s. No second factory is created.", e.Label, e.Status, e.Stage), theme.FgInk(theme.Yellow))
+		where := ""
+		if e.Remote != "" {
+			where = ", on " + e.Remote
+		}
+		add(fmt.Sprintf("%s already has a factory%s: %s in %s. No second factory is created.", e.Label, where, e.Status, e.Stage), theme.FgInk(theme.Yellow))
 		return spans
 	}
 	if e, ok := m.retiredMatch(); ok {
@@ -707,13 +810,49 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	case m.name == "":
 		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
 	case m.id() != "" && !factory.IsReservedID(m.name):
-		add(fmt.Sprintf("%s is a new factory. You'll write its prompt next.", m.id()), theme.Muted)
+		add(fmt.Sprintf("%s is a new factory%s. You'll write its prompt next.", m.id(), onRemote(m.remote())), theme.Muted)
 	}
 	return spans
 }
 
+func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
+	c.Put(1, y, "Runs on", theme.Bright.B())
+	y++
+	x := 3
+	for i, name := range slices.Concat([]string{"this machine"}, m.Context.Remotes) {
+		mark, ink := "○ ", theme.Text
+		if i == m.place {
+			mark, ink = "● ", theme.Bright
+		}
+		x = c.Put(x, y, mark+name, ink)
+		isDefault := i == slices.Index(m.Context.Remotes, m.Context.Default)+1
+		if isDefault {
+			x = c.Put(x+2, y, "default", theme.Muted)
+		}
+		x += 3
+	}
+	y++
+	name := m.remote()
+	p := m.probes[name]
+	switch {
+	case name == "":
+		c.PutMax(3, y, "Runs here, in a new worktree of "+m.selectedRepo().Display+".", theme.Muted, w-3)
+	case !p.done:
+		c.PutMax(3, y, "◌ checking "+name+" over ssh…", theme.FgInk(theme.Cyan), w-3)
+	case p.err != nil:
+		c.PutMax(3, y, "✗ "+name+" is unreachable: "+p.err.Error(), theme.FgInk(theme.Red), w-3)
+	default:
+		c.PutMax(3, y, "↔ "+p.text, theme.FgInk(theme.Cyan), w-3)
+	}
+	return y + 2
+}
+
 func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	repo := m.selectedRepo()
+	if name := m.remote(); name != "" {
+		m.drawRemotePreview(c, x, y, w, name)
+		return
+	}
 	c.Put(x, y, "Will run, from "+theme.KeepTail(repo.Display, w-theme.Width("Will run, from ")), theme.Quiet)
 	y++
 	launch := m.launch()
@@ -733,6 +872,29 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		reason = "--chrome because the " + repo.Name + " repo config uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
+}
+
+func (m *NewFactoryModel) drawRemotePreview(c *theme.Canvas, x, y, w int, name string) {
+	repo := m.selectedRepo()
+	c.Put(x, y, "Will run on "+name+", from its clone of "+strings.TrimSuffix(filepath.Base(repo.GitURL), ".git"), theme.Quiet)
+	y++
+	launch := m.launch()
+	command := strings.SplitN(launch.CreateCommand(), "; cd ", 2)[0]
+	if !launch.Supervisor.OnClaude() {
+		_, command, _ = strings.Cut(launch.CreateCommand(), "\n")
+	}
+	for _, l := range theme.Wrap(command, w-4) {
+		c.Put(x+2, y, l, theme.Text)
+		y++
+	}
+	if repo.Browser {
+		c.PutMax(x, y, "No --chrome on "+name+": "+repo.Name+" uses browser QA, so QA runs on this laptop.", theme.Muted, w)
+		y++
+	}
+	for _, l := range theme.Wrap(name+" clones "+repo.GitURL+" there the first time, then fetches.", w) {
+		c.Put(x, y, l, theme.Muted)
+		y++
+	}
 }
 
 func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {

@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,6 +183,135 @@ func TestNewFactoryPromptEditsWhereTheCursorIs(t *testing.T) {
 	r, _ := m.Result()
 	if got, want := r.(NewResult).Prompt, "fix the bug\nreject  private addXresses in the webhook fetcher"; got != want {
 		t.Errorf("editing above a wrapped line gave %q; want %q: the cursor must land where it is drawn, or edits go to the wrong place", got, want)
+	}
+}
+
+type fakeRemoteActions struct {
+	added  []string
+	checks []CheckRow
+}
+
+func (f *fakeRemoteActions) Add(name, target, identity string) error {
+	f.added = append(f.added, name, target, identity)
+	return nil
+}
+
+func (f *fakeRemoteActions) Check(string) []CheckRow  { return f.checks }
+func (f *fakeRemoteActions) SetDefault(string) error  { return nil }
+func (f *fakeRemoteActions) Remove(string) error      { return nil }
+func (f *fakeRemoteActions) SetPush(state.Push) error { return nil }
+func (f *fakeRemoteActions) NewTopic() string         { return "factory-q7rk2m9xw4tzc3vb" }
+
+func remotesPopup(c RemotesContext, actions RemoteActions) *Remotes {
+	r := NewRemotes(c, actions)
+	r.Update(tea.WindowSizeMsg{Width: 86, Height: 24})
+	return r
+}
+
+func pressRemotes(r *Remotes, keys ...tea.KeyPressMsg) tea.Cmd {
+	var cmd tea.Cmd
+	for _, k := range keys {
+		_, cmd = r.Update(k)
+	}
+	return cmd
+}
+
+func typed(text string) []tea.KeyPressMsg {
+	var keys []tea.KeyPressMsg
+	for _, ch := range text {
+		keys = append(keys, tea.KeyPressMsg{Code: ch, Text: string(ch)})
+	}
+	return keys
+}
+
+func TestRemotesPopupFirstSetupAddsTheRemoteEvenWhenItsCheckFails(t *testing.T) {
+	actions := &fakeRemoteActions{checks: []CheckRow{
+		{Name: "ssh", Mark: "ok", Detail: "afonso@homelab:22 in 0.4s"},
+		{Name: "claude", Mark: "fail", Detail: "2.1.312, but not logged in", Fix: "ssh -t homelab claude  then /login, and quit"},
+		{Name: "bundle", Mark: "skip", Detail: "skipped, needs claude"},
+	}}
+	r := remotesPopup(RemotesContext{Local: 3}, actions)
+	pressRemotes(r, typed("a")...)
+	pressRemotes(r, typed("homelab")...)
+	pressRemotes(r, tea.KeyPressMsg{Code: tea.KeyTab})
+	pressRemotes(r, typed("afonso@homelab:22")...)
+	check := pressRemotes(r, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if want := []string{"homelab", "afonso@homelab:22", ""}; !slices.Equal(actions.added, want) {
+		t.Fatalf("Add got %q; want %q, or the typed remote never reaches the config", actions.added, want)
+	}
+	if check == nil {
+		t.Fatal("⏎ on a valid remote ran no check; the developer never learns what is missing on the server")
+	}
+	r.Update(check())
+	golden.RequireEqual(t, r.View().Content)
+
+	pressRemotes(r, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if list := r.View().Content; !strings.Contains(list, "this machine") || !strings.Contains(list, "afonso@homelab:22") {
+		t.Errorf("after a failing check the list lacks the new remote:\n%s\nit is added either way, as the checked screen says", list)
+	}
+}
+
+func TestRemotesListShowsLinkDefaultAndPush(t *testing.T) {
+	r := remotesPopup(RemotesContext{
+		Remotes: []RemoteRow{
+			{Name: "homelab", Endpoint: "afonso@homelab:22", Link: "connected", Factories: 4, NeedsYou: 1},
+			{Name: "build-box", Endpoint: "ci@build-box", Link: "unreachable", Factories: 2},
+		},
+		Default: "homelab",
+		Local:   3,
+		Push:    state.Push{Topic: "factory-q7rk2m9xw4tzc3vb"},
+	}, nil)
+	golden.RequireEqual(t, r.View().Content)
+}
+
+func TestNewFactoryChecksIDsOnRemotesWithoutWaitingForThem(t *testing.T) {
+	context := NewContext{
+		Repos:   []RepoOption{{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Browser: true, GitURL: "git@github.com:acme/cowork.git"}},
+		Remotes: []string{"homelab"},
+		Elsewhere: []Existing{
+			{Key: "remote:homelab/s-1/inc-1", Worktree: "csv-export", Label: "csv-export", Status: "needs you", Stage: "requirements", Remote: "homelab"},
+			{Worktree: "rate-limits", Label: "rate-limits", Remote: "homelab"},
+		},
+	}
+	typed := func(id string, keys ...string) *NewFactoryModel {
+		m := NewFactory(context)
+		m.Update(tea.WindowSizeMsg{Width: 86, Height: 26})
+		m.Update(probedMsg{remote: "homelab", err: errors.New("ssh: connect to host homelab port 22: timed out")})
+		for _, r := range id {
+			m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		}
+		for _, k := range keys {
+			code := map[string]rune{"left": tea.KeyLeft, "right": tea.KeyRight, "enter": tea.KeyEnter}[k]
+			m.Update(tea.KeyPressMsg{Code: code})
+		}
+		return m
+	}
+
+	listed := typed("csv-export", "enter")
+	golden.RequireEqual(t, listed.View().Content)
+	if r, _ := listed.Result(); !reflect.DeepEqual(r, NewResult{Select: "remote:homelab/s-1/inc-1"}) {
+		t.Errorf("an id that runs on homelab gave %+v; want that factory selected, never a second one here", r)
+	}
+	if cached := typed("rate-limits", "enter"); cached.step != 1 {
+		t.Error("an id homelab reported earlier went on to a second factory while homelab is away")
+	}
+	if away := typed("tag-search", "right", "enter"); away.step != 1 {
+		t.Error("a new factory went ahead on an unreachable remote")
+	}
+	if here := typed("tag-search", "right", "left", "enter"); here.step != 2 {
+		t.Error("an unreachable remote blocked a factory on this machine")
+	}
+}
+
+func TestKeysSheetListsRemotesOnlyOnceOneExists(t *testing.T) {
+	sheet := func(remotes bool) string {
+		k := &Keys{Context: KeysContext{Remotes: remotes}}
+		k.Update(tea.WindowSizeMsg{Width: 124, Height: 17})
+		return k.View().Content
+	}
+	if strings.Contains(sheet(false), "remotes") || !strings.Contains(sheet(true), "remotes") {
+		t.Error("the keys sheet must stay as it was until a remote exists, then list R")
 	}
 }
 
