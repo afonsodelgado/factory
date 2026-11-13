@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ const (
 	Pass Mark = "✓"
 	Warn Mark = "!"
 	Fail Mark = "✗"
+	Skip Mark = "–"
 )
 
 type Check struct {
@@ -119,6 +122,18 @@ func nerdFontInstallCommand() string {
 }
 
 func Doctor(o Options) []Check {
+	return doctor(o, chrome(o), nerdFont(o))
+}
+
+func ServerDoctor(o Options, gitURLs []string) []Check {
+	checks := []Check{claudeLogin(o)}
+	for _, url := range gitURLs {
+		checks = append(checks, gitAccess(url))
+	}
+	return slices.DeleteFunc(doctor(o, append(checks, forwarding())...), func(c Check) bool { return c.Name == "repos" })
+}
+
+func doctor(o Options, extra ...Check) []Check {
 	checks := []Check{
 		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
 		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
@@ -127,11 +142,9 @@ func Doctor(o Options) []Check {
 		ghStack(),
 		revmux(o),
 		plugin(o, "impeccable", "impeccable@impeccable", "design stage"),
-		chrome(o),
-		nerdFont(o),
-		bundleCheck(o),
-		hooksCheck(o),
 	}
+	checks = append(checks, extra...)
+	checks = append(checks, bundleCheck(o), hooksCheck(o))
 	if o.ConfigErr != nil {
 		return append(checks, Check{Name: "config", Mark: Fail, Detail: "factory hub and open refuse to start", Lines: []string{o.ConfigErr.Error()}, Fix: "edit " + o.ConfigFile})
 	}
@@ -267,6 +280,42 @@ func chrome(o Options) Check {
 		detail += " (" + strings.Join(o.Browser, ", ") + ")"
 	}
 	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per repo config"}
+}
+
+func claudeLogin(o Options) Check {
+	_, err := os.Stat(filepath.Join(o.ClaudeDir, ".credentials.json"))
+	if err == nil || os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
+		return Check{Name: "claude login", Mark: Pass, Detail: "logged in"}
+	}
+	return Check{Name: "claude login", Mark: Fail, Detail: "not logged in, so every agent would stop at the login screen", Fix: "claude  then /login, and quit"}
+}
+
+func gitAccess(url string) Check {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "-h", "--", url)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	if err == nil || isNoHeads(err) {
+		return Check{Name: "git access", Mark: Pass, Detail: url}
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return Check{Name: "git access", Mark: Fail, Detail: "can't read " + url, Lines: lines[:min(len(lines), 2)], Fix: "cat ~/.ssh/id_ed25519.pub  and add the key to your git host, or log gh in"}
+}
+
+func isNoHeads(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 2
+}
+
+var forwardingRefused = regexp.MustCompile(`(?im)^\s*(AllowTcpForwarding\s+(no|remote)|DisableForwarding\s+yes)\b`)
+
+func forwarding() Check {
+	data, err := os.ReadFile("/etc/ssh/sshd_config")
+	if err == nil && forwardingRefused.Match(data) {
+		return Check{Name: "forwarding", Mark: Fail, Detail: "sshd refuses local forwarding, so review pages and dev servers can't reach this laptop", Fix: "set AllowTcpForwarding local in /etc/ssh/sshd_config  and restart sshd"}
+	}
+	return Check{Name: "forwarding", Mark: Pass, Detail: "sshd allows local forwarding, for review pages and dev servers"}
 }
 
 func nerdFont(o Options) Check {

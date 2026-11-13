@@ -38,6 +38,15 @@ func (s Snapshot) Find(key string) (Item, bool) {
 	return Item{}, false
 }
 
+func (s Snapshot) Named(id string) (Item, bool) {
+	for _, it := range s.Items {
+		if it.Factory.Label() == id {
+			return it, true
+		}
+	}
+	return Item{}, false
+}
+
 type Loader struct {
 	Config   *state.Config
 	Registry *state.Registry

@@ -241,6 +241,18 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatalf("first %+v, retry %+v, runs %+v", first, retry, runs)
 		}
 	})
+	t.Run("a create cut short resumes on retry and a finished one is not run again", func(t *testing.T) {
+		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"id":"csv"}`)
+		if err := savePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "create", Data: data, Status: "accepted"}); err != nil {
+			t.Fatal(err)
+		}
+		runs := 0
+		effect := func() Message { runs++; return Message{T: "done"} }
+		first, retry := Journal(dir, op, "create", data, true, effect), Journal(dir, op, "create", data, true, effect)
+		if runs != 1 || first.T != "done" || retry.T != "done" {
+			t.Fatalf("ran the create %d times, replies %+v %+v", runs, first, retry)
+		}
+	})
 	recovered := func(t *testing.T, f fixture, entry QueuedType) (chan string, *Runtime) {
 		t.Helper()
 		calls := make(chan string, 8)
@@ -285,4 +297,20 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatal("typed a recovered message into a pane that belongs to someone else")
 		}
 	})
+}
+
+func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {
+	stateDir := t.TempDir()
+	clone := filepath.Join(stateDir, "repos", "0123456789abcdef")
+	if err := WriteFile(state.RepoConfigPath(clone), "qa:\n  mode: browser\n"); err != nil {
+		t.Fatal(err)
+	}
+	r := New(Runtime{Config: &state.Config{StateDir: stateDir}})
+	it := Item{Factory: factory.Factory{Repo: clone, Slug: "csv", Dir: filepath.Join(clone, "f"), Worktree: clone}}
+	if _, err := r.StartStage(it, &state.StageRuns{}, StageRequest{Role: "qa"}); err == nil {
+		t.Fatal("started browser QA on the server; it belongs to the laptop and must stay held")
+	}
+	if profile, _ := state.ReadProfile(clone); r.chrome(clone, profile) {
+		t.Fatal("a server launch would pass --chrome for a factory created from a laptop")
+	}
 }

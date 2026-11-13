@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/install"
@@ -42,17 +43,45 @@ func doctorOptions() install.Options {
 }
 
 func runDoctor(args []string) int {
-	header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
-	problems, warnings := install.Report(os.Stdout, install.Doctor(doctorOptions()), header)
-	summary := fmt.Sprintf("%d problems, %d warnings. Nothing was changed.", problems, warnings)
-	if problems > 0 {
-		summary += " Run the fix commands, then doctor again."
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	only := flags.String("remote", "", "check only this remote")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: factory doctor [--remote name]")
+		return 2
 	}
-	fmt.Println(summary)
+	problems := 0
+	if *only == "" {
+		header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
+		problems += summarize(header, install.Doctor(doctorOptions()))
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil && *only != "" {
+		fmt.Fprintln(os.Stderr, "factory doctor:", err)
+		return 1
+	}
+	if err == nil {
+		for _, name := range remotesToCheck(cfg, *only) {
+			problems += summarize(remoteDoctor(cfg, name))
+		}
+	}
 	if problems > 0 {
 		return 1
 	}
 	return 0
+}
+
+func summarize(header string, checks []install.Check) int {
+	problems, warnings := install.Report(os.Stdout, checks, header)
+	summary := fmt.Sprintf("%d problems, %d warnings.", problems, warnings)
+	if skipped := len(slices.DeleteFunc(slices.Clone(checks), func(c install.Check) bool { return c.Mark != install.Skip })); skipped > 0 {
+		summary = fmt.Sprintf("%d problems, %d warnings, %d skipped.", problems, warnings, skipped)
+	}
+	summary += " Nothing was changed."
+	if problems > 0 {
+		summary += " Run the fix commands, then doctor again."
+	}
+	fmt.Println(summary)
+	return problems
 }
 
 func installPlans(binary string) ([]install.Plan, error) {

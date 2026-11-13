@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,12 +10,13 @@ import (
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [text…]
-       factory review threads [--page <path>] [--open]
+const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [--factory id --remote name] [text…]
+       factory review threads [--page <path>] [--open] [--factory id --remote name]
        factory review open [--factory <id>] [--for design|walkthrough] <url>
        factory review stack [--for design|walkthrough]`
 
@@ -41,15 +43,16 @@ func runReviewReply(args []string) int {
 	flags := flag.NewFlagSet("review reply", flag.ContinueOnError)
 	thread := flags.String("thread", "", "the thread id, such as t-3")
 	resolve := flags.Bool("resolve", false, "mark the thread resolved")
+	owner := ownerFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	text := strings.Join(flags.Args(), " ")
-	if *thread == "" || (text == "" && !*resolve) {
+	if *thread == "" || (text == "" && !*resolve) || !owner.valid() {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	if _, err := askReview(hub.ReviewRequest{Action: "reply", Thread: *thread, Text: text, Resolve: *resolve}); err != nil {
+	if _, err := owner.ask(hub.ReviewRequest{Action: "reply", Thread: *thread, Text: text, Resolve: *resolve}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
@@ -60,10 +63,11 @@ func runReviewThreads(args []string) int {
 	flags := flag.NewFlagSet("review threads", flag.ContinueOnError)
 	page := flags.String("page", "", "only the threads on this page, relative to the factory directory")
 	open := flags.Bool("open", false, "only the threads that are not resolved")
-	if err := flags.Parse(args); err != nil {
+	owner := ownerFlags(flags)
+	if err := flags.Parse(args); err != nil || !owner.valid() {
 		return 2
 	}
-	reply, err := askReview(hub.ReviewRequest{Action: "threads", Page: *page})
+	reply, err := owner.ask(hub.ReviewRequest{Action: "threads", Page: *page})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
@@ -118,6 +122,37 @@ func runReviewStack(args []string) int {
 	}
 	fmt.Printf("Starting the stack in its own window; the factory's Chrome opens %s once it answers.\n", reply.Target)
 	return 0
+}
+
+type reviewOwner struct{ id, remote *string }
+
+func ownerFlags(flags *flag.FlagSet) reviewOwner {
+	return reviewOwner{
+		id:     flags.String("factory", "", "the factory, when this is not one of its panes"),
+		remote: flags.String("remote", "", "the remote the factory runs on; needs --factory"),
+	}
+}
+
+func (o reviewOwner) valid() bool { return *o.remote == "" || *o.id != "" }
+
+func (o reviewOwner) ask(r hub.ReviewRequest) (hub.ReviewReply, error) {
+	r.ID = *o.id
+	if *o.remote == "" {
+		return askReview(r)
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return hub.ReviewReply{}, err
+	}
+	client, err := remote.For(cfg, *o.remote)
+	if err != nil {
+		return hub.ReviewReply{}, err
+	}
+	var reply hub.ReviewReply
+	if r.Action == "threads" {
+		return reply, client.Read(context.Background(), "review", r, &reply)
+	}
+	return reply, client.MutateOnce(context.Background(), "review", r, &reply)
 }
 
 func askReview(r hub.ReviewRequest) (hub.ReviewReply, error) {

@@ -92,12 +92,7 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 
 func (m *Runtime) ReviewItem(r ReviewRequest) (Item, bool) {
 	if r.ID != "" {
-		for _, it := range m.snap.Items {
-			if it.Factory.Label() == r.ID {
-				return it, true
-			}
-		}
-		return Item{}, false
+		return m.snap.Named(r.ID)
 	}
 	if r.Factory != "" {
 		for _, it := range m.snap.Items {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -80,6 +81,14 @@ func (m *Runtime) Tick() {
 	m.FlushTypeQueue()
 	m.CloseFinishedStages()
 	m.SyncReview()
+}
+
+func (m *Runtime) clonedForLaptop(repo string) bool {
+	return strings.HasPrefix(repo, filepath.Join(m.Config.StateDir, "repos")+string(filepath.Separator))
+}
+
+func (m *Runtime) chrome(repo string, profile state.Profile) bool {
+	return profile.BrowserQA() && !m.clonedForLaptop(repo)
 }
 
 func (m *Runtime) repoConfig(repo string) (*state.Config, state.Profile) {

@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+: "${FACTORY_SSH_STANDIN_ROOT:?set it to the stand-in server directory}"
+: "${FACTORY_SSH_STANDIN_BIN:?set it to the factory binary the server runs}"
+root=$FACTORY_SSH_STANDIN_ROOT
+printf '%s\n' "$*" >>"$root/ssh.log"
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-o | -l | -p | -i | -F | -S | -O | -L | -R | -D | -J | -W | -E | -c | -m | -b | -e) shift 2 ;;
+	-T | -t | -tt | -N | -n | -q | -v | -4 | -6 | -C | -x | -a) shift ;;
+	--) shift && break ;;
+	-*) echo "ssh stand-in: unsupported option $1" >&2 && exit 255 ;;
+	*) break ;;
+	esac
+done
+[ $# -gt 0 ] || { echo "ssh stand-in: no host" >&2 && exit 255; }
+host=$1
+shift
+if [ "${FACTORY_SSH_STANDIN_DOWN:-}" = 1 ]; then
+	echo "ssh: connect to host $host port 22: Operation timed out" >&2
+	exit 255
+fi
+if [ "${FACTORY_SSH_STANDIN_NO_FACTORY:-}" = 1 ]; then
+	echo "bash: line 1: factory: command not found" >&2
+	exit 127
+fi
+case "$*" in
+"factory host request") ;;
+*) echo "ssh stand-in: refusing the remote command: $*" >&2 && exit 255 ;;
+esac
+request=$(cat)
+reply=$(printf '%s' "$request" | env HOME="$root/home" FACTORY_CONFIG_DIR="$root/config" FACTORY_STATE_DIR="$root/state" \
+	CLAUDE_CONFIG_DIR="$root/claude" FACTORY_TMUX_SOCKET="${FACTORY_SSH_STANDIN_TMUX:-factory-standin}" TMUX= \
+	"$FACTORY_SSH_STANDIN_BIN" host request)
+case "$request" in
+*"\"action\":\"${FACTORY_SSH_STANDIN_DROP:-}\""*)
+	echo "Connection to $host closed by remote host." >&2
+	exit 255
+	;;
+esac
+printf '%s\n' "$reply"

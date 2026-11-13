@@ -69,7 +69,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.RetiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.SlugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: CustomStages(pipeline), Agents: r.Agents, Chrome: profile.BrowserQA(), RemoteControl: cfg.RemoteControl(), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: CustomStages(pipeline), Agents: r.Agents, Chrome: m.chrome(r.Repo, profile), RemoteControl: cfg.RemoteControl(), Supervisor: supervisor}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
@@ -77,7 +77,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 		launch.AddDirs = m.WritableDirs(r.Repo, "", supervisor)
 	}
 	title := FirstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents}
+	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents, Incarnation: uuid.NewString()}
 	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
 		PinDirs(reg, earlier)
 		reg.Upsert(entry)
@@ -197,7 +197,7 @@ func (m *Runtime) Wake(key string) error {
 	}
 	cfg, profile := m.repoConfig(it.Factory.Repo)
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, profile, cfg.RemoteControl(), WithoutTokens(hooks, m.snap.StageTokens), m.WritableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+	plan := PlanWake(it, m.chrome(it.Factory.Repo, profile), cfg.RemoteControl(), WithoutTokens(hooks, m.snap.StageTokens), m.WritableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree

@@ -370,7 +370,7 @@ func (m *Model) planWakes() {
 			continue
 		}
 		cfg, profile := m.repoConfig(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile, cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	}
 }
 
@@ -529,6 +529,9 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 }
 
 func (m *Model) handleEvent(e Event) tea.Cmd {
+	if e.Op != "" && journaled(e) {
+		return m.journal(e)
+	}
 	switch e.T {
 	case "hello", "resize":
 		if strings.HasPrefix(e.Pane, "dialog:") {
@@ -566,6 +569,34 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func journaled(e Event) bool {
+	switch e.T {
+	case "open", "delete", "stage":
+		return true
+	case "review":
+		var r ReviewRequest
+		return json.Unmarshal(e.Data, &r) == nil && r.Action != "open" && r.Action != "stack"
+	}
+	return false
+}
+
+func (m *Model) journal(e Event) tea.Cmd {
+	var cmd tea.Cmd
+	reply := m.execution().Execute(e.Op, e.T, e.Data, func() Message {
+		inner := e
+		inner.Op, inner.From, inner.Reply = "", nil, make(chan Message, 1)
+		cmd = m.handleEvent(inner)
+		select {
+		case r := <-inner.Reply:
+			return r
+		default:
+			return Message{T: "error", Error: "the hub did not answer " + e.T}
+		}
+	})
+	e.Respond(reply)
+	return cmd
 }
 
 func (m *Model) viewerKey(pane, key, text string) tea.Cmd {

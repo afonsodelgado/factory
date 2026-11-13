@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,8 +19,12 @@ import (
 const hostWindow = "host"
 
 func runHost(args []string) int {
+	if len(args) == 1 && args[0] == "request" {
+		json.NewEncoder(os.Stdout).Encode(answerRequest(os.Stdin))
+		return 0
+	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: factory host run")
+		fmt.Fprintln(os.Stderr, "usage: factory host run | factory host request")
 		return 2
 	}
 	cfg, err := state.LoadConfig()
@@ -37,8 +43,13 @@ func runHost(args []string) int {
 	return 0
 }
 
+func hostLockPath(cfg *state.Config) string { return filepath.Join(cfg.StateDir, "host.lock") }
+
 func startHost(cfg *state.Config, tm tmux.Client) error {
 	if hubRunning(cfg) {
+		if !fileLocked(hostLockPath(cfg)) {
+			return errors.New("the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run")
+		}
 		return nil
 	}
 	bin, err := os.Executable()
@@ -68,6 +79,11 @@ func startHost(cfg *state.Config, tm tmux.Client) error {
 }
 
 func serveHost(cfg *state.Config) error {
+	unlockHost, err := lockHub(hostLockPath(cfg))
+	if err != nil {
+		return err
+	}
+	defer unlockHost()
 	unlock, err := lockHub(cfg.LockPath())
 	if err != nil {
 		return err

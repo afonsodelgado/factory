@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -24,11 +26,13 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 	flags := flag.NewFlagSet("delete", flag.ContinueOnError)
 	repoFlag := flags.String("repo", "", "the repo that holds the factory")
 	yes := flags.Bool("yes", false, "skip the first confirmation; unpushed or uncommitted work still asks")
+	remoteFlag := flags.String("remote", "", "the remote the factory runs on")
+	local := flags.Bool("local", false, "the factory runs on this machine")
 	if err := flags.Parse(reorder(args)); err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: factory delete <id> [--repo path] [--yes]")
+	if flags.NArg() != 1 || (*remoteFlag != "" && *local) {
+		fmt.Fprintln(os.Stderr, "usage: factory delete <id> [--repo path] [--remote name | --local] [--yes]")
 		return 2
 	}
 	id := flags.Arg(0)
@@ -38,6 +42,17 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 		return 1
 	}
 	f, err := findFactory(cfg, *repoFlag, id)
+	where := *remoteFlag
+	if elsewhere := holders(cfg, id); where == "" && !*local && errors.Is(err, errNoFactory) && len(elsewhere) > 0 {
+		if len(elsewhere) > 1 {
+			fmt.Fprintf(os.Stderr, "factory delete: %s exists on %s; pick one with --remote\n", id, strings.Join(elsewhere, " and "))
+			return 1
+		}
+		where = elsewhere[0]
+	}
+	if where != "" {
+		return deleteRemote(cfg, where, id, *yes, in, out)
+	}
 	if errors.Is(err, errNoFactory) {
 		fmt.Fprintf(out, "Nothing to delete: %v.\n", err)
 		return 0
@@ -76,6 +91,55 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 }
 
 var errNoFactory = errors.New("no factory")
+
+func deleteRemote(cfg *state.Config, name, id string, yes bool, in *os.File, out io.Writer) int {
+	fail := func(err error) int {
+		fmt.Fprintln(os.Stderr, "factory delete:", err)
+		return 1
+	}
+	client, err := remote.For(cfg, name)
+	if err != nil {
+		return fail(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), createWait)
+	defer cancel()
+	var preview remote.Removal
+	if err := client.Read(ctx, "removal", remote.Target{ID: id}, &preview); err != nil {
+		return fail(err)
+	}
+	answers := bufio.NewReader(in)
+	if !yes && !confirm(out, answers, preview.What+"Delete "+id+" on "+name+"? [y/N] ") {
+		fmt.Fprintln(out, "Nothing was deleted.")
+		return 0
+	}
+	if preview.Risk != "" {
+		if !term.IsTerminal(in.Fd()) {
+			return fail(fmt.Errorf("refusing: %s has unpushed or uncommitted work on %s and stdin is not a terminal; run it in a terminal", id, name))
+		}
+		if !confirm(out, answers, preview.Risk+"Delete it anyway? [y/N] ") {
+			fmt.Fprintln(out, "Nothing was deleted.")
+			return 0
+		}
+	}
+	var report string
+	err = client.MutateOnce(ctx, "delete", remote.Target{ID: id}, &report)
+	fmt.Fprint(out, report)
+	if err != nil {
+		return fail(fmt.Errorf("%s on %s is not fully deleted: %w. Run factory delete --remote %s %s again to finish", id, name, err, name, id))
+	}
+	return exitOf(remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
+		c.Inventory = slices.DeleteFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == id })
+		return nil
+	}))
+}
+
+func exitOf(err error) int {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory:", err)
+		return 1
+	}
+	return 0
+}
 
 func findFactory(cfg *state.Config, repoFlag, id string) (factory.Factory, error) {
 	registry, err := state.LoadRegistry(cfg.RegistryPath())

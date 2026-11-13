@@ -60,6 +60,10 @@ func run(args []string) int {
 		return runReview(args[1:])
 	case "attention":
 		return runAttention(args[1:])
+	case "remote":
+		return runRemote(args[1:])
+	case "--remote", "--local":
+		return runOpen(args)
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
@@ -84,7 +88,15 @@ commands:
               [--supervisor tool/model:effort]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
-  delete <id> [--repo path] [--yes]
+  open … --remote <name> | --local [--git-remote name]
+              --remote creates a new factory on that remote, --local here;
+              without either, new factories go to default_remote
+  remote add <name> <host> [--user name] [--port n] [--identity file]
+  remote list | remove <name> | default <name | local>
+  remote push [--server url | --off]
+              add, list and remove remotes, pick where new factories run,
+              and set up phone push through ntfy
+  delete <id> [--repo path] [--remote name | --local] [--yes]
               delete a factory: its pane, worktree, local branches, state,
               activity log, drafts and registry entry, so the id can be used
               again; pushed PRs and remote branches stay. --yes skips the first
@@ -94,26 +106,30 @@ commands:
               in .git/info/exclude and list it in the hub; nothing is
               committed. factory and factory open do this by themselves
               in a repo the hub does not list yet
-  forget <path>
-              stop listing a repo in the hub; its files stay
-  doctor      check what the factory needs and print the fix commands
+  forget <path> | --remote <name> <id>
+              stop listing a repo in the hub; its files stay. With
+              --remote, hide a remote factory here; the remote keeps it
+  doctor [--remote name]
+              check what the factory needs and print the fix commands;
+              --remote checks only that remote, over ssh
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]
               add (or remove) only the factory hooks, in Claude's
               settings.json and Codex's hooks.json
-  stage start --role <role> --task <file> [--wait]
-  stage send --role <role> --message <file> [--wait]
+  stage start --role <role> --task <file> [--wait] [--factory id [--remote name]]
+  stage send --role <role> --message <file> [--wait] [--factory id [--remote name]]
               run a stage agent on its own tool in a pane beside the
               supervisor, or send it a follow-up; prints the result file
-              (run by the supervisor from its pane)
+              (run by the supervisor from its pane; --factory and --remote
+              reach a factory from outside its panes)
   stage ci <pr number>...
               wait for CI and CodeRabbit on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
-  review reply --thread <id> [--resolve] [text…]
+  review reply --thread <id> [--resolve] [--factory id [--remote name]] [text…]
               answer a comment thread from the review page, and resolve it
               when the change is made (run by a stage agent)
-  review threads [--page path] [--open]
+  review threads [--page path] [--open] [--factory id [--remote name]]
               list this factory's comment threads
   review open [--factory id] [--for design|walkthrough] <url>
               open any page, such as the running app, in the factory's
@@ -132,6 +148,9 @@ commands:
   host run    run the factories without the hub, in a window of the factory
               tmux session that keeps going after you disconnect (on a
               server)
+  host request
+              answer one JSON request from another machine on stdin (run
+              over ssh by the factory on that machine)
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a hook event (run by Claude Code, Codex and OpenCode)

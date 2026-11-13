@@ -64,3 +64,22 @@ func (m *Runtime) Open(r OpenRequest) (string, error) {
 	}
 	return m.Create(CreateRequest{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
 }
+
+func (m *Runtime) AddRepo(repo string) {
+	if repo == "" || slices.Contains(m.Config.Repos, repo) {
+		return
+	}
+	m.setRepos(append(slices.Clip(m.Config.Repos), repo))
+}
+
+func (m *Runtime) ForgetRepo(repo string) {
+	m.setRepos(slices.DeleteFunc(slices.Clone(m.Config.Repos), func(r string) bool { return r == repo }))
+}
+
+func (m *Runtime) setRepos(repos []string) {
+	if m.Loader != nil {
+		m.Loader.SetRepos(repos)
+		return
+	}
+	m.Config.Repos = repos
+}

@@ -42,7 +42,7 @@ func loginShell() string {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	return shell + " -l"
+	return "exec " + shell + " -l"
 }
 
 func (e *Panes) NewFactoryPane(n NewPane) (string, error) {

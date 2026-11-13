@@ -28,12 +28,13 @@ const (
 )
 
 type StageRequest struct {
-	Action string   `json:"action"`
-	Token  string   `json:"token"`
-	Cwd    string   `json:"cwd"`
-	Role   string   `json:"role"`
-	Text   string   `json:"text"`
-	PRs    []string `json:"prs,omitempty"`
+	Action  string   `json:"action"`
+	Token   string   `json:"token"`
+	Cwd     string   `json:"cwd"`
+	Role    string   `json:"role"`
+	Text    string   `json:"text"`
+	PRs     []string `json:"prs,omitempty"`
+	Factory string   `json:"factory,omitempty"`
 
 	Review bool
 }
@@ -68,9 +69,9 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if !slices.Contains(state.AgentRoles, r.Role) {
 		return StageReply{}, fmt.Errorf("%q is not a role; roles are %s", r.Role, strings.Join(state.AgentRoles, ", "))
 	}
-	it, ok := m.ItemForStage(r.Token, r.Cwd)
+	it, ok := m.stageItem(r)
 	if !ok {
-		return StageReply{}, errors.New("no factory owns this session; run factory stage from a factory's supervisor pane")
+		return StageReply{}, errors.New("no factory owns this session; run factory stage from a factory's supervisor pane, or name it with --factory")
 	}
 	if it.Factory.Dir == "" || it.Factory.Worktree == "" {
 		return StageReply{}, fmt.Errorf("%s has no factory directory or worktree yet; write state.json first", it.Factory.Label())
@@ -86,7 +87,7 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 }
 
 func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
-	it, ok := m.ItemForStage(r.Token, r.Cwd)
+	it, ok := m.stageItem(r)
 	if !ok || it.Factory.Dir == "" {
 		return StageReply{}, errors.New("no factory owns this session; run factory stage ci from a factory's supervisor pane")
 	}
@@ -128,6 +129,13 @@ func (m *Runtime) CiScript() (string, error) {
 	return path, os.WriteFile(path, data, 0o755)
 }
 
+func (m *Runtime) stageItem(r StageRequest) (Item, bool) {
+	if r.Factory != "" {
+		return m.snap.Named(r.Factory)
+	}
+	return m.ItemForStage(r.Token, r.Cwd)
+}
+
 func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 	for _, it := range m.snap.Items {
 		if token != "" && it.Pane != nil && it.Pane.Token == token {
@@ -143,6 +151,9 @@ func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 }
 
 func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
+	if _, profile := m.repoConfig(it.Factory.Repo); r.Role == "qa" && profile.BrowserQA() && m.clonedForLaptop(it.Factory.Repo) {
+		return StageReply{}, errors.New("browser QA for a factory created from a laptop runs on that laptop, which this server can't hand it to yet; it stays held here. Run the QA from the laptop's own checkout, or update both machines")
+	}
 	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
@@ -256,7 +267,7 @@ func (m *Runtime) StageLaunch(it Item, run state.StageRun, sessionID string) fac
 	launch := factory.StageLaunch{Setting: run.Setting, Kickoff: KickoffFor(run), SessionID: sessionID}
 	cfg, profile := m.repoConfig(it.Factory.Repo)
 	if run.Role == "qa" {
-		launch.Chrome = profile.BrowserQA()
+		launch.Chrome = m.chrome(it.Factory.Repo, profile)
 	}
 	if run.Setting.ToolName() == state.ToolCodex {
 		launch.AddDirs = factory.CodexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)
