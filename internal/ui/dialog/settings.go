@@ -131,6 +131,9 @@ func (m *Settings) typeText(text string) {
 
 func (m *Settings) help() string {
 	key := m.fields()[m.field]
+	if strings.Contains(m.values[key], "\n") {
+		return "Multi-line value: ↵ marks a line break. Typing appends; ctrl+u clears the whole value."
+	}
 	if !m.settings.Present[key] {
 		return "The file has no " + key + " yet. Saving adds it."
 	}
@@ -281,7 +284,7 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 		}
 		return
 	}
-	value := m.values[key]
+	value := strings.ReplaceAll(m.values[key], "\n", " ↵ ")
 	if focused {
 		value += "█"
 	}

@@ -279,6 +279,29 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 			t.Fatalf("banner claims setup wrote an existing config: %+v, %s", result, m.problem)
 		}
 	})
+	t.Run("submodule add lists the remembered repo", func(t *testing.T) {
+		repo, source := t.TempDir(), t.TempDir()
+		run := func(dir string, args ...string) {
+			t.Helper()
+			if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("git: %s: %v", out, err)
+			}
+		}
+		run(repo, "init", "-q")
+		run(source, "init", "-q")
+		run(source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
+		run(repo, "-c", "protocol.file.allow=always", "submodule", "add", source, "sub")
+		stateDir := t.TempDir()
+		m := NewFactory(NewContext{StateDir: stateDir})
+		settings, err := m.prepareRepo(filepath.Join(repo, "sub"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		known, err := state.LoadKnownRepos(stateDir)
+		if err != nil || len(known) != 1 || !sameRepo(settings.Repo, known[0]) {
+			t.Fatalf("hub repo %q differs from remembered repos %v: %v", settings.Repo, known, err)
+		}
+	})
 	t.Run("unlisted worktree and invalid paths", func(t *testing.T) {
 		repo := t.TempDir()
 		run := func(args ...string) {
@@ -356,6 +379,10 @@ func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.repo != 0 {
 		t.Fatal("up wrapped")
+	}
+	os.Mkdir(filepath.Join(home, "répo one", "child"), 0o755)
+	if got := completeDirectory("~/répo one/"); got.suffix != "child/" {
+		t.Fatalf("completion after home directory slash: %+v", got)
 	}
 	if got := completeDirectory("~/no-match"); got.suffix != "" || got.problem == "" {
 		t.Fatalf("no match: %+v", got)

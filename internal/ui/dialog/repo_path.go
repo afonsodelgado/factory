@@ -85,12 +85,15 @@ func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
 	if m.setupRetry == nil {
 		m.setupRetry = map[string]bool{}
 	}
+	retrying := m.setupRetry[repo]
 	m.setupRetry[repo] = true
 	result, err := install.Init(repo, m.Context.StateDir)
 	if err != nil {
 		return context, err
 	}
 	delete(m.setupRetry, repo)
+	repo = result.Repo
+	context.Repo = repo
 	context.Banner = "✓ Added " + filepath.Base(repo) + " to the hub. Setup wrote these values; check them, then save."
 	top, err := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel").Output()
 	switch {
@@ -98,6 +101,8 @@ func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
 		context.Banner = "✓ Added " + filepath.Base(repo) + ", the main checkout of the worktree you typed."
 	case result.CopiedFrom != "":
 		context.Banner = "✓ Copied .claude/factory.yml to .factory/config.yml. The form edits the new file."
+	case retrying:
+		context.Banner = "✓ Finished setting up " + filepath.Base(repo) + ". Check these values, then save."
 	case listed:
 		context.Banner = "✓ Set up the missing repo config. Check these values, then save."
 	case !result.ProfileWritten:
@@ -112,12 +117,17 @@ type directoryCompletion struct {
 	problem string
 }
 
-func completeDirectory(input string) directoryCompletion {
+func splitDirectoryInput(input string) (string, string) {
 	expanded := state.ExpandHome(input)
-	if input == "~" {
-		expanded += string(filepath.Separator)
+	separator := string(filepath.Separator)
+	if input == "~" || strings.HasSuffix(input, separator) {
+		return expanded, ""
 	}
-	dir, prefix := filepath.Split(expanded)
+	return filepath.Split(expanded)
+}
+
+func completeDirectory(input string) directoryCompletion {
+	dir, prefix := splitDirectoryInput(input)
 	if dir == "" {
 		dir = "."
 	}
@@ -159,10 +169,7 @@ func (m *NewFactoryModel) drawRepoPath(c *theme.Canvas, y, w int) {
 	completion := completeDirectory(m.repoPath)
 	c.PutMax(3+theme.Width(m.repoPath)+1, y+1, completion.suffix, theme.Muted, max(w-5-theme.Width(m.repoPath), 0))
 	y += 3
-	dir, _ := filepath.Split(state.ExpandHome(m.repoPath))
-	if m.repoPath == "~" {
-		dir = state.ExpandHome("~")
-	}
+	dir, _ := splitDirectoryInput(m.repoPath)
 	for _, match := range completion.matches[:min(5, len(completion.matches))] {
 		path := filepath.Join(dir, match)
 		badge := ""

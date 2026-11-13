@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rivo/uniseg"
@@ -16,21 +17,22 @@ import (
 )
 
 type NewFactoryModel struct {
-	Context    NewContext
-	repo       int
-	name       string
-	repoPath   string
-	setupRetry map[string]bool
-	prompt     textEditor
-	pipeline   string
-	chosen     []string
-	overrides  map[string]state.AgentSetting
-	row        int
-	step       int
-	problem    string
-	result     *NewResult
-	width      int
-	height     int
+	Context        NewContext
+	repo           int
+	name           string
+	repoPathEdited bool
+	repoPath       string
+	setupRetry     map[string]bool
+	prompt         textEditor
+	pipeline       string
+	chosen         []string
+	overrides      map[string]state.AgentSetting
+	row            int
+	step           int
+	problem        string
+	result         *NewResult
+	width          int
+	height         int
 }
 
 const supervisorRole = "supervisor"
@@ -407,9 +409,16 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *NewFactoryModel) typeText(text string) {
+	if text == "" {
+		return
+	}
 	switch m.step {
 	case 1:
 		if m.addingRepo() {
+			if !m.repoPathEdited && (strings.HasPrefix(text, "/") || strings.HasPrefix(text, "~")) {
+				m.repoPath = ""
+			}
+			m.repoPathEdited = true
 			m.repoPath += strings.ReplaceAll(text, "\n", " ")
 		} else {
 			m.name += strings.ReplaceAll(text, "\n", " ")
@@ -430,6 +439,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.resetChoices()
 	case "tab":
 		if m.addingRepo() {
+			m.repoPathEdited = true
 			m.repoPath += completeDirectory(m.repoPath).suffix
 			return nil
 		}
@@ -440,12 +450,14 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.resetChoices()
 	case "backspace":
 		if m.addingRepo() {
+			m.repoPathEdited = true
 			m.repoPath = dropLast(m.repoPath)
 		} else {
 			m.name = dropLast(m.name)
 		}
 	case "ctrl+u":
 		if m.addingRepo() {
+			m.repoPathEdited = true
 			m.repoPath = ""
 		} else {
 			m.name = ""
@@ -893,6 +905,12 @@ func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focus
 	}
 	for i, l := range lines {
 		c.Put(x, y+1+i, "│ ", border)
+		if focused && strings.HasSuffix(l, "█") {
+			for theme.Width(l) > max(w-4, 1) {
+				_, size := utf8.DecodeRuneInString(l)
+				l = l[size:]
+			}
+		}
 		c.PutMax(x+2, y+1+i, l, theme.Bright, w-4)
 		c.Put(x+w-1, y+1+i, "│", border)
 	}

@@ -154,7 +154,8 @@ func settingsNode(file *ast.File, key string) ast.Node {
 }
 
 func (s *RepoSettings) Save(values map[string]string) error {
-	file, err := parseRepoSettings(s.original)
+	normalized := bytes.ReplaceAll(s.original, []byte("\r\n"), []byte("\n"))
+	file, err := parseRepoSettings(normalized)
 	if err != nil {
 		return err
 	}
@@ -177,7 +178,7 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	}
 	data := []byte(file.String())
 	if empty {
-		data = append(append(bytes.Clone(s.original), '\n'), data...)
+		data = append(append(bytes.Clone(normalized), '\n'), data...)
 	}
 	if _, err := parseRepoSettings(data); err != nil {
 		return err
@@ -188,6 +189,12 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	}
 	if !bytes.Equal(current, s.original) {
 		return fmt.Errorf("the config changed since opening; reopen settings before saving")
+	}
+	if len(s.Changes(values)) == 0 {
+		return nil
+	}
+	if bytes.Contains(s.original, []byte("\r\n")) {
+		data = bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n"))
 	}
 	info, err := os.Stat(s.path)
 	if err != nil {
@@ -212,7 +219,7 @@ func (s *RepoSettings) Save(values map[string]string) error {
 }
 
 func encodeSetting(value any) (string, error) {
-	if text, ok := value.(string); ok && strings.ContainsAny(text, ",[]{}") {
+	if text, ok := value.(string); ok && strings.ContainsAny(text, ",[]{}\n\r\t") {
 		return strconv.Quote(text) + "\n", nil
 	}
 	encoded, err := yaml.Marshal(value)
