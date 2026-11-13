@@ -196,7 +196,7 @@ func TestAReviewRoundDoesNotTellTheSupervisorTheStageIsDone(t *testing.T) {
 
 	messages := inboxMessages(stateDir, Item{Factory: f}, nil)
 
-	if len(messages) != 1 || !strings.HasSuffix(messages[0].text, "designer-1.result.json") {
+	if len(messages) != 1 || !strings.HasSuffix(messages[0].Text, "designer-1.result.json") {
 		t.Errorf("inbox %+v; want only the real stage result, never the review round's, which would move the supervisor past its gate", messages)
 	}
 }

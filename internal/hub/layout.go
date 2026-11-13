@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
 )
@@ -28,10 +29,6 @@ const (
 )
 
 var FrameSides = []string{"left", "right", "top", "bottom"}
-
-func ParkName(slug string) string {
-	return "p-" + slug
-}
 
 type Engine struct {
 	TM          tmux.Client
@@ -285,9 +282,9 @@ func (e *Engine) park(panes []tmux.Pane, window string) error {
 		name := ""
 		switch {
 		case p.Slug != "":
-			name = ParkName(p.Slug)
+			name = host.ParkName(p.Slug)
 		case p.UI == "stage":
-			name = StageParkName(p.StageOf, p.Stage)
+			name = host.StageParkName(p.StageOf, p.Stage)
 		}
 		if name == "" {
 			continue
@@ -639,7 +636,7 @@ func (e *Engine) HideStage(l *Layout) error {
 	if !found || p.WindowID != l.Window {
 		return nil
 	}
-	if err := e.TM.Break(p.ID, e.Session, StageParkName(p.StageOf, p.Stage)); err != nil {
+	if err := e.TM.Break(p.ID, e.Session, host.StageParkName(p.StageOf, p.Stage)); err != nil {
 		return err
 	}
 	if groupErr == nil && !beside.cell.Leaf() {

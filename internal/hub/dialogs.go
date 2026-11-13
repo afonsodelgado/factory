@@ -12,10 +12,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/google/uuid"
 
-	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
@@ -177,7 +176,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		reply = Message{T: "error", Error: err.Error()}
 		m.notice = problem(err.Error())
 	}
-	e.respond(reply)
+	e.Respond(reply)
 	return tea.Batch(cmd, m.load())
 }
 
@@ -321,227 +320,24 @@ func (m *Model) selectExisting(key string) error {
 }
 
 func (m *Model) unarchive(it Item) error {
-	if m.Loader == nil {
-		return nil
-	}
-	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
-		if entry := reg.Find(it.Factory.Repo, it.Factory.Slug); entry != nil {
-			entry.Archived = false
-		}
-	})
-	if err != nil {
+	if err := m.execution().Unarchive(it); err != nil {
 		return err
 	}
-	m.Loader.Note(it.Factory, "unarchived")
 	m.notice = news(it.Factory.Label() + " is back in the list.")
 	return nil
 }
 
 func (m *Model) create(r dialog.NewResult) error {
-	if r.Repo == "" || r.Slug == "" {
-		return errors.New("a factory needs a repo and a name")
+	key, err := m.execution().Create(host.CreateRequest{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
+	if key != "" {
+		m.selected = key
 	}
-	if existing, ok := m.existingFactory(r.Repo, r.Slug); ok {
-		return m.selectExisting(existing)
-	}
-	if m.Loader == nil {
-		return errors.New("the hub is not attached to tmux")
-	}
-	pipelines, err := m.Config.PipelinesFor(r.Repo)
-	if err != nil {
-		return err
-	}
-	pipeline, err := chosenPipeline(pipelines, r)
-	if err != nil {
-		return err
-	}
-	if _, err := m.Config.AgentsFor(r.Repo); err != nil {
-		return err
-	}
-	cfg, profile := m.repoConfig(r.Repo)
-	agents := state.ResolveAgents(m.Config, profile, r.Agents)
-	chosen := map[string]state.AgentSetting{}
-	for role := range r.Agents {
-		chosen[role] = agents[role]
-	}
-	if err := state.ValidateAgents("--agent", chosen); err != nil {
-		return err
-	}
-	supervisor := r.Supervisor.Over(cfg.Supervisor)
-	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
-		return err
-	}
-	catalogs := catalog.Local(m.Config.StateDir)
-	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", chosen)); err != nil {
-		return err
-	}
-	if err := catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor)); err != nil {
-		return err
-	}
-	supervisor = catalogs.WithDefault(supervisor)
-	earlier := m.retiredFactories(r.Repo, r.Slug)
-	r.Slug = factory.FreshSlug(r.Slug, m.slugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: customStages(pipeline), Agents: r.Agents, Chrome: profile.BrowserQA(), RemoteControl: cfg.RemoteControl(), Supervisor: supervisor}
-	if supervisor.OnClaude() {
-		launch.SessionID = uuid.NewString()
-	} else {
-		launch.Chrome, launch.RemoteControl = false, false
-		launch.AddDirs = m.writableDirs(r.Repo, "", supervisor)
-	}
-	title := firstLine(r.Prompt)
-	entry := state.Entry{Repo: r.Repo, Slug: r.Slug, Title: title, SessionID: launch.SessionID, CreatedAt: m.Now(), Created: true, Supervisor: supervisor, Agents: agents}
-	err = m.Loader.UpdateRegistry(func(reg *state.Registry) {
-		pinDirs(reg, earlier)
-		reg.Upsert(entry)
-	})
-	if err != nil {
-		return err
-	}
-	if m.Engine == nil {
-		return errors.New("the hub is not attached to tmux")
-	}
-	pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: supervisorEnv(supervisor)})
-	if err != nil {
-		return err
-	}
-	if err := m.typeSupervisor(pane, factory.Factory{Repo: r.Repo, Slug: r.Slug, Entry: &entry}, launch.CreateCommand()); err != nil {
-		return err
-	}
-	note := "created by factory"
-	if r.Prompt != "" {
-		note += fmt.Sprintf(" with a %d-line prompt", strings.Count(strings.TrimRight(r.Prompt, "\n"), "\n")+1)
-	}
-	m.Loader.Note(factory.Factory{Repo: r.Repo, Slug: r.Slug}, note)
-	m.selected = state.Key(r.Repo, r.Slug)
-	return nil
+	return err
 }
 
-func chosenPipeline(pipelines state.Pipelines, r dialog.NewResult) (state.Pipeline, error) {
-	if len(r.Stages) > 0 {
-		return pipelines.Custom(r.Stages)
-	}
-	return pipelines.Find(r.Pipeline)
-}
+func retired(f factory.Factory) bool { return host.Retired(f) }
 
-func customStages(p state.Pipeline) []string {
-	if p.Name != state.CustomPipeline {
-		return nil
-	}
-	return p.Stages
-}
-
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	if len([]rune(line)) > 80 {
-		line = string([]rune(line)[:79]) + "…"
-	}
-	return line
-}
-
-func retired(f factory.Factory) bool {
-	finished := f.Done() || f.Archived()
-	return finished && !dirExists(f.Worktree)
-}
-
-func named(f factory.Factory, id string) bool {
-	return f.Slug == id || strings.ToLower(f.Label()) == id
-}
-
-func (m *Model) retiredMatch(repos []string, id string) (string, bool) {
-	for _, it := range m.snap.Items {
-		f := it.Factory
-		if retired(f) && slices.Contains(repos, f.Repo) && named(f, id) {
-			return f.Repo, true
-		}
-	}
-	return "", false
-}
-
-func (m *Model) retiredFactories(repo, id string) []factory.Factory {
-	var earlier []factory.Factory
-	for _, it := range m.snap.Items {
-		f := it.Factory
-		if f.Repo == repo && f.Dir != "" && retired(f) && named(f, id) {
-			earlier = append(earlier, f)
-		}
-	}
-	return earlier
-}
-
-func pinDirs(reg *state.Registry, factories []factory.Factory) {
-	for _, f := range factories {
-		entry := reg.Find(f.Repo, f.Slug)
-		if entry == nil {
-			entry = reg.Upsert(state.Entry{Repo: f.Repo, Slug: f.Slug, CreatedAt: f.CreatedAt()})
-		}
-		entry.Dir = resolved(f.Dir)
-	}
-}
-
-func (m *Model) slugTaken(repo string) func(string) bool {
-	return func(slug string) bool {
-		_, known := m.snap.Find(state.Key(repo, slug))
-		return known || m.Loader.Known(repo, slug) || dirExists(filepath.Join(factory.WorktreesDir(repo), slug))
-	}
-}
-
-func (m *Model) existingFactory(repo, id string) (string, bool) {
-	for _, it := range m.snap.Items {
-		f := it.Factory
-		if f.Repo == repo && !retired(f) && named(f, id) {
-			return f.Key(), true
-		}
-	}
-	if id != "" && dirExists(filepath.Join(factory.WorktreesDir(repo), id)) {
-		return state.Key(repo, id), true
-	}
-	return "", false
-}
-
-func (m *Model) wake(key string) error {
-	it, ok := m.snap.Find(key)
-	if !ok || !it.Status.Asleep() || m.Engine == nil {
-		return nil
-	}
-	cfg, profile := m.repoConfig(it.Factory.Repo)
-	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, profile, cfg.RemoteControl(), withoutTokens(hooks, m.snap.StageTokens), m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
-	switch plan.Kind {
-	case WakeNewPane:
-		dir := it.Factory.Worktree
-		if !dirExists(dir) {
-			return fmt.Errorf("the worktree %s is gone", tilde(dir))
-		}
-		pane, err := m.Engine.NewFactoryPane(m.Layout, NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: supervisorEnv(it.Factory.Supervisor())})
-		if err != nil {
-			return err
-		}
-		if err := m.typeSupervisor(pane, it.Factory, plan.Command); err != nil {
-			return err
-		}
-		m.typeAfterStart(plan, pane, it)
-	case WakeShell:
-		if now := m.refreshed(m.target(it)).Pane; now == nil || !factory.IsShell(now.Command) {
-			return fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
-		}
-		if err := m.typeSupervisor(it.Pane.ID, it.Factory, plan.Command); err != nil {
-			return err
-		}
-		m.typeAfterStart(plan, it.Pane.ID, it)
-	case WakeResume:
-		reason, err := Deliver(m.Engine, m.refreshed(m.target(it)), plan.Command)
-		if err != nil {
-			return err
-		}
-		if reason != "" {
-			return errors.New(reason)
-		}
-	}
-	if m.Loader != nil {
-		m.Loader.Note(it.Factory, plan.Note())
-	}
-	return nil
-}
+func (m *Model) wake(key string) error { return m.execution().Wake(key) }
 
 func (m *Model) wakeSelected() {
 	if it, ok := m.selectedItem(); ok && it.Status == factory.Done {
@@ -551,34 +347,9 @@ func (m *Model) wakeSelected() {
 	m.report(m.wake(m.selected))
 }
 
-func (m *Model) wakeAll() error {
-	var problems []string
-	for _, it := range m.snap.Items {
-		if it.Status.Asleep() && !it.Factory.Archived() {
-			if err := m.wake(it.Factory.Key()); err != nil {
-				problems = append(problems, it.Factory.Label()+": "+err.Error())
-			}
-		}
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
+func (m *Model) wakeAll() error { return m.execution().WakeAll() }
 
-func (m *Model) pause(key string) error {
-	it, ok := m.snap.Find(key)
-	if !ok || m.Engine == nil {
-		return nil
-	}
-	if err := m.Engine.Pause(&m.Layout, it.Factory.Repo, it.Factory.Slug); err != nil {
-		return err
-	}
-	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "paused from factory")
-	}
-	return nil
-}
+func (m *Model) pause(key string) error { return m.execution().Pause(key) }
 
 func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 	it, ok := m.snap.Find(key)
@@ -589,29 +360,18 @@ func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 }
 
 func (m *Model) deleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
-	if m.Engine != nil {
-		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)
-		if err := m.Engine.Pause(&m.Layout, f.Repo, f.Slug); err != nil {
-			return nil, err
-		}
-		Terminate(strays)
-	}
+	steps, err := m.execution().DeleteFactory(f)
 	if m.Chrome != nil {
 		m.Chrome.CloseFactory(reviewKey(f))
 	}
-	key := f.Key()
-	if m.selected == key {
-		m.choose(m.rowAfter(key))
+	if m.selected == f.Key() {
+		m.choose(m.rowAfter(f.Key()))
 	}
-	m.forgetFactory(key)
-	removal := factory.PlanRemoval(f, m.Config)
-	steps := factory.Run(removal, m.Loader.UpdateRegistry)
-	m.Loader.Forget(key)
-	if failed, stopped := factory.FirstFailure(steps); stopped {
-		return steps, fmt.Errorf("deleting %s failed at %s %s: %v. Run d again to finish", f.Label(), failed.Name, failed.Detail, failed.Err)
+	m.forgetFactory(f.Key())
+	if err == nil {
+		m.notice = news(f.Label() + " is deleted.")
 	}
-	m.notice = news(f.Label() + " is deleted.")
-	return steps, nil
+	return steps, err
 }
 
 func (m *Model) rowAfter(key string) string {
@@ -637,37 +397,10 @@ func (m *Model) forgetFactory(key string) {
 }
 
 func (m *Model) archive(r dialog.ArchiveResult) error {
-	it, ok := m.snap.Find(r.Key)
-	if !ok || m.Loader == nil {
-		return nil
-	}
-	movedTo := ""
-	if r.Remove {
-		var err error
-		if movedTo, err = RemoveWorktree(it.Factory.Repo, it.Factory.Worktree, it.Factory.Dir); err != nil {
-			return err
-		}
-	}
-	err := m.Loader.UpdateRegistry(func(reg *state.Registry) {
-		entry := reg.Find(it.Factory.Repo, it.Factory.Slug)
-		if entry == nil {
-			entry = reg.Upsert(state.Entry{Repo: it.Factory.Repo, Slug: it.Factory.Slug, CreatedAt: it.Factory.CreatedAt()})
-		}
-		entry.Archived = true
-		if movedTo != "" {
-			entry.Dir = movedTo
-		}
-	})
-	if err == nil {
-		m.Loader.Note(it.Factory, "archived")
-	}
-	return err
+	return m.execution().Archive(host.ArchiveRequest{Key: r.Key, Remove: r.Remove})
 }
 
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
+func dirExists(path string) bool { return host.DirExists(path) }
 
 func archivable(it Item) bool {
 	return it.Status == factory.Done || it.Status == factory.Gone || it.Status == factory.Exited || it.Status == factory.FailedToStart

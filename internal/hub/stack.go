@@ -53,7 +53,7 @@ func readStack(factoryDir string) (Stack, error) {
 
 func (m *Model) startStack(e Event, r ReviewRequest) tea.Cmd {
 	fail := func(err error) tea.Cmd {
-		e.respond(Message{T: "error", Error: err.Error()})
+		e.Respond(Message{T: "error", Error: err.Error()})
 		return nil
 	}
 	if m.Engine == nil {
@@ -71,7 +71,7 @@ func (m *Model) startStack(e Event, r ReviewRequest) tea.Cmd {
 		return fail(err)
 	}
 	data, _ := json.Marshal(ReviewReply{Target: stack.URL})
-	e.respond(Message{T: "done", Data: data})
+	e.Respond(Message{T: "done", Data: data})
 	if m.Chrome == nil {
 		return func() tea.Msg {
 			return noticeMsg(news(stack.URL + " is starting; open it with factory review open once it answers."))

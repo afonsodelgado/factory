@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
@@ -57,7 +58,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 		}
 	}
 	panes, _ := e.TM.Panes()
-	if p, _ := FactoryPane(panes, repo, "csv"); p.ID != supervisor {
+	if p, _ := host.FactoryPane(panes, repo, "csv"); p.ID != supervisor {
 		t.Errorf("FactoryPane picked %s; want the supervisor %s, or answers and wakes would go to the stage agent", p.ID, supervisor)
 	}
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(cfg.StateDir, repo, "csv"))
@@ -139,8 +140,8 @@ func TestAStageSplitsBesideTheSupervisorInsideTheFrameAndParksAtItsSize(t *testi
 		t.Fatal(err)
 	}
 	parkedStage := pane(t, e.TM, stage)
-	if parkedStage.WindowName != StageParkName("csv", "engineer") || parkedStage.Width != stageWidth {
-		t.Errorf("hidden stage is %q at %d wide; want %q at %d", parkedStage.WindowName, parkedStage.Width, StageParkName("csv", "engineer"), stageWidth)
+	if parkedStage.WindowName != host.StageParkName("csv", "engineer") || parkedStage.Width != stageWidth {
+		t.Errorf("hidden stage is %q at %d wide; want %q at %d", parkedStage.WindowName, parkedStage.Width, host.StageParkName("csv", "engineer"), stageWidth)
 	}
 	if panes, _ := e.TM.Panes(); slices.ContainsFunc(panes, func(p tmux.Pane) bool { return p.ID == l.Split }) {
 		t.Errorf("the divider %s outlived the split it separated", l.Split)

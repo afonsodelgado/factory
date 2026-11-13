@@ -11,11 +11,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rivo/uniseg"
+
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
-	"github.com/rivo/uniseg"
 )
 
 type panelState struct {
@@ -36,16 +38,7 @@ type lastPress struct {
 	at  time.Time
 }
 
-type sentMark struct {
-	at         time.Time
-	itemSince  time.Time
-	factory    string
-	itemID     string
-	head       string
-	draft      string
-	received   time.Time
-	leavesOpen bool
-}
+type sentMark = host.Answer
 
 const receiptWait = 10 * time.Second
 
@@ -65,7 +58,7 @@ func (m *Model) forgetClosedItems() {
 		}
 	}
 	for key, mark := range m.panel.sent {
-		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.itemSince) {
+		if since, stillOpen := open[key]; !stillOpen || !since.Equal(mark.ItemSince) {
 			m.forgetSent(key, mark)
 		}
 	}
@@ -78,10 +71,10 @@ func (m *Model) forgetClosedItems() {
 
 func (m *Model) checkReceipts() {
 	for key, mark := range m.panel.sent {
-		if mark.at.IsZero() {
+		if mark.At.IsZero() {
 			continue
 		}
-		if !mark.received.IsZero() {
+		if !mark.Received.IsZero() {
 			if m.turnEndedSince(mark) {
 				delete(m.panel.sent, key)
 				m.panel.refused[key] = notResolved
@@ -89,26 +82,26 @@ func (m *Model) checkReceipts() {
 			continue
 		}
 		var submits []state.HookEvent
-		if it, ok := m.snap.Find(mark.factory); ok {
+		if it, ok := m.snap.Find(mark.Factory); ok {
 			submits = submitsOf(it.Hook)
 		}
-		receipt, received := mark.receiptIn(submits)
+		receipt, received := receiptIn(mark, submits)
 		switch {
-		case received && mark.leavesOpen:
+		case received && mark.LeavesOpen:
 			m.forgetSent(key, mark)
 		case received:
-			mark.received = receipt
+			mark.Received = receipt
 			m.panel.sent[key] = mark
-			os.Remove(mark.draft)
-		case mark.misroutedIn(submits) || m.snap.At.Sub(mark.at) > receiptWait:
+			os.Remove(mark.Draft)
+		case misroutedIn(mark, submits) || m.snap.At.Sub(mark.At) > receiptWait:
 			delete(m.panel.sent, key)
 			m.panel.refused[key] = notReceived
-			it, ok := m.snap.Find(mark.factory)
+			it, ok := m.snap.Find(mark.Factory)
 			if ok && it.Pane != nil {
-				delete(m.typedAt, it.Pane.ID)
+				m.execution().ClearTyped(it.Pane.ID)
 			}
 			if ok && m.Loader != nil {
-				m.Loader.Note(it.Factory, "answer to "+mark.itemID+" did not reach the supervisor")
+				m.Loader.Note(it.Factory, "answer to "+mark.ItemID+" did not reach the supervisor")
 			}
 		}
 	}
@@ -117,12 +110,12 @@ func (m *Model) checkReceipts() {
 func (m *Model) forgetSent(key string, mark sentMark) {
 	delete(m.panel.sent, key)
 	delete(m.panel.drafts, key)
-	os.Remove(mark.draft)
+	os.Remove(mark.Draft)
 }
 
 func (m *Model) turnEndedSince(mark sentMark) bool {
-	it, ok := m.snap.Find(mark.factory)
-	return ok && factory.IdleAtPrompt(it.Hook) && it.Hook.Main.At.After(mark.received)
+	it, ok := m.snap.Find(mark.Factory)
+	return ok && factory.IdleAtPrompt(it.Hook) && it.Hook.Main.At.After(mark.Received)
 }
 
 func submitsOf(hook *state.HookFile) []state.HookEvent {
@@ -137,22 +130,22 @@ func submitsOf(hook *state.HookFile) []state.HookEvent {
 	return nil
 }
 
-func (s sentMark) receiptIn(submits []state.HookEvent) (time.Time, bool) {
+func receiptIn(s sentMark, submits []state.HookEvent) (time.Time, bool) {
 	for _, submit := range submits {
-		if submit.AgentID != "" || submit.At.Before(s.at) {
+		if submit.AgentID != "" || submit.At.Before(s.At) {
 			continue
 		}
 		headIsText := submit.PromptHead != "" && !strings.HasPrefix(submit.PromptHead, "[Pasted text")
-		if !headIsText || submit.PromptHead == s.head {
+		if !headIsText || submit.PromptHead == s.Head {
 			return submit.At, true
 		}
 	}
 	return time.Time{}, false
 }
 
-func (s sentMark) misroutedIn(submits []state.HookEvent) bool {
+func misroutedIn(s sentMark, submits []state.HookEvent) bool {
 	for _, submit := range submits {
-		if submit.AgentID != "" && !submit.At.Before(s.at) {
+		if submit.AgentID != "" && !submit.At.Before(s.At) {
 			return true
 		}
 	}
@@ -166,16 +159,16 @@ func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled
 			shown = append(shown, item)
 			continue
 		}
-		settled = append(settled, panel.Settled{ID: item.ID, State: mark.progress()})
+		settled = append(settled, panel.Settled{ID: item.ID, State: progress(mark)})
 	}
 	return shown, settled
 }
 
-func (s sentMark) progress() panel.Progress {
+func progress(s sentMark) panel.Progress {
 	switch {
-	case s.at.IsZero():
+	case s.At.IsZero():
 		return panel.Queued
-	case s.received.IsZero():
+	case s.Received.IsZero():
 		return panel.Sending
 	}
 	return panel.Answered
@@ -427,24 +420,6 @@ func (m *Model) target(it Item) Target {
 	return Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}
 }
 
-func (m *Model) refreshed(t Target) Target {
-	if m.Engine != nil && t.Pane != nil {
-		if panes, err := m.Engine.TM.Panes(); err == nil {
-			id := t.Pane.ID
-			t.Pane = nil
-			if p, ok := byID(panes, id); ok {
-				t.Pane = &p
-			}
-		}
-	}
-	if t.Hook != nil && m.Config.StateDir != "" {
-		if hook, err := state.ReadHookFile(filepath.Join(m.Config.SessionsDir(), t.Hook.SessionID+".json")); err == nil {
-			t.Hook = hook
-		}
-	}
-	return t
-}
-
 func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	switch {
 	case action == "handled":
@@ -508,7 +483,7 @@ func (m *Model) deliver(action string) {
 	m.saveDraft()
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
 	mark := m.answerMark(it.Factory, item.ID, item.Since, text)
-	mark.leavesOpen = item.Kind == "gate" && action == "changes"
+	mark.LeavesOpen = item.Kind == "gate" && action == "changes"
 	m.queueAnswer(it, mark, text)
 	m.panel.press = lastPress{key: key, at: m.Now()}
 	if m.Loader != nil {
@@ -527,28 +502,28 @@ func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool 
 }
 
 func (m *Model) queueAnswer(it Item, mark sentMark, text string) {
-	m.panel.sent[mark.factory+"|"+mark.itemID] = mark
+	m.panel.sent[mark.Factory+"|"+mark.ItemID] = mark
 	m.queueType(queuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text, Answers: &mark})
 }
 
 func (m *Model) stillQueued(answer sentMark) bool {
-	mark, ok := m.panel.sent[answer.factory+"|"+answer.itemID]
-	return ok && mark.at.IsZero() && mark.itemSince.Equal(answer.itemSince)
+	mark, ok := m.panel.sent[answer.Factory+"|"+answer.ItemID]
+	return ok && mark.At.IsZero() && mark.ItemSince.Equal(answer.ItemSince)
 }
 
 func (m *Model) dropAnswer(answer sentMark, reason string) {
-	key := answer.factory + "|" + answer.itemID
+	key := answer.Factory + "|" + answer.ItemID
 	delete(m.panel.sent, key)
 	m.panel.refused[key] = "Not sent. " + reason
 }
 
 func (m *Model) answerMark(f factory.Factory, itemID string, itemSince time.Time, text string) sentMark {
-	return sentMark{itemSince: itemSince, factory: f.Key(), itemID: itemID, head: state.PromptHead(text), draft: m.draftPath(f, itemID)}
+	return sentMark{ItemSince: itemSince, Factory: f.Key(), ItemID: itemID, Head: state.PromptHead(text), Draft: m.draftPath(f, itemID)}
 }
 
 func (m *Model) recordSent(mark sentMark, at time.Time) {
-	mark.at = at
-	m.panel.sent[mark.factory+"|"+mark.itemID] = mark
+	mark.At = at
+	m.panel.sent[mark.Factory+"|"+mark.ItemID] = mark
 }
 
 func unanswered(item panel.Item, d *panel.Draft) string {
