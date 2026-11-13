@@ -336,9 +336,11 @@ func TestAdoptsOnlyLegacyFactorySessions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := e.TM.Run("new-session", "-d", "-s", "eng-2-y", "-c", filepath.Join(factory.WorktreesDir(repo), "eng-2-y"), "exec sleep 600"); err != nil {
+	legacy, err := e.TM.Run("new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "eng-2-y", "-c", filepath.Join(factory.WorktreesDir(repo), "eng-2-y"), "exec sleep 600")
+	if err != nil {
 		t.Fatal(err)
 	}
+	waitForCommand(t, e.TM, legacy, "sleep")
 	if _, err := e.TM.NewSession("notes", "main", 80, 24, "exec sleep 600"); err != nil {
 		t.Fatal(err)
 	}
