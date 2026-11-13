@@ -160,3 +160,137 @@ func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.
 		t.Errorf("with both files present the repo config reads stalled_after %q; want .factory/config.yml's 45m, or edits there are ignored", profile.StalledAfter)
 	}
 }
+
+func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		mode, build string
+		refuse      bool
+		contains    []string
+	}{
+		{name: "block comments and order", input: "# header\ncommands:\n  # build head\n  build: old # inline\n  migrate: keep\nqa:\n  mode: browser\n  start: original # start\n  health: original-health # health\n  notes: keep notes\nports: [42, 43]\n# footer\n", mode: "terminal", contains: []string{"# header", "# build head", "build: new # inline", "migrate: keep", "start: original # start", "health: original-health # health", "notes: keep notes", "ports: [42, 43]", "# footer"}},
+		{name: "flow mapping", input: "commands: {test: old, migrate: keep}\nqa: {notes: keep}\ncoderabbit: true # rabbit\n", mode: "browser", contains: []string{"test: \"\"", "migrate: keep", "notes: keep", "# rabbit"}},
+		{name: "flow punctuation in a value", input: "commands: {}\nqa: {mode: terminal}\n", build: "go build -tags=a,b ./... {x} [y]"},
+		{name: "flow punctuation under a missing parent", input: "design: {source: terminal}\n", build: "go test -run 'A,B' ./..."},
+		{name: "missing parents", input: "design: {source: terminal}\n", contains: []string{"design: {source: terminal}"}},
+		{name: "null parents", input: "commands: null # commands\nqa: # qa\n", contains: []string{"# commands", "# qa"}},
+		{name: "comment only", input: "# header\n# footer\n", contains: []string{"# header\n# footer"}},
+		{name: "empty"},
+		{name: "unowned anchors", input: "defaults: &defaults {a: b}\nother: *defaults\n", contains: []string{"&defaults", "*defaults"}},
+		{name: "malformed", input: "commands: [\n", refuse: true},
+		{name: "duplicate", input: "commands: {build: a, build: b}\n", refuse: true},
+		{name: "non mapping", input: "commands: nope\n", refuse: true},
+		{name: "shared section", input: "commands: &shared {build: a}\nother: *shared\n", refuse: true},
+		{name: "shared scalar", input: "commands: {build: &shared a}\nother: *shared\n", refuse: true},
+		{name: "merge", input: "base: &base {build: a}\ncommands: {<<: *base}\n", refuse: true},
+		{name: "external change", input: "commands: {build: old}\n"},
+		{name: "failed write", input: "commands: {build: old}\n"},
+		{name: "symlink and permissions", input: "commands: {build: old}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := RepoConfigPath(repo)
+			if tc.name == "symlink and permissions" {
+				path = filepath.Join(repo, "target.yml")
+				if err := os.Symlink(path, RepoConfigPath(repo)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(path, []byte(tc.input), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			settings, err := ReadRepoSettings(repo)
+			if tc.refuse {
+				if err == nil {
+					t.Fatal("unsafe input accepted")
+				}
+				data, _ := os.ReadFile(path)
+				if string(data) != tc.input {
+					t.Fatal("refused input changed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			values := map[string]string{"commands.build": "new", "commands.lint": "", "commands.test": "", "qa.mode": tc.mode, "qa.start": "new-start", "qa.health": "new-health", "coderabbit": "false"}
+			if tc.build != "" {
+				values["commands.build"] = tc.build
+			}
+			if values["qa.mode"] == "" {
+				values["qa.mode"] = "terminal"
+			}
+			original := tc.input
+			if tc.name == "external change" {
+				original += "external: edit\n"
+				os.WriteFile(path, []byte(original), 0o640)
+			}
+			if tc.name == "failed write" {
+				if err := os.Chmod(RepoDir(repo), 0o500); err != nil {
+					t.Fatal(err)
+				}
+				defer os.Chmod(RepoDir(repo), 0o755)
+			}
+			err = settings.Save(values)
+			data, _ := os.ReadFile(path)
+			if tc.name == "external change" || tc.name == "failed write" {
+				if err == nil {
+					t.Fatal("save should refuse")
+				}
+				if string(data) != original {
+					t.Fatal("failed save changed original bytes")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.contains {
+				if !strings.Contains(string(data), want) {
+					t.Errorf("lost %q in:\n%s", want, data)
+				}
+			}
+			again, err := ReadRepoSettings(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range SettingsKeys(values["qa.mode"]) {
+				if !again.Present[key] || again.Values[key] != values[key] {
+					t.Errorf("%s = %q, present %v", key, again.Values[key], again.Present[key])
+				}
+			}
+			if tc.name == "block comments and order" {
+				if !(strings.Index(string(data), "build:") < strings.Index(string(data), "migrate:") && strings.Index(string(data), "commands:") < strings.Index(string(data), "qa:") && strings.Index(string(data), "qa:") < strings.Index(string(data), "ports:")) {
+					t.Fatal("existing keys reordered")
+				}
+			}
+			if tc.name == "symlink and permissions" {
+				info, _ := os.Lstat(RepoConfigPath(repo))
+				target, _ := os.Stat(path)
+				if info.Mode()&os.ModeSymlink == 0 || target.Mode().Perm() != 0o640 {
+					t.Fatal("link or permissions changed")
+				}
+			}
+		})
+	}
+}
+
+func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(RepoConfigPath(repo), []byte("coderabbit:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := ReadRepoSettings(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Values["coderabbit"] != "true" {
+		t.Errorf("coderabbit = %q; the pipeline treats a null as on, so the form must show on", settings.Values["coderabbit"])
+	}
+}
