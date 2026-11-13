@@ -67,6 +67,7 @@ type Model struct {
 	loaded        map[string]factory.Status
 	dialogs       map[string]json.RawMessage
 	dialog        string
+	dialogNext    *dialogTransition
 	notice        notice
 	wakes         map[string]Wake
 	pipelines     map[string]string
@@ -225,7 +226,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ghPollMsg:
 		cmd = tea.Batch(m.refreshPRs(false), m.ghPoll())
 	case dialogClosedMsg:
-		m.dialogClosed(msg)
+		cmd = m.dialogClosed(msg)
 	case focusPollMsg:
 		cmd = tea.Batch(m.activePane(), m.focusPoll())
 	case activeMsg:
@@ -1044,7 +1045,9 @@ func (m *Model) hints() []footer.Hint {
 func dialogHints(kind string) []footer.Hint {
 	switch kind {
 	case "new":
-		return hints("⏎", "next", "↑↓", "pick", "esc", "back or cancel")
+		return hints("⏎", "next", "↑↓", "pick", "ctrl+e", "settings", "esc", "back or cancel")
+	case "settings":
+		return hints("ctrl+s", "save", "↑↓", "field", "esc", "cancel")
 	case "switch":
 		return hints("⏎", "select", "ctrl+j/k", "move", "ctrl+g", "next needing you", "esc", "close")
 	case "pause":

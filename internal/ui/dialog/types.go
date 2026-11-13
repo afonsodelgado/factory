@@ -44,10 +44,12 @@ type AgentOption struct {
 }
 
 type NewContext struct {
-	Repos []RepoOption `json:"repos"`
-	Repo  int          `json:"repo"`
-	Here  bool         `json:"here,omitempty"`
-	Tools []ToolOption `json:"tools,omitempty"`
+	StateDir string       `json:"state_dir"`
+	Notice   string       `json:"notice,omitempty"`
+	Repos    []RepoOption `json:"repos"`
+	Repo     int          `json:"repo"`
+	Here     bool         `json:"here,omitempty"`
+	Tools    []ToolOption `json:"tools,omitempty"`
 }
 
 type ToolOption struct {
@@ -58,6 +60,7 @@ type ToolOption struct {
 }
 
 type NewResult struct {
+	Settings   *SettingsContext              `json:"settings,omitempty"`
 	Repo       string                        `json:"repo"`
 	Slug       string                        `json:"slug,omitempty"`
 	Prompt     string                        `json:"prompt,omitempty"`
@@ -67,6 +70,16 @@ type NewResult struct {
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 	Select     string                        `json:"select,omitempty"`
 	Wake       bool                          `json:"wake,omitempty"`
+}
+
+type SettingsContext struct {
+	Repo   string `json:"repo"`
+	Banner string `json:"banner,omitempty"`
+}
+
+type SettingsResult struct {
+	Repo  string `json:"repo"`
+	Saved bool   `json:"saved"`
 }
 
 type SwitchRow struct {
@@ -145,6 +158,10 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		var c NewContext
 		json.Unmarshal(context, &c)
 		return NewFactory(c), true
+	case "settings":
+		var c SettingsContext
+		json.Unmarshal(context, &c)
+		return NewSettings(c), true
 	case "switch":
 		var c SwitchContext
 		json.Unmarshal(context, &c)

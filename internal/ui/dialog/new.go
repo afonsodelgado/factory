@@ -16,25 +16,27 @@ import (
 )
 
 type NewFactoryModel struct {
-	Context   NewContext
-	repo      int
-	name      string
-	prompt    textEditor
-	pipeline  string
-	chosen    []string
-	overrides map[string]state.AgentSetting
-	row       int
-	step      int
-	problem   string
-	result    *NewResult
-	width     int
-	height    int
+	Context    NewContext
+	repo       int
+	name       string
+	repoPath   string
+	setupRetry map[string]bool
+	prompt     textEditor
+	pipeline   string
+	chosen     []string
+	overrides  map[string]state.AgentSetting
+	row        int
+	step       int
+	problem    string
+	result     *NewResult
+	width      int
+	height     int
 }
 
 const supervisorRole = "supervisor"
 
 func NewFactory(c NewContext) *NewFactoryModel {
-	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow}
+	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, repoPath: sharedRepoDirectory(c.Repos)}
 }
 
 const firstStageRow = 1
@@ -76,7 +78,7 @@ func (m *NewFactoryModel) Result() (any, bool) {
 }
 
 func (m *NewFactoryModel) selectedRepo() RepoOption {
-	if len(m.Context.Repos) == 0 {
+	if m.addingRepo() {
 		return RepoOption{}
 	}
 	return m.Context.Repos[m.repo]
@@ -387,10 +389,12 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.PasteMsg:
+		m.Context.Notice = ""
 		m.typeText(DecodeKeys(msg.Content))
 	case promptEdited:
 		m.promptEdited(msg)
 	case tea.KeyPressMsg:
+		m.Context.Notice = ""
 		switch m.step {
 		case 1:
 			return m, m.nameKey(msg)
@@ -405,7 +409,11 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *NewFactoryModel) typeText(text string) {
 	switch m.step {
 	case 1:
-		m.name += strings.ReplaceAll(text, "\n", " ")
+		if m.addingRepo() {
+			m.repoPath += strings.ReplaceAll(text, "\n", " ")
+		} else {
+			m.name += strings.ReplaceAll(text, "\n", " ")
+		}
 	case 3:
 		m.prompt.insert(text)
 	}
@@ -420,14 +428,32 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.repo = max(m.repo-1, 0)
 		m.Context.Here = false
 		m.resetChoices()
-	case "down", "tab":
-		m.repo = (m.repo + 1) % max(len(m.Context.Repos), 1)
+	case "tab":
+		if m.addingRepo() {
+			m.repoPath += completeDirectory(m.repoPath).suffix
+			return nil
+		}
+		fallthrough
+	case "down":
+		m.repo = (m.repo + 1) % (len(m.Context.Repos) + 1)
 		m.Context.Here = false
 		m.resetChoices()
 	case "backspace":
-		m.name = dropLast(m.name)
+		if m.addingRepo() {
+			m.repoPath = dropLast(m.repoPath)
+		} else {
+			m.name = dropLast(m.name)
+		}
 	case "ctrl+u":
-		m.name = ""
+		if m.addingRepo() {
+			m.repoPath = ""
+		} else {
+			m.name = ""
+		}
+	case "ctrl+e":
+		if !m.addingRepo() {
+			return m.prepareSettings(m.selectedRepo().Path)
+		}
 	case "ctrl+w":
 		if e, ok := m.existing(); ok && !e.Archived {
 			m.result = &NewResult{Select: e.Key, Wake: true}
@@ -436,12 +462,15 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		return m.next()
 	default:
-		m.name += DecodeKeys(msg.Text)
+		m.typeText(DecodeKeys(msg.Text))
 	}
 	return nil
 }
 
 func (m *NewFactoryModel) next() tea.Cmd {
+	if m.addingRepo() {
+		return m.prepareSettings(m.repoPath)
+	}
 	if m.id() == "" {
 		m.problem = "Type an id made of letters a–z, digits 0–9 and dashes, such as csv-export."
 		return nil
@@ -598,11 +627,25 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		c.Put(max(x+2, 44), y, qa+" · "+rabbit, theme.Quiet)
 		y++
 	}
-	y++
+	if m.addingRepo() {
+		c.Put(1, y, "❯", theme.Focused.B())
+		c.Put(5, y, "+ add a repo…", theme.Bright)
+	} else {
+		c.Put(5, y, "+ add a repo…", theme.Quiet)
+	}
+	y += 2
+	if m.addingRepo() {
+		m.drawRepoPath(c, y, w)
+		return
+	}
 	c.Put(1, y, "Factory id", theme.Bright.B())
 	y++
-	drawInput(c, 1, y, w, "", []string{m.name + "█"}, true)
+	drawInput(c, 1, y, w, "", []string{m.name + "█"}, true, theme.Focused)
 	y += 3
+	if m.Context.Notice != "" {
+		c.PutMax(1, y, m.Context.Notice, theme.FgInk(theme.Green), w)
+		y++
+	}
 	for _, l := range m.notice(w) {
 		c.Spans(1, y, l)
 		y++
@@ -617,14 +660,14 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
-	hints := "⏎ next: pipeline   ↑↓ repo   esc cancel"
+	hints := "⏎ next: pipeline   ↑↓ repo   ctrl+e settings   esc cancel"
 	if m.Context.Here && len(m.Context.Repos) > 1 {
-		hints = "⏎ next: pipeline   ↑↓ another repo   esc cancel"
+		hints = "⏎ next: pipeline   ↑↓ another repo   ctrl+e settings   esc cancel"
 	}
 	if e, matched := m.existing(); matched && e.Archived {
-		hints = "esc cancel"
+		hints = "ctrl+e settings   esc cancel"
 	} else if matched {
-		hints = "⏎ select it   ctrl+w select and wake it   esc cancel"
+		hints = "⏎ select it   ctrl+w select and wake it   ctrl+e settings   esc cancel"
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
@@ -719,7 +762,7 @@ func (m *NewFactoryModel) drawPromptInput(c *theme.Canvas, y, w, room int) int {
 		}
 		lines[i] = number + e.text[r.start:r.end]
 	}
-	drawInput(c, 1, y, w, "prompt", lines, true)
+	drawInput(c, 1, y, w, "prompt", lines, true, theme.Focused)
 	under := " "
 	if e.cursor < rows[row].end {
 		if cluster := e.text[e.cursor:nextGrapheme(e.text, e.cursor)]; theme.Width(cluster) > 0 {
@@ -835,7 +878,7 @@ func overrideInk(value string) theme.Ink {
 	return theme.Muted
 }
 
-func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focused bool) {
+func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focused bool, titleInk theme.Ink) {
 	border := theme.Line
 	if focused {
 		border = theme.Focused
@@ -845,6 +888,9 @@ func drawInput(c *theme.Canvas, x, y, w int, title string, lines []string, focus
 		head = "─ " + title + " "
 	}
 	c.Put(x, y, "╭"+head+strings.Repeat("─", max(w-2-theme.Width(head), 0))+"╮", border)
+	if title != "" {
+		c.Put(x+3, y, title, titleInk)
+	}
 	for i, l := range lines {
 		c.Put(x, y+1+i, "│ ", border)
 		c.PutMax(x+2, y+1+i, l, theme.Bright, w-4)
