@@ -46,6 +46,8 @@ type Runtime struct {
 	Pending      func(Answer) bool
 	Sent         func(Answer, time.Time)
 	Refused      func(Answer, string)
+	Log          *EventLog
+	Push         *Pusher
 
 	snap        Snapshot
 	typeQueue   []QueuedType
@@ -81,6 +83,7 @@ func (m *Runtime) Tick() {
 	m.FlushTypeQueue()
 	m.CloseFinishedStages()
 	m.SyncReview()
+	m.watch()
 }
 
 func (m *Runtime) clonedForLaptop(repo string) bool {

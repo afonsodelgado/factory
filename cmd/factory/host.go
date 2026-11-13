@@ -150,6 +150,9 @@ func serveHost(cfg *state.Config) error {
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	panes := &host.Panes{TM: tm, Session: cfg.Hub.Session, Openers: openers}
 	loader := &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}
-	runtime := host.New(host.Runtime{Config: cfg, Loader: loader, Engine: panes, TM: tm, Session: cfg.Hub.Session, Typist: panes, Pages: pages})
+	pusher := &host.Pusher{StateDir: cfg.StateDir, Now: time.Now}
+	go pusher.Run(ctx)
+	journal := host.LoadEventLog(host.EventLogPath(cfg.StateDir))
+	runtime := host.New(host.Runtime{Config: cfg, Loader: loader, Engine: panes, TM: tm, Session: cfg.Hub.Session, Typist: panes, Pages: pages, Log: journal, Push: pusher})
 	return runtime.Run(ctx, events)
 }

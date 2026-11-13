@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
@@ -110,6 +113,59 @@ func TestARemoteGateNamesTheServerAndTheTunnelItsPageComesThrough(t *testing.T) 
 	m.choose(it.Factory.Key())
 	m.panel.tab = panel.Attention
 	golden.RequireEqual(t, m.PanelView(109, 20))
+}
+
+func TestReconnectDoesNotRepeatAttentionEvents(t *testing.T) {
+	m := mixedModel(t)
+	m.Config.Alerts.Desktop = true
+	var mu sync.Mutex
+	var notified []string
+	m.Notify = func(text string) {
+		mu.Lock()
+		defer mu.Unlock()
+		notified = append(notified, text)
+	}
+	log := host.LoadEventLog(filepath.Join(t.TempDir(), "events.json"))
+	cursor := int64(0)
+	ask := func(at time.Duration, id string) state.Attention {
+		return state.Attention{ID: id, Kind: "question", CreatedAt: state.Time{Time: remoteNow.Add(at)}}
+	}
+	serve := func(hook *state.HookFile, open ...state.Attention) {
+		f := factory.Factory{Repo: "/srv/cowork", Slug: "csv", ID: "csv", State: &state.State{ID: "csv", Attention: open}}
+		log.Record([]host.Item{{Factory: f, Hook: hook}})
+	}
+	poll := func() {
+		batch := log.After(cursor)
+		m.heard("homelab", "s-1", &batch)
+		w, _ := remote.LoadWatch(m.Config.StateDir, "homelab")
+		cursor = w.Cursor
+	}
+
+	serve(nil, ask(-time.Hour, "q-1"))
+	poll()
+	permission := &state.HookFile{Prompt: &state.PendingPrompt{At: remoteNow}}
+	serve(permission, ask(-time.Hour, "q-1"), ask(0, "q-2"))
+	poll()
+	serve(permission, ask(-time.Hour, "q-1"))
+	serve(permission, ask(-time.Hour, "q-1"), ask(time.Minute, "q-3"))
+	serve(permission, ask(-time.Hour, "q-1"), ask(2*time.Minute, "q-2"))
+	missed := log.After(cursor)
+	m.heard("homelab", "s-1", &missed)
+	m.heard("homelab", "s-1", &missed)
+
+	want := []string{"csv on homelab needs you", "csv on homelab needs you", "csv on homelab needs you"}
+	got := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(notified)
+	}
+	for deadline := time.Now().Add(2 * time.Second); len(got()) < len(want) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if !slices.Equal(got(), want) {
+		t.Fatalf("notified %q; want one alert each for q-2, the permission prompt and q-2 asked again, none for q-1 seen at first contact or q-3 asked and settled during the outage, and none twice on a replay", got())
+	}
 }
 
 type quietTypist struct{}

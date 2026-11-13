@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -374,6 +377,54 @@ func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {
 	}
 }
 
+func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
+	var mu sync.Mutex
+	var received []string
+	answers := []int{http.StatusBadGateway}
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, r.URL.Path+" "+r.Header.Get("Title")+" "+string(body))
+		if len(answers) > 0 {
+			w.WriteHeader(answers[0])
+			answers = answers[1:]
+		}
+	}))
+	t.Cleanup(ntfy.Close)
+	dir := t.TempDir()
+	now := time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)
+	pusher := &Pusher{StateDir: dir, Now: func() time.Time { return now }}
+	settings := remote.PushSettings{Server: ntfy.URL, Topic: "factory-q7rk2m9x", Label: "homelab", Revision: 2}
+	if held, err := pusher.Configure(settings); err != nil || held.Revision != 2 {
+		t.Fatalf("configure: %+v %v", held, err)
+	}
+	if held, _ := pusher.Configure(remote.PushSettings{Server: ntfy.URL, Label: "homelab", Revision: 1}); held.Revision != 2 || held.Topic != settings.Topic {
+		t.Fatal("an older settings revision turned push off after a newer one")
+	}
+	secret := state.Attention{ID: "q-csv-1", Kind: "question", Title: "Paste the prod token sk-live-123?", Body: "sk-live-123", CreatedAt: state.Time{Time: now}}
+	m := New(Runtime{Config: &state.Config{StateDir: dir}, Log: LoadEventLog(EventLogPath(dir)), Push: pusher, Now: func() time.Time { return now }})
+	m.SetSnapshot(Snapshot{Items: []Item{{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv-export", ID: "csv-export", State: &state.State{ID: "csv-export", Attention: []state.Attention{secret}}}}}})
+
+	m.watch()
+	pusher.Flush()
+	now = now.Add(pushFirstGap)
+	pusher.Flush()
+	pusher.Flush()
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := "/factory-q7rk2m9x factory csv-export on homelab: question"
+	if len(received) != 2 || received[0] != want || received[1] != want {
+		t.Fatalf("ntfy received %q; want the id, remote and kind only, retried once after the failure and then never again", received)
+	}
+	stored, _ := os.ReadFile(filepath.Join(dir, "push.json"))
+	journal, _ := os.ReadFile(EventLogPath(dir))
+	if bytes.Contains(stored, []byte("sk-live")) || bytes.Contains(journal, []byte("sk-live")) {
+		t.Fatal("the question's text reached the push outbox or the event journal")
+	}
+}
+
 func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 	cfg := &state.Config{StateDir: t.TempDir()}
 	listen := func() *review.Server {
@@ -400,5 +451,30 @@ func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode == http.StatusForbidden {
 		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
+	}
+}
+
+func TestPushNamesAFactoryByAPlainIDOnly(t *testing.T) {
+	got := pushText("Paste the prod token sk-live-123?", "homelab", "question")
+	if strings.Contains(got, "sk-live") || got != "a factory on homelab: question" {
+		t.Fatalf("push text %q; an id an agent wrote into state.json must not carry text to a third-party server", got)
+	}
+	if got := pushText("csv-export", "homelab", "gate"); got != "csv-export on homelab: gate" {
+		t.Fatalf("push text %q for a plain id", got)
+	}
+}
+
+func TestAnUnreadStateFileNeitherResolvesNorReopensAnItem(t *testing.T) {
+	question := state.Attention{ID: "q-csv-1", Kind: "question", CreatedAt: state.Time{Time: time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)}}
+	read := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", State: &state.State{ID: "csv", Attention: []state.Attention{question}}}}
+	unread := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", StateErr: errors.New("unexpected end of JSON input")}}
+	log := LoadEventLog(filepath.Join(t.TempDir(), "events.json"))
+
+	if opened := log.Record([]Item{read}); len(opened) != 1 {
+		t.Fatalf("first scan opened %d items; want 1", len(opened))
+	}
+	log.Record([]Item{unread})
+	if opened := log.Record([]Item{read}); len(opened) != 0 || log.Seq != 1 {
+		t.Fatalf("after a scan that caught state.json mid-write, %d items opened again and the journal is at %d; want none, or the phone and laptop alert again for a question already seen", len(opened), log.Seq)
 	}
 }

@@ -46,6 +46,7 @@ func (s linkState) String() string {
 type link struct {
 	view    remote.View
 	server  string
+	offset  time.Duration
 	ok      bool
 	contact time.Time
 	since   time.Time
@@ -78,6 +79,7 @@ type remoteMsg struct {
 	name   string
 	view   remote.View
 	server string
+	events *remote.Events
 	err    error
 }
 
@@ -147,7 +149,10 @@ func (m *Model) pollRemotes() tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 			defer cancel()
 			view, server, err := fetchView(ctx, cfg, name)
-			return remoteMsg{name: name, view: view, server: server, err: err}
+			if err != nil {
+				return remoteMsg{name: name, err: err}
+			}
+			return remoteMsg{name: name, view: view, server: server, events: listen(ctx, cfg, name)}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -180,21 +185,90 @@ func fetchView(ctx context.Context, cfg *state.Config, name string) (remote.View
 	return view, cache.Server, err
 }
 
+func listen(ctx context.Context, cfg *state.Config, name string) *remote.Events {
+	client, err := remote.For(cfg, name)
+	if err != nil {
+		return nil
+	}
+	client.SyncPush(ctx, cfg.Push)
+	w, _ := remote.LoadWatch(cfg.StateDir, name)
+	events, err := client.Events(ctx, w.Cursor)
+	if err != nil {
+		return nil
+	}
+	return &events
+}
+
 func (m *Model) remoteArrived(msg remoteMsg) tea.Cmd {
 	l := m.link(msg.name)
 	l.busy = false
 	if msg.err != nil {
+		if l.ok {
+			m.noteLink(msg.name, "lost: "+msg.err.Error()+" · factories keep running")
+		}
 		l.ok, l.problem = false, msg.err.Error()
 		m.refresh()
 		return nil
 	}
 	back := !l.ok
+	if back && !l.contact.IsZero() {
+		m.noteLink(msg.name, "back after "+theme.Age(m.Now().Sub(l.contact))+" · tunnels and inbox restored")
+	}
 	l.ok, l.view, l.server, l.contact, l.problem = true, msg.view, msg.server, m.Now(), ""
+	if !msg.view.Now.IsZero() {
+		l.offset = msg.view.Now.Sub(m.Now())
+	}
 	m.refresh()
+	m.heard(msg.name, msg.server, msg.events)
 	if back {
 		return tea.Batch(m.restoreTunnels(msg.name), m.settleOpens(msg.name))
 	}
 	return m.settleOpens(msg.name)
+}
+
+func (m *Model) heard(name, server string, batch *remote.Events) {
+	if batch == nil || m.Config.StateDir == "" {
+		return
+	}
+	w, _ := remote.LoadWatch(m.Config.StateDir, name)
+	w, fresh := w.Take(server, *batch)
+	if remote.SaveWatch(m.Config.StateDir, name, w) != nil {
+		return
+	}
+	for _, e := range fresh {
+		m.alertRemote(name, e)
+	}
+}
+
+func (m *Model) alertRemote(name string, e remote.Attention) {
+	for _, it := range m.snap.Items {
+		if it.Factory.Remote != nil && it.Factory.Remote.Incarnation == e.Incarnation && it.Factory.Key() == m.selected {
+			return
+		}
+	}
+	if m.Config.Alerts.Bell && m.Bell != nil {
+		m.Bell.Write([]byte("\a"))
+	}
+	if m.Config.Alerts.Notifies() && m.Notify != nil {
+		go m.Notify(e.Factory + " on " + name + " needs you")
+	}
+}
+
+func linkActivityPath(stateDir, name string) string {
+	return remote.CachePath(stateDir, name+".activity")
+}
+
+func (m *Model) noteLink(name, text string) {
+	if m.Config.StateDir != "" {
+		state.AppendActivity(linkActivityPath(m.Config.StateDir, name), state.ActivityEntry{At: m.Now(), Source: "hub", Stage: "link", Text: text})
+	}
+}
+
+func (m *Model) clockOf(key string) time.Time {
+	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
+		return m.snap.At.Add(m.linkOf(it.Factory).offset)
+	}
+	return m.snap.At
 }
 
 func (m *Model) remoteItems() []Item {
@@ -597,6 +671,7 @@ func (m *Model) remotesContext() dialog.RemotesContext {
 	}
 	for _, name := range m.remoteNames() {
 		row := dialog.RemoteRow{Name: name, Endpoint: remote.Transport{Remote: m.Config.Remotes[name]}.Endpoint(), Link: m.link(name).state(m.Now()).String()}
+		row.PushPending = m.Config.StateDir != "" && remote.PushPending(m.Config.StateDir, name, m.Config.Push)
 		for _, it := range m.snap.Items {
 			if it.Factory.Where() != name || it.Factory.Archived() {
 				continue

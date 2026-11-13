@@ -104,6 +104,18 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &ids); err == nil {
 			err = m.Opened(ids)
 		}
+	case "events":
+		var cursor int64
+		if err = json.Unmarshal(request.Data, &cursor); err == nil {
+			value = m.Events(cursor)
+		}
+	case "push":
+		var settings remote.PushSettings
+		if err = json.Unmarshal(request.Data, &settings); err == nil {
+			value, err = m.configurePush(settings)
+		}
+	case "push-test":
+		err = m.testPush()
 	case "snapshot":
 		value = m.snap
 	case "view":

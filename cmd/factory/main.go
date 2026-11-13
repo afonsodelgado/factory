@@ -93,9 +93,10 @@ commands:
               without either, new factories go to default_remote
   remote add <name> <host> [--user name] [--port n] [--identity file]
   remote list | remove <name> | default <name | local>
-  remote push [--server url | --off]
+  remote push [--server url | --off | --test]
               add, list and remove remotes, pick where new factories run,
-              and set up phone push through ntfy
+              and set up phone push through ntfy; --test sends a test push from
+              each server
   delete <id> [--repo path] [--remote name | --local] [--yes]
               delete a factory: its pane, worktree, local branches, state,
               activity log, drafts and registry entry, so the id can be used

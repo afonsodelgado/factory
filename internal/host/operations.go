@@ -71,6 +71,12 @@ func sameJSON(a, b json.RawMessage) bool {
 	return bytes.Equal(x.Bytes(), y.Bytes())
 }
 
+func saveOrReport(path string, value any) {
+	if err := savePrivate(path, value); err != nil {
+		fmt.Fprintf(os.Stderr, "factory host: could not save %s, so a push or an alert may be lost: %v\n", filepath.Base(path), err)
+	}
+}
+
 func savePrivate(path string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {

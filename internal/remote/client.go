@@ -50,6 +50,7 @@ type Cache struct {
 	Forgotten    []string      `json:"forgotten,omitempty"`
 	Pending      []PendingOp   `json:"pending,omitempty"`
 	Opened       []string      `json:"opened,omitempty"`
+	Push         int           `json:"push,omitempty"`
 	CheckedAt    time.Time     `json:"checked_at,omitzero"`
 }
 

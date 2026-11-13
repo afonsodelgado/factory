@@ -25,7 +25,7 @@ const (
        factory remote list
        factory remote remove <name>
        factory remote default <name | local>
-       factory remote push [--server url | --off]`
+       factory remote push [--server url | --off | --test]`
 )
 
 func runRemote(args []string) int {
@@ -115,6 +115,9 @@ func remoteList() error {
 		if cache.Release != "" {
 			line += fmt.Sprintf("  %s, %s", cache.Release, factories(len(cache.Shown())))
 		}
+		if remote.PushPending(cfg.StateDir, name, cfg.Push) {
+			line += "  push settings pending"
+		}
 		fmt.Println(line)
 	}
 	return nil
@@ -179,8 +182,12 @@ func remotePush(args []string) error {
 	flags := flag.NewFlagSet("remote push", flag.ContinueOnError)
 	server := flags.String("server", "", "the ntfy server; default "+state.DefaultPushServer)
 	off := flags.Bool("off", false, "turn phone push off")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || (*off && *server != "") {
+	test := flags.Bool("test", false, "ask every remote to send a test push now")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || (*off && *server != "") || (*test && (*off || *server != "")) {
 		return errors.New(remoteUsage)
+	}
+	if *test {
+		return testPush()
 	}
 	push, err := updatePush(func(p *state.Push) {
 		switch {
@@ -198,10 +205,52 @@ func remotePush(args []string) error {
 	}
 	if !push.On() {
 		fmt.Println("Phone push is off.")
-		return nil
+	} else {
+		fmt.Printf("Phone push is on. In the ntfy app on your phone, subscribe to %s/%s; anyone with that address can read the pushes, so keep it private.\n", push.ServerURL(), push.Topic)
 	}
-	fmt.Printf("Phone push is on. In the ntfy app on your phone, subscribe to %s/%s; anyone with that address can read the pushes, so keep it private.\n", push.ServerURL(), push.Topic)
-	return nil
+	return syncPush(push)
+}
+
+func eachRemote(do func(context.Context, remote.Client) string) ([]string, error) {
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.Remotes)) {
+		client, _ := remote.For(cfg, name)
+		ctx, cancel := context.WithTimeout(context.Background(), probeWait)
+		lines = append(lines, name+": "+do(ctx, client))
+		cancel()
+	}
+	return lines, nil
+}
+
+func printEach(lines []string, err error) error {
+	for _, line := range lines {
+		fmt.Println("  " + line)
+	}
+	return err
+}
+
+func syncPush(push state.Push) error {
+	return printEach(eachRemote(func(ctx context.Context, client remote.Client) string {
+		if err := client.SyncPush(ctx, push); err != nil {
+			return "pending, it takes the change once it answers (" + err.Error() + ")"
+		}
+		return "has it"
+	}))
+}
+
+func testPush() error { return printEach(pushTests()) }
+
+func pushTests() ([]string, error) {
+	return eachRemote(func(ctx context.Context, client remote.Client) string {
+		if err := client.Read(ctx, "push-test", nil, nil); err != nil {
+			return "no test push: " + err.Error()
+		}
+		return "sent a test push"
+	})
 }
 
 func updatePush(change func(*state.Push)) (state.Push, error) {

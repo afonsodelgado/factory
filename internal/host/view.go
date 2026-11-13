@@ -34,7 +34,7 @@ func Incarnation(f factory.Factory) string {
 
 func (m *Runtime) View() remote.View {
 	home, _ := os.UserHomeDir()
-	view := remote.View{Home: home, Factories: []remote.Factory{}, Opens: m.Opens()}
+	view := remote.View{Home: home, Now: m.Now(), Factories: []remote.Factory{}, Opens: m.Opens()}
 	if m.Pages != nil {
 		view.Review = m.Pages.Home()
 	}

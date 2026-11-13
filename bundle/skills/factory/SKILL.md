@@ -184,7 +184,7 @@ Wherever a stage below says to spawn an agent or SendMessage it, use the start a
 
 ## Notifications
 
-Send a PushNotification only when the user has to act: a question, a lit gate, a tripped cap, a second failure, and the handoff. Never for progress.
+Send a PushNotification only when the user has to act: a question, a lit gate, a tripped cap, a second failure, and the handoff. Never for progress. When `FACTORY_SERVER` is set, you run on a server that pushes to the developer's phone by itself for every open attention item: send no PushNotification there.
 
 ## Artifacts
 

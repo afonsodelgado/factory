@@ -17,6 +17,7 @@ import (
 
 type View struct {
 	Home      string    `json:"home"`
+	Now       time.Time `json:"now,omitzero"`
 	Review    string    `json:"review,omitempty"`
 	Factories []Factory `json:"factories"`
 	Opens     []Open    `json:"opens,omitempty"`
@@ -31,6 +32,36 @@ type Open struct {
 	Key     string          `json:"key,omitempty"`
 	Cookies []review.Cookie `json:"cookies,omitempty"`
 	At      time.Time       `json:"at"`
+}
+
+type Attention struct {
+	Seq         int64     `json:"seq"`
+	Factory     string    `json:"factory"`
+	Incarnation string    `json:"incarnation"`
+	Item        string    `json:"item"`
+	Kind        string    `json:"kind"`
+	Since       time.Time `json:"since"`
+	Resolved    bool      `json:"resolved,omitempty"`
+}
+
+func (a Attention) Key() string {
+	return a.Incarnation + "|" + a.Item + "|" + a.Since.UTC().Format(time.RFC3339Nano)
+}
+
+type Events struct {
+	Seq    int64       `json:"seq"`
+	Events []Attention `json:"events,omitempty"`
+}
+
+type PushSettings struct {
+	Server   string `json:"server"`
+	Topic    string `json:"topic,omitempty"`
+	Label    string `json:"label"`
+	Revision int    `json:"revision"`
+}
+
+func (s PushSettings) Matches(other PushSettings) bool {
+	return s.Server == other.Server && s.Topic == other.Topic && s.Label == other.Label
 }
 
 type LinkRequest struct {

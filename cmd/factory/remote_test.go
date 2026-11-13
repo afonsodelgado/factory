@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -518,6 +519,52 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	}
 	if log := readOr(filepath.Join(s.server, "ssh.log")); !strings.Contains(log, "-N") || strings.Contains(tunnelLines(log), "ClearAllForwardings") {
 		t.Fatalf("tunnel ssh calls:\n%s\nwant -N without ClearAllForwardings, which would drop the -L", tunnelLines(log))
+	}
+}
+
+func TestServerPushesAttentionWithoutTheLaptop(t *testing.T) {
+	s := newStandIn(t)
+	url := "https://git.example/acme/app.git"
+	src := gitRepo(t, s.root, url)
+	s.serveGit(t, url, filepath.Join(s.root, "origin.git"))
+	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var mu sync.Mutex
+	var pushes []string
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		pushes = append(pushes, string(body))
+		mu.Unlock()
+	}))
+	t.Cleanup(ntfy.Close)
+	pushed := func(text string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Contains(pushes, text)
+	}
+
+	if out, err := s.factory(t, src, nil, "remote", "push", "--server", ntfy.URL); err != nil || !strings.Contains(out, "homelab: has it") {
+		t.Fatalf("turning push on: %v\n%s", err, out)
+	}
+	if out, err := s.factory(t, src, nil, "remote", "push", "--test"); err != nil || !pushed("factory on homelab: test") {
+		t.Fatalf("test push: %v\n%s\npushes %q", err, out, pushes)
+	}
+	s.inProcess(t)
+	cfg, _ := state.LoadConfig()
+	homelab, _ := remote.For(cfg, "homelab")
+	csv, _ := paneOf(t, homelab, "csv")
+	writeFile(t, filepath.Join(csv.Worktree, ".claude", "factory", "csv", "state.json"), `{"id": "csv", "stage": "requirements", "attention": [{"id": "q-csv-1", "kind": "question", "title": "Which columns hold the secret?", "created_at": "2026-11-12T14:02:00Z"}]}`)
+	waitFor(t, "homelab to push the question by itself", func() bool { return pushed("csv on homelab: question") })
+	events, err := homelab.Events(context.Background(), 0)
+	if err != nil || !slices.ContainsFunc(events.Events, func(a remote.Attention) bool { return a.Item == "q-csv-1" }) {
+		t.Fatalf("events %+v (%v); want the question kept for the laptop", events, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if slices.ContainsFunc(pushes, func(p string) bool { return strings.Contains(p, "secret") }) {
+		t.Fatalf("a push carried the question's text: %q", pushes)
 	}
 }
 
