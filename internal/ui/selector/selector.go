@@ -327,7 +327,7 @@ func renderEmpty(c *theme.Canvas, d Data, w int) {
 	}
 	y++
 	if len(d.Groups) == 0 {
-		for _, line := range theme.Wrap("No repos yet. Run factory inside a repo, or factory init <repo>, and the hub adds it.", inner) {
+		for _, line := range theme.Wrap("No repos yet. Press n and pick + add a repo… to add one.", inner) {
 			c.Put(2, y, line, theme.Text)
 			y++
 		}
