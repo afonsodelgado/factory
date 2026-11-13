@@ -17,9 +17,7 @@ func LoopbackPort(raw string) (int, bool) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return 0, false
 	}
-	host := u.Hostname()
-	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
-	if !isLoopback {
+	if !onTheServerItself(u.Hostname()) {
 		return 0, false
 	}
 	port := u.Port()
@@ -28,6 +26,14 @@ func LoopbackPort(raw string) (int, bool) {
 	}
 	n, err := strconv.Atoi(port)
 	return n, err == nil
+}
+
+func onTheServerItself(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
 func ThroughTunnel(raw string, local int) string {
@@ -39,15 +45,22 @@ func ThroughTunnel(raw string, local int) string {
 	return u.String()
 }
 
-func openable(raw string) (string, error) {
+func WebLink(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
+}
+
+func openable(raw string) (string, error) {
+	if !WebLink(raw) {
 		return "", fmt.Errorf("only web links open on this laptop, and %q is not one", raw)
 	}
 	return raw, nil
 }
 
-func isFile(raw string) bool { return strings.HasPrefix(raw, "file://") }
+func isFile(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "file"
+}
 
 func (c Client) Resolve(ctx context.Context, tunnels *Tunnels, home, raw string) (string, error) {
 	if _, loopback := LoopbackPort(raw); !loopback && !isFile(raw) {

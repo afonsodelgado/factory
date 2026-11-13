@@ -66,6 +66,7 @@ func newStandIn(t *testing.T) standIn {
 		"SHELL="+filepath.Join(s.bin, "shell"),
 		"ZDOTDIR=",
 		"ENV=",
+		"CLAUDE_ENV_FILE=",
 		"HOME="+filepath.Join(client, "home"),
 		"FACTORY_CONFIG_DIR="+filepath.Join(client, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(client, "state"),
@@ -201,6 +202,33 @@ func TestNewFactoriesFollowTheDefaultAndExistingOnesStayWhereTheyRun(t *testing.
 	}
 }
 
+func TestRemoteAddTakesItsFlagsInAnyOrder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	for _, args := range [][]string{
+		{"add", "box", "boxhost", "--identity", "keyfile"},
+		{"add", "attic", "attic.lan", "--user", "bob", "--port", "2222"},
+		{"add", "--user", "bob", "--port", "2222", "cellar", "cellar.lan"},
+	} {
+		if code := runRemote(args); code != 0 {
+			t.Fatalf("factory remote %v exited %d", args, code)
+		}
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]state.Remote{
+		"box":    {Host: "boxhost", Identity: "keyfile"},
+		"attic":  {Host: "attic.lan", User: "bob", Port: 2222},
+		"cellar": {Host: "cellar.lan", User: "bob", Port: 2222},
+	}
+	if !maps.Equal(cfg.Remotes, want) {
+		t.Fatalf("remotes %+v; want %+v, so ssh reaches the host the developer named with the key, user and port given", cfg.Remotes, want)
+	}
+}
+
 func TestARemoteRequestFailsAtOnceWhileAnInteractiveHubHoldsTheServerRuntime(t *testing.T) {
 	cfg := &state.Config{StateDir: t.TempDir()}
 	unlock, err := lockHub(cfg.LockPath())
@@ -299,6 +327,33 @@ func TestRemoteCreationRetryDoesNotDuplicateFactory(t *testing.T) {
 	}
 	if gitState(t, src) != before {
 		t.Fatal("remote creation changed the developer's checkout")
+	}
+
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=create"}, "open", "--remote", "homelab", "json", "--prompt", "first prompt"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost acknowledgement reported %v:\n%s", err, out)
+	}
+	if out, _ := s.factory(t, src, nil, "open", "--remote", "homelab", "json", "--prompt", "second prompt"); strings.Contains(out, "did not start") || !strings.Contains(out, "json already runs on homelab") {
+		t.Fatalf("a retry with another prompt said:\n%s\nwant that the lost attempt created json, never that it did not start", out)
+	}
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=delete"}, "delete", "csv", "--remote", "homelab", "--yes"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost delete answer reported %v:\n%s", err, out)
+	}
+	if out, err := s.factory(t, src, nil, "delete", "csv", "--remote", "homelab", "--yes"); err != nil {
+		t.Fatalf("retrying a delete whose answer was lost: %v\n%s\nwant the deletion it already made reported", err, out)
+	}
+	if slices.ContainsFunc(s.serverRegistry(t), func(e state.Entry) bool { return e.Slug == "csv" }) {
+		t.Fatal("csv is still on the server after its delete was retried")
+	}
+
+	if out, err := s.factory(t, src, []string{"FACTORY_SSH_STANDIN_DROP=delete"}, "delete", "json", "--remote", "homelab", "--yes"); err == nil || !strings.Contains(out, "outcome unknown") {
+		t.Fatalf("a lost delete answer reported %v:\n%s", err, out)
+	}
+	reborn := func(e state.Entry) bool { return e.Slug == "json" && e.Title == "json second life" }
+	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "json", "--prompt", "json second life"); err != nil || !slices.ContainsFunc(s.serverRegistry(t), reborn) {
+		t.Fatalf("reusing json after its delete answer was lost: %v\n%s\nwant a new json with the new prompt, never \"runs on\" for a factory that is gone", err, out)
+	}
+	if out, err := s.factory(t, src, nil, "delete", "json", "--remote", "homelab", "--yes"); err != nil || slices.ContainsFunc(s.serverRegistry(t), func(e state.Entry) bool { return e.Slug == "json" }) {
+		t.Fatalf("deleting the new json: %v\n%s\nwant it gone, not the lost delete's receipt replayed while it keeps running", err, out)
 	}
 }
 
@@ -456,6 +511,19 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	url := "https://git.example/acme/app.git"
 	src := gitRepo(t, s.root, url)
 	s.serveGit(t, url, filepath.Join(s.root, "origin.git"))
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "app") }))
+	t.Cleanup(app.Close)
+	appURL := strings.Replace(app.URL, "127.0.0.1", "localhost", 1) + "/contacts?tab=export"
+	bypassed := filepath.Join(s.root, "bypassed")
+	for _, opener := range []string{"open", "xdg-open"} {
+		writeFile(t, filepath.Join(s.bin, opener), "#!/bin/sh\necho \"$@\" >>"+bypassed+"\n")
+		os.Chmod(filepath.Join(s.bin, opener), 0o755)
+	}
+	loginProfile := "PATH=" + factory.ShellQuote(s.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFile(t, filepath.Join(s.bin, "shell"), "#!/bin/sh\n[ \"${1:-}\" = -l ] && shift\n"+loginProfile+"\nexec /bin/sh \"$@\"\n")
+	bashTool := factory.ShellQuote(`. "$CLAUDE_ENV_FILE" && xdg-open ` + factory.ShellQuote(appURL+"&from=bash"))
+	writeFile(t, filepath.Join(s.bin, "claude"), "#!/bin/sh\nxdg-open "+factory.ShellQuote(appURL)+"\n\"$SHELL\" -l -c "+bashTool+"\nexec sleep 600\n")
+	os.Chmod(filepath.Join(s.bin, "claude"), 0o755)
 	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -469,17 +537,17 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	dir := filepath.Join(csv.Worktree, ".claude", "factory", "csv")
 	writeFile(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
 	writeFile(t, filepath.Join(dir, "state.json"), `{"id": "csv", "stage": "plan"}`)
-	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "app") }))
-	t.Cleanup(app.Close)
-	appURL := strings.Replace(app.URL, "127.0.0.1", "localhost", 1) + "/contacts?tab=export"
 
-	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
-	if out, err := s.factory(t, dir, onServer, "review", "link", appURL); err != nil || !strings.Contains(out, "Queued") {
-		t.Fatalf("an agent's link on the server: %v\n%s", err, out)
-	}
 	var view remote.View
-	if err := homelab.Read(context.Background(), "view", nil, &view); err != nil || len(view.Opens) != 1 {
-		t.Fatalf("the server holds %d open requests (%v); want the agent's link kept for the laptop", len(view.Opens), err)
+	waitFor(t, "the agent's xdg-open to reach the server's queue", func() bool {
+		return homelab.Read(context.Background(), "view", nil, &view) == nil && len(view.Opens) == 2
+	})
+	if opened := readOr(bypassed); opened != "" || view.Opens[0].URL != appURL || view.Opens[1].URL != appURL+"&from=bash" {
+		t.Fatalf("the agent's xdg-open ran the server's own opener with %q and queued %v; want its links, direct and from a Bash tool's login shell, queued for the laptop", opened, view.Opens)
+	}
+	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+	if out, err := s.factory(t, dir, onServer, "review", "link", "file:///etc/passwd"); err == nil || strings.Contains(out, "Queued") {
+		t.Fatalf("a link the laptop never opens was accepted: %v\n%s\nwant it refused on the server, not queued to nag on every hub start", err, out)
 	}
 
 	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
@@ -499,7 +567,7 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	if status, body := fetch(t, page); status != http.StatusOK || !strings.Contains(body, "overlay.js") {
 		t.Fatalf("the plan through the tunnel answered %d %q; want the served page past the host check", status, body)
 	}
-	if err := homelab.Read(ctx, "opened", []string{view.Opens[0].ID}, nil); err != nil {
+	if err := homelab.Read(ctx, "opened", []string{view.Opens[0].ID, view.Opens[1].ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var after remote.View

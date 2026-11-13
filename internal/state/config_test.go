@@ -187,24 +187,39 @@ func TestRemoteConfigRefusesWhatSSHWouldMisread(t *testing.T) {
 }
 
 func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
-	dir := t.TempDir()
-	original := "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  old:\n    host: old\n"
-	os.WriteFile(filepath.Join(dir, "config.yml"), []byte(original), 0o644)
-	err := UpdateMachine(dir, func(m *Machine) error {
-		delete(m.Remotes, "old")
-		m.Remotes["homelab"] = Remote{Host: "homelab", Port: 2222}
-		m.DefaultRemote = "homelab"
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct{ name, original, comment string }{
+		{"a config with settings", "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  old:\n    host: old\n", "# main repo"},
+		{"a config that holds only comments", "# just a comment\n", "# just a comment"},
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "config.yml"))
-	t.Setenv("FACTORY_CONFIG_DIR", dir)
-	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
-	cfg, err := LoadConfig()
-	if err != nil || !strings.Contains(string(data), "# main repo") || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" {
-		t.Fatalf("config after adding a remote:\n%s\nerr %v; want the user's comments kept and only homelab listed", data, err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(c.original), 0o644)
+			err := UpdateMachine(dir, func(m *Machine) error {
+				m.Remotes = map[string]Remote{}
+				m.Remotes["homelab"] = Remote{Host: "homelab", Port: 2222}
+				m.DefaultRemote = "homelab"
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := os.ReadFile(filepath.Join(dir, "config.yml"))
+			t.Setenv("FACTORY_CONFIG_DIR", dir)
+			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+			cfg, err := LoadConfig()
+			if err != nil || !strings.Contains(string(data), c.comment) || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" {
+				t.Fatalf("config after adding a remote:\n%s\nerr %v; want the user's comments kept and only homelab listed", data, err)
+			}
+			for range 3 {
+				if err := UpdateMachine(dir, func(m *Machine) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if again, _ := os.ReadFile(filepath.Join(dir, "config.yml")); string(again) != string(data) {
+				t.Fatalf("config after three more writes:\n%s\nwant it unchanged, not indented further on every write:\n%s", again, data)
+			}
+		})
 	}
 }
 

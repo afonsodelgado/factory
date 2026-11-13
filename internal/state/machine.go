@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -52,6 +54,25 @@ var (
 	sshUser    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 	pushTopic  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
+
+func LoadMachine(configDir string) (Machine, error) {
+	var m Machine
+	data, err := os.ReadFile(filepath.Join(configDir, "config.yml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return m, nil
+	}
+	if err != nil {
+		return m, err
+	}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return m, err
+	}
+	return m, m.Validate()
+}
+
+func (m Machine) Equal(other Machine) bool {
+	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push
+}
 
 func (m Machine) Validate() error {
 	for name, r := range m.Remotes {
@@ -131,6 +152,9 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if holdsOnlyComments(file) {
+		return afterComments(data, m)
+	}
 	remotes := m.Remotes
 	if remotes == nil {
 		remotes = map[string]Remote{}
@@ -152,17 +176,36 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 	return []byte(file.String()), nil
 }
 
-func setKey(file *ast.File, name string, value any, zero bool) error {
-	path, err := yaml.PathString("$." + name)
-	if err != nil {
-		return err
+func holdsOnlyComments(file *ast.File) bool {
+	for _, doc := range file.Docs {
+		switch doc.Body.(type) {
+		case nil, *ast.CommentGroupNode, *ast.CommentNode:
+		default:
+			return false
+		}
 	}
-	if _, err := path.FilterFile(file); err == nil {
-		node, err := yaml.ValueToNode(value)
+	return true
+}
+
+func afterComments(comments []byte, m Machine) ([]byte, error) {
+	if m.Equal(Machine{}) {
+		return comments, nil
+	}
+	settings, err := yaml.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(bytes.TrimRight(comments, "\n"), []byte("\n"), settings), nil
+}
+
+func setKey(file *ast.File, name string, value any, zero bool) error {
+	if entry := topLevelEntry(file, name); entry != nil {
+		fresh, err := entryOf(name, value)
 		if err != nil {
 			return err
 		}
-		return path.ReplaceWithNode(file, node)
+		entry.Value = fresh.Value
+		return nil
 	}
 	if zero {
 		return nil
@@ -176,4 +219,41 @@ func setKey(file *ast.File, name string, value any, zero bool) error {
 		return err
 	}
 	return root.MergeFromNode(file, node)
+}
+
+func topLevelEntry(file *ast.File, name string) *ast.MappingValueNode {
+	for _, doc := range file.Docs {
+		for _, entry := range entriesOf(doc.Body) {
+			if entry.Key.GetToken().Value == name {
+				return entry
+			}
+		}
+	}
+	return nil
+}
+
+func entriesOf(body ast.Node) []*ast.MappingValueNode {
+	switch n := body.(type) {
+	case *ast.MappingNode:
+		return n.Values
+	case *ast.MappingValueNode:
+		return []*ast.MappingValueNode{n}
+	}
+	return nil
+}
+
+func entryOf(name string, value any) (*ast.MappingValueNode, error) {
+	data, err := yaml.Marshal(map[string]any{name: value})
+	if err != nil {
+		return nil, err
+	}
+	file, err := parser.ParseBytes(data, 0)
+	if err != nil {
+		return nil, err
+	}
+	entry := topLevelEntry(file, name)
+	if entry == nil {
+		return nil, fmt.Errorf("could not write %s", name)
+	}
+	return entry, nil
 }

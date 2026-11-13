@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -81,10 +82,24 @@ func Holders(cfg *state.Config, id string) []string {
 }
 
 func RefreshInventories(cfg *state.Config) {
+	refreshInventories(cfg, slices.Collect(maps.Keys(cfg.Remotes)))
+}
+
+func RefreshWhereListed(cfg *state.Config, id string) {
+	var listing []string
+	for name := range cfg.Remotes {
+		if cache, err := LoadCache(cfg.StateDir, name); err == nil && cache.Lists(id) {
+			listing = append(listing, name)
+		}
+	}
+	refreshInventories(cfg, listing)
+}
+
+func refreshInventories(cfg *state.Config, names []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), RefreshWait)
 	defer cancel()
 	var wg sync.WaitGroup
-	for name := range cfg.Remotes {
+	for _, name := range names {
 		client, err := For(cfg, name)
 		if err != nil {
 			continue
@@ -138,6 +153,10 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 	if err != nil {
 		return err
 	}
+	lostDelete, err := operationKey("delete", Target{ID: create.ID})
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), CreateWait)
 	defer cancel()
 	say(fmt.Sprintf("Creating %s on %s: the server clones or fetches %s first, which can take a while.", create.ID, name, create.GitURL))
@@ -150,6 +169,7 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 		c.Reservations = slices.DeleteFunc(c.Reservations, func(res Reservation) bool { return res.ID == create.ID })
 		if err == nil {
 			c.Inventory = append(slices.DeleteFunc(c.Inventory, func(l Listing) bool { return l.ID == create.ID }), listing)
+			c.Pending = slices.DeleteFunc(c.Pending, func(p PendingOp) bool { return p.Key == lostDelete })
 		}
 		return nil
 	})
@@ -163,9 +183,25 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 	return nil
 }
 
+func earlierCreation(cfg *state.Config, name, id string) error {
+	cache, _ := LoadCache(cfg.StateDir, name)
+	if !slices.ContainsFunc(cache.Inventory, func(l Listing) bool { return l.ID == id }) {
+		return fmt.Errorf("an earlier creation of %s on %s, with another prompt or settings, has no answer yet; run that command again to see what happened", id, name)
+	}
+	err := UpdateCache(cfg.StateDir, name, func(c *Cache) error {
+		c.Reservations = slices.DeleteFunc(c.Reservations, func(res Reservation) bool { return res.ID == id })
+		return nil
+	})
+	return cmp.Or(err, fmt.Errorf("%s already runs on %s: the earlier attempt whose answer was lost created it, with that attempt's prompt and settings, not these. Open it with factory open %s", id, name, id))
+}
+
 func reserve(cfg *state.Config, name string, create Create) (Reservation, error) {
+	digest, err := operationKey("create", create)
+	if err != nil {
+		return Reservation{}, err
+	}
 	var reservation Reservation
-	err := WithCreationLock(cfg, func() error {
+	err = WithCreationLock(cfg, func() error {
 		RefreshInventories(cfg)
 		if Local(cfg, create.ID) {
 			return fmt.Errorf("%s runs on this machine; pick another id", create.ID)
@@ -178,13 +214,17 @@ func reserve(cfg *state.Config, name string, create Create) (Reservation, error)
 				reservation = c.Reservations[i]
 				return nil
 			}
-			reservation = Reservation{ID: create.ID, GitURL: create.GitURL, Op: uuid.NewString(), At: time.Now()}
+			reservation = Reservation{ID: create.ID, GitURL: create.GitURL, Digest: digest, Op: uuid.NewString(), At: time.Now()}
 			c.Reservations = append(c.Reservations, reservation)
 			return nil
 		})
 	})
-	if err == nil && reservation.GitURL != create.GitURL {
+	switch {
+	case err != nil:
+	case reservation.GitURL != create.GitURL:
 		err = fmt.Errorf("a creation of %s from %s on %s has not finished; run it again from that repo to see what happened", create.ID, reservation.GitURL, name)
+	case reservation.Digest != digest:
+		err = earlierCreation(cfg, name, create.ID)
 	}
 	return reservation, err
 }

@@ -25,8 +25,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
-var valueFlags = []string{"--repo", "--prompt", "--pipeline", "--stages", "--agent", "--supervisor", "--remote", "--git-remote"}
-
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
 func runOpen(args []string) int {
@@ -41,7 +39,7 @@ func runOpen(args []string) int {
 	remoteFlag := flags.String("remote", "", "create the factory on this remote; default: default_remote")
 	local := flags.Bool("local", false, "create the factory on this machine, whatever default_remote says")
 	gitRemote := flags.String("git-remote", "", "the git remote the server clones from; default: origin, or the only remote")
-	if err := flags.Parse(reorder(args)); err != nil {
+	if err := flags.Parse(reorder(flags, args)); err != nil {
 		return 2
 	}
 	if *pipeline != "" && *stages != "" {
@@ -80,12 +78,15 @@ func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote strin
 	if r.Name != "" {
 		r.Name = factory.Slugify(r.Name)
 	}
+	if r.Name != "" {
+		remote.RefreshWhereListed(cfg, r.Name)
+	}
 	where, err := remote.Place(cfg, r.Name, remoteFlag, local)
 	if err != nil {
 		return err
 	}
 	if where != "" {
-		if cache, _ := remote.LoadCache(cfg.StateDir, where); slices.ContainsFunc(cache.Inventory, func(l remote.Listing) bool { return l.ID == r.Name }) {
+		if cache, _ := remote.LoadCache(cfg.StateDir, where); cache.Lists(r.Name) {
 			fmt.Printf("%s runs on %s.\n", r.Name, where)
 			return remote.UpdateCache(cfg.StateDir, where, func(c *remote.Cache) error {
 				shown := slices.IndexFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == r.Name })
@@ -134,11 +135,11 @@ func splitStages(list string) []string {
 	return stages
 }
 
-func reorder(args []string) []string {
+func reorder(flags *flag.FlagSet, args []string) []string {
 	var named, positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
-		case slices.Contains(valueFlags, args[i]) && i+1 < len(args):
+		case takesValue(flags, args[i]) && i+1 < len(args):
 			named = append(named, args[i], args[i+1])
 			i++
 		case strings.HasPrefix(args[i], "-"):
@@ -148,6 +149,20 @@ func reorder(args []string) []string {
 		}
 	}
 	return append(named, positional...)
+}
+
+func takesValue(flags *flag.FlagSet, arg string) bool {
+	name, isFlag := strings.CutPrefix(arg, "-")
+	name = strings.TrimPrefix(name, "-")
+	if !isFlag || strings.Contains(name, "=") {
+		return false
+	}
+	f := flags.Lookup(name)
+	if f == nil {
+		return false
+	}
+	boolean, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return !ok || !boolean.IsBoolFlag()
 }
 
 func openMain(r hub.OpenRequest) error {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -55,6 +56,15 @@ func Descendants(roots []int) []int {
 		queue = append(queue, children[pid]...)
 	}
 	return found
+}
+
+func ShellInForeground(shell int) bool {
+	out, err := exec.Command("ps", "-o", "tpgid=", "-p", strconv.Itoa(shell)).Output()
+	if err != nil {
+		return true
+	}
+	foreground, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	return err != nil || foreground == shell
 }
 
 func Terminate(pids []int) {

@@ -78,6 +78,8 @@ func TestOnlyLoopbackLinksGoThroughTheTunnel(t *testing.T) {
 		"http://localhost:5173/app?x=1#top":  "http://127.0.0.1:52817/app?x=1#top",
 		"http://[::1]:3000/":                 "http://127.0.0.1:52817/",
 		"https://127.0.0.1/health":           "https://127.0.0.1:52817/health",
+		"HTTP://LOCALHOST:47960/index.html":  "http://127.0.0.1:52817/index.html",
+		"http://0.0.0.0:47960/":              "http://127.0.0.1:52817/",
 		"https://github.com/acme/app/pull/7": "",
 		"http://homelab.tailnet:3000/":       "",
 	} {

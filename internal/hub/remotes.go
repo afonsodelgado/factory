@@ -137,6 +137,7 @@ func (m *Model) pollRemotes() tea.Cmd {
 	if m.Config.StateDir == "" {
 		return nil
 	}
+	m.followMachine()
 	var cmds []tea.Cmd
 	for _, name := range m.remoteNames() {
 		l := m.link(name)
@@ -144,7 +145,7 @@ func (m *Model) pollRemotes() tea.Cmd {
 			continue
 		}
 		l.busy = true
-		cfg := m.Config
+		cfg := new(*m.Config)
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 			defer cancel()
@@ -185,12 +186,32 @@ func fetchView(ctx context.Context, cfg *state.Config, name string) (remote.View
 	return view, cache.Server, err
 }
 
+func (m *Model) followMachine() {
+	if m.Config.ConfigDir == "" {
+		return
+	}
+	if fresh, err := state.LoadMachine(m.Config.ConfigDir); err == nil && !fresh.Equal(m.Config.Machine) {
+		m.Config.Machine = fresh
+		m.refresh()
+	}
+}
+
+func pushOnDisk(cfg *state.Config) state.Push {
+	if cfg.ConfigDir == "" {
+		return cfg.Push
+	}
+	if fresh, err := state.LoadMachine(cfg.ConfigDir); err == nil {
+		return fresh.Push
+	}
+	return cfg.Push
+}
+
 func listen(ctx context.Context, cfg *state.Config, name string) *remote.Events {
 	client, err := remote.For(cfg, name)
 	if err != nil {
 		return nil
 	}
-	client.SyncPush(ctx, cfg.Push)
+	client.SyncPush(ctx, pushOnDisk(cfg))
 	w, _ := remote.LoadWatch(cfg.StateDir, name)
 	events, err := client.Events(ctx, w.Cursor)
 	if err != nil {
@@ -359,8 +380,12 @@ func (m *Model) remoteAct(it Item, action string, fields map[string]any) error {
 	payload := map[string]any{"id": f.Label(), "incarnation": f.Remote.Incarnation}
 	maps.Copy(payload, fields)
 	cfg, name, label := m.Config, f.Remote.Name, f.Label()
+	send := func() error { return mutate(cfg, name, action, payload, nil) }
+	if action == "delete" {
+		send = func() error { return deleteOn(cfg, name, remote.Target{ID: label, Incarnation: f.Remote.Incarnation}) }
+	}
 	m.later = append(m.later, func() tea.Msg {
-		err := mutate(cfg, name, action, payload, nil)
+		err := send()
 		switch {
 		case errors.Is(err, remote.ErrUncertain):
 			return noticeMsg(problem(fmt.Sprintf("%s did not answer, so whether %s was %s is unknown. Wait for the list to refresh before trying again.", name, label, pastTense[action])))
@@ -386,6 +411,16 @@ func mutateWithin(cfg *state.Config, name, action string, wait time.Duration, pa
 	return client.MutateOnce(ctx, action, payload, reply)
 }
 
+func deleteOn(cfg *state.Config, name string, target remote.Target) error {
+	client, err := remote.For(cfg, name)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
+	defer cancel()
+	return client.Delete(ctx, target, nil)
+}
+
 type answeredMsg struct {
 	mark sentMark
 	at   time.Time
@@ -396,7 +431,7 @@ func (m *Model) deliverRemote(it Item, mark sentMark, text string) {
 	f := it.Factory
 	key := mark.Factory + "|" + mark.ItemID
 	if m.unreachable(f) {
-		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable. Draft kept."
+		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable."
 		return
 	}
 	m.panel.sent[key] = mark
@@ -414,13 +449,20 @@ func (m *Model) answered(msg answeredMsg) {
 	switch {
 	case errors.Is(msg.err, remote.ErrUncertain):
 		delete(m.panel.sent, key)
-		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again. Draft kept."
+		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
 		delete(m.panel.sent, key)
-		m.panel.refused[key] = "Not sent. " + msg.err.Error() + " Draft kept."
+		m.panel.refused[key] = "Not sent. " + withFullStop(msg.err.Error())
 	default:
 		m.recordSent(msg.mark, msg.at)
 	}
+}
+
+func withFullStop(sentence string) string {
+	if strings.HasSuffix(sentence, ".") {
+		return sentence
+	}
+	return sentence + "."
 }
 
 func proxySlug(f factory.Factory) string { return f.Label() + "+" + f.Remote.Name }
@@ -804,14 +846,28 @@ func (m *Model) knownElsewhere() []dialog.Existing {
 		known = append(known, dialog.Existing{Key: f.Key(), Worktree: f.Slug, Label: f.Label(), Status: it.Status.String(), Stage: stage, Archived: f.Archived(), Retired: f.Remote == nil && retired(f), Remote: f.Where()})
 	}
 	for _, name := range m.remoteNames() {
-		cache, _ := remote.LoadCache(m.Config.StateDir, name)
-		for _, l := range cache.Inventory {
-			if !listed[name+"|"+l.ID] {
-				known = append(known, dialog.Existing{Worktree: l.ID, Label: l.ID, Remote: name})
+		for _, id := range m.idsOn(name) {
+			if !listed[name+"|"+id] {
+				known = append(known, dialog.Existing{Worktree: id, Label: id, Remote: name})
 			}
 		}
 	}
 	return known
+}
+
+func (m *Model) idsOn(name string) []string {
+	var ids []string
+	if l := m.link(name); l.state(m.Now()) == connected {
+		for _, w := range l.view.Factories {
+			ids = append(ids, w.ID)
+		}
+		return ids
+	}
+	cache, _ := remote.LoadCache(m.Config.StateDir, name)
+	for _, l := range cache.Inventory {
+		ids = append(ids, l.ID)
+	}
+	return ids
 }
 
 func (m *Model) createRemote(r dialog.NewResult) error {

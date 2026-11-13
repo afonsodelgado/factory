@@ -180,6 +180,15 @@ func TestForwardedReviewPreservesHostAndOriginChecks(t *testing.T) {
 			t.Errorf("%s through the tunnel answered %d; want 200", name, status)
 		}
 	}
+	resp, err := http.Get(origin + "/r/tok/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(index), `href="/r/tok/k/plan.html"`) {
+		t.Errorf("the index through the tunnel links:\n%s\nwant its pages on the tunnel's own origin, not the server's port", index)
+	}
 	for name, status := range map[string]int{
 		"an unregistered forwarded port": call("GET", "http://127.0.0.1:"+strconv.Itoa(local)+"/r/tok/k/plan.html", "", "", ""),
 		"a forged Host":                  call("GET", origin+"/r/tok/k/plan.html", "evil.example:"+strconv.Itoa(tunnel), "", ""),
