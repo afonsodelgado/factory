@@ -11,12 +11,31 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type View struct {
 	Home      string    `json:"home"`
+	Review    string    `json:"review,omitempty"`
 	Factories []Factory `json:"factories"`
+	Opens     []Open    `json:"opens,omitempty"`
+}
+
+type Open struct {
+	ID      string          `json:"id"`
+	Factory string          `json:"factory"`
+	URL     string          `json:"url"`
+	Health  string          `json:"health,omitempty"`
+	Page    string          `json:"page,omitempty"`
+	Key     string          `json:"key,omitempty"`
+	Cookies []review.Cookie `json:"cookies,omitempty"`
+	At      time.Time       `json:"at"`
+}
+
+type LinkRequest struct {
+	URL  string `json:"url"`
+	Port int    `json:"port,omitempty"`
 }
 
 type Factory struct {
@@ -26,6 +45,7 @@ type Factory struct {
 	Repo        string                `json:"repo"`
 	RepoName    string                `json:"repo_name,omitempty"`
 	Worktree    string                `json:"worktree,omitempty"`
+	ReviewKey   string                `json:"review_key,omitempty"`
 	State       *state.State          `json:"state,omitempty"`
 	StateError  string                `json:"state_error,omitempty"`
 	StateMod    time.Time             `json:"state_mod,omitzero"`

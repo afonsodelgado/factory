@@ -1,6 +1,9 @@
 package hub
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +56,60 @@ func TestRemoteFactoriesGroupBesideLocalOnesAndGoGreyWhenUnreachable(t *testing.
 	if _, right := m.Header(); !strings.Contains(right, "homelab") || !strings.Contains(right, "spare unreachable 4m") {
 		t.Errorf("header right %q; want each remote's link, so a lost server is visible from any row", right)
 	}
+}
+
+func TestAServerLinkOpensOnceAcrossPollsAndHubRestarts(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nexit 255\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	m := mixedModel(t)
+	var opened []string
+	withLink := func(m *Model) *Model {
+		m.Tunnels = &remote.Tunnels{StateDir: m.Config.StateDir}
+		m.Open = func(url string) { opened = append(opened, url) }
+		m.links["homelab"].view.Opens = []remote.Open{{ID: "o-1", Factory: "csv-export", URL: "https://github.com/acme/app/pull/7"}}
+		return m
+	}
+	withLink(m)
+
+	first, second := m.settleOpens("homelab"), m.settleOpens("homelab")
+	if first == nil || second != nil {
+		t.Fatal("a second poll before the first open finished started another open")
+	}
+	first()
+	restarted := withLink(mixedModel(t))
+	restarted.Config.StateDir = m.Config.StateDir
+	if cmd := restarted.settleOpens("homelab"); cmd != nil {
+		cmd()
+	}
+	if len(opened) != 1 || opened[0] != "https://github.com/acme/app/pull/7" {
+		t.Fatalf("opened %v; want the PR link once, as it is, even though the server never heard the acknowledgement", opened)
+	}
+}
+
+func TestARemoteGateNamesTheServerAndTheTunnelItsPageComesThrough(t *testing.T) {
+	local := time.Local
+	time.Local = time.UTC
+	t.Cleanup(func() { time.Local = local })
+	m := mixedModel(t)
+	gate := state.Attention{ID: "gate-plan", Kind: "gate", Title: "The plan is ready", CreatedAt: state.Time{Time: remoteNow.Add(-2 * time.Minute)}}
+	w := wired("doctor-json", "plan", factory.NeedsYou, gate)
+	w.State.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{Title: "Plan", URL: "file://" + w.Worktree + "/.claude/factory/doctor-json/plan.html"}}}}
+	homelab := m.links["homelab"]
+	homelab.view.Review = "http://127.0.0.1:7417/r/tok/"
+	homelab.view.Factories = append(homelab.view.Factories, w)
+	data, _ := json.Marshal([]remote.Tunnel{{Server: "s-1", Port: 7417, Local: 52817}})
+	writeFile(remote.TunnelsPath(m.Config.StateDir, "homelab"), string(data))
+	m.refresh()
+	it, ok := m.snap.Named("doctor-json")
+	if !ok {
+		t.Fatal("doctor-json is not listed")
+	}
+	m.choose(it.Factory.Key())
+	m.panel.tab = panel.Attention
+	golden.RequireEqual(t, m.PanelView(109, 20))
 }
 
 type quietTypist struct{}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -52,7 +53,7 @@ const notResolved = "The supervisor received this answer but finished its turn w
 func (m *Model) forgetClosedItems() {
 	open := map[string]time.Time{}
 	for _, it := range m.snap.Items {
-		for _, item := range attentionItems(it, m.snap.At, m.threadCounter()) {
+		for _, item := range attentionItems(it, m.snap.At, m.threadCounter(it.Factory)) {
 			if item.ID != "" {
 				open[draftKey(it.Factory, item.ID)] = item.Since
 			}
@@ -154,7 +155,7 @@ func misroutedIn(s sentMark, submits []state.HookEvent) bool {
 }
 
 func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled) {
-	for _, item := range attentionItems(it, m.snap.At, m.threadCounter()) {
+	for _, item := range attentionItems(it, m.snap.At, m.threadCounter(it.Factory)) {
 		mark, sent := m.panel.sent[draftKey(it.Factory, item.ID)]
 		if item.ID == "" || !sent {
 			shown = append(shown, item)
@@ -566,13 +567,16 @@ func (m *Model) panelView() panel.View {
 	f := it.Factory
 	v.Label = f.Placed()
 	v.Items, v.Settled = m.shownItems(it)
+	if f.Remote != nil {
+		v.Served = m.servedBy(f)
+	}
 	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
 		v.Next = next.Factory.Label()
 	}
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
-			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter()))
+			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter(f)))
 		}
 	}
 	v.PRs = m.prsFor(f)
@@ -1035,6 +1039,10 @@ func (m *Model) openRow(v panel.View) tea.Cmd {
 func (m *Model) openCmd(url string) tea.Cmd {
 	if url == "" || m.Open == nil {
 		return nil
+	}
+	if it, ok := m.selectedItem(); ok && it.Factory.Remote != nil {
+		page, _ := liveStageOf(it.Factory, url)
+		return m.openRemote(it.Factory.Remote.Name, remote.Open{Factory: it.Factory.Label(), URL: url, Page: page, Key: m.wires[it.Factory.Key()].ReviewKey})
 	}
 	url = m.reviewURL(url)
 	if live := m.openLive(url); live != nil {

@@ -49,6 +49,7 @@ type Cache struct {
 	Reservations []Reservation `json:"reservations,omitempty"`
 	Forgotten    []string      `json:"forgotten,omitempty"`
 	Pending      []PendingOp   `json:"pending,omitempty"`
+	Opened       []string      `json:"opened,omitempty"`
 	CheckedAt    time.Time     `json:"checked_at,omitzero"`
 }
 

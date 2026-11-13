@@ -180,15 +180,21 @@ func fetchView(ctx context.Context, cfg *state.Config, name string) (remote.View
 	return view, cache.Server, err
 }
 
-func (m *Model) remoteArrived(msg remoteMsg) {
+func (m *Model) remoteArrived(msg remoteMsg) tea.Cmd {
 	l := m.link(msg.name)
 	l.busy = false
 	if msg.err != nil {
 		l.ok, l.problem = false, msg.err.Error()
-	} else {
-		l.ok, l.view, l.server, l.contact, l.problem = true, msg.view, msg.server, m.Now(), ""
+		m.refresh()
+		return nil
 	}
+	back := !l.ok
+	l.ok, l.view, l.server, l.contact, l.problem = true, msg.view, msg.server, m.Now(), ""
 	m.refresh()
+	if back {
+		return tea.Batch(m.restoreTunnels(msg.name), m.settleOpens(msg.name))
+	}
+	return m.settleOpens(msg.name)
 }
 
 func (m *Model) remoteItems() []Item {

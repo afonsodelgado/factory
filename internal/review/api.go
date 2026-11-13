@@ -6,6 +6,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 )
 
 func (s *Server) Store(f Factory) (*Store, error) {
@@ -114,6 +116,51 @@ func (s *Server) deleteThread(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, r, func(st *Store) (any, error) { return map[string]bool{"deleted": true}, st.Delete(r.PathValue("id")) })
 }
 
+func (s *Server) saveShot(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PNG []byte `json:"png"`
+	}
+	if !readJSONUpTo(w, r, &body, shotLimit) {
+		return
+	}
+	f, st, ok := s.storeFor(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	rel := "shots/" + id + ".png"
+	if err := st.SetShot(id, rel); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	path := filepath.Join(f.Dir, "review", filepath.FromSlash(rel))
+	err := os.MkdirAll(filepath.Dir(path), 0o755)
+	if err == nil {
+		err = os.WriteFile(path, body.PNG, 0o644)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.ThreadsChanged(f)
+	writeJSON(w, http.StatusOK, map[string]string{"shot": rel})
+}
+
+func (s *Server) addConsole(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Lines []string `json:"lines"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	_, st, ok := s.storeFor(w, r)
+	if !ok {
+		return
+	}
+	st.AddConsole(body.Lines)
+	writeJSON(w, http.StatusOK, map[string]int{"lines": len(body.Lines)})
+}
+
 func (s *Server) respond(w http.ResponseWriter, r *http.Request, change func(*Store) (any, error)) {
 	f, st, ok := s.storeFor(w, r)
 	if !ok {
@@ -128,8 +175,14 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, change func(*St
 	writeJSON(w, http.StatusOK, result)
 }
 
+const shotLimit = 16 << 20
+
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil {
+	return readJSONUpTo(w, r, v, 1<<20)
+}
+
+func readJSONUpTo(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	if err := json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(v); err != nil {
 		http.Error(w, "bad JSON: "+err.Error(), http.StatusBadRequest)
 		return false
 	}

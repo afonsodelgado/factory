@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -122,14 +123,9 @@ func (t Transport) privateControlDir() error {
 
 func (t Transport) Args(tty bool, command []string) []string {
 	args := []string{
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=10",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=3",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=" + t.controlPath(),
 		"-o", "ControlPersist=10m",
-		"-o", "ForwardAgent=no",
 		"-o", "ClearAllForwardings=yes",
 	}
 	if tty {
@@ -137,6 +133,27 @@ func (t Transport) Args(tty bool, command []string) []string {
 	} else {
 		args = append(args, "-T")
 	}
+	return append(t.connection(args), command...)
+}
+
+func (t Transport) tunnelArgs(local, port int) []string {
+	return t.connection([]string{
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "ExitOnForwardFailure=yes",
+		"-N",
+		"-L", fmt.Sprintf("127.0.0.1:%d:localhost:%d", local, port),
+	})
+}
+
+func (t Transport) connection(mode []string) []string {
+	args := slices.Concat([]string{
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=3",
+		"-o", "ForwardAgent=no",
+	}, mode)
 	if t.Remote.User != "" {
 		args = append(args, "-l", t.Remote.User)
 	}
@@ -146,7 +163,7 @@ func (t Transport) Args(tty bool, command []string) []string {
 	if t.Remote.Identity != "" {
 		args = append(args, "-i", state.ExpandHome(t.Remote.Identity), "-o", "IdentitiesOnly=yes")
 	}
-	return append(append(args, "--", t.Remote.Host), command...)
+	return append(args, "--", t.Remote.Host)
 }
 
 func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]byte, error) {
@@ -168,17 +185,17 @@ func (t Transport) Run(ctx context.Context, stdin []byte, command []string) ([]b
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit) && exit.ExitCode() == unreachable:
-		return nil, &TransportError{Remote: t.Name, Detail: lastLine(stderr.String(), exit)}
+		return nil, &TransportError{Remote: t.Name, Detail: lastLine(stderr.String(), exit.ExitCode())}
 	case errors.As(err, &exit):
-		return nil, &CommandError{Remote: t.Name, Detail: lastLine(stderr.String(), exit)}
+		return nil, &CommandError{Remote: t.Name, Detail: lastLine(stderr.String(), exit.ExitCode())}
 	}
 	return out, err
 }
 
-func lastLine(stderr string, exit *exec.ExitError) string {
+func lastLine(stderr string, code int) string {
 	lines := strings.Split(strings.TrimSpace(stderr), "\n")
 	if line := strings.TrimSpace(lines[len(lines)-1]); line != "" {
 		return line
 	}
-	return fmt.Sprintf("ssh exited with %d", exit.ExitCode())
+	return fmt.Sprintf("ssh exited with %d", code)
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,7 @@ type Server struct {
 	now       func() time.Time
 	act       func(Action) (any, error)
 	browser   *Browser
+	forwarded map[string]bool
 }
 
 type event struct {
@@ -68,6 +70,7 @@ func Listen(port int, token string, overlay []byte) (*Server, error) {
 		watched:   map[string]bool{},
 		clients:   map[chan event]bool{},
 		stores:    map[string]*Store{},
+		forwarded: map[string]bool{},
 		now:       time.Now,
 	}
 	s.http = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
@@ -176,17 +179,32 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("PATCH /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.updateThread)))
 	mux.HandleFunc("DELETE /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.deleteThread)))
 	mux.HandleFunc("POST /r/{token}/{key}/_api/threads/{id}/replies", s.withToken(s.mutation(s.replyThread)))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/threads/{id}/shot", s.withToken(s.mutation(s.saveShot)))
+	mux.HandleFunc("POST /r/{token}/{key}/_api/console", s.withToken(s.mutation(s.addConsole)))
 	mux.HandleFunc("GET /r/{token}/{key}/_api/status", s.withToken(s.action("status")))
 	mux.HandleFunc("POST /r/{token}/{key}/_api/send", s.withToken(s.mutation(s.action("send"))))
 	mux.HandleFunc("POST /r/{token}/{key}/_api/approve", s.withToken(s.mutation(s.action("approve"))))
 	return s.sameHost(mux)
 }
 
+func (s *Server) Allow(port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, host := range []string{"127.0.0.1", "localhost"} {
+		s.forwarded[net.JoinHostPort(host, strconv.Itoa(port))] = true
+	}
+}
+
 func (s *Server) sameHost(next http.Handler) http.Handler {
 	_, port, _ := net.SplitHostPort(s.ln.Addr().String())
-	allowed := map[string]bool{"127.0.0.1:" + port: true, "localhost:" + port: true}
+	own := map[string]bool{"127.0.0.1:" + port: true, "localhost:" + port: true}
+	allowed := func(host string) bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return own[host] || s.forwarded[host]
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowed[r.Host] {
+		if !allowed(r.Host) {
 			http.Error(w, "unknown host", http.StatusForbidden)
 			return
 		}

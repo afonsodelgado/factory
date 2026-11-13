@@ -116,6 +116,8 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		return forward(cfg, req.Action, req.Op, req.Data)
 	case "view":
 		return forward(cfg, "view", "", nil)
+	case "link", "opened":
+		return forward(cfg, req.Action, "", req.Data)
 	case "wake", "pause", "archive", "unarchive", "answer":
 		f, err := targetFactory(cfg, req.Data)
 		if err != nil {

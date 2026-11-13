@@ -17,6 +17,7 @@ import (
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -102,23 +103,26 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer watch.Close()
+	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
+	defer tunnels.Close()
 
 	model := hub.NewModel(hub.Model{
-		Config: cfg,
-		Engine: engine,
-		Layout: layout,
-		Server: server,
-		Loader: &hub.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now},
-		Events: events,
-		Watch:  watch,
-		GitHub: &hub.GitHub{Run: hub.RunGH},
-		Typist: engine,
-		Open:   reviewOpener(pages, chrome),
-		Review: pages,
-		Chrome: chrome,
-		Bell:   os.Stderr,
-		Notify: notify,
-		Icons:  icons,
+		Config:  cfg,
+		Engine:  engine,
+		Layout:  layout,
+		Server:  server,
+		Loader:  &hub.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now},
+		Events:  events,
+		Watch:   watch,
+		GitHub:  &hub.GitHub{Run: hub.RunGH},
+		Typist:  engine,
+		Open:    reviewOpener(pages, chrome),
+		Review:  pages,
+		Chrome:  chrome,
+		Tunnels: tunnels,
+		Bell:    os.Stderr,
+		Notify:  notify,
+		Icons:   icons,
 		DialogCommand: func(kind string) string {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},
