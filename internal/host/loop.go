@@ -116,6 +116,16 @@ func (m *Runtime) handle(request Message) Message {
 		}
 	case "push-test":
 		err = m.testPush()
+	case "qa-claim":
+		var c remote.QAClaim
+		if err = json.Unmarshal(request.Data, &c); err == nil {
+			value, err = m.ClaimQA(c)
+		}
+	case "qa-return":
+		var r remote.QAReturn
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			err = m.ReturnQA(r)
+		}
 	case "snapshot":
 		value = m.snap
 	case "view":

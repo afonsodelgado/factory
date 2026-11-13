@@ -151,9 +151,6 @@ func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 }
 
 func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
-	if _, profile := m.repoConfig(it.Factory.Repo); r.Role == "qa" && profile.BrowserQA() && m.clonedForLaptop(it.Factory.Repo) {
-		return StageReply{}, errors.New("browser QA for a factory created from a laptop runs on that laptop, which this server can't hand it to yet; it stays held here. Run the QA from the laptop's own checkout, or update both machines")
-	}
 	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
@@ -165,6 +162,9 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	}
 	if err := WriteFile(run.Prompt, prompt); err != nil {
 		return StageReply{}, err
+	}
+	if m.heldForLaptop(it, r.Role) {
+		return m.HoldQA(it, runs, run, prompt)
 	}
 	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, r.Role); err != nil {
 		return StageReply{}, err

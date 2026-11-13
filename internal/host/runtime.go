@@ -77,7 +77,7 @@ func (m *Runtime) TakeNotice() string {
 
 func (m *Runtime) Tick() {
 	if m.Loader != nil {
-		m.snap = m.Loader.Load()
+		m.snap = m.withQA(m.Loader.Load())
 	}
 	m.QueueInbox()
 	m.FlushTypeQueue()

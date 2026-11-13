@@ -83,6 +83,10 @@ type Model struct {
 	attempts      map[string]attempt
 	opening       map[string]bool
 	later         []tea.Cmd
+	runs          []remote.QARun
+	claiming      map[string]remote.QARun
+	returning     map[string]bool
+	checkouts     map[string]string
 }
 
 type snapshotMsg Snapshot
@@ -228,6 +232,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.attached(msg)
 	case answeredMsg:
 		m.answered(msg)
+	case qaClaimedMsg:
+		m.qaClaimed(msg)
+	case qaReturnedMsg:
+		m.qaReturned(msg)
 	case removalMsg:
 		cmd = m.removalArrived(msg)
 	case changedMsg:
@@ -937,8 +945,14 @@ func (m *Model) row(it Item) selector.Row {
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)
 	}
+	if _, startable := m.startable(it); startable {
+		row.Items++
+	}
 	if f.Remote != nil && !f.Remote.Creating.IsZero() {
 		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
+	}
+	if _, here := m.qaRunOf(f.Key()); here {
+		row.Stage = laptopStage
 	}
 	return row
 }
@@ -976,6 +990,9 @@ func (m *Model) pushFrame() {
 		}
 		if f := it.Factory; f.Remote != nil {
 			path = remotePath(f, f.Worktree)
+		}
+		if run, here := m.qaRunOf(it.Factory.Key()); here {
+			path = tilde(run.Dir)
 		}
 		if m.Layout.Stage != "" && it.Stage != nil {
 			stage = stageLabel(it.Stage.Run)
@@ -1211,6 +1228,8 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
+	case item.Kind == "qa":
+		return hints("⏎", "start on this laptop", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")
 }

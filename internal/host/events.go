@@ -47,6 +47,11 @@ func attentions(it Item) []remote.Attention {
 			open = append(open, e)
 		}
 	}
+	if it.QA != nil && it.QA.Phase == remote.QAHeld {
+		e := base
+		e.Item, e.Kind, e.Since = it.QA.ID, "qa", it.QA.CreatedAt
+		open = append(open, e)
+	}
 	if factory.PermissionPrompt(it.Hook) {
 		e := base
 		e.Item, e.Kind, e.Since = "permission", "permission", it.Hook.Prompt.At

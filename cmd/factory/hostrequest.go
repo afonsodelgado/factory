@@ -112,7 +112,7 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 			return nil, remote.Failed, err
 		}
 		return forward(cfg, "delete", req.Op, mustJSON(hub.DeleteRequest{Repo: f.Repo, Slug: f.Slug}))
-	case "stage", "review":
+	case "stage", "review", "qa-claim", "qa-return":
 		return forward(cfg, req.Action, req.Op, req.Data)
 	case "view":
 		return forward(cfg, "view", "", nil)

@@ -361,22 +361,6 @@ func TestADeleteThatCouldNotClosePanesKeepsItsRecordAndFinishesOnRetry(t *testin
 	}
 }
 
-func TestServerNeverStartsBrowserQAForALaptopFactory(t *testing.T) {
-	stateDir := t.TempDir()
-	clone := filepath.Join(stateDir, "repos", "0123456789abcdef")
-	if err := WriteFile(state.RepoConfigPath(clone), "qa:\n  mode: browser\n"); err != nil {
-		t.Fatal(err)
-	}
-	r := New(Runtime{Config: &state.Config{StateDir: stateDir}})
-	it := Item{Factory: factory.Factory{Repo: clone, Slug: "csv", Dir: filepath.Join(clone, "f"), Worktree: clone}}
-	if _, err := r.StartStage(it, &state.StageRuns{}, StageRequest{Role: "qa"}); err == nil {
-		t.Fatal("started browser QA on the server; it belongs to the laptop and must stay held")
-	}
-	if profile, _ := state.ReadProfile(clone); r.chrome(clone, profile) {
-		t.Fatal("a server launch would pass --chrome for a factory created from a laptop")
-	}
-}
-
 func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
@@ -451,6 +435,36 @@ func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode == http.StatusForbidden {
 		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
+	}
+}
+
+func TestHoldingQAGivesUpOnAnOriginThatNeverAnswers(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	bin, repo := t.TempDir(), t.TempDir()
+	shim := "#!/bin/sh\ncase \"$*\" in *ls-remote*) exec sleep 30;; esac\nexec " + realGit + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "csv"},
+		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "start"},
+		{"remote", "add", "origin", "https://git.example/acme/app.git"},
+	} {
+		if out, err := exec.Command(realGit, append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	publishCheckWait = 200 * time.Millisecond
+	t.Cleanup(func() { publishCheckWait = 20 * time.Second })
+	start := time.Now()
+	_, _, _, err = publishedHead(repo)
+	if err == nil || !strings.Contains(err.Error(), "did not answer") || time.Since(start) > 5*time.Second {
+		t.Fatalf("publishedHead returned %v after %s; want it to give up, since the host serves every request in one loop", err, time.Since(start))
 	}
 }
 

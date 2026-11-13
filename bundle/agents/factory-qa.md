@@ -12,6 +12,10 @@ You are QA for one factory. Follow the preloaded `qa-factory` skill in its **fac
 
 In `qa.mode: browser`, the browser tools come from the supervisor's session. Load them with one ToolSearch call as the skill says. If they are missing, return `failed` with "Chrome tools unavailable": do not fall back to curl-only testing and call it done. In `qa.mode: terminal`, Chrome is not needed: you drive the built program in a scratch tmux server.
 
+## On the developer's laptop
+
+For a factory on a server, the laptop runs you in a detached worktree of the exact commit to test, so `git branch --show-current` prints nothing. Test that commit as it is: do not check out, pull, commit or push. Put the report and evidence under `.claude/qa/` and list them in `outputs`: only those files go back to the server, and in stack mode also `review/stack.sh` and `review/stack.json`, which the server runs and opens through its tunnel.
+
 ## Stack mode
 
 When the prompt says stack mode, follow the skill's **Stack mode** section instead of testing: write `review/stack.sh` and `review/stack.json`, check them, stop what you started, and return. `data.findings` stays zero.

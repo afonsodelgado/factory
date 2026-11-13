@@ -42,6 +42,8 @@ An attention item is something the user must act on. The supervisor writes it to
 | cap | `cap-<id>-<stage>` |
 | failure | `fail-<id>-<stage>` |
 
+A QA job held for the developer's laptop is not an item you write: the app shows its start item and pushes it.
+
 `<id>` is the factory id, as in the factory directory name. A cap or failure id ends with the stage key, which is how the app knows which stage `/factory skip` names and which limit a cap raises (`coderabbit_rounds` for `coderabbit`, `qa_rounds` otherwise).
 
 ## Messages from the panel

@@ -231,7 +231,9 @@ func (m *Model) openRemote(name string, o remote.Open) tea.Cmd {
 	}
 	cfg, tunnels, chrome, open, home := m.Config, m.Tunnels, m.Chrome, m.Open, l.view.Review
 	return func() tea.Msg {
-		err := openThrough(cfg, tunnels, chrome, open, name, home, o)
+		if err := openThrough(cfg, tunnels, chrome, open, name, home, o); err != nil {
+			return noticeMsg(problem("Could not open " + o.URL + " from " + name + ": " + err.Error() + ". It stays queued and opens when the hub starts again."))
+		}
 		if o.ID != "" {
 			remote.UpdateCache(cfg.StateDir, name, func(c *remote.Cache) error {
 				c.Opened = append(c.Opened, o.ID)
@@ -239,9 +241,6 @@ func (m *Model) openRemote(name string, o remote.Open) tea.Cmd {
 				return nil
 			})
 			acknowledge(cfg, name, []string{o.ID})()
-		}
-		if err != nil {
-			return noticeMsg(problem("Could not open " + o.URL + " from " + name + ": " + err.Error()))
 		}
 		return nil
 	}

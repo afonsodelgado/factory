@@ -86,6 +86,7 @@ type Factory struct {
 	Hook        *state.HookFile       `json:"hook,omitempty"`
 	Pane        *Pane                 `json:"pane,omitempty"`
 	Stage       *Stage                `json:"stage,omitempty"`
+	QA          *QAJob                `json:"qa,omitempty"`
 	Activity    []state.ActivityEntry `json:"activity,omitempty"`
 }
 
