@@ -341,7 +341,7 @@ func (r *Remotes) drawAdd(c *theme.Canvas) {
 		if r.field == field {
 			text += "█"
 		}
-		drawInput(c, 1, y+1, c.W-2, "", []string{text}, r.field == field)
+		drawInput(c, 1, y+1, c.W-2, "", []string{text}, r.field == field, theme.Focused)
 		y += 4
 	}
 	input("Name, as the hub shows it", nameField)
@@ -624,7 +624,7 @@ func (r *Remotes) drawPush(c *theme.Canvas) {
 	if r.editingServer {
 		server += "█"
 	}
-	drawInput(c, 1, y+2, c.W-2, "", []string{server}, r.editingServer)
+	drawInput(c, 1, y+2, c.W-2, "", []string{server}, r.editingServer, theme.Focused)
 	y = paragraph(c, y+5, "ntfy.sh works anywhere. A self-hosted server needs a URL your phone can reach.", theme.Muted)
 	topicNote := "generated and unguessable · r makes a new one"
 	if on {
