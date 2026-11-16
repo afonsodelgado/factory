@@ -365,6 +365,13 @@ func TestPhonePopupKeepsThePairingLinkAndKeysVisibleAt80x24(t *testing.T) {
 	if screen := crowded.View().Content; !strings.Contains(screen, "Phone 8") || !strings.Contains(screen, "keeps it.") || !intact(screen, hintRows...) {
 		t.Fatalf("revoking the last of 8 phones at 80x24 shows:\n%s\nwant that phone, the whole prompt and both intact key rows", screen)
 	}
+	crowded.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	for _, height := range []int{11, 12} {
+		crowded.Update(tea.WindowSizeMsg{Width: 74, Height: height})
+		crowded.View()
+		crowded.Update(phoneDone{status: crowded.Context, notice: "Phone is on."})
+		crowded.View()
+	}
 }
 
 func TestRemotesListShowsLinkDefaultAndPush(t *testing.T) {

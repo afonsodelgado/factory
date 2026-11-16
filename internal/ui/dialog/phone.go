@@ -323,8 +323,8 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 	if text != "" {
 		lines = theme.Wrap(text, c.W-2)
 	}
-	if fitsBelowOneDevice := space - 2; !p.revoking && len(lines) > fitsBelowOneDevice {
-		lines = clipLines(lines, max(fitsBelowOneDevice, 1), c.W-2)
+	if fitsBelowOneDevice := max(space-2, 1); !p.revoking && len(lines) > fitsBelowOneDevice {
+		lines = clipLines(lines, fitsBelowOneDevice, c.W-2)
 	}
 	y := devicesTop + p.drawDevices(c, max(space-1-len(lines), 1)) + 1
 	for i, line := range lines {
