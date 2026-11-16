@@ -168,9 +168,6 @@ func startReview(cfg *state.Config) (*review.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !cfg.Phone.Enabled {
-		return pages, nil
-	}
 	if err := pages.ServeMobile(review.MobileSocket(cfg.StateDir)); err != nil {
 		pages.Close()
 		return nil, err
