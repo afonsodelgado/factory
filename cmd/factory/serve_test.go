@@ -191,6 +191,59 @@ func TestTheRuntimeChangesHandsBetweenServeAndTheHubWithoutLosingAQueuedMessage(
 	}
 }
 
+func TestTurningPhoneOnWhileTheHubRunsServesItsReviewPages(t *testing.T) {
+	m := newPhoneMachine(t)
+	config := filepath.Join(filepath.Dir(m.stateDir), "config", "config.yml")
+	on, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, config, strings.Replace(string(on), "enabled: true", "enabled: false", 1))
+	m.tmux(t, "new-session", "-d", "-s", "factory", "exec sleep 600")
+	m.startHub(t)
+	m.waitForOwner(t, phone.ModeHub)
+
+	writeFile(t, config, string(on))
+	serve := m.command("serve")
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { serve.Process.Signal(syscall.SIGTERM); serve.Wait() })
+	code, _, err := phone.Open(m.stateDir).NewCode(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap phone.Snapshot
+	waitFor(t, "the gateway to pair the phone and read the hub's factories", func() bool {
+		if m.cookie == "" {
+			m.call(t, "POST", "/api/pair/exchange", `{"code":"`+code+`"}`)
+		}
+		status, body := m.call(t, "GET", "/api/snapshot", "")
+		return status == 200 && json.Unmarshal([]byte(body), &snap) == nil && len(snap.Factories) == 1
+	})
+	m.openPlan(t, snap.Factories[0].Route, "the hub that started with Phone off")
+}
+
+func TestTheReviewServerStartsWhenTheStateDirIsTooLongForThePhoneSocket(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "frl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	stateDir := filepath.Join(base, strings.Repeat("a", 92-len(base)-1))
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pages, phoneProblem, err := startReview(&state.Config{StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("a %d-byte state dir stopped the review server: %v; want the hub to start without phone review pages", len(stateDir), err)
+	}
+	pages.Close()
+	if phoneProblem == "" {
+		t.Error("the phone socket could not open and nothing said so; want a notice naming the problem")
+	}
+}
+
 func TestPhoneStopReleasesAFallbackWhoseServeDied(t *testing.T) {
 	m := newPhoneMachine(t)
 	serve := m.command("serve")

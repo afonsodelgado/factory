@@ -91,15 +91,18 @@ func printTestPush(w io.Writer, setup phone.Setup) error {
 			names[d.ID] = d.Name
 		}
 	}
+	var failed error
 	for _, r := range results {
 		outcome := "accepted by the push service; check that the phone shows it"
 		if !r.Accepted {
-			outcome = r.Problem
+			outcome, failed = r.Problem, errPushRejected
 		}
 		fmt.Fprintf(w, "%s: %s\n", cmp.Or(names[r.Device], r.Device), outcome)
 	}
-	return nil
+	return failed
 }
+
+var errPushRejected = errors.New("a test notification did not reach the phone's push service")
 
 func phoneSetup(cfg *state.Config) phone.Setup {
 	return phone.Setup{Config: cfg, Bundle: bundle.Files, Start: func() error { return startServe(cfg) }}
@@ -111,6 +114,9 @@ func configurePhone(setup phone.Setup, args []string) error {
 	hostname := flags.String("hostname", "", "this machine's full Tailscale name, such as devbox.tail1234.ts.net")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("unexpected %q; give only --port and --hostname", flags.Arg(0))
 	}
 	if *port == 0 && *hostname == "" {
 		return errors.New("give --port, --hostname or both")
@@ -205,10 +211,12 @@ func (a phoneActions) Pair() (dialog.PhonePairing, error) {
 
 func (a phoneActions) Test() (string, error) {
 	var b strings.Builder
-	if err := printTestPush(&b, a.setup); err != nil {
-		return "", err
+	err := printTestPush(&b, a.setup)
+	outcome := strings.ReplaceAll(strings.TrimSpace(b.String()), "\n", "; ")
+	if errors.Is(err, errPushRejected) {
+		return "", errors.New(outcome)
 	}
-	return strings.ReplaceAll(strings.TrimSpace(b.String()), "\n", "; "), nil
+	return outcome, err
 }
 
 func (a phoneActions) Check() []dialog.CheckRow {

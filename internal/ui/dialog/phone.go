@@ -314,38 +314,73 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 		c.Put(1, 2+i, row.label, theme.Muted)
 		c.PutMax(checkDetailX-10, 2+i, row.value, row.ink, c.W-checkDetailX+9)
 	}
-	y := 7
-	c.Put(1, y, "Paired phones", theme.Bright)
-	y++
-	if len(p.Context.Devices) == 0 {
-		c.Put(3, y, "none yet; p shows a code to scan", theme.Muted)
-		y++
+	c.Put(1, devicesTop-1, "Paired phones", theme.Bright)
+	hints := packHints(p.mainHints(), c.W-2)
+	hintsTop := c.H - len(hints)
+	space := hintsTop - devicesTop
+	text, ink := p.mainMessage()
+	var lines []string
+	if text != "" {
+		lines = theme.Wrap(text, c.W-2)
 	}
-	for i, d := range p.Context.Devices {
-		ink := theme.Text
-		if i == p.cursor {
+	if fitsBelowOneDevice := max(space-2, 1); !p.revoking && len(lines) > fitsBelowOneDevice {
+		lines = clipLines(lines, fitsBelowOneDevice, c.W-2)
+	}
+	y := devicesTop + p.drawDevices(c, max(space-1-len(lines), 1)) + 1
+	for i, line := range lines {
+		c.Put(1, y+i, line, ink)
+	}
+	for i, line := range hints {
+		c.Put(1, hintsTop+i, line, theme.Text)
+	}
+}
+
+const devicesTop = 8
+
+func (p *Phone) drawDevices(c *theme.Canvas, rows int) int {
+	devices := p.Context.Devices
+	if len(devices) == 0 {
+		c.Put(3, devicesTop, "none yet; p shows a code to scan", theme.Muted)
+		return 1
+	}
+	shown := min(len(devices), rows)
+	first := max(p.cursor-shown+1, 0)
+	if shown < len(devices) {
+		c.Right(c.W-2, devicesTop-1, fmt.Sprintf("%d–%d of %d", first+1, first+shown, len(devices)), theme.Muted)
+	}
+	for i, d := range devices[first : first+shown] {
+		y, ink := devicesTop+i, theme.Text
+		if first+i == p.cursor {
 			c.Put(1, y, "›", theme.Key)
 			ink = theme.Bright
 		}
 		c.PutMax(3, y, d.Name, ink, 24)
 		c.PutMax(28, y, "paired "+d.Paired, theme.Muted, c.W-29)
-		y++
 	}
-	y++
-	switch {
-	case p.revoking:
-		paragraph(c, y, fmt.Sprintf("Revoke %s? It loses access and its notifications at once. y revokes, any other key keeps it.", p.Context.Devices[p.cursor].Name), theme.FgInk(theme.Yellow))
-	case p.busy != "":
-		paragraph(c, y, "◌ "+p.busy, theme.FgInk(theme.Yellow))
-	case p.problem != "":
-		paragraph(c, y, "✗ "+p.problem, theme.FgInk(theme.Red))
-	case p.notice != "":
-		paragraph(c, y, "✓ "+p.notice, theme.FgInk(theme.Green))
-	}
-	c.PutMax(1, c.H-1, p.mainHints(), theme.Text, c.W-2)
+	return shown
 }
 
-func (p *Phone) mainHints() string {
+func (p *Phone) mainMessage() (string, theme.Ink) {
+	switch {
+	case p.revoking:
+		return fmt.Sprintf("Revoke %s? It loses access and its notifications at once. y revokes, any other key keeps it.", p.Context.Devices[p.cursor].Name), theme.FgInk(theme.Yellow)
+	case p.busy != "":
+		return "◌ " + p.busy, theme.FgInk(theme.Yellow)
+	case p.problem != "":
+		return "✗ " + p.problem, theme.FgInk(theme.Red)
+	case p.notice != "":
+		return "✓ " + p.notice, theme.FgInk(theme.Green)
+	}
+	return "", theme.Text
+}
+
+func clipLines(lines []string, keep, width int) []string {
+	kept := append([]string(nil), lines[:keep]...)
+	kept[keep-1] = theme.Truncate(lines[keep-1]+" "+lines[keep], width)
+	return kept
+}
+
+func (p *Phone) mainHints() []string {
 	toggle, serve := "e turn on", "s start"
 	if p.Context.Enabled {
 		toggle = "e turn off"
@@ -357,7 +392,33 @@ func (p *Phone) mainHints() string {
 	if len(p.Context.Devices) > 0 {
 		hints = append(hints, "r revoke")
 	}
-	return strings.Join(append(hints, "esc close"), "   ")
+	return append(hints, "esc close")
+}
+
+func packHints(hints []string, width int) []string {
+	var rows []string
+	for _, hint := range hints {
+		last := len(rows) - 1
+		if last >= 0 && theme.Width(rows[last]+"   "+hint) <= width {
+			rows[last] += "   " + hint
+			continue
+		}
+		rows = append(rows, hint)
+	}
+	return rows
+}
+
+func breakAt(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, r := range text {
+		if line != "" && theme.Width(line+string(r)) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		line += string(r)
+	}
+	return append(lines, line)
 }
 
 func (p *Phone) drawConfigure(c *theme.Canvas) {
@@ -386,17 +447,28 @@ func (p *Phone) drawPairing(c *theme.Canvas) {
 	} else {
 		c.Right(c.W-2, 0, fmt.Sprintf("expires in %d:%02d", int(left.Minutes()), int(left.Seconds())%60), theme.Muted)
 	}
+	y := paragraph(c, 2, "Scan with the phone's camera, or open this link on it. The code works once.", theme.Text)
+	for _, line := range breakAt(p.pairing.URL, c.W-2) {
+		c.Put(1, y, line, theme.Bright)
+		y++
+	}
+	if qrFits := y+1+len(p.pairing.QR) < c.H-1; qrFits {
+		drawQR(c, y+1, p.pairing.QR)
+	} else {
+		paragraph(c, y+1, "Make this window taller to see the QR code.", theme.Muted)
+	}
+	c.Put(1, c.H-1, "esc back", theme.Text)
+}
+
+func drawQR(c *theme.Canvas, y int, qr []string) {
 	width := 0
-	for _, line := range p.pairing.QR {
+	for _, line := range qr {
 		width = max(width, lipgloss.Width(line))
 	}
 	x := max((c.W-width)/2, 1)
-	for i, line := range p.pairing.QR {
-		c.Put(x, 2+i, line, theme.Bright)
+	for i, line := range qr {
+		c.Put(x, y+i, line, theme.Bright)
 	}
-	y := paragraph(c, 3+len(p.pairing.QR), "Scan with the phone's camera, or open this link on it. The code works once.", theme.Text)
-	c.PutMax(1, y, p.pairing.URL, theme.Bright, c.W-2)
-	c.Put(1, c.H-1, "esc back", theme.Text)
 }
 
 func (p *Phone) drawChecks(c *theme.Canvas) {

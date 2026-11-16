@@ -657,8 +657,8 @@ func TestAPermissionAnswerTypesOnlyIntoTheUnchangedPromptItWasPickedFrom(t *test
 	}
 
 	r, console, _, item := setup(bash)
-	if item.ID != "permission-designer" || item.Permission == nil || len(item.Permission.Options) != 3 {
-		t.Fatalf("the stage's prompt projects as %+v; want its three options", item)
+	if item.ID != "permission-designer" || item.Permission == nil || len(item.Permission.Options) != 3 || strings.Contains(item.Body, "cannot") {
+		t.Fatalf("the stage's prompt projects as %+v; want its three options, without copy saying the phone cannot answer them", item)
 	}
 	if receipt, err := r.Act(pick(item, "2", "")); err != nil || receipt.Status != StatusSending || strings.Join(console.pressed, ",") != "%5: 2" {
 		t.Fatalf("picking option 2 pressed %v with %+v, %v; want 2 typed into the designer's pane only", console.pressed, receipt, err)

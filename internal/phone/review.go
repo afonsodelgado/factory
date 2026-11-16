@@ -44,12 +44,16 @@ func opensPage(method, path string) bool {
 	return method == http.MethodGet && strings.HasPrefix(path, "/r/") && !strings.Contains(path, "/_api/")
 }
 
+func reviewStream(path string) bool {
+	return strings.HasPrefix(path, "/r/") && strings.HasSuffix(path, "/_api/events")
+}
+
 func (s *Server) review(w http.ResponseWriter, r *http.Request, device Device) {
 	if s.Review == nil {
 		unavailable(w)
 		return
 	}
-	if r.URL.Path != "/events/review" {
+	if !reviewStream(r.URL.Path) {
 		s.Review.ServeHTTP(w, r)
 		return
 	}

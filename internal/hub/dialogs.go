@@ -94,9 +94,6 @@ func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
 	if msg.kind == "remotes" || msg.kind == "phone" {
 		m.reloadRemotes()
 	}
-	if msg.kind == "phone" {
-		m.servePhoneReview()
-	}
 	if m.dialog != msg.kind {
 		return nil
 	}

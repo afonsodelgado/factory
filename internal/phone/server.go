@@ -120,7 +120,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if mutates(r) {
-			if problem, status := s.mutationProblem(r); problem != "" && !strings.HasPrefix(r.URL.Path, grantPrefix) {
+			if problem, status := s.mutationProblem(r); problem != "" {
 				fail(w, status, problem)
 				return
 			}
@@ -131,14 +131,22 @@ func (s *Server) guard(next http.Handler) http.Handler {
 }
 
 func mutates(r *http.Request) bool {
-	return r.Method != http.MethodGet && r.Method != http.MethodHead
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return true
 }
 
 func (s *Server) mutationProblem(r *http.Request) (string, int) {
+	origin := "https://" + s.Host
+	if strings.HasPrefix(r.URL.Path, grantPrefix) {
+		origin = sandboxOrigin
+	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	origins := r.Header.Values("Origin")
 	switch {
-	case len(origins) != 1 || origins[0] != "https://"+s.Host:
+	case len(origins) != 1 || origins[0] != origin:
 		return "this request must come from the factory app's own origin", http.StatusForbidden
 	case err != nil || media != "application/json":
 		return "send JSON", http.StatusUnsupportedMediaType

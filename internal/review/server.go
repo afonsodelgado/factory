@@ -42,11 +42,14 @@ type Server struct {
 	act       func(Action) (any, error)
 	browser   *Browser
 	forwarded map[string]bool
+	listed    chan struct{}
+	listOnce  sync.Once
 }
 
 type event struct {
-	name string
-	data string
+	name    string
+	data    string
+	factory string
 }
 
 func Listen(port int, token string, overlay []byte) (*Server, error) {
@@ -72,6 +75,7 @@ func Listen(port int, token string, overlay []byte) (*Server, error) {
 		clients:   map[chan event]bool{},
 		stores:    map[string]*Store{},
 		forwarded: map[string]bool{},
+		listed:    make(chan struct{}),
 		now:       time.Now,
 	}
 	s.http = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
@@ -88,6 +92,7 @@ func (s *Server) Close() error {
 	if mobile != nil {
 		mobile.Close()
 	}
+	s.markListed()
 	return s.http.Close()
 }
 
@@ -115,6 +120,11 @@ func (s *Server) SetFactories(factories []Factory) {
 			delete(s.stores, dir)
 		}
 	}
+	s.markListed()
+}
+
+func (s *Server) markListed() {
+	s.listOnce.Do(func() { close(s.listed) })
 }
 
 func (s *Server) PageURL(fileURL string) (string, bool) {
@@ -416,7 +426,7 @@ func (s *Server) changed(path string) {
 		if err != nil || !filepath.IsLocal(rel) {
 			continue
 		}
-		s.broadcastLocked(event{"change", f.Key + "/" + filepath.ToSlash(rel)})
+		s.broadcastLocked(event{"change", f.Key + "/" + filepath.ToSlash(rel), f.Key})
 	}
 }
 
@@ -439,6 +449,15 @@ func (s *Server) broadcastLocked(e event) {
 }
 
 func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
+	s.stream(w, r, func(event) bool { return true })
+}
+
+func (s *Server) serveFactoryEvents(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	s.stream(w, r, func(e event) bool { return e.factory == key })
+}
+
+func (s *Server) stream(w http.ResponseWriter, r *http.Request, wanted func(event) bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -464,6 +483,9 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case e := <-c:
+			if !wanted(e) {
+				continue
+			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.name, e.data)
 			flusher.Flush()
 		case <-keepAlive.C:
