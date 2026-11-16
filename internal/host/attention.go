@@ -398,6 +398,7 @@ func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalIte
 		li.Send = Eligibility{Reason: "Answer it in the session."}
 		if menu, ok := m.PermissionMenu(item); ok {
 			li.Permission = &menu
+			li.Body = "Claude Code is asking for permission in the session. Pick an answer here, or answer it there."
 			li.Send = Eligibility{Ready: true, Reason: "Types the option you pick into the session."}
 		}
 	}
