@@ -130,6 +130,7 @@ func TestDoctorNamesEachPhoneSetupGapAndItsFix(t *testing.T) {
 		{name: "logged out", status: `{"BackendState":"NeedsLogin"}`, failing: []string{"tailscale"}},
 		{name: "HTTPS off", status: strings.Replace(running, `"CertDomains":["`+host+`"],`, "", 1), serve: served, failing: []string{"https cert"}},
 		{name: "no serve mapping", status: running, serve: `{}`, failing: []string{"serve"}},
+		{name: "serve status unreadable", status: running, serve: `not json`, failing: []string{"serve", "funnel"}},
 		{name: "funnel on", status: running, serve: strings.TrimSuffix(served, "}") + `,"AllowFunnel":{"` + host + `:443":true}}`, failing: []string{"funnel"}},
 		{name: "push services unreachable", status: running, serve: served, offline: true, failing: []string{"push reach"}},
 	}

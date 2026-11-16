@@ -91,7 +91,7 @@ func tailscaleChecks(ctx context.Context, settings state.Phone, probe Probe) []C
 	if err == nil {
 		err = json.Unmarshal(out, &serve)
 	}
-	return append(checks, mapping(serve, err, host, port), funnel(serve, host, port))
+	return append(checks, mapping(serve, err, host, port), funnel(serve, err, host, port))
 }
 
 func skipped(names ...string) []Check {
@@ -132,7 +132,10 @@ func mapping(serve serveStatus, err error, host string, port int) Check {
 	return Check{Name: "serve", State: Passed, Detail: fmt.Sprintf("https://%s/ → %s", host, want)}
 }
 
-func funnel(serve serveStatus, host string, port int) Check {
+func funnel(serve serveStatus, err error, host string, port int) Check {
+	if err != nil {
+		return Check{Name: "funnel", State: Failed, Detail: "could not tell whether Funnel is on: tailscale serve status failed: " + err.Error(), Fix: "tailscale serve status --json"}
+	}
 	if serve.AllowFunnel[host+":443"] {
 		return Check{Name: "funnel", State: Failed, Detail: "Funnel puts this server on the public internet", Fix: "tailscale funnel --https=443 off"}
 	}
