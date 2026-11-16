@@ -29,6 +29,10 @@ func (m *Runtime) Run(ctx context.Context, events <-chan Event) error {
 			if e.T == "hello" || e.T == "gone" {
 				continue
 			}
+			if e.T == "handoff" && m.Fallback {
+				e.Respond(Message{T: "done"})
+				return nil
+			}
 			m.Tick()
 			e.Respond(m.Handle(e.Message))
 		}

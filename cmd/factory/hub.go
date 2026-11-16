@@ -17,6 +17,7 @@ import (
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -44,11 +45,11 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
 		return err
 	}
-	unlock, err := lockHub(cfg.LockPath())
+	release, err := phone.Claim(cfg, phone.ModeHub, version)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	bin, err := os.Executable()

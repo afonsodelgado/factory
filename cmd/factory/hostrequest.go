@@ -163,7 +163,7 @@ func mustServerID(cfg *state.Config) string {
 }
 
 func forward(cfg *state.Config, kind, op string, data json.RawMessage) (json.RawMessage, remote.Status, error) {
-	if err := startHost(cfg, tmux.Client{Socket: cfg.Tmux.Socket}); err != nil {
+	if err := startHost(cfg, tmux.Client{Socket: cfg.Tmux.Socket}, false); err != nil {
 		return nil, remote.Failed, err
 	}
 	reply, err := send(cfg.SocketPath(), hub.Message{T: kind, Op: op, Pane: "cli", Data: data})

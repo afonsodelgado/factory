@@ -20,10 +20,13 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
+
+const hubTakeover = 30 * time.Second
 
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
@@ -205,7 +208,7 @@ func openMain(r hub.OpenRequest) error {
 	if name != "" {
 		calls = append(calls, hubCall{"open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}})
 	}
-	if !hubRunning(cfg) && sharesServer(tm) {
+	if !hubOpen(cfg) && sharesServer(tm) {
 		return hubMain(startupEvents(calls), false)
 	}
 	if err := ensureHub(cfg, tm, bin); err != nil {
@@ -300,6 +303,8 @@ func cwdRepo(cfg *state.Config) string {
 
 func hubRunning(cfg *state.Config) bool { return fileLocked(cfg.LockPath()) }
 
+func hubOpen(cfg *state.Config) bool { return hubRunning(cfg) && !phone.FallbackOwns(cfg) }
+
 func fileLocked(path string) bool {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -314,9 +319,24 @@ func fileLocked(path string) bool {
 }
 
 func ensureHub(cfg *state.Config, tm tmux.Client, bin string) error {
-	if hubRunning(cfg) {
+	if hubOpen(cfg) {
 		return nil
 	}
+	fallback := phone.FallbackOwns(cfg)
+	if err := startHub(cfg, tm, bin); err != nil || !fallback {
+		return err
+	}
+	deadline := time.Now().Add(hubTakeover)
+	for !hubOpen(cfg) {
+		if time.Now().After(deadline) {
+			return errors.New("the hub did not take over from factory serve; read the hub window in tmux session " + cfg.Hub.Session)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil
+}
+
+func startHub(cfg *state.Config, tm tmux.Client, bin string) error {
 	hubCommand := shellQuote(bin) + " hub; exec " + loginShell()
 	if !tm.HasSession(cfg.Hub.Session) {
 		args := []string{"new-session", "-d", "-s", cfg.Hub.Session, "-n", hub.HubWindow, "-x", "200", "-y", "50"}

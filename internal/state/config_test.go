@@ -187,6 +187,7 @@ func TestRemoteConfigRefusesWhatSSHWouldMisread(t *testing.T) {
 }
 
 func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
+	phone := Phone{Enabled: true, Port: 7419, Hostname: "devbox.tail1234.ts.net", VAPIDPublicKey: "BPublic"}
 	cases := []struct{ name, original, comment string }{
 		{"a config with settings", "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  old:\n    host: old\n", "# main repo"},
 		{"a config that holds only comments", "# just a comment\n", "# just a comment"},
@@ -199,6 +200,7 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 				m.Remotes = map[string]Remote{}
 				m.Remotes["homelab"] = Remote{Host: "homelab", Port: 2222}
 				m.DefaultRemote = "homelab"
+				m.Phone = phone
 				return nil
 			})
 			if err != nil {
@@ -208,8 +210,11 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 			t.Setenv("FACTORY_CONFIG_DIR", dir)
 			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 			cfg, err := LoadConfig()
-			if err != nil || !strings.Contains(string(data), c.comment) || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" {
-				t.Fatalf("config after adding a remote:\n%s\nerr %v; want the user's comments kept and only homelab listed", data, err)
+			if err != nil || !strings.Contains(string(data), c.comment) || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" || cfg.Phone != phone {
+				t.Fatalf("config after adding a remote and phone settings:\n%s\nerr %v; want the user's comments kept, only homelab listed and the phone settings read back", data, err)
+			}
+			if info, _ := os.Stat(filepath.Join(dir, "config.yml")); info.Mode().Perm() != 0o600 {
+				t.Fatalf("config.yml mode %v; want 0600 because it now names the machine's tailnet", info.Mode().Perm())
 			}
 			for range 3 {
 				if err := UpdateMachine(dir, func(m *Machine) error { return nil }); err != nil {

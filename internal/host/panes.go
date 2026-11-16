@@ -142,8 +142,11 @@ func (e *Panes) Pause(repo, slug string) error {
 		return err
 	}
 	p, ok := FactoryPane(panes, repo, slug)
-	if !ok {
+	switch {
+	case !ok:
 		return nil
+	case inHubWindow(panes, p):
+		return e.TM.KillPane(p.ID)
 	}
 	return e.TM.KillWindow(p.WindowID)
 }

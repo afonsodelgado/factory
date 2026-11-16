@@ -19,13 +19,33 @@ import (
 	"github.com/goccy/go-yaml/parser"
 )
 
-const DefaultPushServer = "https://ntfy.sh"
+const (
+	DefaultPushServer = "https://ntfy.sh"
+	DefaultPhonePort  = 7418
+)
 
 type Machine struct {
 	Remotes       map[string]Remote `yaml:"remotes,omitempty"`
 	DefaultRemote string            `yaml:"default_remote,omitempty"`
 	Push          Push              `yaml:"push,omitempty"`
+	Phone         Phone             `yaml:"phone,omitempty"`
 }
+
+type Phone struct {
+	Enabled        bool   `yaml:"enabled,omitempty"`
+	Port           int    `yaml:"port,omitempty"`
+	Hostname       string `yaml:"hostname,omitempty"`
+	VAPIDPublicKey string `yaml:"vapid_public_key,omitempty"`
+}
+
+func (p Phone) ListenPort() int {
+	if p.Port == 0 {
+		return DefaultPhonePort
+	}
+	return p.Port
+}
+
+func (p Phone) Origin() string { return "https://" + p.Hostname }
 
 type Remote struct {
 	Host     string `yaml:"host"`
@@ -53,6 +73,7 @@ var (
 	sshHost    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 	sshUser    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 	pushTopic  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	tailnetDNS = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net$`)
 )
 
 func LoadMachine(configDir string) (Machine, error) {
@@ -71,7 +92,7 @@ func LoadMachine(configDir string) (Machine, error) {
 }
 
 func (m Machine) Equal(other Machine) bool {
-	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push
+	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone
 }
 
 func (m Machine) Validate() error {
@@ -90,6 +111,18 @@ func (m Machine) Validate() error {
 	}
 	if m.Push.Topic != "" && !pushTopic.MatchString(m.Push.Topic) {
 		return errors.New("push.topic may hold only letters, digits, - and _; run factory remote push to generate one")
+	}
+	return m.Phone.validate()
+}
+
+func (p Phone) validate() error {
+	switch {
+	case p.Port < 0 || p.Port > 65535:
+		return fmt.Errorf("phone.port %d must be between 1 and 65535", p.Port)
+	case p.Hostname != "" && !tailnetDNS.MatchString(p.Hostname):
+		return fmt.Errorf("phone.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", p.Hostname)
+	case p.Enabled && p.Hostname == "":
+		return errors.New("phone.enabled needs phone.hostname, this machine's full Tailscale name; run factory phone configure --hostname")
 	}
 	return nil
 }
@@ -167,6 +200,7 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 		{"remotes", remotes, len(m.Remotes) == 0},
 		{"default_remote", m.DefaultRemote, m.DefaultRemote == ""},
 		{"push", m.Push, m.Push == Push{}},
+		{"phone", m.Phone, m.Phone == Phone{}},
 	}
 	for _, key := range keys {
 		if err := setKey(file, key.name, key.value, key.zero); err != nil {

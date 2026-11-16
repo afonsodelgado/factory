@@ -62,6 +62,10 @@ func run(args []string) int {
 		return runAttention(args[1:])
 	case "remote":
 		return runRemote(args[1:])
+	case "serve":
+		return runServe(args[1:])
+	case "phone":
+		return runPhone(args[1:])
 	case "--remote", "--local":
 		return runOpen(args)
 	}
