@@ -38,8 +38,10 @@ type Server struct {
 	Host    string
 	Version string
 	Shell   http.Handler
+	Review  http.Handler
 	Now     func() time.Time
 
+	grants    grants
 	mu        sync.Mutex
 	current   *Snapshot
 	factories []byte
@@ -86,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pair/status", s.pairStatus)
 	mux.HandleFunc("POST /api/pair/exchange", s.pairExchange)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
+	mux.HandleFunc("/r/", s.authed(s.openReview))
+	mux.HandleFunc(grantPrefix+"{token}/{rest...}", s.sandboxed)
 	mux.Handle("/", s.shell())
 	return s.guard(mux)
 }
@@ -109,7 +113,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if mutates(r) {
-			if problem, status := s.mutationProblem(r); problem != "" {
+			if problem, status := s.mutationProblem(r); problem != "" && !strings.HasPrefix(r.URL.Path, grantPrefix) {
 				fail(w, status, problem)
 				return
 			}
@@ -151,6 +155,10 @@ func (s *Server) authed(next authedHandler) http.HandlerFunc {
 		device, paired := s.Store.Authenticate(secret)
 		if !ok || !paired {
 			http.SetCookie(w, &http.Cookie{Name: CookieName, Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+			if opensPage(r.Method, r.URL.Path) {
+				page(w, http.StatusUnauthorized, unpairedPage, DatabaseName)
+				return
+			}
 			fail(w, http.StatusUnauthorized, "This phone is not paired.")
 			return
 		}
@@ -169,6 +177,7 @@ func unavailable(w http.ResponseWriter) {
 
 func reply(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(value)
 }
@@ -280,7 +289,7 @@ func (s *Server) Revoke(device string) {
 	}
 }
 
-func (s *Server) subscribe(device string) *stream {
+func (s *Server) watch(device string) *stream {
 	st := &stream{device: device, next: make(chan []byte, 1), closed: make(chan struct{})}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -288,6 +297,13 @@ func (s *Server) subscribe(device string) *stream {
 		s.streams = map[*stream]bool{}
 	}
 	s.streams[st] = true
+	return st
+}
+
+func (s *Server) subscribe(device string) *stream {
+	st := s.watch(device)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.current != nil {
 		st.offer(event("snapshot", s.current))
 	} else {

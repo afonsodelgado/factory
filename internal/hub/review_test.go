@@ -143,7 +143,10 @@ func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T)
 	fx.f.State.Attention = []state.Attention{{ID: "gate-csv-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-time.Hour)}}}
 	clock := now
 	fx.m.Now = func() time.Time { return clock }
-	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"}); err != nil {
+	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design-earlier"}); err == nil {
+		t.Fatal("a page that loaded before the gate was replaced approved the new gate")
+	}
+	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design"}); err != nil {
 		t.Fatal(err)
 	}
 

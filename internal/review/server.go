@@ -30,6 +30,7 @@ type Server struct {
 	overlay []byte
 	ln      net.Listener
 	http    *http.Server
+	mobile  *http.Server
 	watch   *fsnotify.Watcher
 
 	mu        sync.Mutex
@@ -81,6 +82,12 @@ func Listen(port int, token string, overlay []byte) (*Server, error) {
 
 func (s *Server) Close() error {
 	s.watch.Close()
+	s.mu.Lock()
+	mobile := s.mobile
+	s.mu.Unlock()
+	if mobile != nil {
+		mobile.Close()
+	}
 	return s.http.Close()
 }
 
@@ -177,7 +184,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /r/{token}/{$}", s.withToken(s.serveIndex))
 	mux.HandleFunc("GET /r/{token}/events", s.withToken(s.serveEvents))
-	mux.HandleFunc("GET /r/{token}/{key}/{path...}", s.withToken(s.serveFile))
+	mux.HandleFunc("GET /r/{token}/{key}/{path...}", s.withToken(s.servePage(s.scriptTag)))
 	mux.HandleFunc("GET /r/{token}/{key}/_api/threads", s.withToken(s.listThreads))
 	mux.HandleFunc("POST /r/{token}/{key}/_api/threads", s.withToken(s.mutation(s.createThread)))
 	mux.HandleFunc("PATCH /r/{token}/{key}/_api/threads/{id}", s.withToken(s.mutation(s.updateThread)))
@@ -239,36 +246,44 @@ func (s *Server) factory(key string) (Factory, bool) {
 	return f, ok
 }
 
-func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
-	f, ok := s.factory(r.PathValue("key"))
-	if !ok {
-		http.NotFound(w, r)
-		return
+func (s *Server) servePage(tag func(f Factory, rel, revision string) []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		f, ok := s.factory(r.PathValue("key"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		rel := filepath.FromSlash(r.PathValue("path"))
+		path, ok := inside(f.Dir, rel)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		s.watchDir(filepath.Dir(filepath.Join(f.Dir, rel)))
+		if !isHTML(path) {
+			http.ServeFile(w, r, path)
+			return
+		}
+		page, err := os.ReadFile(path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		revision := revisionOf(info)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Factory-Revision", revision)
+		w.Write(inject(page, tag(f, filepath.ToSlash(rel), revision)))
 	}
-	rel := filepath.FromSlash(r.PathValue("path"))
-	path, ok := inside(f.Dir, rel)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		http.NotFound(w, r)
-		return
-	}
-	s.watchDir(filepath.Dir(filepath.Join(f.Dir, rel)))
-	if !isHTML(path) {
-		http.ServeFile(w, r, path)
-		return
-	}
-	page, err := os.ReadFile(path)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(inject(page, s.scriptTag(f.Key, filepath.ToSlash(rel))))
+}
+
+func revisionOf(info os.FileInfo) string {
+	return strconv.FormatInt(info.ModTime().UnixNano(), 36) + "-" + strconv.FormatInt(info.Size(), 36)
 }
 
 func inside(dir, rel string) (string, bool) {
@@ -295,10 +310,10 @@ func isHTML(path string) bool {
 	return ext == ".html" || ext == ".htm"
 }
 
-func (s *Server) scriptTag(key, rel string) []byte {
+func (s *Server) scriptTag(f Factory, rel, revision string) []byte {
 	base := "/r/" + s.token
-	return fmt.Appendf(nil, `<script src="/_review/overlay.js" data-factory-review data-events="%s" data-api="%s" data-page="%s" data-file="%s" defer></script>`,
-		html.EscapeString(base+"/events"), html.EscapeString(base+"/"+url.PathEscape(key)+"/_api"), html.EscapeString(key+"/"+rel), html.EscapeString(rel))
+	return fmt.Appendf(nil, `<script src="/_review/overlay.js" data-factory-review data-events="%s" data-api="%s" data-page="%s" data-file="%s" data-revision="%s" defer></script>`,
+		html.EscapeString(base+"/events"), html.EscapeString(base+"/"+url.PathEscape(f.Key)+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), revision)
 }
 
 func inject(page, tag []byte) []byte {

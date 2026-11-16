@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -199,6 +200,123 @@ func TestForwardedReviewPreservesHostAndOriginChecks(t *testing.T) {
 		if status == http.StatusOK {
 			t.Errorf("%s was accepted through the tunnel", name)
 		}
+	}
+}
+
+func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "factory")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "plan.html"), "<html><body><a href='https://example.com'>plan</a></body></html>")
+	write(t, filepath.Join(root, "secret.txt"), "secret")
+	if err := os.Symlink(filepath.Join(root, "secret.txt"), filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Listen(0, "desktop-token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
+	phone := httptest.NewServer(s.MobileHandler())
+	t.Cleanup(phone.Close)
+
+	resp, err := http.Get(phone.URL + "/r/k/plan.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || strings.Contains(string(page), "desktop-token") || !strings.Contains(string(page), `data-api="/r/k/_api"`) || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("phone page %d, Cache-Control %q:\n%s\nwant it served with token-free API paths and no-store", resp.StatusCode, resp.Header.Get("Cache-Control"), page)
+	}
+
+	desktopEvents, err := http.Get(s.Origin() + "/r/desktop-token/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer desktopEvents.Body.Close()
+	seen := make(chan string, 4)
+	go func() {
+		lines := bufio.NewScanner(desktopEvents.Body)
+		for lines.Scan() {
+			if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+				seen <- data
+			}
+		}
+	}()
+	create := `{"page":"plan.html","intent":"fix","text":"Bigger.","anchor":{"selector":"a"},"operation":"op-1"}`
+	for range 2 {
+		resp, err := http.Post(phone.URL+"/r/k/_api/threads", "application/json", strings.NewReader(create))
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("phone comment: %v %v", resp, err)
+		}
+		resp.Body.Close()
+	}
+	if _, desktop := get(t, s.Origin()+"/r/desktop-token/k/_api/threads?page=plan.html"); strings.Count(desktop, `"id"`) != 1 {
+		t.Fatalf("desktop threads %s; want the phone's comment once, even though its lost answer made it post twice", desktop)
+	}
+	for heard := ""; heard != "k"; {
+		select {
+		case heard = <-seen:
+		case <-time.After(3 * time.Second):
+			t.Fatal("the desktop page heard no thread change when the phone commented")
+		}
+	}
+
+	for name, path := range map[string]string{
+		"the desktop token route": "/r/desktop-token/k/plan.html",
+		"a parent directory":      "/r/k/..%2Fsecret.txt",
+		"a symlink out":           "/r/k/link.txt",
+		"an unknown factory":      "/r/other/plan.html",
+	} {
+		if status, body := get(t, phone.URL+path); status == http.StatusOK || strings.Contains(body, "secret") {
+			t.Errorf("%s: %s answered %d %q on the phone", name, path, status, body)
+		}
+	}
+	for _, path := range []string{"/r/k/_api/console", "/r/k/_api/threads/t-1/shot"} {
+		resp, err := http.Post(phone.URL+path, "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("the phone reached the desktop browser endpoint %s", path)
+		}
+	}
+}
+
+func TestSendHoldsEditsUntilTheBatchIsMarkedSent(t *testing.T) {
+	st, err := OpenStore(t.TempDir(), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := st.Create(NewThread{Page: "plan.html", Intent: "fix", Text: "first words"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := make(chan error, 1)
+	var batched string
+	if _, err := st.Send("plan.html", func(drafts []Thread, _ int) error {
+		batched = drafts[0].Messages[0].Text
+		text := "second words"
+		go func() {
+			_, err := st.Update(thread.ID, Change{Text: &text})
+			edited <- err
+		}()
+		select {
+		case <-edited:
+			t.Error("a comment changed while its batch was being delivered")
+		case <-time.After(100 * time.Millisecond):
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-edited; err == nil || batched != "first words" {
+		t.Fatalf("edit after send: %v, batch held %q; want the edit refused because the agent already has the first words", err, batched)
 	}
 }
 

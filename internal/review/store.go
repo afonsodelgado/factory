@@ -63,6 +63,7 @@ type Thread struct {
 	Batch    int       `json:"batch,omitempty"`
 	Shot     string    `json:"shot,omitempty"`
 	Messages []Message `json:"messages"`
+	Op       string    `json:"op,omitempty"`
 }
 
 func (t Thread) Open() bool { return t.Status != Resolved }
@@ -74,6 +75,7 @@ type threadsFile struct {
 }
 
 type Store struct {
+	sending sync.Mutex
 	mu      sync.Mutex
 	path    string
 	now     func() time.Time
@@ -101,10 +103,11 @@ func OpenStore(factoryDir string, now func() time.Time) (*Store, error) {
 }
 
 type NewThread struct {
-	Page   string `json:"page"`
-	Anchor Anchor `json:"anchor"`
-	Intent string `json:"intent"`
-	Text   string `json:"text"`
+	Page      string `json:"page"`
+	Anchor    Anchor `json:"anchor"`
+	Intent    string `json:"intent"`
+	Text      string `json:"text"`
+	Operation string `json:"operation,omitempty"`
 }
 
 func (s *Store) Create(n NewThread) (Thread, error) {
@@ -115,8 +118,13 @@ func (s *Store) Create(n NewThread) (Thread, error) {
 	if !validIntent(n.Intent) {
 		return Thread{}, fmt.Errorf("intent %q is not one of %s", n.Intent, strings.Join(intents, ", "))
 	}
+	s.sending.Lock()
+	defer s.sending.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if t, ok := s.created(n.Operation); ok {
+		return t, nil
+	}
 	s.data.Next++
 	t := Thread{
 		ID:       fmt.Sprintf("t-%d", s.data.Next),
@@ -125,9 +133,19 @@ func (s *Store) Create(n NewThread) (Thread, error) {
 		Intent:   n.Intent,
 		Status:   Draft,
 		Messages: []Message{{By: "you", Text: text, At: s.now().UTC()}},
+		Op:       n.Operation,
 	}
 	s.data.Threads = append(s.data.Threads, t)
 	return t, s.save()
+}
+
+func (s *Store) created(operation string) (Thread, bool) {
+	for _, t := range s.data.Threads {
+		if operation != "" && t.Op == operation {
+			return t, true
+		}
+	}
+	return Thread{}, false
 }
 
 func validIntent(intent string) bool {
@@ -146,6 +164,8 @@ type Change struct {
 }
 
 func (s *Store) Update(id string, c Change) (Thread, error) {
+	s.sending.Lock()
+	defer s.sending.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, err := s.find(id)
@@ -179,6 +199,8 @@ func (s *Store) Reply(id, by, text string, resolve bool) (Thread, error) {
 	if text == "" && !resolve {
 		return Thread{}, errors.New("a reply needs text")
 	}
+	s.sending.Lock()
+	defer s.sending.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, err := s.find(id)
@@ -198,6 +220,8 @@ func (s *Store) Reply(id, by, text string, resolve bool) (Thread, error) {
 }
 
 func (s *Store) Delete(id string) error {
+	s.sending.Lock()
+	defer s.sending.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, t := range s.data.Threads {
@@ -241,7 +265,25 @@ func (s *Store) Drafts(page string) []Thread {
 	return drafts
 }
 
-func (s *Store) MarkSent(batch int, ids []string) error {
+func (s *Store) Send(page string, deliver func(drafts []Thread, batch int) error) ([]Thread, error) {
+	s.sending.Lock()
+	defer s.sending.Unlock()
+	drafts := s.Drafts(page)
+	if len(drafts) == 0 {
+		return nil, errors.New("there are no unsent comments on this page")
+	}
+	batch := s.nextBatch()
+	if err := deliver(drafts, batch); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(drafts))
+	for i, t := range drafts {
+		ids[i] = t.ID
+	}
+	return drafts, s.markSent(batch, ids)
+}
+
+func (s *Store) markSent(batch int, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.Batches = batch
@@ -280,7 +322,7 @@ func (s *Store) TakeConsole() []string {
 	return lines
 }
 
-func (s *Store) NextBatch() int {
+func (s *Store) nextBatch() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data.Batches + 1

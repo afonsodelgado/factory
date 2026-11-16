@@ -28,6 +28,7 @@ type ReviewRequest struct {
 	Thread  string `json:"thread,omitempty"`
 	Text    string `json:"text,omitempty"`
 	Resolve bool   `json:"resolve,omitempty"`
+	Gate    string `json:"gate,omitempty"`
 }
 
 type ReviewReply struct {
@@ -42,7 +43,7 @@ type ReviewReply struct {
 
 func ReviewActions(events chan<- Event) func(review.Action) (any, error) {
 	return func(a review.Action) (any, error) {
-		data, err := json.Marshal(ReviewRequest{Action: a.Kind, Factory: a.Factory, Page: a.Page})
+		data, err := json.Marshal(ReviewRequest{Action: a.Kind, Factory: a.Factory, Page: a.Page, Gate: a.Gate})
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +84,7 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 	case "send":
 		return m.SendReview(it, store, r.Page)
 	case "approve":
-		return m.ApproveFromPage(it, r.Page)
+		return m.ApproveFromPage(it, r.Page, r.Gate)
 	case "reply":
 		return m.ReplyToThread(it, store, r)
 	case "threads":
@@ -153,30 +154,25 @@ func (m *Runtime) ReviewStatus(it Item, page string) ReviewReply {
 }
 
 func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewReply, error) {
-	drafts := store.Drafts(page)
-	if len(drafts) == 0 {
-		return ReviewReply{}, errors.New("there are no unsent comments on this page")
-	}
-	batch := store.NextBatch()
-	id := review.BatchID(it.Factory.Label(), batch)
-	path, text, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
+	var path, target string
+	sent, err := store.Send(page, func(drafts []review.Thread, batch int) error {
+		id := review.BatchID(it.Factory.Label(), batch)
+		var text string
+		var err error
+		path, text, err = review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
+		if err != nil {
+			return err
+		}
+		if target, err = m.DeliverReview(it, page, id, path, text); err != nil {
+			os.Remove(path)
+		}
+		return err
+	})
 	if err != nil {
-		return ReviewReply{}, err
-	}
-	target, err := m.DeliverReview(it, page, id, path, text)
-	if err != nil {
-		os.Remove(path)
-		return ReviewReply{}, err
-	}
-	ids := make([]string, len(drafts))
-	for i, t := range drafts {
-		ids[i] = t.ID
-	}
-	if err := store.MarkSent(batch, ids); err != nil {
 		return ReviewReply{}, err
 	}
 	m.Pages.ThreadsChanged(ReviewFactory(it))
-	return ReviewReply{Target: target, Batch: path, Count: len(drafts)}, nil
+	return ReviewReply{Target: target, Batch: path, Count: len(sent)}, nil
 }
 
 func (m *Runtime) DeliverReview(it Item, page, id, path, text string) (string, error) {
@@ -206,10 +202,13 @@ func (m *Runtime) ReachesRole(it Item, role, text string) bool {
 	return err == nil
 }
 
-func (m *Runtime) ApproveFromPage(it Item, page string) (ReviewReply, error) {
+func (m *Runtime) ApproveFromPage(it Item, page, seen string) (ReviewReply, error) {
 	gate, ok := OpenGate(it.Factory, StageOfPage(it.Factory, page))
 	if !ok {
 		return ReviewReply{}, errors.New("this page has no open gate to approve")
+	}
+	if seen != "" && seen != gate.ID {
+		return ReviewReply{}, errors.New("the gate on this page changed since it loaded; reload the page, then approve again")
 	}
 	if it.Pane == nil {
 		return ReviewReply{}, fmt.Errorf("%s has no supervisor pane; wake it, then approve again", it.Factory.Label())
