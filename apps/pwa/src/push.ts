@@ -38,19 +38,17 @@ export async function turnOn(me: Me): Promise<PushState> {
     );
   }
   const registration = await navigator.serviceWorker.ready;
-  const subscription =
-    (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: keyBytes(me.push.vapid_public_key),
-    }));
+  await (await registration.pushManager.getSubscription())?.unsubscribe();
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: keyBytes(me.push.vapid_public_key),
+  });
   return api.subscribe(subscription.toJSON());
 }
 
 export async function turnOff(): Promise<PushState> {
-  const state = await api.unsubscribe();
   await (await current())?.unsubscribe();
-  return state;
+  return api.unsubscribe();
 }
 
 export type PushHealth = "on" | "off" | "blocked" | "expired";
@@ -59,11 +57,12 @@ export async function reconcile(me: Me): Promise<PushHealth> {
   if (pushSupport() !== "ready") return "off";
   if (Notification.permission === "denied") return "blocked";
   const local = await current();
-  if (local && local.endpoint !== me.push.endpoint) {
+  if (local && me.push.subscribed && local.endpoint !== me.push.endpoint) {
     await api.subscribe(local.toJSON());
     return "on";
   }
-  if (!local && me.push.subscribed) return "expired";
+  const browserAndServerDisagree = (local !== null) !== me.push.subscribed;
+  if (browserAndServerDisagree) return "expired";
   return local ? "on" : "off";
 }
 

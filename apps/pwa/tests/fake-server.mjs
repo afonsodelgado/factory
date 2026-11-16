@@ -39,6 +39,7 @@ function reset() {
     threads: [],
     next: 1,
     gate: "",
+    grants: {},
   };
 }
 
@@ -97,16 +98,16 @@ function serveFile(res, file, cache = "no-cache") {
   fs.createReadStream(file).pipe(res);
 }
 
-function page(key) {
+function page(key, prefix = "") {
   return `<!doctype html><html><head><title>plan</title></head><body style="font:16px sans-serif;width:900px;margin:24px">
 <h1>plan</h1><section id="risks"><h2>Risks</h2><ul><li id="fonts">Fonts differ between macOS and Linux.</li>
 <li><a id="link" href="https://example.com/">Large invoices exceed the budget.</a></li></ul></section>
 <p style="height:1200px">filler</p>
-<script src="/_review/overlay.js" data-factory-review data-mobile data-theme="dark" data-events="/events/review" data-api="/r/${key}/_api" data-page="${key}/plan.html" data-file="plan.html" data-label="${key}" data-back="/f/${key}/pages" data-revision="r1" defer></script>
+<script src="${prefix}/_review/overlay.js" data-factory-review data-mobile data-theme="dark" data-events="${prefix}/events/review" data-access="${prefix}/_access" data-api="${prefix}/r/${key}/_api" data-page="${key}/plan.html" data-file="plan.html" data-label="${key}" data-back="/f/${key}/pages" data-revision="r1" defer></script>
 </body></html>`;
 }
 
-async function review(req, res, key, rest) {
+async function review(req, res, key, rest, prefix = "") {
   const notify = () => {
     for (const s of reviewStreams) s.write(`event: threads\ndata: ${key}\n\n`);
   };
@@ -117,7 +118,7 @@ async function review(req, res, key, rest) {
       "Cache-Control": "no-store",
       "X-Factory-Revision": "r1",
     });
-    return res.end(page(key));
+    return res.end(page(key, prefix));
   }
   if (rest === "_api/status")
     return send(res, 200, { gate: state.gate, owner: "architect" });
@@ -319,6 +320,33 @@ async function control(req, res, url) {
   send(res, 404, {});
 }
 
+async function sandboxed(req, res, token, rest) {
+  res.setHeader("Access-Control-Allow-Origin", "null");
+  res.setHeader("Access-Control-Expose-Headers", "X-Factory-Revision");
+  res.setHeader(
+    "Content-Security-Policy",
+    "sandbox allow-scripts allow-forms allow-modals",
+  );
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    return res.end();
+  }
+  const holder = state.grants[token];
+  if (!holder || !Object.values(state.devices).some((d) => d.id === holder))
+    return send(res, 401, { error: "This review page expired." });
+  if (rest === "/_access") return res.writeHead(204).end();
+  if (rest === "/_review/overlay.js")
+    return serveFile(res, overlay, "no-store");
+  if (rest === "/events/review") return stream(req, res, reviewStreams);
+  const reviewPath = /^\/r\/([^/]+)\/(.+)$/.exec(rest);
+  if (reviewPath)
+    return await review(req, res, reviewPath[1], reviewPath[2], `/rt/${token}`);
+  send(res, 404, {});
+}
+
 reset();
 http
   .createServer(async (req, res) => {
@@ -329,16 +357,19 @@ http
       if (state.mode === "serve-down")
         return send(res, 502, { error: "bad gateway" });
       if (url.pathname.startsWith("/api/")) return await api(req, res, url);
-      if (url.pathname === "/_review/overlay.js")
-        return serveFile(res, overlay, "no-store");
-      if (url.pathname === "/events/review")
-        return device(req)
-          ? stream(req, res, reviewStreams)
-          : send(res, 401, {});
+      const granted = /^\/rt\/([^/]+)(\/.*)$/.exec(url.pathname);
+      if (granted) return await sandboxed(req, res, granted[1], granted[2]);
       const reviewPath = /^\/r\/([^/]+)\/(.+)$/.exec(url.pathname);
       if (reviewPath) {
-        if (!device(req)) return send(res, 401, {});
-        return await review(req, res, reviewPath[1], reviewPath[2]);
+        const current = device(req);
+        if (!current) return send(res, 401, {});
+        const token = randomUUID();
+        state.grants[token] = current.id;
+        res.writeHead(303, {
+          Location: `/rt/${token}${url.pathname}`,
+          "Cache-Control": "no-store",
+        });
+        return res.end();
       }
       if (shellRoute.test(url.pathname))
         return serveFile(res, path.join(dist, "index.html"));

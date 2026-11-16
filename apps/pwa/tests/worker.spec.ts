@@ -29,7 +29,7 @@ test("the installed shell opens offline and never caches private routes", async 
   });
   expect(cached).toContain("/");
   expect(
-    cached.filter((path) => /^\/(api|r|events|_review)\//.test(path)),
+    cached.filter((path) => /^\/(api|r|rt|events|_review)\//.test(path)),
   ).toEqual([]);
 
   await context.setOffline(true);
