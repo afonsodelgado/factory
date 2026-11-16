@@ -27,18 +27,15 @@ func TestServerServesOnlyTheFactoryDirWithTheToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := Listen(0, "tok", []byte("// overlay"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, client := serve(t, "tok", []byte("// overlay"))
 	s.SetFactories([]Factory{{Key: "repo-1-csv", Label: "csv", Dir: dir}})
 
-	page, ok := s.PageURL("file://" + filepath.Join(dir, "design", "variant-a.html"))
+	path, ok := s.PagePath("file://" + filepath.Join(dir, "design", "variant-a.html"))
 	if !ok {
-		t.Fatal("PageURL did not map a file inside the factory dir")
+		t.Fatal("PagePath did not map a file inside the factory dir")
 	}
-	status, body := get(t, page)
+	page := onSocket + path
+	status, body := get(t, client, page)
 	if status != http.StatusOK || !strings.Contains(body, `src="/_review/overlay.js"`) || !strings.HasSuffix(body, "</body></html>") {
 		t.Fatalf("page: %d %q", status, body)
 	}
@@ -50,14 +47,14 @@ func TestServerServesOnlyTheFactoryDirWithTheToken(t *testing.T) {
 		"unknown factory":   "/r/tok/other/design/variant-a.html",
 		"outside any route": "/secret.txt",
 	} {
-		if status, body := get(t, s.Origin()+path); status == http.StatusOK || strings.Contains(body, "secret") {
+		if status, body := get(t, client, onSocket+path); status == http.StatusOK || strings.Contains(body, "secret") {
 			t.Errorf("%s: %s answered %d %q", name, path, status, body)
 		}
 	}
 
 	req, _ := http.NewRequest("GET", page, nil)
 	req.Host = "evil.example:80"
-	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
+	if resp, err := client.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
 		t.Errorf("a foreign Host header was served: %v %v", resp, err)
 	}
 }
@@ -66,16 +63,12 @@ func TestEditingAServedPageNotifiesOpenTabs(t *testing.T) {
 	dir := t.TempDir()
 	page := filepath.Join(dir, "plan.html")
 	write(t, page, "<body>v1</body>")
-	s, err := Listen(0, "tok", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, client := serve(t, "tok", nil)
 	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
-	url, _ := s.PageURL("file://" + page)
-	get(t, url)
+	path, _ := s.PagePath("file://" + page)
+	get(t, client, onSocket+path)
 
-	resp, err := http.Get(s.Origin() + "/r/tok/events")
+	resp, err := client.Get(onSocket + "/r/tok/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,17 +97,13 @@ func TestEditingAServedPageNotifiesOpenTabs(t *testing.T) {
 func TestCommentsSurviveAHubRestart(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
-	s, err := Listen(0, "tok", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, client := serve(t, "tok", nil)
 	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
 
 	body := `{"page":"plan.html","intent":"question","text":"Why two layers?","anchor":{"selector":"#q1","text":"Q1"}}`
-	req, _ := http.NewRequest("POST", s.Origin()+"/r/tok/k/_api/threads", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", onSocket+"/r/tok/k/_api/threads", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("create: %v %v", resp, err)
 	}
@@ -139,17 +128,13 @@ func TestCommentsSurviveAHubRestart(t *testing.T) {
 	}
 }
 
-func TestForwardedReviewPreservesHostAndOriginChecks(t *testing.T) {
+func TestASSHTunnelToTheReviewSocketKeepsHostTokenAndOriginChecks(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "plan.html"), "<body>plan</body>")
-	s, err := Listen(0, "tok", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, client := serve(t, "tok", nil)
 	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
 	s.SetActions(func(a Action) (any, error) { return map[string]string{"did": a.Kind}, nil })
-	tunnel, local := forwardTo(t, s.ln.Addr().String()), forwardTo(t, s.ln.Addr().String())
+	tunnel, local := forwardTo(t, client), forwardTo(t, client)
 	s.Allow(tunnel)
 	origin := "http://127.0.0.1:" + strconv.Itoa(tunnel)
 
@@ -215,11 +200,7 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "secret.txt"), filepath.Join(dir, "link.txt")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Listen(0, "desktop-token", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, client := serve(t, "desktop-token", nil)
 	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
 	phone := httptest.NewServer(s.MobileHandler())
 	t.Cleanup(phone.Close)
@@ -234,7 +215,7 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 		t.Fatalf("phone page %d, Cache-Control %q:\n%s\nwant it served with token-free API paths and no-store", resp.StatusCode, resp.Header.Get("Cache-Control"), page)
 	}
 
-	desktopEvents, err := http.Get(s.Origin() + "/r/desktop-token/events")
+	desktopEvents, err := client.Get(onSocket + "/r/desktop-token/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +237,7 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
-	if _, desktop := get(t, s.Origin()+"/r/desktop-token/k/_api/threads?page=plan.html"); strings.Count(desktop, `"id"`) != 1 {
+	if _, desktop := get(t, client, onSocket+"/r/desktop-token/k/_api/threads?page=plan.html"); strings.Count(desktop, `"id"`) != 1 {
 		t.Fatalf("desktop threads %s; want the phone's comment once, even though its lost answer made it post twice", desktop)
 	}
 	for heard := ""; heard != "k"; {
@@ -273,7 +254,7 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 		"a symlink out":           "/r/k/link.txt",
 		"an unknown factory":      "/r/other/plan.html",
 	} {
-		if status, body := get(t, phone.URL+path); status == http.StatusOK || strings.Contains(body, "secret") {
+		if status, body := get(t, http.DefaultClient, phone.URL+path); status == http.StatusOK || strings.Contains(body, "secret") {
 			t.Errorf("%s: %s answered %d %q on the phone", name, path, status, body)
 		}
 	}
@@ -286,48 +267,6 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 		if resp.StatusCode == http.StatusOK {
 			t.Errorf("the phone reached the desktop browser endpoint %s", path)
 		}
-	}
-}
-
-func TestAPhonePageAskedForBeforeTheFactoriesAreListedWaitsForThem(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, "plan.html"), "<html><body>plan</body></html>")
-	s, err := Listen(0, "desktop-token", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-	sockets, err := os.MkdirTemp("/tmp", "frm-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(sockets) })
-	socket := MobileSocket(sockets)
-	if err := s.ServeMobile(socket); err != nil {
-		t.Fatal(err)
-	}
-	phone := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, "unix", socket)
-	}}}
-	answered := make(chan int, 1)
-	go func() {
-		resp, err := phone.Get("http://review/r/k/plan.html")
-		if err != nil {
-			answered <- 0
-			return
-		}
-		resp.Body.Close()
-		answered <- resp.StatusCode
-	}()
-	select {
-	case status := <-answered:
-		t.Fatalf("a phone page asked for while the hub was still listing its factories answered %d; want it held until they are listed", status)
-	case <-time.After(200 * time.Millisecond):
-	}
-	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
-	if status := <-answered; status != 200 {
-		t.Fatalf("the held phone page answered %d once the factories were listed; want 200", status)
 	}
 }
 
@@ -363,8 +302,42 @@ func TestSendHoldsEditsUntilTheBatchIsMarkedSent(t *testing.T) {
 	}
 }
 
-func forwardTo(t *testing.T, dest string) int {
+const onSocket = "http://" + SocketHost
+
+func serve(t *testing.T, token string, overlay []byte) (*Server, *http.Client) {
 	t.Helper()
+	s, socket := serveSocket(t, token, overlay)
+	return s, SocketClient(socket)
+}
+
+func serveSocket(t *testing.T, token string, overlay []byte) (*Server, string) {
+	t.Helper()
+	s, err := New(token, overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp("/tmp", "frv-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "review.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: s.Handler()}
+	go server.Serve(ln)
+	t.Cleanup(func() {
+		server.Close()
+		s.Close()
+		os.RemoveAll(dir)
+	})
+	return s, socket
+}
+
+func forwardTo(t *testing.T, socket *http.Client) int {
+	t.Helper()
+	dial := socket.Transport.(*http.Transport).DialContext
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -378,7 +351,7 @@ func forwardTo(t *testing.T, dest string) int {
 			}
 			go func() {
 				defer c.Close()
-				d, err := net.Dial("tcp", dest)
+				d, err := dial(context.Background(), "", "")
 				if err != nil {
 					return
 				}
@@ -398,9 +371,9 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-func get(t *testing.T, url string) (int, string) {
+func get(t *testing.T, client *http.Client, url string) (int, string) {
 	t.Helper()
-	resp, err := http.Get(url)
+	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatal(err)
 	}

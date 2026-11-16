@@ -69,11 +69,10 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.RetiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.SlugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: CustomStages(pipeline), Agents: r.Agents, Chrome: m.chrome(r.Repo, profile), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: CustomStages(pipeline), Agents: r.Agents, Supervisor: supervisor}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
-		launch.Chrome = false
 		launch.AddDirs = m.WritableDirs(r.Repo, "", supervisor)
 	}
 	title := FirstLine(r.Prompt)
@@ -195,9 +194,8 @@ func (m *Runtime) Wake(key string) error {
 	if !ok || !it.Status.Asleep() || m.Engine == nil {
 		return nil
 	}
-	_, profile := m.repoConfig(it.Factory.Repo)
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
-	plan := PlanWake(it, m.chrome(it.Factory.Repo, profile), WithoutTokens(hooks, m.snap.StageTokens), m.WritableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+	plan := PlanWake(it, WithoutTokens(hooks, m.snap.StageTokens), m.WritableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree

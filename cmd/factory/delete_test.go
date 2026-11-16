@@ -41,7 +41,7 @@ func scratchNode(t *testing.T, config string) {
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", socket, "kill-server").Run() })
 	t.Setenv("FACTORY_TMUX_SOCKET", socket)
-	writeFile(t, filepath.Join(config, "config.yml"), readOr(filepath.Join(config, "config.yml"))+fmt.Sprintf("review:\n  port: %d\nnode:\n  port: %d\n", freePort(t), freePort(t)))
+	writeFile(t, filepath.Join(config, "config.yml"), readOr(filepath.Join(config, "config.yml"))+fmt.Sprintf("node:\n  port: %d\n", freePort(t)))
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		t.Fatal(err)

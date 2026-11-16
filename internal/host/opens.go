@@ -75,7 +75,7 @@ func (m *Runtime) opensOnTheLaptop(raw string) bool {
 	if m.Pages == nil {
 		return false
 	}
-	_, page := m.Pages.PageURL(raw)
+	_, page := m.Pages.PagePath(raw)
 	return page
 }
 
@@ -97,10 +97,13 @@ func (m *Runtime) Link(r remote.LinkRequest) (string, error) {
 			return "", err
 		}
 	}
-	if page, ok := m.Pages.PageURL(r.URL); ok {
+	if page, ok := m.Pages.PagePath(r.URL); ok {
 		return page, nil
 	}
-	return r.URL, nil
+	if r.URL != "" {
+		return "", fmt.Errorf("%s is not a page in any factory's folder", r.URL)
+	}
+	return "", nil
 }
 
 func WriteOpeners(dir, bin string) error {

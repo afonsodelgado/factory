@@ -1,44 +1,12 @@
 package phone
 
 import (
-	"context"
-	"errors"
 	"html/template"
-	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 )
 
 const DatabaseName = "factory-phone"
-
-func ReviewProxy(socket string) http.Handler {
-	return &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(&url.URL{Scheme: "http", Host: "review"})
-			pr.Out.Header.Del("Cookie")
-		},
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, "unix", socket)
-			},
-		},
-		FlushInterval: -1,
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
-			if errors.Is(r.Context().Err(), context.Canceled) {
-				return
-			}
-			if opensPage(r.Method, r.URL.Path) {
-				page(w, http.StatusServiceUnavailable, changingPage, nil)
-				return
-			}
-			unavailable(w)
-		},
-	}
-}
 
 func opensPage(method, path string) bool {
 	return method == http.MethodGet && strings.HasPrefix(path, "/r/") && !strings.Contains(path, "/_api/")
@@ -73,12 +41,5 @@ var refusedPage = template.Must(template.New("refused").Parse(pageHead + `<h1>Th
 <p>This device is signed in to Tailscale as <b>{{.Login}}</b>. factory nodes answer their owner and no one else, so nothing from this node is shown or kept here.</p>
 <p>Switch to {{.Owner}} in the Tailscale app, then open factory again.</p>
 <script>try{indexedDB.deleteDatabase({{.Database}})}catch(e){}</script>
-</body></html>
-`))
-
-var changingPage = template.Must(template.New("changing").Parse(pageHead + `<h1>factory is restarting</h1>
-<p>The node is starting its review pages. This page tries again in a moment.</p>
-<p><a href="">Try again</a></p>
-<script>setTimeout(function(){location.reload()},2000)</script>
 </body></html>
 `))

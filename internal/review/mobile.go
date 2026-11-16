@@ -3,45 +3,12 @@ package review
 import (
 	"fmt"
 	"html"
-	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
-	"time"
 )
 
 const PrefixHeader = "X-Factory-Phone-Prefix"
-
-func MobileSocket(stateDir string) string { return filepath.Join(stateDir, "phone", "review.sock") }
-
-func (s *Server) ServeMobile(path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
-	}
-	os.Remove(path)
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		ln.Close()
-		return err
-	}
-	mobile := &http.Server{Handler: s.MobileHandler(), ReadHeaderTimeout: 10 * time.Second}
-	s.mu.Lock()
-	s.mobile = mobile
-	s.mu.Unlock()
-	go func() {
-		<-s.listed
-		mobile.Serve(ln)
-	}()
-	return nil
-}
 
 func (s *Server) MobileHandler() http.Handler {
 	mux := http.NewServeMux()

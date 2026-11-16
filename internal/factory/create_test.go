@@ -12,9 +12,9 @@ import (
 )
 
 func TestCreateCommand(t *testing.T) {
-	noPromptInBrowserRepo := Launch{Repo: "/r/cowork", Slug: "eng-740", SessionID: "5f0c9d2e", Chrome: true}
-	want := "claude --worktree eng-740 --session-id 5f0c9d2e --chrome '/factory eng-740'; cd '/r/cowork/.claude/worktrees/eng-740'"
-	if got := noPromptInBrowserRepo.CreateCommand(); got != want {
+	noPrompt := Launch{Repo: "/r/cowork", Slug: "eng-740", SessionID: "5f0c9d2e"}
+	want := "claude --worktree eng-740 --session-id 5f0c9d2e '/factory eng-740'; cd '/r/cowork/.claude/worktrees/eng-740'"
+	if got := noPrompt.CreateCommand(); got != want {
 		t.Errorf("factory without a prompt runs =\n%s\nwant\n%s", got, want)
 	}
 

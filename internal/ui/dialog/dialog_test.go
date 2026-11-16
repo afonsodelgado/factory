@@ -592,7 +592,7 @@ func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {
 				}
 				return
 			}
-			if settings.values["commands.build"] != "old" || len(settings.fields()) != 7 {
+			if settings.values["commands.build"] != "old" || len(settings.fields()) != 9 {
 				t.Fatal("file not loaded")
 			}
 			settings.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
@@ -605,7 +605,7 @@ func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {
 				t.Fatal("terminal fields lost edits")
 			}
 			settings.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-			if len(settings.fields()) != 7 {
+			if len(settings.fields()) != 9 {
 				t.Fatal("browser fields not restored")
 			}
 			settings.Update(tea.KeyPressMsg{Code: tea.KeySpace})

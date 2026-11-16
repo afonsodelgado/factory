@@ -24,10 +24,10 @@ func (l *listening) Close() {
 	})
 }
 
-func bindLocally(local, port int) (Forwarding, error) {
+func bindLocally(local int, to Tunnel) (Forwarding, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(local))
 	if err != nil {
-		return nil, &PortTakenError{Local: local, Port: port}
+		return nil, &PortTakenError{Local: local, To: to.Destination()}
 	}
 	return &listening{ln: ln, done: make(chan struct{})}, nil
 }
@@ -38,7 +38,7 @@ func TestTunnelsKeepTheirPortAcrossReconnectsAndNeverMoveIt(t *testing.T) {
 	t.Cleanup(tunnels.Close)
 	open := func(ts *Tunnels, name, server string) (int, error) {
 		t.Helper()
-		return ts.Open(name, server, 7417, bindLocally)
+		return ts.Open(name, Tunnel{Server: server, Socket: "/srv/state/review.sock"}, bindLocally)
 	}
 
 	first, err := open(tunnels, "homelab", "s-1")
@@ -46,7 +46,7 @@ func TestTunnelsKeepTheirPortAcrossReconnectsAndNeverMoveIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if other, _ := open(tunnels, "build", "s-2"); other == first {
-		t.Fatalf("two servers that both serve on 7417 share 127.0.0.1:%d", first)
+		t.Fatalf("two servers whose review sockets share a path share 127.0.0.1:%d", first)
 	}
 	for _, f := range tunnels.live {
 		f.Close()
@@ -97,11 +97,11 @@ func TestOnlyLoopbackLinksGoThroughTheTunnel(t *testing.T) {
 func TestAServerCannotMakeTheLaptopOpenAnythingButAWebLink(t *testing.T) {
 	var client Client
 	for _, raw := range []string{"-a Terminal", "/System/Applications/Utilities/Terminal.app", "vscode://file/etc/passwd", "ftp://example.com/x", "https://"} {
-		if got, err := client.Resolve(context.Background(), nil, "", raw); err == nil {
+		if got, err := client.Resolve(context.Background(), nil, ReviewHome{}, raw); err == nil {
 			t.Errorf("%q resolved to %q; want a refusal, since the laptop's opener would run it", raw, got)
 		}
 	}
-	if got, err := client.Resolve(context.Background(), nil, "", "https://github.com/acme/app/pull/7"); err != nil || got != "https://github.com/acme/app/pull/7" {
+	if got, err := client.Resolve(context.Background(), nil, ReviewHome{}, "https://github.com/acme/app/pull/7"); err != nil || got != "https://github.com/acme/app/pull/7" {
 		t.Errorf("a public link resolved to %q, %v; want it unchanged", got, err)
 	}
 }

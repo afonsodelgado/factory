@@ -54,18 +54,13 @@ type Launch struct {
 	Stages     []string
 	Agents     map[string]state.AgentSetting
 	SessionID  string
-	Chrome     bool
 	Supervisor state.AgentSetting
 	AddDirs    []string
 }
 
 func (l Launch) flags() []string {
 	flags := option("--model", l.Supervisor.Model)
-	flags = append(flags, option("--effort", l.Supervisor.Effort)...)
-	if l.Chrome {
-		flags = append(flags, "--chrome")
-	}
-	return flags
+	return append(flags, option("--effort", l.Supervisor.Effort)...)
 }
 
 const openCodeSkillCommand = "Use the factory skill for: /factory"

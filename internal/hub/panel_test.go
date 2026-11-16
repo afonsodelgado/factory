@@ -407,30 +407,3 @@ func TestQuestionBatchPanel(t *testing.T) {
 		})
 	}
 }
-
-func TestPRCIFollowsTheLatestRunOfEachCheck(t *testing.T) {
-	cases := []struct {
-		name   string
-		rollup string
-		want   string
-	}{
-		{"cancelled run superseded by a pass", `[
-			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-11-04T14:41:24Z"},
-			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-04T15:04:48Z"},
-			{"context":"deploy","state":"SUCCESS","createdAt":"2026-11-04T15:00:00Z"}]`, "pass"},
-		{"pass superseded by a failure", `[
-			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-04T15:04:48Z"},
-			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-04T14:41:24Z"}]`, "fail"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			gh := &GitHub{Run: func(string, ...string) ([]byte, error) {
-				return []byte(`{"number":7,"statusCheckRollup":` + c.rollup + `}`), nil
-			}}
-			pr := gh.Statuses("/repo", []int{7}, time.Now(), true)[0]
-			if pr.CI != c.want {
-				t.Fatalf("CI = %q, want %q", pr.CI, c.want)
-			}
-		})
-	}
-}

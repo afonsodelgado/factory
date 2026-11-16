@@ -118,8 +118,10 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		}
 		confirmed := host.WorkDigest(factory.CheckWork(factory.PlanRemoval(f, cfg)))
 		return forward(cfg, "delete", req.Op, mustJSON(host.DeleteRequest{Repo: f.Repo, Slug: f.Slug, Work: confirmed}))
-	case "stage", "review", "qa-claim", "qa-return":
+	case "stage", "review":
 		return forward(cfg, req.Action, req.Op, req.Data)
+	case "qa-claim", "qa-return":
+		return nil, remote.Rejected, errors.New("QA no longer runs on a laptop: it runs in headless Chrome on the machine that holds the factory. Start the QA stage again there")
 	case "view":
 		return forward(cfg, "view", "", nil)
 	case "link", "opened", "events", "push", "push-test":

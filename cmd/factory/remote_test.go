@@ -85,7 +85,7 @@ func newStandIn(t *testing.T) standIn {
 		t.Fatalf("tmux: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", s.tmux, "kill-server").Run() })
-	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\nnode:\n  port: %d\n  owner: owner@example.com\n", freePort(t), freePort(t)))
+	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("node:\n  port: %d\n  owner: owner@example.com\n", freePort(t)))
 	writeFile(t, filepath.Join(client, "config", "config.yml"), "remotes:\n  homelab:\n    host: homelab\n")
 	s.serverNode(t, s.server, s.tmux)
 	return s
@@ -453,7 +453,7 @@ func (s standIn) secondServer(t *testing.T, name string) (string, string) {
 		}
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", socket, "kill-server").Run() })
-	writeFile(t, filepath.Join(root, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\nnode:\n  port: %d\n  owner: owner@example.com\n", freePort(t), freePort(t)))
+	writeFile(t, filepath.Join(root, "config", "config.yml"), fmt.Sprintf("node:\n  port: %d\n  owner: owner@example.com\n", freePort(t)))
 	writeFile(t, filepath.Join(root, "home", ".gitconfig"), readOr(filepath.Join(s.server, "home", ".gitconfig")))
 	s.serverNode(t, root, socket)
 	return root, socket
@@ -725,132 +725,6 @@ func (s standIn) run(t *testing.T, cmd *exec.Cmd) string {
 		t.Fatalf("%v: %v\n%s", cmd.Args, err, out)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func heldJob(t *testing.T, client remote.Client, id, sha string) remote.QAJob {
-	t.Helper()
-	var job remote.QAJob
-	waitFor(t, "the server to hold QA at "+sha, func() bool {
-		var view remote.View
-		client.Read(context.Background(), "view", nil, &view)
-		for _, f := range view.Factories {
-			if f.ID == id && f.QA != nil && f.QA.SHA == sha {
-				job = *f.QA
-			}
-		}
-		return job.Phase == remote.QAHeld
-	})
-	return job
-}
-
-func startOnLaptop(t *testing.T, client remote.Client, stateDir, repo string, job remote.QAJob) remote.QARun {
-	t.Helper()
-	run := remote.QARun{Repo: repo, Dir: remote.QADir(stateDir, job.ID), Job: job}
-	if err := remote.CheckOutQA(context.Background(), repo, run.Dir, job); err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := remote.ServerID(stateDir)
-	if err := client.Mutate(context.Background(), "qa-claim", uuid.NewString(), remote.QAClaim{Job: job.ID, Runner: runner}, &run.Job); err != nil {
-		t.Fatal(err)
-	}
-	if err := remote.WriteQAInputs(run.Dir, run.Job); err != nil {
-		t.Fatal(err)
-	}
-	return run
-}
-
-func TestRemoteQAReturnsEvidenceForExactCommit(t *testing.T) {
-	s := newStandIn(t)
-	url, bare := "https://git.example/acme/app.git", filepath.Join(s.root, "origin.git")
-	src := gitRepo(t, s.root, url)
-	s.serveGit(t, url, bare)
-	writeFile(t, filepath.Join(s.root, "client", "home", ".gitconfig"), fmt.Sprintf("[url %q]\n\tinsteadOf = %s\n", bare, url))
-	writeFile(t, filepath.Join(src, ".factory", "config.yml"), "qa:\n  mode: browser\n")
-	before := gitState(t, src)
-	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	s.inProcess(t)
-	cfg, _ := state.LoadConfig()
-	homelab, _ := remote.For(cfg, "homelab")
-	csv, _ := paneOf(t, homelab, "csv")
-	worktree, dir := csv.Worktree, filepath.Join(csv.Worktree, ".claude", "factory", "csv")
-	s.run(t, s.onServer(csv.Repo, "git", "worktree", "add", "-q", "-b", "csv", worktree))
-	publish := func(stage, change string) string {
-		t.Helper()
-		s.run(t, s.onServer(worktree, "git", "commit", "-q", "--allow-empty", "-m", change))
-		s.run(t, s.onServer(worktree, "git", "push", "-q", "origin", "csv"))
-		writeFile(t, filepath.Join(dir, "state.json"), `{"id": "csv", "stage": "`+stage+`"}`)
-		return s.run(t, s.onServer(worktree, "git", "rev-parse", "HEAD"))
-	}
-	writeFile(t, filepath.Join(dir, "brief.md"), "the QA brief")
-	writeFile(t, filepath.Join(dir, "stages", "qa-task.md"), "QA csv. The spec is brief.md in "+dir+".")
-
-	implemented := publish("qa", "implement")
-	var waited strings.Builder
-	stage := s.onServer(worktree, filepath.Join(s.bin, "factory"), "stage", "start", "--role", "qa", "--task", filepath.Join(dir, "stages", "qa-task.md"), "--factory", "csv", "--wait")
-	stage.Stdout, stage.Stderr = &waited, &waited
-	if err := stage.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stage.Process.Kill() })
-	job := heldJob(t, homelab, "csv", implemented)
-	if again := heldJob(t, homelab, "csv", implemented); again.ID != job.ID || again.Runner != "" {
-		t.Fatal("reading the server claimed or replaced the held job; only an explicit start may")
-	}
-	if strings.Contains(paneCommands(s.tmux), "-qa ") {
-		t.Fatalf("the server opened a QA pane for browser QA:\n%s", paneCommands(s.tmux))
-	}
-
-	run := startOnLaptop(t, homelab, cfg.StateDir, src, job)
-	if gitHead(t, run.Dir) != implemented {
-		t.Fatalf("the laptop checked out %s; want %s", gitHead(t, run.Dir), implemented)
-	}
-	if brief := readOr(filepath.Join(run.Dir, ".claude", "factory", "csv", "brief.md")); brief != "the QA brief" {
-		t.Fatalf("the laptop's brief reads %q", brief)
-	}
-	report := filepath.Join(run.Dir, ".claude", "qa", "csv-report.md")
-	writeFile(t, report, "1 major: the export drops the header")
-	shot := filepath.Join(run.Dir, ".claude", "qa", "csv-shot.png")
-	writeFile(t, shot, strings.Repeat("x", 4<<20))
-	writeFile(t, filepath.Join(run.Dir, run.Job.Result), `{"status": "done", "summary": "1 major", "outputs": ["`+report+`", "`+shot+`"]}`)
-	back, ready, err := remote.QAReport(run.Dir, run.Job)
-	if !ready || err != nil {
-		t.Fatalf("the laptop's report is not ready: %v", err)
-	}
-	if err := homelab.Mutate(context.Background(), "qa-return", uuid.NewString(), back, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := stage.Wait(); err != nil || !strings.Contains(waited.String(), filepath.Join(worktree, ".claude", "qa", "csv-report.md")) {
-		t.Fatalf("the supervisor's wait ended with %v:\n%s\nwant the result naming the report on the server", err, waited.String())
-	}
-	if info, err := os.Stat(filepath.Join(worktree, ".claude", "qa", "csv-shot.png")); err != nil || info.Size() != 4<<20 {
-		t.Fatalf("the server's copy of a 4 MiB screenshot is %v, %v; the host socket must carry the whole report", info, err)
-	}
-	if got := readOr(filepath.Join(worktree, ".claude", "qa", "csv-report.md")); got != "1 major: the export drops the header" {
-		t.Fatalf("the server's copy of the report reads %q", got)
-	}
-
-	fixed := publish("qa_fixes", "fix the header")
-	recheck := s.onServer(worktree, filepath.Join(s.bin, "factory"), "stage", "start", "--role", "qa", "--task", filepath.Join(dir, "stages", "qa-task.md"), "--factory", "csv")
-	s.run(t, recheck)
-	job = heldJob(t, homelab, "csv", fixed)
-	if job.Kind != "recheck" {
-		t.Fatalf("the second QA is a %s job; want a re-check that needs its own start", job.Kind)
-	}
-	run = startOnLaptop(t, homelab, cfg.StateDir, src, job)
-	if gitHead(t, run.Dir) != fixed {
-		t.Fatalf("the re-check runs %s; want the fixed commit %s", gitHead(t, run.Dir), fixed)
-	}
-	if gitState(t, src) != before {
-		t.Fatal("laptop QA changed the developer's checkout")
-	}
-	filepath.WalkDir(filepath.Join(s.root, "client"), func(path string, d os.DirEntry, err error) error {
-		if err == nil && d.Name() == "state.json" {
-			t.Errorf("the laptop wrote %s; only the server's supervisor writes state.json", path)
-		}
-		return nil
-	})
 }
 
 func gitHead(t *testing.T, dir string) string {

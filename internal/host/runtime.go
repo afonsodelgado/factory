@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -40,17 +39,20 @@ type Answer struct {
 }
 
 type Runtime struct {
-	Pages   *review.Server
-	Config  *state.Config
-	Loader  *Loader
-	Engine  StageEngine
-	TM      tmux.Client
-	Session string
-	Typist  Typist
-	Now     func() time.Time
-	Console Console
-	Log     *EventLog
-	Push    *Pusher
+	Pages    *review.Server
+	Config   *state.Config
+	Loader   *Loader
+	Engine   StageEngine
+	TM       tmux.Client
+	Session  string
+	Typist   Typist
+	Now      func() time.Time
+	Console  Console
+	Log      *EventLog
+	Push     *Pusher
+	Jobs     Background
+	Browsers Browsers
+	GitHub   *GitHub
 
 	snap        Snapshot
 	typeQueue   []QueuedType
@@ -59,6 +61,9 @@ type Runtime struct {
 	notice      string
 	receipts    receiptFile
 	repoNames   map[string]string
+	leases      map[string]BrowserReady
+	prs         map[string][]PR
+	prsPolled   time.Time
 }
 
 func New(r Runtime) *Runtime {
@@ -69,6 +74,7 @@ func New(r Runtime) *Runtime {
 	r.inboxQueued = map[string]bool{}
 	r.receipts = receiptFile{Claims: map[string]Answer{}}
 	r.repoNames = map[string]string{}
+	r.leases = map[string]BrowserReady{}
 	return &r
 }
 
@@ -84,22 +90,15 @@ func (m *Runtime) TakeNotice() string {
 
 func (m *Runtime) Tick() {
 	if m.Loader != nil {
-		m.snap = m.withQA(m.Loader.Load())
+		m.snap = m.Loader.Load()
 	}
 	m.SettleReceipts(m.snap.Items, func(string) time.Time { return m.snap.At })
 	m.QueueInbox()
 	m.FlushTypeQueue()
 	m.CloseFinishedStages()
+	m.ReleaseFinishedBrowsers()
 	m.SyncReview()
 	m.watch()
-}
-
-func (m *Runtime) clonedForLaptop(repo string) bool {
-	return remote.IsClone(m.Config.StateDir, repo)
-}
-
-func (m *Runtime) chrome(repo string, profile state.Profile) bool {
-	return profile.BrowserQA() && !m.clonedForLaptop(repo)
 }
 
 func (m *Runtime) repoConfig(repo string) (*state.Config, state.Profile) {
@@ -200,5 +199,11 @@ func (m *Runtime) typeSupervisor(pane string, f factory.Factory, command string)
 func (m *Runtime) typeAfterStart(plan Wake, pane string, it Item) {
 	if plan.ThenType != "" {
 		m.QueueType(QueuedType{Pane: pane, SessionID: plan.Launch.SessionID, Label: it.Factory.Label(), Text: plan.ThenType, NotBefore: m.Now().Add(resumeSettle)})
+	}
+}
+
+func (m *Runtime) note(f factory.Factory, text string) {
+	if m.Loader != nil {
+		m.Loader.Note(f, text)
 	}
 }

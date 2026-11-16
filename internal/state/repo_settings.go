@@ -64,7 +64,7 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 func SettingsKeys(mode string) []string {
 	keys := []string{"commands.build", "commands.lint", "commands.test", "qa.mode"}
 	if mode == "browser" {
-		keys = append(keys, "qa.start", "qa.health")
+		keys = append(keys, "qa.start", "qa.health", "qa.seed", "qa.sign_in")
 	}
 	return append(keys, "coderabbit")
 }

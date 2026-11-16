@@ -3,7 +3,9 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +22,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/remote"
 
+	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -132,5 +136,98 @@ func TestABrowserJobDrivesHeadlessChromeWithoutADisplayAndLeavesNothingBehind(t 
 		if time.Now().After(deadline) {
 			t.Fatalf("Chrome %d still runs after the job closed", pid)
 		}
+	}
+}
+
+type stageEngine struct{ typed []string }
+
+func (e *stageEngine) NewFactoryPane(host.NewPane) (string, error) { return "%1", nil }
+func (e *stageEngine) Pause(string, string) error                  { return nil }
+func (e *stageEngine) NewStagePane(host.StagePane) (string, error) { return "%2", nil }
+func (e *stageEngine) KillStages(string, string, string) error     { return nil }
+func (e *stageEngine) Type(_, text string) error                   { e.typed = append(e.typed, text); return nil }
+
+func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing.T) {
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<!doctype html><html><body><h1>Contacts</h1></body></html>`))
+	}))
+	t.Cleanup(app.Close)
+	_, port, _ := net.SplitHostPort(app.Listener.Addr().String())
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	repo, stateDir := t.TempDir(), t.TempDir()
+	worktree := filepath.Join(repo, "wt")
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{ID: "csv"}}
+	configure := func(qa string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(repo, ".factory"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(state.RepoConfigPath(repo), []byte("qa:\n  mode: browser\n  web_port: "+port+"\n  health: "+app.URL+"\n"+qa), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := &stageEngine{}
+	queue := NewQueue()
+	browsers := &Browsers{NoSandbox: goruntime.GOOS == "linux"}
+	t.Cleanup(func() { browsers.Close() })
+	r := host.New(host.Runtime{Config: &state.Config{StateDir: stateDir}, Engine: engine, Jobs: &Jobs{Queue: queue, Ctx: context.Background()}, Browsers: browsers})
+	r.SetSnapshot(host.Snapshot{At: time.Now(), Items: []host.Item{{Factory: f}}})
+	startQA := func() (host.StageReply, error) {
+		return r.Stage(host.StageRequest{Role: "qa", Factory: "csv", Text: "Test the export."})
+	}
+
+	configure("  seed: none\n")
+	if _, err := startQA(); err == nil || !strings.Contains(err.Error(), "qa.sign_in") || !strings.Contains(err.Error(), "no browser was launched") {
+		t.Fatalf("browser QA without a declared sign-in gave %v; want a failure naming qa.sign_in before any browser", err)
+	}
+	if len(engine.typed) != 0 || len(queue.Events()) != 0 {
+		t.Fatal("browser QA without a recipe still started a pane or a browser job")
+	}
+
+	configure("  seed: none\n  sign_in: none\n")
+	reply, err := startQA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ready host.Message
+	select {
+	case e := <-queue.Events():
+		ready = e.Message
+	case <-time.After(time.Minute):
+		t.Fatal("the browser job never reported back")
+	}
+	var b host.BrowserReady
+	json.Unmarshal(ready.Data, &b)
+	if b.Error != "" {
+		if os.Getenv("CI") == "" {
+			t.Skip("no Chrome here: ", b.Error)
+		}
+		t.Fatal(b.Error)
+	}
+	if answer := r.Handle(ready); answer.T != "done" {
+		t.Fatalf("opening the QA pane on the ready browser: %+v", answer)
+	}
+	launch, _ := os.ReadFile(state.LaunchScriptPath(stateDir, repo, "csv", "qa"))
+	config, _ := os.ReadFile(b.MCPConfig)
+	job := browsers.leased[f.Key()]
+	switch {
+	case !bytes.Contains(launch, []byte("--mcp-config "+factory.ShellQuote(b.MCPConfig))) || bytes.Contains(launch, []byte("--chrome")):
+		t.Fatalf("QA launched with\n%s\nwant this stage's MCP config and no --chrome", launch)
+	case !bytes.Contains(config, []byte("--browser-url="+job.Chrome.URL)):
+		t.Fatalf("the stage's MCP config does not attach to its own headless browser:\n%s", config)
+	case !strings.HasPrefix(job.Chrome.Profile, os.TempDir()):
+		t.Fatalf("Chrome runs on the profile %s; want a temporary one", job.Chrome.Profile)
+	}
+
+	host.WriteFile(reply.Result, `{"status":"done"}`)
+	r.ReleaseFinishedBrowsers()
+	if _, err := os.Stat(job.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the finished QA stage left its browser profile %s behind: %v", job.Dir, err)
 	}
 }

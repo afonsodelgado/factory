@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -192,4 +195,60 @@ func (j *BrowserJob) Close() error {
 		j.stack.Wait()
 	}
 	return errors.Join(append(errs, os.RemoveAll(j.Dir))...)
+}
+
+type Browsers struct {
+	Chrome    string
+	NoSandbox bool
+
+	mu     sync.Mutex
+	leased map[string]*BrowserJob
+}
+
+func (b *Browsers) Check(profile state.Profile, worktree string) error {
+	_, err := RecipeOf(profile, worktree)
+	return err
+}
+
+func (b *Browsers) Prepare(ctx context.Context, key string, profile state.Profile, worktree string) (string, error) {
+	recipe, err := RecipeOf(profile, worktree)
+	if err != nil {
+		return "", err
+	}
+	b.Release(key)
+	job, err := StartBrowserJob(ctx, recipe, b.Chrome, b.NoSandbox)
+	if err != nil {
+		return "", err
+	}
+	if ctx.Err() != nil {
+		job.Close()
+		return "", ctx.Err()
+	}
+	b.mu.Lock()
+	if b.leased == nil {
+		b.leased = map[string]*BrowserJob{}
+	}
+	b.leased[key] = job
+	b.mu.Unlock()
+	return job.MCPConfig, nil
+}
+
+func (b *Browsers) Release(key string) {
+	b.mu.Lock()
+	job := b.leased[key]
+	delete(b.leased, key)
+	b.mu.Unlock()
+	if job != nil {
+		job.Close()
+	}
+}
+
+func (b *Browsers) Close() error {
+	b.mu.Lock()
+	keys := slices.Collect(maps.Keys(b.leased))
+	b.mu.Unlock()
+	for _, key := range keys {
+		b.Release(key)
+	}
+	return nil
 }

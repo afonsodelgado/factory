@@ -197,7 +197,7 @@ func (m *NewFactoryModel) launch() factory.Launch {
 	name, stages := m.chosenPipeline()
 	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
 	if launch.Supervisor.OnClaude() {
-		launch.SessionID, launch.Chrome = "<uuid>", repo.Browser && m.remote() == ""
+		launch.SessionID = "<uuid>"
 	}
 	return launch
 }
@@ -864,12 +864,12 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
-	reason := "no --chrome: the " + repo.Name + " repo config uses terminal QA."
+	reason := "QA runs the app in a scratch tmux server: the " + repo.Name + " repo config uses terminal QA."
 	switch {
 	case !launch.Supervisor.OnClaude():
 		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
 	case repo.Browser:
-		reason = "--chrome because the " + repo.Name + " repo config uses browser QA."
+		reason = "QA opens its own Claude pane on headless Chrome: the " + repo.Name + " repo config uses browser QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
 }
@@ -885,10 +885,6 @@ func (m *NewFactoryModel) drawRemotePreview(c *theme.Canvas, x, y, w int, name s
 	}
 	for _, l := range theme.Wrap(command, w-4) {
 		c.Put(x+2, y, l, theme.Text)
-		y++
-	}
-	if repo.Browser {
-		c.PutMax(x, y, "No --chrome on "+name+": "+repo.Name+" uses browser QA, so QA runs on this laptop.", theme.Muted, w)
 		y++
 	}
 	for _, l := range theme.Wrap(name+" clones "+repo.GitURL+" there the first time, then fetches.", w) {

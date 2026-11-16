@@ -47,12 +47,11 @@ const (
 
 func (m *Model) servedBy(f factory.Factory) string {
 	l := m.linkOf(f)
-	port, ok := remote.LoopbackPort(l.view.Review)
-	if !ok {
+	if l.view.Review.Socket == "" {
 		return ""
 	}
-	served := f.Remote.Name + ":" + strconv.Itoa(port)
-	if local, ok := remote.LocalPort(m.Config.StateDir, f.Remote.Name, l.server, port); ok {
+	served := f.Remote.Name
+	if local, ok := remote.LocalPort(m.Config.StateDir, f.Remote.Name, remote.Tunnel{Server: l.server, Socket: l.view.Review.Socket}); ok {
 		return served + ", through the tunnel at 127.0.0.1:" + strconv.Itoa(local)
 	}
 	return served + ", through a tunnel that ctrl+o opens"
@@ -136,7 +135,7 @@ func (m *Model) openRemote(name string, o remote.Open) tea.Cmd {
 	}
 }
 
-func openThrough(cfg *state.Config, tunnels *remote.Tunnels, open func(string), name, home string, o remote.Open) error {
+func openThrough(cfg *state.Config, tunnels *remote.Tunnels, open func(string), name string, home remote.ReviewHome, o remote.Open) error {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 	defer cancel()
 	client, err := remote.For(cfg, name)

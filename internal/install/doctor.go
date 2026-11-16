@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -124,7 +125,7 @@ func nerdFontInstallCommand() string {
 }
 
 func Doctor(o Options) []Check {
-	return doctor(o, append([]Check{chrome(o), nerdFont(o)}, PhoneChecks(o)...)...)
+	return doctor(o, append([]Check{browserQA(o), nerdFont(o)}, PhoneChecks(o)...)...)
 }
 
 var phoneMarks = map[string]Mark{phone.Passed: Pass, phone.Failed: Fail, phone.Skipped: Skip}
@@ -293,12 +294,42 @@ func revmux(o Options) Check {
 	return Check{Name: "revmux", Mark: Pass, Detail: strings.TrimSpace(version(out) + " · plugin revmux@revmux")}
 }
 
-func chrome(o Options) Check {
-	detail := "can't be detected from here. Only repos whose repo config uses browser QA need it"
-	if len(o.Browser) > 0 {
-		detail += " (" + strings.Join(o.Browser, ", ") + ")"
+func browserQA(o Options) Check {
+	const name = "browser QA"
+	if len(o.Browser) == 0 {
+		return Check{Name: name, Mark: Skip, Detail: "no repo uses browser QA"}
 	}
-	return Check{Name: "Chrome", Mark: Warn, Detail: detail + ".", Fix: "install the Claude in Chrome extension; factory passes --chrome per repo config"}
+	repos := " for " + strings.Join(o.Browser, ", ")
+	if !hasCommand("npx") {
+		return Check{Name: name, Mark: Fail, Detail: "npx is not on PATH, so " + node.DevToolsMCP + " cannot drive headless Chrome" + repos, Fix: installCommand("node")}
+	}
+	configured := ""
+	if o.Config != nil {
+		configured = o.Config.Review.Chrome
+	}
+	chrome, found := chromeBinary(configured)
+	if !found {
+		return Check{Name: name, Mark: Fail, Detail: "no Chrome or Chromium found" + repos, Fix: "install Google Chrome, or set review.chrome in config.yml to its binary"}
+	}
+	return Check{Name: name, Mark: Pass, Detail: node.DevToolsMCP + " through npx on headless " + tilde(chrome)}
+}
+
+func chromeBinary(configured string) (string, bool) {
+	if configured != "" {
+		_, err := os.Stat(configured)
+		return configured, err == nil
+	}
+	for _, app := range []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"} {
+		if _, err := os.Stat(app); err == nil && runtime.GOOS == "darwin" {
+			return app, true
+		}
+	}
+	for _, binary := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "headless_shell"} {
+		if path, err := exec.LookPath(binary); err == nil {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func claudeLogin(o Options) Check {
@@ -327,12 +358,12 @@ func isNoHeads(err error) bool {
 	return errors.As(err, &exit) && exit.ExitCode() == 2
 }
 
-var forwardingRefused = regexp.MustCompile(`(?im)^\s*(AllowTcpForwarding\s+(no|remote)|DisableForwarding\s+yes)\b`)
+var forwardingRefused = regexp.MustCompile(`(?im)^\s*((AllowTcpForwarding|AllowStreamLocalForwarding)\s+(no|remote)|DisableForwarding\s+yes)\b`)
 
 func forwarding() Check {
 	data, err := os.ReadFile("/etc/ssh/sshd_config")
 	if err == nil && forwardingRefused.Match(data) {
-		return Check{Name: "forwarding", Mark: Fail, Detail: "sshd refuses local forwarding, so review pages and dev servers can't reach this laptop", Fix: "set AllowTcpForwarding local in /etc/ssh/sshd_config  and restart sshd"}
+		return Check{Name: "forwarding", Mark: Fail, Detail: "sshd refuses local forwarding, so review pages and dev servers can't reach this laptop", Fix: "set AllowTcpForwarding local and AllowStreamLocalForwarding local in /etc/ssh/sshd_config  and restart sshd"}
 	}
 	return Check{Name: "forwarding", Mark: Pass, Detail: "sshd allows local forwarding, for review pages and dev servers"}
 }

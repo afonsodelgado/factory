@@ -5,11 +5,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: forward <bind:port> <host:port>")
+		fmt.Fprintln(os.Stderr, "usage: forward <bind:port> <host:port|/socket/path>")
 		os.Exit(255)
 	}
 	ln, err := net.Listen("tcp", os.Args[1])
@@ -28,7 +29,11 @@ func main() {
 
 func proxy(c net.Conn, dest string) {
 	defer c.Close()
-	d, err := net.Dial("tcp", dest)
+	network := "tcp"
+	if strings.HasPrefix(dest, "/") {
+		network = "unix"
+	}
+	d, err := net.Dial(network, dest)
 	if err != nil {
 		return
 	}

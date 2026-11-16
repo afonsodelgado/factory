@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -20,7 +19,6 @@ type Item struct {
 	Hook      *state.HookFile
 	Pane      *tmux.Pane
 	Stage     *StageView
-	QA        *remote.QAJob
 }
 
 type Snapshot struct {

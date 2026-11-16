@@ -1,6 +1,6 @@
 # state.json
 
-One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer, by hand or through `factory attention resolve`; the factory app only reads it.
+One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The supervisor is the only writer; the factory app and its node only read it. `factory attention resolve` changes nothing: it prints the edit to make, and the supervisor makes it.
 
 | Field | Meaning |
 |---|---|

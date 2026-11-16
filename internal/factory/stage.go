@@ -9,13 +9,15 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
+const BrowserTools = "mcp__chrome-devtools"
+
 const openCodeQuiet = `OPENCODE_CONFIG_CONTENT='{"autoupdate":false}'`
 
 type StageLaunch struct {
 	Setting      state.AgentSetting
 	Kickoff      string
 	SessionID    string
-	Chrome       bool
+	MCPConfig    string
 	AddDirs      []string
 	AddCwdGitDir bool
 }
@@ -41,10 +43,11 @@ func (s StageLaunch) claude() string {
 	}
 	parts = append(parts, option("--model", s.Setting.Model)...)
 	parts = append(parts, option("--effort", s.Setting.Effort)...)
-	if s.Chrome {
-		parts = append(parts, "--chrome")
+	parts = append(parts, ShellQuote(s.Kickoff))
+	if s.MCPConfig != "" {
+		parts = append(parts, "--mcp-config", ShellQuote(s.MCPConfig), "--allowedTools", BrowserTools)
 	}
-	return strings.Join(append(parts, ShellQuote(s.Kickoff)), " ")
+	return strings.Join(parts, " ")
 }
 
 func (s StageLaunch) codex() string {

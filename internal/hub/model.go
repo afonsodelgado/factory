@@ -36,7 +36,6 @@ type Model struct {
 	Node    Node
 	Events  chan Event
 	Watch   *Watcher
-	GitHub  *GitHub
 	Open    func(url string)
 	Tunnels *remote.Tunnels
 
@@ -78,11 +77,10 @@ type Model struct {
 	attempts      map[string]attempt
 	opening       map[string]bool
 	later         []tea.Cmd
-	runs          []remote.QARun
-	claiming      map[string]remote.QARun
-	returning     map[string]bool
-	checkouts     map[string]string
 	claims        map[string]host.Answer
+	threads       map[string]int
+	prs           map[string][]host.PR
+	prsChecked    time.Time
 	lastSettled   string
 	presented     bool
 	parked        map[string]bool
@@ -139,7 +137,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.ghPoll(), m.refreshCatalog(), m.pollRemotes())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.refreshCatalog(), m.pollRemotes())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -241,20 +239,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.attached(msg)
 	case answeredMsg:
 		m.answered(msg)
-	case qaClaimedMsg:
-		m.qaClaimed(msg)
-	case qaReturnedMsg:
-		m.qaReturned(msg)
 	case removalMsg:
 		cmd = m.removalArrived(msg)
 	case changedMsg:
 		cmd = tea.Batch(m.load(), m.waitChange())
-	case prsMsg:
-		for key, prs := range msg.statuses {
-			m.panel.prs[key] = prs
-		}
-	case ghPollMsg:
-		cmd = tea.Batch(m.refreshPRs(false), m.ghPoll())
 	case dialogClosedMsg:
 		cmd = m.dialogClosed(msg)
 	case focusPollMsg:
@@ -299,7 +287,6 @@ func (m *Model) apply(s Snapshot) {
 func (m *Model) refresh() {
 	s := m.local
 	s.Items = append(slices.Clone(s.Items), m.remoteItems()...)
-	first := len(m.snap.Items) == 0 && m.GitHub != nil
 	starting := m.selected == ""
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
@@ -333,9 +320,6 @@ func (m *Model) refresh() {
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
-	if first {
-		m.pending = append(m.pending, m.refreshPRs(false))
-	}
 }
 
 func (m *Model) landing(rows []selector.Row, starting bool) string {
@@ -417,8 +401,7 @@ func (m *Model) planWakes() {
 		if !it.Status.Asleep() {
 			continue
 		}
-		_, profile := m.repoConfig(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), hooks, host.WritableDirsFor(m.Config, it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+		m.wakes[it.Factory.Key()] = PlanWake(it, hooks, host.WritableDirsFor(m.Config, it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	}
 }
 
@@ -902,14 +885,8 @@ func (m *Model) row(it Item) selector.Row {
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)
 	}
-	if _, startable := m.startable(it); startable {
-		row.Items++
-	}
 	if f.Remote != nil && !f.Remote.Creating.IsZero() {
 		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
-	}
-	if _, here := m.qaRunOf(f.Key()); here {
-		row.Stage = laptopStage
 	}
 	return row
 }
@@ -935,9 +912,6 @@ func (m *Model) pushFrame() {
 		}
 		if f := it.Factory; f.Remote != nil {
 			path = remotePath(f, f.Worktree)
-		}
-		if run, here := m.qaRunOf(it.Factory.Key()); here {
-			path = tilde(run.Dir)
 		}
 		if m.Layout.Stage != "" && it.Stage != nil {
 			stage = stageLabel(it.Stage.Run)
@@ -1033,10 +1007,7 @@ func (m *Model) Header() (string, string) {
 }
 
 func (m *Model) ghLabel() string {
-	if m.GitHub == nil {
-		return ""
-	}
-	checked := m.GitHub.Checked()
+	checked := m.prsChecked
 	if checked.IsZero() {
 		return ""
 	}

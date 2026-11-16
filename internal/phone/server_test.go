@@ -92,25 +92,17 @@ func TestReviewGrantsOpenOnlyTheirOwnFactoryInASandbox(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "plan.html"), []byte("<body>plan</body>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pages, err := review.Listen(0, "desktop-token", []byte("// overlay"))
+	pages, err := review.New("desktop-token", []byte("// overlay"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { pages.Close() })
 	other := t.TempDir()
 	if err := os.WriteFile(filepath.Join(other, "plan.html"), []byte("<body>pdf plan</body>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}, {Key: "k2", Label: "pdf", Dir: other}})
-	sockets, err := os.MkdirTemp("", "fr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(sockets) })
-	socket := review.MobileSocket(sockets)
-	if err := pages.ServeMobile(socket); err != nil {
-		t.Fatal(err)
-	}
-	g.server.Review = ReviewProxy(socket)
+	g.server.Review = pages.MobileHandler()
 
 	if resp := g.do("GET", "/rt/nope/r/k/plan.html", ""); resp.StatusCode != 401 || !strings.Contains(body(resp), "expired") {
 		t.Fatalf("a page link nobody granted answered %d; want the expired page", resp.StatusCode)
@@ -183,10 +175,6 @@ func TestReviewGrantsOpenOnlyTheirOwnFactoryInASandbox(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("the review stream never sent the grant's own factory's comment")
 		}
-	}
-	pages.Close()
-	if resp := g.do("GET", "/rt/"+token+"/r/k/_api/threads", ""); resp.StatusCode != 503 {
-		t.Fatalf("with the review pages restarting, the review API answered %d; want a retryable 503", resp.StatusCode)
 	}
 }
 

@@ -421,7 +421,7 @@ func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
 func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 	cfg := &state.Config{StateDir: t.TempDir()}
 	listen := func() *review.Server {
-		pages, err := review.Listen(0, "token", nil)
+		pages, err := review.New("token", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -435,45 +435,12 @@ func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
 	if err := New(Runtime{Config: cfg, Pages: restarted}).Recover(); err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest("GET", restarted.Origin()+"/favicon.ico", nil)
+	req := httptest.NewRequest("GET", "/favicon.ico", nil)
 	req.Host = "127.0.0.1:52817"
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode == http.StatusForbidden {
+	res := httptest.NewRecorder()
+	restarted.Handler().ServeHTTP(res, req)
+	if res.Code == http.StatusForbidden {
 		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
-	}
-}
-
-func TestHoldingQAGivesUpOnAnOriginThatNeverAnswers(t *testing.T) {
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git not installed")
-	}
-	bin, repo := t.TempDir(), t.TempDir()
-	shim := "#!/bin/sh\ncase \"$*\" in *ls-remote*) exec sleep 30;; esac\nexec " + realGit + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("HOME", t.TempDir())
-	for _, args := range [][]string{
-		{"init", "-q", "-b", "csv"},
-		{"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "start"},
-		{"remote", "add", "origin", "https://git.example/acme/app.git"},
-	} {
-		if out, err := exec.Command(realGit, append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	publishCheckWait = 200 * time.Millisecond
-	t.Cleanup(func() { publishCheckWait = 20 * time.Second })
-	start := time.Now()
-	_, _, _, err = publishedHead(repo)
-	if err == nil || !strings.Contains(err.Error(), "did not answer") || time.Since(start) > 5*time.Second {
-		t.Fatalf("publishedHead returned %v after %s; want it to give up, since the host serves every request in one loop", err, time.Since(start))
 	}
 }
 
@@ -761,5 +728,32 @@ func TestAnAnswerFromTheHubNeverRetypesAnItemAlreadyAnswered(t *testing.T) {
 	r.Handle(Message{T: "queue-answer", Data: again})
 	if len(typist.typed) != 1 {
 		t.Fatalf("typed %q; a hub answer for an item the phone already answered must not be typed again", typist.typed)
+	}
+}
+
+func TestPRCIFollowsTheLatestRunOfEachCheck(t *testing.T) {
+	cases := []struct {
+		name   string
+		rollup string
+		want   string
+	}{
+		{"cancelled run superseded by a pass", `[
+			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-11-04T14:41:24Z"},
+			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-04T15:04:48Z"},
+			{"context":"deploy","state":"SUCCESS","createdAt":"2026-11-04T15:00:00Z"}]`, "pass"},
+		{"pass superseded by a failure", `[
+			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-04T15:04:48Z"},
+			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-04T14:41:24Z"}]`, "fail"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gh := &GitHub{Run: func(string, ...string) ([]byte, error) {
+				return []byte(`{"number":7,"statusCheckRollup":` + c.rollup + `}`), nil
+			}}
+			pr := gh.Statuses("/repo", []int{7}, time.Now(), true)[0]
+			if pr.CI != c.want {
+				t.Fatalf("CI = %q, want %q", pr.CI, c.want)
+			}
+		})
 	}
 }

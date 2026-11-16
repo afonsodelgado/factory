@@ -85,6 +85,15 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.Stage(r)
 		}
+	case "prs":
+		err = json.Unmarshal(request.Data, &m.prs)
+	case "refresh-prs":
+		m.PollPRs(true)
+	case "browser":
+		var b BrowserReady
+		if err = json.Unmarshal(request.Data, &b); err == nil {
+			err = m.BrowserReady(b)
+		}
 	case "review":
 		var r ReviewRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
@@ -164,17 +173,8 @@ func (m *Runtime) handle(request Message) Message {
 		}
 	case "push-test":
 		err = m.testPush()
-	case "qa-claim":
-		var c remote.QAClaim
-		if err = json.Unmarshal(request.Data, &c); err == nil {
-			value, err = m.ClaimQA(c)
-		}
-	case "qa-return":
-		var r remote.QAReturn
-		if err = json.Unmarshal(request.Data, &r); err == nil {
-			err = m.ReturnQA(r)
-		}
 	case "snapshot":
+		m.PollPRs(false)
 		value = m.Presentation()
 	case "view":
 		value = m.View()

@@ -93,7 +93,6 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		Node:    runtime,
 		Events:  events,
 		Watch:   watch,
-		GitHub:  &hub.GitHub{Run: hub.RunGH},
 		Open:    openURL,
 		Tunnels: tunnels,
 		Bell:    os.Stderr,

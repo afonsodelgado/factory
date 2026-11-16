@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -31,7 +31,6 @@ type panelState struct {
 	shown   string
 	drafts  map[string]*panel.Draft
 	refused map[string]string
-	prs     map[string][]panel.PR
 	press   lastPress
 }
 
@@ -59,7 +58,7 @@ func (m *Model) clearRefusals() {
 }
 
 func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled) {
-	for _, item := range slices.Concat(attentionItems(it, m.snap.At, nil), m.qaItems(it)) {
+	for _, item := range attentionItems(it, m.snap.At, m.threadCounter(it.Factory)) {
 		mark, sent := m.claim(draftKey(it.Factory, item.ID))
 		if item.ID == "" || !sent {
 			shown = append(shown, item)
@@ -111,7 +110,6 @@ func newPanelState() panelState {
 	return panelState{
 		drafts:  map[string]*panel.Draft{},
 		refused: map[string]string{},
-		prs:     map[string][]panel.PR{},
 	}
 }
 
@@ -120,6 +118,16 @@ func attentionItems(it Item, now time.Time, counter threadCounter) []panel.Item 
 }
 
 type threadCounter = host.ThreadCounter
+
+func (m *Model) threadCounter(f factory.Factory) threadCounter {
+	if f.Remote != nil {
+		return nil
+	}
+	return func(url string) (int, bool) {
+		open, counted := m.threads[url]
+		return open, counted
+	}
+}
 
 func artifactRow(a state.Artifact, counter threadCounter) panel.ArtifactRow {
 	return host.NewArtifactRow(a, counter)
@@ -348,13 +356,11 @@ func (m *Model) panelView() panel.View {
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
-			v.Artifacts = append(v.Artifacts, artifactRow(a, nil))
+			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter(f)))
 		}
 	}
 	v.PRs = m.prsFor(f)
-	if m.GitHub != nil {
-		v.Checked = m.GitHub.Checked()
-	}
+	v.Checked = m.prsChecked
 	v.Counts = [3]int{len(v.Items), len(v.PRs), len(v.Artifacts)}
 	v.Activity = m.activity(it)
 	if v.All {
@@ -392,7 +398,7 @@ func (m *Model) prsFor(f factory.Factory) []panel.PR {
 	if f.State == nil {
 		return nil
 	}
-	cached := m.panel.prs[f.Key()]
+	cached := m.prs[f.Key()]
 	prs := make([]panel.PR, len(f.State.PRs))
 	for i, pr := range f.State.PRs {
 		prs[i] = panel.PR{Number: pr.Number, Title: pr.Title}
@@ -492,8 +498,6 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	switch {
 	case hasItem && item.Kind == "permission" && key == "enter":
 		m.focusSession()
-	case hasItem && item.Kind == "qa" && key == "enter":
-		m.startQA(it)
 	case !hasItem && key == "enter":
 		m.nextNeedingYou()
 	}
@@ -792,7 +796,7 @@ func (m *Model) listKey(key string) tea.Cmd {
 		}
 	case "r":
 		if m.panel.tab == panel.PRs {
-			return m.refreshPRs(true)
+			m.report(m.ask("refresh-prs", nil, nil))
 		}
 	case "o":
 		return m.openRow(v)
@@ -809,9 +813,21 @@ func (m *Model) openRow(v panel.View) tea.Cmd {
 	case m.panel.tab == panel.PRs && m.panel.row < len(v.PRs):
 		return m.openCmd(v.PRs[m.panel.row].URL)
 	case m.panel.tab == panel.Artifacts && m.panel.row < len(v.Artifacts):
-		return m.openCmd(v.Artifacts[m.panel.row].URL)
+		return m.openCmd(m.reviewURL(v.Artifacts[m.panel.row].URL))
 	}
 	return nil
+}
+
+func (m *Model) reviewURL(url string) string {
+	it, ok := m.selectedItem()
+	origin := m.Config.NodeOrigin()
+	if !ok || it.Factory.Remote != nil || origin == "" {
+		return url
+	}
+	if page, served := review.MobilePath(host.ReviewFactory(it), url); served {
+		return origin + page
+	}
+	return url
 }
 
 func (m *Model) openCmd(url string) tea.Cmd {
@@ -827,55 +843,6 @@ func (m *Model) openCmd(url string) tea.Cmd {
 		open(url)
 		return nil
 	}
-}
-
-type prsMsg struct {
-	statuses map[string][]panel.PR
-}
-
-func (m *Model) refreshPRs(force bool) tea.Cmd {
-	if m.GitHub == nil {
-		return nil
-	}
-	gh := m.GitHub
-	type job struct {
-		key     string
-		dir     string
-		numbers []int
-	}
-	var jobs []job
-	for _, it := range localOnly(m.snap).Items {
-		f := it.Factory
-		if f.State == nil || len(f.State.PRs) == 0 || f.Archived() {
-			continue
-		}
-		var numbers []int
-		for _, pr := range f.State.PRs {
-			numbers = append(numbers, pr.Number)
-		}
-		dir := f.Worktree
-		if _, err := os.Stat(dir); err != nil {
-			dir = f.Repo
-		}
-		jobs = append(jobs, job{f.Key(), dir, numbers})
-	}
-	now := m.Now()
-	return func() tea.Msg {
-		statuses := map[string][]panel.PR{}
-		for _, j := range jobs {
-			statuses[j.key] = gh.Statuses(j.dir, j.numbers, now, force)
-		}
-		return prsMsg{statuses}
-	}
-}
-
-type ghPollMsg struct{}
-
-func (m *Model) ghPoll() tea.Cmd {
-	if m.GitHub == nil {
-		return nil
-	}
-	return tea.Tick(ghEvery, func(time.Time) tea.Msg { return ghPollMsg{} })
 }
 
 func (m *Model) alert(previous map[string]factory.Status) {

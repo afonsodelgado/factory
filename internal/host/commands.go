@@ -21,10 +21,34 @@ type Presentation struct {
 	Settled  []Answer
 	Notice   string
 	Repos    []string
+	Threads  map[string]int
+	PRs      map[string][]PR
+	Checked  time.Time
 }
 
 func (m *Runtime) Presentation() Presentation {
-	return Presentation{Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos}
+	return Presentation{
+		Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
+		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(),
+	}
+}
+
+func (m *Runtime) openThreads() map[string]int {
+	if m.Pages == nil {
+		return nil
+	}
+	open := map[string]int{}
+	for _, it := range m.snap.Items {
+		if it.Factory.State == nil {
+			continue
+		}
+		for _, a := range it.Factory.State.Artifacts() {
+			if n, counted := m.Pages.OpenCount(a.URL); counted {
+				open[a.URL] = n
+			}
+		}
+	}
+	return open
 }
 
 func Remote(factoryKey string) bool { return strings.HasPrefix(factoryKey, "remote:") }

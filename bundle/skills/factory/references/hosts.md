@@ -11,7 +11,6 @@ The factory app sets `FACTORY_SUPERVISOR` to the tool this session runs in: `cla
 | Workflow fan-out for design variants | Start the variants one after another with `"${FACTORY_BIN:-factory}" stage start --role designer`, waiting for each `done` message. |
 | `scripts/wait-for-review.sh` with `run_in_background` | Run `"${FACTORY_BIN:-factory}" stage ci <pr numbers…>` and end your turn. The app waits for CI and CodeRabbit and types the summary into this session. |
 | AskUserQuestion | Always ask in plain text, in the factory-app form. |
-| Browser QA on a server | `"${FACTORY_BIN:-factory}" stage start --role qa --task <file>`, as for any role. `stage qa done: <file>` arrives once the developer has run it on the laptop and its report is back. |
-| ToolSearch for the Chrome tools | Skip the preflight check. QA always runs on `claude`, which `"${FACTORY_BIN:-factory}" stage start --role qa` opens with Chrome. |
+| Browser QA | `"${FACTORY_BIN:-factory}" stage start --role qa --task <file>`, as for any role. QA always runs on `claude`, in a pane the node opens on its own headless Chrome. |
 
 Panel messages reach Codex as `$factory approve …`, `$factory skip …` and `$factory resume`, because Codex refuses an unknown `/` command; read them as the `/factory` commands of the same name. OpenCode has no `/factory` command, so its messages start with `Use the factory skill for: /factory`, followed by the same words; OpenCode finds the skill in `~/.claude/skills`, where `factory bootstrap` installs it.

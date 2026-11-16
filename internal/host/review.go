@@ -154,12 +154,10 @@ func (m *Runtime) ReviewStatus(it Item, page string) ReviewReply {
 }
 
 func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewReply, error) {
-	var path, target string
+	var id, target string
 	sent, err := store.Send(page, func(drafts []review.Thread, batch int) error {
-		id := review.BatchID(it.Factory.Label(), batch)
-		var text string
-		var err error
-		path, text, err = review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
+		id = review.BatchID(it.Factory.Label(), batch)
+		path, text, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
 		if err != nil {
 			return err
 		}
@@ -172,7 +170,7 @@ func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewR
 		return ReviewReply{}, err
 	}
 	m.Pages.ThreadsChanged(ReviewFactory(it))
-	return ReviewReply{Target: target, Batch: path, Count: len(sent)}, nil
+	return ReviewReply{Target: target, Batch: id, Count: len(sent)}, nil
 }
 
 func (m *Runtime) DeliverReview(it Item, page, id, path, text string) (string, error) {

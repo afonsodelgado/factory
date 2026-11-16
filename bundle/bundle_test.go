@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,20 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestNoBundledInstructionAsksForVisibleChromeOrItsExtension(t *testing.T) {
+	visible := regexp.MustCompile(`--chrome\b|claude-in-chrome|Claude in Chrome|chrome extension`)
+	fs.WalkDir(Files, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasPrefix(path, "pwa/") {
+			return err
+		}
+		data, _ := fs.ReadFile(Files, path)
+		if found := visible.Find(data); found != nil {
+			t.Errorf("%s still says %q; QA drives only headless Chrome through Chrome DevTools MCP", path, found)
+		}
+		return nil
+	})
 }
 
 func TestDefaultAgentsMatchTheBundledFrontmatter(t *testing.T) {

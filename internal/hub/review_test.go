@@ -36,7 +36,7 @@ func newReviewFixture(t *testing.T, designerRan bool, supervisorHook *state.Hook
 	st := &state.State{ID: "csv", Stages: map[string]state.Stage{"design": {Artifacts: []state.Artifact{{URL: "file://" + page}}}}}
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: st}
 
-	srv, err := review.Listen(0, "tok", nil)
+	srv, err := review.New("tok", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +87,15 @@ func busyHook(at time.Time) *state.HookFile {
 func withToken(h *state.HookFile, token string) *state.HookFile {
 	h.Token = token
 	return h
+}
+
+func TestThePanelCountsAPagesOpenThreadsFromTheNode(t *testing.T) {
+	fx := newReviewFixture(t, false, idleHook(time.Now()))
+	fx.m.choose(fx.f.Key())
+	artifacts := fx.m.panelView().Artifacts
+	if len(artifacts) != 1 || artifacts[0].OpenThreads == nil || *artifacts[0].OpenThreads != 1 {
+		t.Fatalf("the panel lists %+v; want the variant with its one open thread, counted by the node's review server", artifacts)
+	}
 }
 
 func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
@@ -224,7 +233,7 @@ func TestTheWalkthroughStackRunsInItsOwnWindowAndStopsWithTheFactory(t *testing.
 	host.WriteFile(host.StackPath(dir), `{"url": "http://127.0.0.1:1/", "script": "`+script+`"}`)
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: &state.State{ID: "csv"}}
 	panes := &host.Panes{TM: e.TM, Session: e.Session}
-	pages, err := review.Listen(0, "tok", nil)
+	pages, err := review.New("tok", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

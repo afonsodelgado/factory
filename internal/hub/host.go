@@ -68,6 +68,7 @@ func (m *Model) applyPresentation(p host.Presentation) {
 	if p.Repos != nil {
 		m.Config.Repos = p.Repos
 	}
+	m.threads, m.prs, m.prsChecked = p.Threads, p.PRs, p.Checked
 	m.apply(p.Snapshot)
 }
 

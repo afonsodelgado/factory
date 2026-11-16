@@ -44,13 +44,13 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := PlanWake(c.item, false, hooks, nil).Command; got != c.want {
+			if got := PlanWake(c.item, hooks, nil).Command; got != c.want {
 				t.Errorf("wake runs %q, want %q", got, c.want)
 			}
 		})
 	}
 
-	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), false, nil, nil)
+	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), nil, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
 	}

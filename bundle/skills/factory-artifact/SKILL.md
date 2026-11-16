@@ -8,7 +8,7 @@ description: |
 
 # Factory artifacts
 
-The factory app serves every HTML file in the factory directory on `127.0.0.1`, adds its comment layer, and reloads the page when you rewrite it. On a server, the developer views it on their laptop through an ssh tunnel, so link to other pages with relative URLs, never with this machine's host or port. The developer clicks an element and comments on it, and the comments come back to you as a batch. Write pages that read well there and that comments can anchor to.
+The factory node serves every HTML file in the factory directory on its review pages, adds its comment layer, and reloads the page when you rewrite it. The developer views it from their phone or browser through the node's tailnet address, inside a sandbox, so link to other pages with relative URLs, never with this machine's host or port. The developer clicks an element and comments on it, and the comments come back to you as a batch. Write pages that read well there and that comments can anchor to.
 
 ## The page
 

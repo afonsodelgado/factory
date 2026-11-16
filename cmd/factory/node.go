@@ -125,12 +125,20 @@ func startNode(ctx context.Context, cfg *state.Config, owner string) (*runningNo
 	if err != nil {
 		return nil, err
 	}
-	n := &runningNode{closers: []io.Closer{pages}, stopped: make(chan error, 1)}
+	browsers := &node.Browsers{Chrome: cfg.Review.Chrome}
+	n := &runningNode{closers: []io.Closer{pages, browsers}, stopped: make(chan error, 1)}
+	reviewListener, err := node.ListenUnix(cfg.ReviewSocket())
+	if err != nil {
+		n.close()
+		return nil, err
+	}
+	n.serve(reviewListener, pages.Handler())
 	queue := node.NewQueue()
 	pages.SetActions(host.ReviewActions(queue.Sink()))
 	runtime := host.New(host.Runtime{
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
 		Pages: pages, Engine: panes, Typist: panes, Log: host.LoadEventLog(host.EventLogPath(cfg.StateDir)), Push: &host.Pusher{StateDir: cfg.StateDir, Now: time.Now},
+		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH},
 	})
 	go runtime.Push.Run(ctx)
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
@@ -200,7 +208,7 @@ func startReview(cfg *state.Config) (*review.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return review.Listen(cfg.Review.Port, token, overlay)
+	return review.New(token, overlay)
 }
 
 func localNode(cfg *state.Config) (*node.Client, error) {

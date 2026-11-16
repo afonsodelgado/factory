@@ -23,6 +23,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/phone"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -159,7 +160,7 @@ func TestTheHTTPDoorReachesTheSameRuntimeChecksAsTheSocket(t *testing.T) {
 
 func TestASupersededCheckNeverPostsItsResultAndNeverHoldsUpAnswers(t *testing.T) {
 	queue := NewQueue()
-	jobs := &Jobs{Queue: queue}
+	jobs := &Jobs{Queue: queue, Ctx: context.Background()}
 	posted := make(chan string, 4)
 	go func() {
 		for e := range queue.Events() {
@@ -171,14 +172,14 @@ func TestASupersededCheckNeverPostsItsResultAndNeverHoldsUpAnswers(t *testing.T)
 		}
 	}()
 	release := make(chan struct{})
-	jobs.Start(context.Background(), "ci", func(context.Context) host.Message {
+	jobs.Start("ci", func(context.Context) host.Message {
 		<-release
 		return host.Message{T: "checked", Text: "stale"}
 	})
 	if reply, err := queue.Call(context.Background(), host.Message{T: "local"}); err != nil || reply.T != "done" {
 		t.Fatalf("a running check held up an answer: %+v, %v", reply, err)
 	}
-	jobs.Start(context.Background(), "ci", func(context.Context) host.Message { return host.Message{T: "checked", Text: "fresh"} })
+	jobs.Start("ci", func(context.Context) host.Message { return host.Message{T: "checked", Text: "fresh"} })
 	close(release)
 	select {
 	case text := <-posted:
@@ -368,5 +369,75 @@ func TestASecondNodeOrAnOldOwnerProcessIsRefusedWithoutTakingOver(t *testing.T) 
 		t.Error("the refused node kept its lock, so a later node could never start")
 	} else {
 		again()
+	}
+}
+
+type recordingCaller struct{ calls []string }
+
+func (c *recordingCaller) Call(_ context.Context, m host.Message) (host.Message, error) {
+	c.calls = append(c.calls, m.T)
+	return host.Message{T: "done"}, nil
+}
+
+func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
+	const name = "devbox.tail1234.ts.net"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plan.html"), []byte("<body>plan</body>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := review.New("token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
+	runtime := &recordingCaller{}
+	api := &API{Commands: Commands{Runtime: runtime}, Node: "node-1", Version: "test"}
+	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key", Review: pages.MobileHandler()}).Handler()
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{name}, Origin: "https://" + name, OpaquePath: phone.GrantPrefix}
+	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
+	request := func(method, path, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "https://"+name+path, strings.NewReader(`{"key":"/r/app:csv"}`))
+		r.RemoteAddr = "127.0.0.1:50000"
+		r.Header.Set(LoginHeader, "alice@example.com")
+		r.Header.Set("Content-Type", "application/json")
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	grant := request("GET", "/r/k/plan.html", "").Header().Get("Location")
+	scope, granted := strings.CutSuffix(grant, "/r/k/plan.html")
+	if !strings.HasPrefix(grant, phone.GrantPrefix) || !granted {
+		t.Fatalf("opening the page granted %q; want a scoped review path", grant)
+	}
+	comment := `{"page":"plan.html","intent":"fix","text":"Bigger.","anchor":{"selector":"h1"}}`
+	r := httptest.NewRequest("POST", "https://"+name+scope+"/r/k/_api/threads", strings.NewReader(comment))
+	r.RemoteAddr = "127.0.0.1:50000"
+	r.Header.Set(LoginHeader, "alice@example.com")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", "null")
+	commented := httptest.NewRecorder()
+	if handler.ServeHTTP(commented, r); commented.Code != http.StatusOK {
+		t.Fatalf("the page's own comment through its grant answered %d %s; want 200", commented.Code, commented.Body)
+	}
+	for what, path := range map[string]string{
+		"the control route directly":        "/api/commands/wake",
+		"the control route under the grant": scope + "/api/commands/wake",
+		"dot segments out of the grant":     scope + "/../../api/commands/wake",
+		"a factory action out of the grant": scope + "/../../api/factories/k/actions",
+		"dot segments inside the grant":     scope + "/r/k/../../api/commands/wake",
+	} {
+		if w := request("POST", path, "null"); w.Code < 300 {
+			t.Errorf("%s answered %d to the page's opaque origin", what, w.Code)
+		}
+	}
+	if snapshot := request("GET", "/api/snapshot", "null"); snapshot.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("the snapshot let the page's opaque origin %q read it", snapshot.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if len(runtime.calls) != 0 {
+		t.Fatalf("a review page script ran %v on the node", runtime.calls)
 	}
 }

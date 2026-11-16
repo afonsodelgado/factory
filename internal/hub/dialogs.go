@@ -445,7 +445,6 @@ func (m *Model) forgetFactory(key string) {
 	maps.DeleteFunc(m.claims, func(k string, _ host.Answer) bool { return ownDraft(k) })
 	m.report(m.ask("forget-claims", key+"|", nil))
 	maps.DeleteFunc(m.panel.refused, func(k string, _ string) bool { return ownDraft(k) })
-	delete(m.panel.prs, key)
 }
 
 func (m *Model) archive(r dialog.ArchiveResult) error {

@@ -68,7 +68,6 @@ func (m *Runtime) Delete(r DeleteRequest) ([]factory.RemovalStep, error) {
 }
 
 func (m *Runtime) DeleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
-	m.cancelQA(Incarnation(f))
 	var closeErr error
 	if m.Engine != nil {
 		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)

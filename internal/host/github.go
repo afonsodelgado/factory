@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -185,4 +186,49 @@ func failing(conclusion string) bool {
 func rateLimited(message string) bool {
 	lower := strings.ToLower(message)
 	return strings.Contains(lower, "403") || strings.Contains(lower, "rate limit")
+}
+
+func (m *Runtime) PollPRs(force bool) {
+	if m.GitHub == nil || m.Jobs == nil || (!force && m.Now().Sub(m.prsPolled) < GHEvery) {
+		return
+	}
+	now, gh := m.Now(), m.GitHub
+	m.prsPolled = now
+	type lookup struct {
+		key, dir string
+		numbers  []int
+	}
+	var lookups []lookup
+	for _, it := range m.snap.Items {
+		f := it.Factory
+		if f.State == nil || len(f.State.PRs) == 0 || f.Archived() {
+			continue
+		}
+		l := lookup{key: f.Key(), dir: f.Worktree}
+		if !DirExists(l.dir) {
+			l.dir = f.Repo
+		}
+		for _, pr := range f.State.PRs {
+			l.numbers = append(l.numbers, pr.Number)
+		}
+		lookups = append(lookups, l)
+	}
+	m.Jobs.Start("prs", func(ctx context.Context) Message {
+		statuses := map[string][]PR{}
+		for _, l := range lookups {
+			if ctx.Err() != nil {
+				break
+			}
+			statuses[l.key] = gh.Statuses(l.dir, l.numbers, now, force)
+		}
+		data, _ := json.Marshal(statuses)
+		return Message{T: "prs", Data: data}
+	})
+}
+
+func (m *Runtime) prsChecked() time.Time {
+	if m.GitHub == nil {
+		return time.Time{}
+	}
+	return m.GitHub.Checked()
 }
