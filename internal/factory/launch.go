@@ -47,17 +47,16 @@ func FreshSlug(slug string, taken func(string) bool) string {
 }
 
 type Launch struct {
-	Repo          string
-	Slug          string
-	Prompt        string
-	Pipeline      string
-	Stages        []string
-	Agents        map[string]state.AgentSetting
-	SessionID     string
-	Chrome        bool
-	RemoteControl bool
-	Supervisor    state.AgentSetting
-	AddDirs       []string
+	Repo       string
+	Slug       string
+	Prompt     string
+	Pipeline   string
+	Stages     []string
+	Agents     map[string]state.AgentSetting
+	SessionID  string
+	Chrome     bool
+	Supervisor state.AgentSetting
+	AddDirs    []string
 }
 
 func (l Launch) flags() []string {
@@ -65,9 +64,6 @@ func (l Launch) flags() []string {
 	flags = append(flags, option("--effort", l.Supervisor.Effort)...)
 	if l.Chrome {
 		flags = append(flags, "--chrome")
-	}
-	if l.RemoteControl {
-		flags = append(flags, "--remote-control", l.Slug)
 	}
 	return flags
 }

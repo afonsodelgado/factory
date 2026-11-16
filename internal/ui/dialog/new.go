@@ -197,7 +197,7 @@ func (m *NewFactoryModel) launch() factory.Launch {
 	name, stages := m.chosenPipeline()
 	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
 	if launch.Supervisor.OnClaude() {
-		launch.SessionID, launch.Chrome, launch.RemoteControl = "<uuid>", repo.Browser && m.remote() == "", repo.RemoteControl
+		launch.SessionID, launch.Chrome = "<uuid>", repo.Browser && m.remote() == ""
 	}
 	return launch
 }

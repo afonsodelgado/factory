@@ -18,7 +18,6 @@ type Config struct {
 	StalledAfter string   `yaml:"stalled_after"`
 	Alerts       Alerts   `yaml:"alerts"`
 	Icons        string   `yaml:"icons"`
-	Claude       Claude   `yaml:"claude"`
 	Tmux         Tmux     `yaml:"tmux"`
 	Review       Review   `yaml:"review"`
 
@@ -47,10 +46,6 @@ type Alerts struct {
 
 func (a Alerts) Notifies() bool {
 	return a.Desktop || a.MacOS
-}
-
-type Claude struct {
-	RemoteControl *bool `yaml:"remote_control"`
 }
 
 type Codex struct {
@@ -150,10 +145,6 @@ func (c *Config) Stalled() time.Duration {
 	}
 	d, _ := time.ParseDuration(c.StalledAfter)
 	return d
-}
-
-func (c *Config) RemoteControl() bool {
-	return c.Claude.RemoteControl == nil || *c.Claude.RemoteControl
 }
 
 func (c *Config) RegistryPath() string { return filepath.Join(c.StateDir, "registry.json") }

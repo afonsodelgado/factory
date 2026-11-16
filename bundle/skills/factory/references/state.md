@@ -6,7 +6,7 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 |---|---|
 | `id`, `title` | the factory id and a short title taken from the prompt |
 | `repo` | the main checkout's absolute path |
-| `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, refreshed on every write because remote control can change it mid-session |
+| `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, refreshed on every write because it can change mid-session |
 | `authorized` | `true` once `/factory` started; the per-factory commit/push/PR authorisation |
 | `needs_design` | whether stage 2 runs |
 | `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick`, or `custom` when it was started with `--stages` |

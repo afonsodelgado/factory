@@ -409,8 +409,8 @@ func (m *Model) planWakes() {
 		if !it.Status.Asleep() {
 			continue
 		}
-		cfg, profile := m.repoConfig(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), cfg.RemoteControl(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+		_, profile := m.repoConfig(it.Factory.Repo)
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	}
 }
 
