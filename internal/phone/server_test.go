@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/review"
 )
 
 const testHost = "devbox.tail1234.ts.net"
@@ -232,6 +236,75 @@ func TestRevokingAPhoneClosesItsOpenStream(t *testing.T) {
 	if resp := g.do("GET", "/api/snapshot", "", "Cookie", cookie); resp.StatusCode != 401 {
 		t.Fatalf("the revoked credential got %d; want 401", resp.StatusCode)
 	}
+}
+
+func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
+	g := newGateway(t)
+	cookie, device := g.pair()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plan.html"), []byte("<body>plan</body>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := review.Listen(0, "desktop-token", []byte("// overlay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
+	sockets, err := os.MkdirTemp("", "fr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockets) })
+	socket := review.MobileSocket(sockets)
+	if err := pages.ServeMobile(socket); err != nil {
+		t.Fatal(err)
+	}
+	g.server.Review = ReviewProxy(socket)
+
+	if resp := g.do("GET", "/r/k/plan.html", ""); resp.StatusCode != 401 || !strings.Contains(body(resp), DatabaseName) {
+		t.Fatalf("an unpaired page load answered %d; want the 401 page that clears the phone's saved data", resp.StatusCode)
+	}
+	if resp := g.do("GET", "/_review/overlay.js", ""); resp.StatusCode != 401 {
+		t.Fatalf("the overlay script without a cookie answered %d; want 401", resp.StatusCode)
+	}
+	if resp := g.do("GET", "/r/k/plan.html", "", "Cookie", cookie); resp.StatusCode != 200 || !strings.Contains(body(resp), "data-mobile") {
+		t.Fatalf("the paired phone's page answered %d; want the page with the phone overlay", resp.StatusCode)
+	}
+	if resp := g.do("POST", "/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Cookie", cookie); resp.StatusCode != 200 {
+		t.Fatalf("the paired phone's comment answered %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest("GET", g.http.URL+"/events/review", nil)
+	req.Host = testHost
+	req.Header.Set("Cookie", cookie)
+	stream, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil || stream.StatusCode != 200 {
+		t.Fatalf("review stream: %v %v", err, stream)
+	}
+	defer stream.Body.Close()
+	ended := make(chan bool)
+	go func() {
+		io.Copy(io.Discard, stream.Body)
+		ended <- true
+	}()
+	g.server.Store.Revoke(device.ID)
+	g.server.Revoke(device.ID)
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the revoked phone's review stream stayed open")
+	}
+
+	again, _ := g.pair()
+	pages.Close()
+	if resp := g.do("GET", "/r/k/_api/threads", "", "Cookie", again); resp.StatusCode != 503 {
+		t.Fatalf("with the runtime handing over, the review API answered %d; want a retryable 503, never the 502 that means factory serve is down", resp.StatusCode)
+	}
+}
+
+func body(resp *http.Response) string {
+	data, _ := io.ReadAll(resp.Body)
+	return string(data)
 }
 
 func TestThePlainTailnetAddressServesOnlyTheHTTPSHelp(t *testing.T) {

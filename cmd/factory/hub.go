@@ -164,7 +164,18 @@ func startReview(cfg *state.Config) (*review.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return review.Listen(cfg.Review.Port, token, overlay)
+	pages, err := review.Listen(cfg.Review.Port, token, overlay)
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Phone.Enabled {
+		return pages, nil
+	}
+	if err := pages.ServeMobile(review.MobileSocket(cfg.StateDir)); err != nil {
+		pages.Close()
+		return nil, err
+	}
+	return pages, nil
 }
 
 func lockHub(path string) (func(), error) {

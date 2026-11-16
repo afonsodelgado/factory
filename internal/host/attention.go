@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -263,22 +264,45 @@ type Local struct {
 }
 
 type LocalFactory struct {
-	Key         string        `json:"key"`
-	Incarnation string        `json:"incarnation"`
-	ID          string        `json:"id"`
-	Title       string        `json:"title,omitempty"`
-	Repo        string        `json:"repo"`
-	RepoName    string        `json:"repo_name"`
-	Stage       string        `json:"stage,omitempty"`
-	Status      string        `json:"status"`
-	Paused      bool          `json:"paused"`
-	NeedsSince  time.Time     `json:"needs_since,omitzero"`
-	Items       []LocalItem   `json:"items"`
-	Resolved    []Resolution  `json:"resolved,omitempty"`
-	Pages       []ArtifactRow `json:"pages"`
-	Message     Eligibility   `json:"message"`
-	CanPause    bool          `json:"can_pause"`
-	CanWake     bool          `json:"can_wake"`
+	Key         string       `json:"key"`
+	Route       string       `json:"route"`
+	Incarnation string       `json:"incarnation"`
+	ID          string       `json:"id"`
+	Title       string       `json:"title,omitempty"`
+	Repo        string       `json:"repo"`
+	RepoName    string       `json:"repo_name"`
+	Stage       string       `json:"stage,omitempty"`
+	Status      string       `json:"status"`
+	Paused      bool         `json:"paused"`
+	NeedsSince  time.Time    `json:"needs_since,omitzero"`
+	Items       []LocalItem  `json:"items"`
+	Resolved    []Resolution `json:"resolved,omitempty"`
+	Pages       []LocalPage  `json:"pages"`
+	Message     Eligibility  `json:"message"`
+	CanPause    bool         `json:"can_pause"`
+	CanWake     bool         `json:"can_wake"`
+}
+
+type LocalPage struct {
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	OpenThreads *int   `json:"open_threads,omitempty"`
+	Href        string `json:"href,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+func localPage(f review.Factory, row ArtifactRow) LocalPage {
+	page := LocalPage{Name: row.Name, Title: row.Title, OpenThreads: row.OpenThreads}
+	href, static := review.MobilePath(f, row.URL)
+	switch {
+	case static:
+		page.Href = href
+	case strings.HasPrefix(row.URL, "http"):
+		page.Unavailable = "It runs on a dev server, so it opens only on the computer."
+	default:
+		page.Unavailable = "It is not an HTML page in this factory's folder."
+	}
+	return page
 }
 
 type LocalItem struct {
@@ -329,14 +353,14 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	f := it.Factory
 	target := supervisorTarget(it)
 	lf := LocalFactory{
-		Key: f.Key(), Incarnation: Incarnation(f), ID: f.Label(), Title: f.Title(), Repo: f.Repo, RepoName: m.repoName(f.Repo),
-		Status: it.Status.String(), Paused: Paused(f), Items: []LocalItem{}, Pages: []ArtifactRow{}, Message: Eligible(target, "the message"),
+		Key: f.Key(), Route: ReviewKey(f), Incarnation: Incarnation(f), ID: f.Label(), Title: f.Title(), Repo: f.Repo, RepoName: m.repoName(f.Repo),
+		Status: it.Status.String(), Paused: Paused(f), Items: []LocalItem{}, Pages: []LocalPage{}, Message: Eligible(target, "the message"),
 		CanPause: it.Pane != nil && !it.Pane.Dead, CanWake: it.Status.Asleep() && it.Status != factory.Done,
 	}
 	if f.State != nil {
 		lf.Stage = f.State.Stage
 		for _, a := range f.State.Artifacts() {
-			lf.Pages = append(lf.Pages, NewArtifactRow(a, m.threadCounter()))
+			lf.Pages = append(lf.Pages, localPage(ReviewFactory(it), NewArtifactRow(a, m.threadCounter())))
 		}
 	}
 	if it.Status == factory.NeedsYou {

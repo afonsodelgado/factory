@@ -200,6 +200,7 @@ type Action struct {
 	Kind    string `json:"kind"`
 	Factory string `json:"factory"`
 	Page    string `json:"page"`
+	Gate    string `json:"gate,omitempty"`
 }
 
 func (s *Server) SetActions(act func(Action) (any, error)) {
@@ -217,17 +218,18 @@ func (s *Server) action(kind string) http.HandlerFunc {
 			http.Error(w, "the hub is not taking actions", http.StatusServiceUnavailable)
 			return
 		}
-		page := r.URL.Query().Get("page")
+		a := Action{Kind: kind, Factory: r.PathValue("key"), Page: r.URL.Query().Get("page")}
 		if r.Method == http.MethodPost {
 			var body struct {
 				Page string `json:"page"`
+				Gate string `json:"gate"`
 			}
 			if !readJSON(w, r, &body) {
 				return
 			}
-			page = body.Page
+			a.Page, a.Gate = body.Page, body.Gate
 		}
-		result, err := act(Action{Kind: kind, Factory: r.PathValue("key"), Page: page})
+		result, err := act(a)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
