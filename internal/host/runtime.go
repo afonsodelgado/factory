@@ -41,6 +41,7 @@ type Answer struct {
 
 type Runtime struct {
 	ShowArchived bool
+	Fallback     bool
 	Pages        *review.Server
 	Config       *state.Config
 	Loader       *Loader

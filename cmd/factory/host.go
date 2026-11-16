@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -34,17 +35,18 @@ func runHost(args []string) int {
 		return 1
 	}
 	if len(args) == 0 || args[0] != "run" {
-		fmt.Fprintln(os.Stderr, "usage: factory host run | factory host request | factory host attach <view>")
+		fmt.Fprintln(os.Stderr, "usage: factory host run [--local] | factory host request | factory host attach <view>")
 		return 2
 	}
 	cfg, err := state.LoadConfig()
 	if err == nil {
 		err = os.MkdirAll(cfg.StateDir, 0o700)
 	}
-	if err == nil && len(args) == 2 && args[1] == "--worker" {
-		err = serveHost(cfg)
+	local := slices.Contains(args[1:], "--local")
+	if err == nil && slices.Contains(args[1:], "--worker") {
+		err = serveHost(cfg, local)
 	} else if err == nil {
-		err = startHost(cfg, tmux.Client{Socket: cfg.Tmux.Socket})
+		err = startHost(cfg, tmux.Client{Socket: cfg.Tmux.Socket}, local)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory host:", err)
@@ -72,8 +74,11 @@ func attachView(id string) error {
 	return syscall.Exec(path, cmd.Args, env)
 }
 
-func startHost(cfg *state.Config, tm tmux.Client) error {
+func startHost(cfg *state.Config, tm tmux.Client, local bool) error {
 	if hubRunning(cfg) {
+		if phone.FallbackOwns(cfg) && !local {
+			return errors.New("factory serve runs this machine's factories while the hub is closed, so they cannot serve a laptop. Run factory phone stop, then factory host run")
+		}
 		if !fileLocked(hostLockPath(cfg)) {
 			return errors.New("the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run")
 		}
@@ -84,6 +89,9 @@ func startHost(cfg *state.Config, tm tmux.Client) error {
 		return err
 	}
 	command := shellQuote(bin) + " host run --worker"
+	if local {
+		command += " --local"
+	}
 	if tm.HasSession(cfg.Hub.Session) {
 		_, err = tm.NewWindow(tmux.Window{Session: cfg.Hub.Session, Name: hostWindow, Env: passedEnvironment(), Command: command})
 	} else {
@@ -105,17 +113,21 @@ func startHost(cfg *state.Config, tm tmux.Client) error {
 	return errors.New("the host did not start; read the " + hostWindow + " window in tmux session " + cfg.Hub.Session)
 }
 
-func serveHost(cfg *state.Config) error {
+func serveHost(cfg *state.Config, local bool) error {
 	unlockHost, err := lockHub(hostLockPath(cfg))
 	if err != nil {
 		return err
 	}
 	defer unlockHost()
-	unlock, err := lockHub(cfg.LockPath())
+	mode := phone.ModeRemote
+	if local {
+		mode = phone.ModeLocal
+	}
+	release, err := phone.Claim(cfg, mode, version)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 	registry, err := state.LoadRegistry(cfg.RegistryPath())
 	if err != nil {
 		return err
@@ -139,20 +151,23 @@ func serveHost(cfg *state.Config) error {
 	}
 	defer pages.Close()
 	pages.SetActions(host.ReviewActions(events))
-	bin, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	openers := filepath.Join(cfg.StateDir, "openers")
-	if err := host.WriteOpeners(openers, bin); err != nil {
-		return err
-	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	panes := &host.Panes{TM: tm, Session: cfg.Hub.Session, Openers: openers}
 	loader := &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}
-	pusher := &host.Pusher{StateDir: cfg.StateDir, Now: time.Now}
-	go pusher.Run(ctx)
-	journal := host.LoadEventLog(host.EventLogPath(cfg.StateDir))
-	runtime := host.New(host.Runtime{Config: cfg, Loader: loader, Engine: panes, TM: tm, Session: cfg.Hub.Session, Typist: panes, Pages: pages, Log: journal, Push: pusher})
-	return runtime.Run(ctx, events)
+	runtime := host.Runtime{Config: cfg, Loader: loader, TM: tm, Session: cfg.Hub.Session, Pages: pages, Fallback: local}
+	panes := &host.Panes{TM: tm, Session: cfg.Hub.Session}
+	if !local {
+		bin, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		panes.Openers = filepath.Join(cfg.StateDir, "openers")
+		if err := host.WriteOpeners(panes.Openers, bin); err != nil {
+			return err
+		}
+		runtime.Push = &host.Pusher{StateDir: cfg.StateDir, Now: time.Now}
+		go runtime.Push.Run(ctx)
+		runtime.Log = host.LoadEventLog(host.EventLogPath(cfg.StateDir))
+	}
+	runtime.Engine, runtime.Typist = panes, panes
+	return host.New(runtime).Run(ctx, events)
 }
