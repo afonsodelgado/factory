@@ -254,7 +254,7 @@ func (p *Phone) configureKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		hostname := strings.TrimSpace(p.fields[hostnameField])
 		p.screen = phoneMain
-		return p.run("Saving…", "Saved. Restart factory serve to use a new port.", func() error { return p.actions.Configure(port, hostname) })
+		return p.run("Saving…", "Saved. Restart factory serve to use a new port or hostname.", func() error { return p.actions.Configure(port, hostname) })
 	default:
 		if msg.Text != "" {
 			p.typeText(msg.Text)
