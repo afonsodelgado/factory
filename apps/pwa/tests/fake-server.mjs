@@ -335,6 +335,13 @@ http
       if (state.mode === "node-down")
         return send(res, 502, { error: "bad gateway" });
       if (refused(req, res, url)) return;
+      if (state.mode === "funnel")
+        return send(res, 403, {
+          error:
+            "Funnel puts this machine on the public internet, so the node answers nothing over the network until every Funnel entry is off",
+          funnel: true,
+          fixes: state.fixes,
+        });
       if (url.pathname.startsWith("/api/")) return await api(req, res, url);
       const granted = /^\/rt\/([^/]+)(\/.*)$/.exec(url.pathname);
       if (granted) return await sandboxed(req, res, granted[1], granted[2]);

@@ -249,6 +249,32 @@ func TestOnlyTheOwnersLoginThroughLocalServeReachesTheAPI(t *testing.T) {
 	}
 }
 
+func TestAStreamOpenedBeforeFunnelTurnsOnIsCutOff(t *testing.T) {
+	serve := []byte("{}")
+	exposure := &Exposure{Tailscale: Tailscale{Run: func(context.Context, string, ...string) ([]byte, error) { return serve, nil }}}
+	exposure.Check(context.Background())
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{"devbox.tail1234.ts.net"}, Exposure: exposure}
+	streaming := make(chan struct{})
+	ended := make(chan struct{})
+	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(streaming)
+		<-r.Context().Done()
+		close(ended)
+	}))
+	r := httptest.NewRequest(http.MethodGet, "https://devbox.tail1234.ts.net/api/events", nil)
+	r.RemoteAddr = "127.0.0.1:50000"
+	r.Header.Set(LoginHeader, "alice@example.com")
+	go handler.ServeHTTP(httptest.NewRecorder(), r)
+	<-streaming
+	serve = []byte(`{"AllowFunnel":{"devbox.tail1234.ts.net:443":true}}`)
+	exposure.Check(context.Background())
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stream opened while Funnel was off kept sending after Funnel turned on")
+	}
+}
+
 func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.T) {
 	const host = "devbox.tail1234.ts.net"
 	api := &API{Node: "node-1", Version: "test"}

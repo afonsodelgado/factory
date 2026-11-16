@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"mime"
 	"net/http"
 	"net/netip"
@@ -37,8 +38,21 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			fail(w, status, problem)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(g.untilExposed(r.Context())))
 	})
+}
+
+func (g Gate) untilExposed(parent context.Context) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	unsafe := g.Exposure.Unsafe()
+	go func() {
+		select {
+		case <-unsafe:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx
 }
 
 func (g Gate) Principal(*http.Request) (string, bool) { return g.Owner, true }

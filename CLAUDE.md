@@ -56,6 +56,8 @@ Integration tests that need tmux start their own scratch server and kill it in `
 
 Address panes by id (`%12`) and windows by name. Never assume a window or pane index: `base-index` differs between machines.
 
+Hub popups such as `N` (Nodes) and `P` (Phone) are tmux client overlays, so `capture-pane` on the hub's server never shows them, and they run with that server's global environment. To see one by hand, start the inner scratch server from a shell whose `HOME`, `FACTORY_*` and `CLAUDE_CONFIG_DIR` are temporary and whose `PATH` puts the fakes first, run `factory node run` from the same environment, then run the hub in a second scratch server from a temporary repo with `TMUX` unset (`tmux -L <outer> -f /dev/null new -d -x 120 -y 40 factory`), send the key there and capture the outer pane.
+
 ## Code
 
 - No comments. Clear names and small functions instead.

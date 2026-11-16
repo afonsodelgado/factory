@@ -550,6 +550,8 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.openDialog("remotes", m.remotesContext())
 	case "P":
 		return m.openDialog("phone", struct{}{})
+	case "N":
+		return m.openDialog("nodes", struct{}{})
 	case "p":
 		return m.askPause()
 	case "a":
@@ -968,7 +970,7 @@ func (m *Model) Header() (string, string) {
 	ic := m.Icons
 	left := appBadge(ic)
 	if len(m.snap.Items) == 0 {
-		return left + " #[fg=#737aa2]no factories yet", m.linkLabels() + hostLabel
+		return left + " #[fg=#737aa2]no factories yet", m.linkLabels() + m.machineLabel()
 	}
 	count := func(statuses ...factory.Status) int {
 		n := 0
@@ -1003,7 +1005,11 @@ func (m *Model) Header() (string, string) {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, m.linkLabels() + m.ghLabel() + hostLabel
+	return left, m.linkLabels() + m.ghLabel() + m.machineLabel()
+}
+
+func (m *Model) machineLabel() string {
+	return "#[fg=#3b4261]" + m.Config.NodeName() + " "
 }
 
 func (m *Model) ghLabel() string {
@@ -1087,9 +1093,9 @@ func (m *Model) selectorHints() []footer.Hint {
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
 	if len(m.Config.Remotes) > 0 {
-		return hints("j/k", "move", "⏎", "session", "i", "answer", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
+		return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
 }
 
 func (m *Model) panelHints() []footer.Hint {

@@ -242,7 +242,8 @@ function Empty() {
         get a notification when it first needs you.
       </p>
       <p className="hint">
-        Factories on remote servers are not shown on the phone yet.
+        Another machine joins with <code>factory node install</code> there. Its
+        factories show here too, marked with its name.
       </p>
     </div>
   );

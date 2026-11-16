@@ -20,6 +20,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
+	"github.com/afonsodelgado/factory/internal/ui/selector"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
@@ -82,6 +83,24 @@ func keystrokes(s string) []string {
 
 func typeText(tm sender, s string) {
 	panelKeys(tm, keystrokes(s)...)
+}
+
+func TestAnEmptyHubPointsAtNodesAndAnnouncesTheNodesFirstStartOnlyOnce(t *testing.T) {
+	cfg := &state.Config{StateDir: t.TempDir()}
+	runtime := host.New(host.Runtime{Config: cfg, Machine: "macbook"})
+	m := NewModel(Model{Config: cfg, Icons: theme.Nerd})
+	m.applyPresentation(runtime.Presentation())
+
+	if list := selector.Render(m.data(), SelectorWidth, 24); !strings.Contains(list, "nodes and the phone app") {
+		t.Errorf("the empty factory list does not offer N:\n%s", list)
+	}
+	if bar := m.FooterView(112, 1); !strings.Contains(bar, "macbook's node is running. N shows it and the URL your phone opens.") {
+		t.Errorf("on the node's first start the footer reads:\n%s\nwant the welcome naming macbook", bar)
+	}
+	restarted := host.New(host.Runtime{Config: cfg, Machine: "macbook"})
+	if again := runtime.Presentation().FirstStart + restarted.Presentation().FirstStart; again != "" {
+		t.Errorf("the welcome came back as %q on a later poll or node start; it must show once", again)
+	}
 }
 
 func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {

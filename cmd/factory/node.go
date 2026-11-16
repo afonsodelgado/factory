@@ -171,7 +171,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	runtime := host.New(host.Runtime{
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
 		Pages: pages, Engine: panes, Typist: panes, Log: host.LoadEventLog(host.EventLogPath(cfg.StateDir)), Push: &host.Pusher{StateDir: cfg.StateDir, Now: time.Now},
-		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH},
+		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
 	})
 	go runtime.Push.Run(ctx)
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()

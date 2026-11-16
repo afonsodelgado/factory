@@ -48,6 +48,15 @@ func (m Machine) NodePort() int {
 
 func (m Machine) NodeHostname() string { return cmp.Or(m.Node.Hostname, m.Phone.Hostname) }
 
+func (m Machine) NodeName() string {
+	name, _, _ := strings.Cut(m.NodeHostname(), ".")
+	if name == "" {
+		host, _ := os.Hostname()
+		name, _, _ = strings.Cut(host, ".")
+	}
+	return name
+}
+
 func (m Machine) NodeOrigin() string {
 	if m.NodeHostname() == "" {
 		return ""

@@ -103,10 +103,13 @@ func (p *Phone) key(msg tea.KeyPressMsg) tea.Cmd {
 	case "h":
 		p.checkRun++
 		p.screen = phoneChecking
-		run := p.checkRun
-		return func() tea.Msg { return phoneChecks{run, p.actions.Check()} }
+		return runChecks(p.actions, p.checkRun)
 	}
 	return nil
+}
+
+func runChecks(actions PhoneActions, run int) tea.Cmd {
+	return func() tea.Msg { return phoneChecks{run, actions.Check()} }
 }
 
 func (p *Phone) finish(fallback PhoneContext, notice string, err error) phoneDone {
@@ -136,10 +139,8 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 	if p.Context.Running {
 		running, runningInk = "running", theme.FgInk(theme.Green)
 	}
-	url, urlInk := "unknown; put node.hostname, this machine's ts.net name, in config.yml", theme.FgInk(theme.Yellow)
-	if p.Context.Hostname != "" {
-		url, urlInk = "https://"+p.Context.Hostname, theme.Bright
-	}
+	url, urlInk := p.Context.url()
+	notify, notifyInk := p.Context.notify()
 	rows := []struct {
 		label, value string
 		ink          theme.Ink
@@ -147,7 +148,7 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 		{"node", running, runningInk},
 		{"url", url, urlInk},
 		{"port", fmt.Sprintf("127.0.0.1:%d, forwarded by tailscale serve", p.Context.Port), theme.Text},
-		{"notify", fmt.Sprintf("%d subscribed", p.Context.Subscriptions), theme.Text},
+		{"notify", notify, notifyInk},
 	}
 	for i, row := range rows {
 		c.Put(1, 2+i, row.label, theme.Muted)
@@ -158,6 +159,20 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 		paragraph(c, y+1, text, ink)
 	}
 	c.Put(1, c.H-1, "t test push   h checks   esc close", theme.Text)
+}
+
+func (c PhoneContext) url() (string, theme.Ink) {
+	if c.Hostname == "" {
+		return "unknown; put node.hostname, this machine's ts.net name, in config.yml", theme.FgInk(theme.Yellow)
+	}
+	return "https://" + c.Hostname, theme.Bright
+}
+
+func (c PhoneContext) notify() (string, theme.Ink) {
+	if c.Subscriptions == 0 {
+		return "off: no phone has turned notifications on yet", theme.Muted
+	}
+	return "on for " + plural(c.Subscriptions, "phone"), theme.FgInk(theme.Green)
 }
 
 func (p *Phone) mainMessage() (string, theme.Ink) {

@@ -96,13 +96,40 @@ export function Refused() {
   const host = hostName();
   const owner = refusal?.owner;
   return (
+    <Closed label={`${host} refuses this Tailscale account`}>
+      <h1>
+        {owner
+          ? `${host} answers ${owner} only`
+          : `${host} needs your Tailscale login`}
+      </h1>
+      <p>
+        {refusal?.login ? (
+          <>
+            This phone is signed in to Tailscale as{" "}
+            <b className="ink">{refusal.login}</b>.{" "}
+          </>
+        ) : (
+          "This device reached factory without a Tailscale login, as a tagged machine does. "
+        )}
+        factory nodes answer their owner and no one else, so nothing from {host}{" "}
+        is shown or kept here.
+      </p>
+      <p className="sm mute">
+        {owner
+          ? `Switch to ${owner} in the Tailscale app, then open factory again.`
+          : "Sign in to Tailscale as the node's owner on this device, then open factory again."}
+      </p>
+    </Closed>
+  );
+}
+
+export function Closed(props: { label: string; children: ReactNode }) {
+  const host = hostName();
+  return (
     <div className="shell">
       <header className="tb">
         <span className="mode">factory</span>
-        <span
-          className="host"
-          aria-label={`${host} refuses this Tailscale account`}
-        >
+        <span className="host" aria-label={props.label}>
           <span className="dot red" aria-hidden="true">
             ✕
           </span>
@@ -114,28 +141,7 @@ export function Refused() {
           <p className="big-g red" aria-hidden="true">
             ✕
           </p>
-          <h1>
-            {owner
-              ? `${host} answers ${owner} only`
-              : `${host} needs your Tailscale login`}
-          </h1>
-          <p>
-            {refusal?.login ? (
-              <>
-                This phone is signed in to Tailscale as{" "}
-                <b className="ink">{refusal.login}</b>.{" "}
-              </>
-            ) : (
-              "This device reached factory without a Tailscale login, as a tagged machine does. "
-            )}
-            factory nodes answer their owner and no one else, so nothing from{" "}
-            {host} is shown or kept here.
-          </p>
-          <p className="sm mute">
-            {owner
-              ? `Switch to ${owner} in the Tailscale app, then open factory again.`
-              : "Sign in to Tailscale as the node's owner on this device, then open factory again."}
-          </p>
+          {props.children}
         </div>
       </main>
     </div>

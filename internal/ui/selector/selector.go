@@ -309,6 +309,9 @@ func renderEmpty(c *theme.Canvas, d Data, w int) {
 	x := c.Put(2, y, "n", theme.Key)
 	c.Put(x+2, y, "new factory", theme.Text)
 	y++
+	x = c.Put(2, y, "N", theme.Key)
+	c.Put(x+2, y, "nodes and the phone app", theme.Text)
+	y++
 	x = c.Put(2, y, "?", theme.Key)
 	c.Put(x+2, y, "all keys", theme.Text)
 	y += 2

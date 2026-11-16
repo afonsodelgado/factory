@@ -234,6 +234,25 @@ type Exposure struct {
 	checked bool
 	problem string
 	fixes   []string
+	safe    chan struct{}
+}
+
+var neverSafe = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()
+
+func (e *Exposure) Unsafe() <-chan struct{} {
+	if e == nil {
+		return neverSafe
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.safe == nil {
+		return neverSafe
+	}
+	return e.safe
 }
 
 func (e *Exposure) Check(ctx context.Context) {
@@ -251,6 +270,13 @@ func (e *Exposure) Check(ctx context.Context) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.checked, e.problem, e.fixes = true, problem, fixes
+	switch {
+	case problem != "" && e.safe != nil:
+		close(e.safe)
+		e.safe = nil
+	case problem == "" && e.safe == nil:
+		e.safe = make(chan struct{})
+	}
 }
 
 func (e *Exposure) Watch(ctx context.Context) {

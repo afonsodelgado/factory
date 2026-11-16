@@ -4,7 +4,7 @@ import { usePushHealth } from "../hooks.ts";
 import { pushSupport, standalone, turnOn, type PushHealth } from "../push.ts";
 import { paths } from "../route.ts";
 import { useApp } from "../state.tsx";
-import { AppShell } from "./AppShell.tsx";
+import { AppShell, Closed } from "./AppShell.tsx";
 
 export function Setup() {
   const { me, installation, navigate } = useApp();
@@ -35,10 +35,12 @@ export function Setup() {
         <ul className="checks">
           <Check
             ok={!!me}
-            label={me ? `Connected to ${host}` : `Not connected to ${host}`}
+            label={
+              me ? `Signed in as ${me.caller}` : `Not connected to ${host}`
+            }
             detail={
               me
-                ? `as ${me.caller}, through Tailscale`
+                ? `Tailscale on this phone tells ${host} it's you. No code, no pairing.`
                 : `Open factory on a phone signed in to Tailscale as ${host}'s owner.`
             }
           />
@@ -53,7 +55,7 @@ export function Setup() {
           />
           <Check
             ok={https}
-            label="HTTPS through tailscale serve"
+            label="HTTPS through Tailscale Serve"
             detail={location.host}
           />
           <Check
@@ -98,6 +100,40 @@ export function Setup() {
         </footer>
       </div>
     </AppShell>
+  );
+}
+
+export function Exposed() {
+  const { exposure } = useApp();
+  const host = hostName();
+  const fixes = exposure?.fixes ?? [];
+  return (
+    <Closed label={`${host} refuses every request until Funnel is off`}>
+      <h1>
+        {fixes.length
+          ? `Funnel is on for ${host}`
+          : `${host} can't confirm that Funnel is off`}
+      </h1>
+      <p>
+        Anyone on the internet might reach {host}'s node, so it refuses every
+        request until Funnel is off. Nothing from {host} is shown here.
+      </p>
+      <ul className="checks">
+        <Check ok={false} warn label="funnel" detail={exposure?.error} />
+        {fixes.map((fix) => (
+          <Check
+            key={fix}
+            ok={false}
+            warn
+            label={`fix on ${host}`}
+            detail={<code>{fix}</code>}
+          />
+        ))}
+      </ul>
+      <p className="sm mute">
+        factory asks again every 15s and opens by itself once Funnel is off.
+      </p>
+    </Closed>
   );
 }
 
