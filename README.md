@@ -247,6 +247,22 @@ The hub lists remote factories beside local ones, under a `↔ homelab` group, a
 
 With `qa.mode: browser` the server holds browser QA, each re-check and the walkthrough's stack preparation until you press `⏎` on their start item in this hub. They need a checkout of the repo that `factory init` listed here, whose remotes include the server's git remote, and `claude` installed here. The laptop fetches the exact published commit into a worktree of its own, runs `claude --chrome` there and sends only the report and evidence under `.claude/qa/` (plus the walkthrough's `stack.sh` and `stack.json`) back; connecting alone never starts a job, and a dropped link keeps a running one going.
 
+### The phone app
+
+The phone app lists this machine's factories, tells you when one needs you, and lets you answer, approve, pause, wake, message a supervisor and review pages with the same comments as the desktop. Remote factories are not shown. It runs at `https://<machine>.<tailnet>.ts.net/` through [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve), so the phone needs Tailscale to act, but notifications arrive through the browser's push service on any network. Press `P` in the hub for the Phone popup, or use the commands:
+
+| Command | Does |
+|---|---|
+| `factory phone configure --hostname devbox.tail1234.ts.net [--port 7418]` | sets this machine's full Tailscale name and the loopback port |
+| `factory phone enable` / `disable` | turns Phone on (making the private push keys once) and starts `factory serve`, or stops it; disabling keeps paired phones and keys |
+| `factory phone pair` | prints a QR code and link with a one-time code that expires in five minutes |
+| `factory phone devices` / `revoke <id>` | lists paired phones, or revokes one with its notifications |
+| `factory phone test` | sends a test notification; "accepted" means the push service took it, not that the phone showed it |
+| `factory phone check` | checks Tailscale, HTTPS, the serve mapping, Funnel and the push services, with a fix for each failure |
+| `factory phone start` / `stop` / `status` | runs `factory serve` in the background, stops it, or reports what runs |
+
+Once, on this machine: turn on HTTPS Certificates for the tailnet, then run `tailscale serve --bg --https=443 http://127.0.0.1:7418`. Never use Funnel. `factory serve` listens only on `127.0.0.1` and answers the plain Tailscale IP with a page that points to the HTTPS name. While the hub is closed, `factory serve` runs the factories headless so notifications and answers keep working; opening the hub takes them back. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Phone is off by default; its keys, device hashes and subscriptions live in the state directory with private modes.
+
 ### Reviewing designs and plans
 
 Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `o` opens one on the hub's review page on `127.0.0.1`, in any browser. There:

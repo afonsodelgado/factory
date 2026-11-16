@@ -398,7 +398,7 @@ func (r *Remotes) drawCheck(c *theme.Canvas) {
 		c.Put(1, c.H-1, "esc stop", theme.Text)
 		return
 	}
-	y = r.drawCheckRows(c)
+	y = drawChecks(c, 2, r.checkRows)
 	y = paragraph(c, y+1, r.checkSummary(), theme.Text)
 	r.drawProblem(c, y+1)
 	c.Put(1, c.H-1, r.checkedHints(), theme.Text)
@@ -417,9 +417,8 @@ func (r *Remotes) drawPendingChecks(c *theme.Canvas) int {
 	return y
 }
 
-func (r *Remotes) drawCheckRows(c *theme.Canvas) int {
-	y := 2
-	for _, row := range r.checkRows {
+func drawChecks(c *theme.Canvas, y int, rows []CheckRow) int {
+	for _, row := range rows {
 		mark := markGlyphs[row.Mark]
 		detailInk := theme.Text
 		if row.Mark == "skip" {

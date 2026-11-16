@@ -33,6 +33,7 @@ var popupSizes = map[string][2]int{
 	"delete":   {84, 14},
 	"keys":     {124, 17},
 	"remotes":  {90, 26},
+	"phone":    {90, 32},
 }
 
 var popupTitles = map[string]string{
@@ -44,6 +45,7 @@ var popupTitles = map[string]string{
 	"delete":   " ✕ Delete ",
 	"keys":     " Keys ",
 	"remotes":  " ↔ Remotes ",
+	"phone":    " Phone ",
 }
 
 type dialogClosedMsg struct {
@@ -89,8 +91,11 @@ type dialogTransition struct {
 }
 
 func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
-	if msg.kind == "remotes" {
+	if msg.kind == "remotes" || msg.kind == "phone" {
 		m.reloadRemotes()
+	}
+	if msg.kind == "phone" {
+		m.servePhoneReview()
 	}
 	if m.dialog != msg.kind {
 		return nil

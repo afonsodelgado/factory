@@ -2,7 +2,10 @@ package install
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/catalog"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -109,6 +113,59 @@ func TestDoctorReportsWhatIsMissingWithTheFix(t *testing.T) {
 	}
 	if hooks := find(Doctor(o), "hooks"); hooks.Mark != Pass {
 		t.Errorf("after bootstrap the hooks check says %s %q", hooks.Mark, hooks.Detail)
+	}
+}
+
+func TestDoctorNamesEachPhoneSetupGapAndItsFix(t *testing.T) {
+	const host = "devbox.tail1234.ts.net"
+	running := `{"BackendState":"Running","CertDomains":["` + host + `"],"Self":{"DNSName":"` + host + `."}}`
+	served := `{"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}}}}`
+	cases := []struct {
+		name, status, serve string
+		missing, offline    bool
+		failing             []string
+	}{
+		{name: "everything set up", status: running, serve: served},
+		{name: "no tailscale", missing: true, failing: []string{"tailscale"}},
+		{name: "logged out", status: `{"BackendState":"NeedsLogin"}`, failing: []string{"tailscale"}},
+		{name: "HTTPS off", status: strings.Replace(running, `"CertDomains":["`+host+`"],`, "", 1), serve: served, failing: []string{"https cert"}},
+		{name: "no serve mapping", status: running, serve: `{}`, failing: []string{"serve"}},
+		{name: "funnel on", status: running, serve: strings.TrimSuffix(served, "}") + `,"AllowFunnel":{"` + host + `:443":true}}`, failing: []string{"funnel"}},
+		{name: "push services unreachable", status: running, serve: served, offline: true, failing: []string{"push reach"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			probe := phone.Probe{
+				Tailscale: func(_ context.Context, args ...string) ([]byte, error) {
+					switch {
+					case c.missing:
+						return nil, &exec.Error{Name: "tailscale", Err: exec.ErrNotFound}
+					case args[0] == "serve":
+						return []byte(c.serve), nil
+					}
+					return []byte(c.status), nil
+				},
+				DialTLS: func(context.Context, string) error {
+					if c.offline {
+						return errors.New("dial tcp: no route to host")
+					}
+					return nil
+				},
+			}
+			cfg := &state.Config{Machine: state.Machine{Phone: state.Phone{Enabled: true, Hostname: host}}}
+			var failing []string
+			for _, check := range PhoneChecks(Options{Config: cfg, PhoneProbe: probe}) {
+				if check.Mark == Fail {
+					failing = append(failing, check.Name)
+					if check.Fix == "" {
+						t.Errorf("%s fails with no fix", check.Name)
+					}
+				}
+			}
+			if !slices.Equal(failing, c.failing) {
+				t.Errorf("failing checks %v; want %v", failing, c.failing)
+			}
+		})
 	}
 }
 

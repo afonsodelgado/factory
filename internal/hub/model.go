@@ -553,6 +553,8 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.openDialog("keys", m.keysContext())
 	case "R":
 		return m.openDialog("remotes", m.remotesContext())
+	case "P":
+		return m.openDialog("phone", struct{}{})
 	case "p":
 		return m.askPause()
 	case "a":
