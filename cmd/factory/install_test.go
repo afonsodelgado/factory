@@ -21,6 +21,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/node/nodetest"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -379,6 +380,7 @@ func TestNodeRunLearnsItsOwnerAndNameFromTailscaleAndRunsOfflineOnSavedSettings(
 		{name: "a saved owner online", saved: "node:\n  owner: bob@example.com\n", owner: "bob@example.com", online: true, wantOwner: "bob@example.com", wantHost: tailnetHost},
 		{name: "a saved owner offline", saved: "node:\n  owner: bob@example.com\n", owner: "bob@example.com", wantOwner: "bob@example.com"},
 		{name: "a fresh machine offline", refused: true},
+		{name: "an owner given to a named machine offline", saved: "node:\n  hostname: " + tailnetHost + "\n", owner: "carol@example.com", wantOwner: "carol@example.com", wantHost: tailnetHost},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -435,5 +437,42 @@ func TestFunnelOnRefusesTheTailnetWhileTheSocketStillAnswers(t *testing.T) {
 	})
 	if !node.Answers(cfg.NodeSocket()) {
 		t.Fatal("the local socket stopped answering while Funnel is on; doctor and the hub need it to explain the fix")
+	}
+}
+
+func TestInstallJoinsAFoundNodeOnlyOnAYesOrAFlag(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	studio := tn.Machine("studio").Start()
+	var out bytes.Buffer
+	offer := func(answer string, tty bool, join joinChoice) (bool, error) {
+		out.Reset()
+		s := nodeSetup{out: &out, in: strings.NewReader(answer), tty: tty, join: join}
+		joined, _, err := s.offerJoin(context.Background(), studio.Local, "studio")
+		return joined, err
+	}
+
+	if joined, err := offer("", false, askToJoin); joined || err == nil || !strings.Contains(err.Error(), "--join") {
+		t.Errorf("install without a terminal or flag joined %v, %v; want a refusal naming --join and --no-join", joined, err)
+	}
+	if joined, err := offer("", false, neverJoin); joined || err != nil {
+		t.Errorf("--no-join answered %v, %v", joined, err)
+	}
+	if joined, err := offer("n\n", true, askToJoin); joined || err != nil || !strings.Contains(out.String(), "Join it? ") {
+		t.Errorf("answering n joined %v, %v:\n%s", joined, err, &out)
+	}
+	if got := studio.Names(); len(got) != 1 {
+		t.Fatalf("studio lists %v before any yes; want nothing written", got)
+	}
+	if joined, err := offer("\n", true, askToJoin); !joined || err != nil {
+		t.Fatalf("pressing Enter joined %v, %v:\n%s", joined, err, &out)
+	}
+	if joined, err := offer("", false, askToJoin); joined || err != nil || !strings.Contains(out.String(), "already shares") {
+		t.Errorf("installing again joined %v, %v:\n%s; want it to find the list it already shares", joined, err, &out)
+	}
+	for _, n := range []*nodetest.Node{macbook, studio} {
+		if got := n.Names(); !slices.Equal(got, []string{"macbook", "studio"}) {
+			t.Errorf("%s lists %v after the join", n.Short(), got)
+		}
 	}
 }

@@ -144,3 +144,11 @@ func Answers(socket string) bool {
 	var me Me
 	return Unix(socket).Do(ctx, http.MethodGet, "/api/me", nil, &me) == nil
 }
+
+func AttachCommand(ctx context.Context, c *Client, name string, r host.AttachRequest) ([]string, error) {
+	var view string
+	if err := c.Request(ctx, "attach", "", r, &view); err != nil {
+		return nil, err
+	}
+	return []string{"ssh", "-t", "-o", "ClearAllForwardings=yes", name, "factory", "host", "attach", view}, nil
+}

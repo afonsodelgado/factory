@@ -45,9 +45,11 @@ func System(ctx context.Context, name string, args ...string) ([]byte, error) {
 type Tailscale struct{ Run Runner }
 
 type Self struct {
+	ID          string
 	Login       string
 	DNSName     string
 	Tailnet     string
+	OS          string
 	Tagged      bool
 	CertDomains []string
 }
@@ -59,17 +61,27 @@ func (s Self) Short() string {
 
 func (s Self) HTTPS() bool { return slices.Contains(s.CertDomains, s.DNSName) }
 
+type device struct {
+	ID           string
+	DNSName      string
+	OS           string
+	UserID       int64
+	Tags         []string
+	Online       bool
+	TailscaleIPs []string
+	LastSeen     time.Time
+}
+
 type status struct {
-	BackendState string
-	Self         struct {
-		DNSName string
-		UserID  int64
-		Tags    []string
-	}
+	BackendState   string
+	Self           device
+	Peer           map[string]device
 	User           map[string]struct{ LoginName string }
 	CurrentTailnet struct{ MagicDNSSuffix string }
 	CertDomains    []string
 }
+
+func (s status) login(d device) string { return s.User[strconv.FormatInt(d.UserID, 10)].LoginName }
 
 func (t Tailscale) call(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, tailscaleWait)
@@ -82,28 +94,40 @@ func (t Tailscale) call(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (t Tailscale) Status(ctx context.Context) (Self, error) {
+	inv, err := t.Inventory(ctx)
+	return inv.Self, err
+}
+
+func (t Tailscale) Inventory(ctx context.Context) (Inventory, error) {
 	out, err := t.call(ctx, "status", "--json")
 	if errors.Is(err, ErrNoTailscale) {
-		return Self{}, err
+		return Inventory{}, err
 	}
 	var s status
 	if err == nil {
 		err = json.Unmarshal(out, &s)
 	}
 	if err != nil || s.BackendState != "Running" {
-		return Self{}, ErrLoggedOut
+		return Inventory{}, ErrLoggedOut
 	}
 	self := Self{
-		Login:       s.User[strconv.FormatInt(s.Self.UserID, 10)].LoginName,
+		ID:          s.Self.ID,
+		Login:       s.login(s.Self),
 		DNSName:     strings.TrimSuffix(s.Self.DNSName, "."),
 		Tailnet:     strings.TrimSuffix(s.CurrentTailnet.MagicDNSSuffix, "."),
+		OS:          s.Self.OS,
 		Tagged:      len(s.Self.Tags) > 0,
 		CertDomains: s.CertDomains,
 	}
 	if !self.Tagged && (self.Login == "" || self.DNSName == "") {
-		return Self{}, errUnnamed
+		return Inventory{}, errUnnamed
 	}
-	return self, nil
+	inv := Inventory{Self: self}
+	for _, key := range slices.Sorted(maps.Keys(s.Peer)) {
+		d := s.Peer[key]
+		inv.Peers = append(inv.Peers, Peer{ID: d.ID, Name: strings.ToLower(strings.TrimSuffix(d.DNSName, ".")), OS: d.OS, Login: s.login(d), Tags: d.Tags, Online: d.Online, LastSeen: d.LastSeen, IPs: d.TailscaleIPs})
+	}
+	return inv, nil
 }
 
 type ServeConfig struct {

@@ -16,6 +16,7 @@ type Gate struct {
 	Owner       string
 	Hosts       []string
 	Origin      string
+	Home        func() string
 	OpaquePath  string
 	RefusalPage func(w http.ResponseWriter, owner, login string)
 	Exposure    *Exposure
@@ -29,7 +30,7 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			g.refuseAccount(w, r, login, problem)
 			return
 		case problem != "":
-		case g.exposed(w):
+		case g.exposed(w), g.cors(w, r):
 			return
 		default:
 			status, problem = g.requestRefusal(r)
@@ -83,6 +84,9 @@ func (g Gate) requestRefusal(r *http.Request) (int, string) {
 		return http.StatusMisdirectedRequest, "this node does not know the name " + r.Host + "; if it is this machine's Tailscale name, set node.hostname to it in config.yml and restart the node"
 	}
 	if !mutates(r) {
+		if problem := g.readRefusal(r); problem != "" {
+			return http.StatusForbidden, problem
+		}
 		return 0, ""
 	}
 	if !g.trustedOrigin(r) {
@@ -134,11 +138,10 @@ func (g Gate) trustedOrigin(r *http.Request) bool {
 		return true
 	case len(origins) > 1:
 		return false
-	case origins[0] == g.Origin && g.Origin != "":
+	case g.allows(origins[0]):
 		return true
 	}
-	scopedReview := g.OpaquePath != "" && strings.HasPrefix(r.URL.Path, g.OpaquePath)
-	return scopedReview && origins[0] == "null"
+	return g.scopedReview(r) && origins[0] == "null"
 }
 
 func sendsJSON(r *http.Request) bool {

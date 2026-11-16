@@ -40,10 +40,11 @@ type API struct {
 	Node    string
 	Boot    string
 	Now     func() time.Time
+	Nodes   *Nodes
 
 	mu        sync.Mutex
 	current   *Snapshot
-	factories []byte
+	published []byte
 	streams   map[*stream]bool
 }
 
@@ -61,7 +62,7 @@ func (a *API) With(app http.Handler, principal Principal, kinds ...string) http.
 	return mux
 }
 
-var NetworkKinds = []string{"create", "removal", "delete", "archive", "unarchive", "wake", "pause", "wake-all"}
+var NetworkKinds = []string{"create", "removal", "delete", "archive", "unarchive", "wake", "pause", "wake-all", "attach"}
 
 func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string) {
 	route := func(pattern string, serve func(http.ResponseWriter, *http.Request, string)) {
@@ -81,6 +82,9 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 	route("GET /api/operations/{operation}", a.Operation)
 	route("POST /api/factories/{key}/actions", a.Act)
 	route("POST /api/factories/{key}/preview", a.Preview)
+	if a.Nodes != nil {
+		a.Nodes.routes(route)
+	}
 	mux.HandleFunc("POST /api/commands/{kind}", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := principal(r); !ok {
 			fail(w, http.StatusUnauthorized, "this request has no owner identity")
@@ -141,24 +145,37 @@ func (a *API) refresh(ctx context.Context) {
 }
 
 func (a *API) publish(local []host.LocalFactory) {
-	factories, _ := json.Marshal(local)
+	var roster *Roster
+	if a.Nodes != nil {
+		current := a.Nodes.Dir.Roster()
+		roster = &current
+	}
+	published, _ := json.Marshal(struct {
+		Factories []host.LocalFactory
+		Roster    *Roster
+	}{local, roster})
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.current != nil && bytes.Equal(factories, a.factories) {
+	if a.current != nil && bytes.Equal(published, a.published) {
 		return
 	}
 	revision := a.now().UnixMilli()
 	if a.current != nil && revision <= a.current.Revision {
 		revision = a.current.Revision + 1
 	}
-	a.factories = factories
-	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local}
+	a.published = published
+	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local, Roster: roster}
 	a.broadcast(event("snapshot", a.current))
 }
 
 func (a *API) Factories() (int64, []host.LocalFactory, bool) {
 	snap, ok := a.Latest()
 	return snap.Revision, snap.Factories, ok
+}
+
+func (a *API) Holds(repo, slug string) bool {
+	_, factories, _ := a.Factories()
+	return slices.ContainsFunc(factories, func(f host.LocalFactory) bool { return f.ID == slug && (repo == "" || f.Repo == repo) })
 }
 
 func (a *API) Connected(installation string) bool {
@@ -178,7 +195,7 @@ func (a *API) lose() {
 	if a.current == nil {
 		return
 	}
-	a.current, a.factories = nil, nil
+	a.current, a.published = nil, nil
 	a.broadcast(event("unavailable", map[string]any{"retry": true}))
 }
 
