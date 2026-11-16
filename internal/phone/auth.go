@@ -189,14 +189,17 @@ func (s Store) Paired(id string) bool {
 }
 
 func (s Store) Revoke(id string) error {
-	return update(s, devicesFile, func(d *devices) error {
+	if err := update(s, devicesFile, func(d *devices) error {
 		before := len(d.Devices)
 		d.Devices = slices.DeleteFunc(d.Devices, func(device Device) bool { return device.ID == id })
 		if len(d.Devices) == before {
 			return ErrNoDevice
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.Unsubscribe(id)
 }
 
 type vapid struct {
@@ -227,6 +230,17 @@ func (s Store) VAPIDKey(configured string) (string, error) {
 		return nil
 	})
 	return public, err
+}
+
+type vapidKeys struct{ public, private string }
+
+func (s Store) vapidPair() (vapidKeys, error) {
+	var v vapid
+	if err := s.read(vapidFile, &v); err != nil {
+		return vapidKeys{}, err
+	}
+	public, err := publicOf(v.Private)
+	return vapidKeys{public: public, private: v.Private}, err
 }
 
 func publicOf(private string) (string, error) {

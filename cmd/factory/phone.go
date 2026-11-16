@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 
 const serveReady = 10 * time.Second
 
-const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id>"
+const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id> | test"
 
 func runPhone(args []string) int {
 	if len(args) == 0 {
@@ -48,6 +49,8 @@ func runPhone(args []string) int {
 		err = printPairing(os.Stdout, setup)
 	case "devices":
 		err = printDevices(os.Stdout, setup)
+	case "test":
+		err = printTestPush(os.Stdout, setup)
 	case "revoke":
 		if len(args) != 2 {
 			fmt.Fprintln(os.Stderr, phoneUsage)
@@ -63,6 +66,31 @@ func runPhone(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func printTestPush(w io.Writer, setup phone.Setup) error {
+	results, err := setup.Test()
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		fmt.Fprintln(w, "No phone has turned on notifications yet.")
+		return nil
+	}
+	names := map[string]string{}
+	if devices, err := setup.Devices(); err == nil {
+		for _, d := range devices {
+			names[d.ID] = d.Name
+		}
+	}
+	for _, r := range results {
+		outcome := "accepted by the push service; check that the phone shows it"
+		if !r.Accepted {
+			outcome = r.Problem
+		}
+		fmt.Fprintf(w, "%s: %s\n", cmp.Or(names[r.Device], r.Device), outcome)
+	}
+	return nil
 }
 
 func phoneSetup(cfg *state.Config) phone.Setup {

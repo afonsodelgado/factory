@@ -1,0 +1,174 @@
+package phone
+
+import (
+	"encoding/json"
+	"slices"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/afonsodelgado/factory/internal/host"
+)
+
+const (
+	pushFile     = "push.json"
+	resolvedKept = 30 * 24 * time.Hour
+	needsYou     = "Needs you. Tap to open it."
+	resolvedBody = "Resolved elsewhere."
+)
+
+var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission"}
+
+type Link struct {
+	Route       string `json:"route"`
+	Item        string `json:"item"`
+	Incarnation string `json:"incarnation"`
+	Open        bool   `json:"open"`
+}
+
+type tracked struct {
+	Link
+	Title    string    `json:"title"`
+	Alerted  bool      `json:"alerted,omitempty"`
+	Revision int64     `json:"revision"`
+	Changed  time.Time `json:"changed"`
+}
+
+type job struct {
+	ID       string    `json:"id"`
+	Device   string    `json:"device"`
+	Endpoint string    `json:"endpoint"`
+	Tag      string    `json:"tag"`
+	Resolved bool      `json:"resolved,omitempty"`
+	Payload  string    `json:"payload"`
+	Attempts int       `json:"attempts,omitempty"`
+	Due      time.Time `json:"due"`
+	Sending  bool      `json:"sending,omitempty"`
+}
+
+type ledger struct {
+	Baseline bool                `json:"baseline"`
+	Items    map[string]*tracked `json:"items"`
+	Jobs     []job               `json:"jobs"`
+}
+
+type Payload struct {
+	Tag      string `json:"tag"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	URL      string `json:"url"`
+	Revision int64  `json:"revision"`
+	Resolved bool   `json:"resolved,omitempty"`
+}
+
+type alert struct {
+	tracked
+	active bool
+}
+
+func alertsOf(factories []host.LocalFactory) (map[string]alert, map[string]bool) {
+	open, active := map[string]alert{}, map[string]bool{}
+	for _, f := range factories {
+		active[f.Incarnation] = !f.Paused
+		for _, item := range f.Items {
+			if slices.Contains(notifiable, item.Kind) {
+				link := Link{Route: f.Route, Item: item.ID, Incarnation: f.Incarnation, Open: true}
+				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Revision: 1}, active: !f.Paused}
+			}
+		}
+	}
+	return open, active
+}
+
+func (s Store) Reconcile(factories []host.LocalFactory, connected func(device string) bool, now time.Time) (bool, error) {
+	subs, err := s.Subscriptions()
+	if err != nil {
+		return false, err
+	}
+	queued := false
+	err = update(s, pushFile, func(l *ledger) error {
+		if l.Items == nil {
+			l.Items = map[string]*tracked{}
+		}
+		open, active := alertsOf(factories)
+		for key, a := range open {
+			_, seen := l.Items[key]
+			switch {
+			case seen && !a.active:
+				l.cancel(key)
+			case !seen:
+				item := a.tracked
+				item.Changed = now
+				l.Items[key] = &item
+				if l.Baseline && a.active {
+					item.Alerted = l.queue(subs, key, &item, nil, now)
+					queued = item.Alerted || queued
+				}
+			}
+		}
+		for key, item := range l.Items {
+			if _, still := open[key]; still || !item.Open {
+				continue
+			}
+			item.Open, item.Revision, item.Changed = false, item.Revision+1, now
+			unsent := l.cancel(key)
+			if active[item.Incarnation] && item.Alerted {
+				queued = l.queue(subs, key, item, func(device string) bool { return unsent[device] || connected(device) }, now) || queued
+			}
+		}
+		for key, item := range l.Items {
+			if !item.Open && now.Sub(item.Changed) > resolvedKept {
+				delete(l.Items, key)
+			}
+		}
+		l.Baseline = true
+		return nil
+	})
+	return queued, err
+}
+
+func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func(string) bool, now time.Time) bool {
+	payload := Payload{Tag: key, Title: item.Title, Body: needsYou, URL: "/n/" + key, Revision: item.Revision, Resolved: !item.Open}
+	if payload.Resolved {
+		payload.Body = resolvedBody
+	}
+	data, _ := json.Marshal(payload)
+	queued := false
+	for _, sub := range subs {
+		if skip != nil && skip(sub.Device) {
+			continue
+		}
+		l.Jobs = append(l.Jobs, job{ID: uuid.NewString(), Device: sub.Device, Endpoint: sub.Endpoint, Tag: key, Resolved: payload.Resolved, Payload: string(data), Due: now})
+		queued = true
+	}
+	return queued
+}
+
+func (l *ledger) cancel(key string) map[string]bool {
+	unsent := map[string]bool{}
+	l.Jobs = slices.DeleteFunc(l.Jobs, func(j job) bool {
+		if j.Tag != key {
+			return false
+		}
+		if !j.Sending && !j.Resolved {
+			unsent[j.Device] = true
+		}
+		return true
+	})
+	return unsent
+}
+
+func (s Store) Link(key string) (Link, bool) {
+	var l ledger
+	if s.read(pushFile, &l) != nil || l.Items[key] == nil {
+		return Link{}, false
+	}
+	return l.Items[key].Link, true
+}
+
+func (s Store) dropJobs(device string) error {
+	return update(s, pushFile, func(l *ledger) error {
+		l.Jobs = slices.DeleteFunc(l.Jobs, func(j job) bool { return j.Device == device })
+		return nil
+	})
+}

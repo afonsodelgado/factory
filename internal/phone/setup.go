@@ -11,7 +11,10 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const stopWait = 10 * time.Second
+const (
+	stopWait = 10 * time.Second
+	testWait = 8 * time.Second
+)
 
 type Setup struct {
 	Config *state.Config
@@ -166,6 +169,15 @@ func (s Setup) Pair() (Pairing, error) {
 
 func (s Setup) Devices() ([]Device, error) { return s.store().Devices() }
 
+func (s Setup) Test() ([]Delivery, error) {
+	if !Running(s.Config.StateDir) {
+		return nil, errors.New("factory serve is not running, so it cannot send a test notification; start it with factory phone start")
+	}
+	var results []Delivery
+	err := s.control(host.Message{T: "test"}, &results)
+	return results, err
+}
+
 func (s Setup) Revoke(id string) error {
 	if Running(s.Config.StateDir) {
 		return s.control(host.Message{T: "revoke", Data: mustJSON(id)}, nil)
@@ -202,6 +214,17 @@ func (c Control) handle(m host.Message) host.Message {
 		return done(serving)
 	case "stop":
 		return done(nil)
+	case "test":
+		if c.Server.Push == nil {
+			return host.Message{T: "error", Error: "this factory serve sends no notifications"}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), testWait)
+		defer cancel()
+		results, err := c.Server.Push.Test(ctx)
+		if err != nil {
+			return host.Message{T: "error", Error: err.Error()}
+		}
+		return done(results)
 	case "revoke":
 		var id string
 		if err := json.Unmarshal(m.Data, &id); err != nil {
