@@ -45,10 +45,25 @@ func (s Store) Subscribe(sub Subscription) error {
 	if err := validSubscription(sub); err != nil {
 		return err
 	}
-	return update(s, subscriptionsFile, func(subs *subscriptions) error {
+	if err := update(s, subscriptionsFile, func(subs *subscriptions) error {
 		subs.Subscriptions = append(withoutDevice(subs.Subscriptions, sub.Device), sub)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.dropJobsWhere(func(j job) bool { return j.Device == sub.Device && j.Endpoint != sub.Endpoint })
+}
+
+func (s Store) UnsubscribeEndpoint(device, endpoint string) error {
+	if err := update(s, subscriptionsFile, func(subs *subscriptions) error {
+		subs.Subscriptions = slices.DeleteFunc(subs.Subscriptions, func(sub Subscription) bool {
+			return sub.Device == device && sub.Endpoint == endpoint
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+	return s.dropJobsWhere(func(j job) bool { return j.Device == device && j.Endpoint == endpoint })
 }
 
 func (s Store) Unsubscribe(device string) error {

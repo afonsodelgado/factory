@@ -167,8 +167,12 @@ func (s Store) Link(key string) (Link, bool) {
 }
 
 func (s Store) dropJobs(device string) error {
+	return s.dropJobsWhere(func(j job) bool { return j.Device == device })
+}
+
+func (s Store) dropJobsWhere(drop func(job) bool) error {
 	return update(s, pushFile, func(l *ledger) error {
-		l.Jobs = slices.DeleteFunc(l.Jobs, func(j job) bool { return j.Device == device })
+		l.Jobs = slices.DeleteFunc(l.Jobs, drop)
 		return nil
 	})
 }

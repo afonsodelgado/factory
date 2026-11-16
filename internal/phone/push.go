@@ -134,7 +134,7 @@ func (p *Pusher) Test(ctx context.Context) ([]Delivery, error) {
 		results = append(results, Delivery{Device: sub.Device, Accepted: accepted(status), Problem: problem})
 		p.Store.recordDelivery(sub.Device, sub.Endpoint, p.now(), problem)
 		if gone(status) {
-			p.Store.Unsubscribe(sub.Device)
+			p.Store.UnsubscribeEndpoint(sub.Device, sub.Endpoint)
 		}
 	}
 	return results, nil
@@ -210,7 +210,7 @@ func (s Store) takeDue(now time.Time) ([]job, error) {
 
 func (s Store) settle(sent job, status int, retry time.Duration, problem string, now time.Time) {
 	if gone(status) {
-		s.Unsubscribe(sent.Device)
+		s.UnsubscribeEndpoint(sent.Device, sent.Endpoint)
 		return
 	}
 	final := accepted(status) || !transient(status)

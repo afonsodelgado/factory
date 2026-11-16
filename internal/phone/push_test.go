@@ -189,6 +189,39 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 }
 
+func TestAnOldEndpointsFailureLeavesTheRenewedSubscriptionOn(t *testing.T) {
+	store := Open(t.TempDir())
+	if _, err := store.VAPIDKey(""); err != nil {
+		t.Fatal(err)
+	}
+	v := newVendor(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
+	offline := func(string) bool { return false }
+	code, _, _ := store.NewCode(now)
+	device, _, err := store.Exchange(code, "a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Subscribe(subscriptionFor(t, device.ID, v.URL+"/old")); err != nil {
+		t.Fatal(err)
+	}
+	store.Reconcile(factoryWith(false, "old"), offline, now)
+	store.Reconcile(factoryWith(false, "old", "k1"), offline, now)
+	if err := store.Subscribe(subscriptionFor(t, device.ID, v.URL+"/new")); err != nil {
+		t.Fatal(err)
+	}
+
+	pusher.Deliver(context.Background())
+	store.settle(job{ID: "in-flight", Device: device.ID, Endpoint: v.URL + "/old"}, http.StatusGone, 0, "", now)
+	if sub, ok := store.SubscriptionOf(device.ID); !ok || sub.Endpoint != v.URL+"/new" {
+		t.Fatalf("subscription %+v after the browser's old endpoint failed; want the renewed one kept, or the phone stays silent until the app is opened", sub)
+	}
+	if calls := v.took(); len(calls) != 0 {
+		t.Fatalf("vendor saw %+v; want nothing sent to the replaced endpoint", calls)
+	}
+}
+
 func subjectOf(authorization string) string {
 	token, _, _ := strings.Cut(strings.TrimPrefix(authorization, "vapid t="), ",")
 	parts := strings.Split(token, ".")
