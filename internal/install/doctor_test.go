@@ -153,7 +153,7 @@ func TestDoctorNamesEachPhoneSetupGapAndItsFix(t *testing.T) {
 					return nil
 				},
 			}
-			cfg := &state.Config{Machine: state.Machine{Phone: state.Phone{Enabled: true, Hostname: host}}}
+			cfg := &state.Config{Machine: state.Machine{Node: state.Node{Hostname: host}}}
 			var failing []string
 			for _, check := range PhoneChecks(Options{Config: cfg, PhoneProbe: probe}) {
 				if check.Mark == Fail {

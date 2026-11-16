@@ -2,8 +2,6 @@ import type { APIRequestContext, Page } from "@playwright/test";
 
 export type Fake = {
   reset: () => Promise<void>;
-  pair: () => Promise<void>;
-  code: () => Promise<string>;
   set: (values: Record<string, unknown>) => Promise<void>;
   factories: (factories: unknown[]) => Promise<void>;
   state: () => Promise<{
@@ -11,7 +9,6 @@ export type Fake = {
     previews: Record<string, unknown>[];
     threads: { id: string; status: string; messages: { text: string }[] }[];
   }>;
-  revoke: () => Promise<void>;
 };
 
 export function fake(request: APIRequestContext): Fake {
@@ -19,20 +16,12 @@ export function fake(request: APIRequestContext): Fake {
     const response = await request.post(path, { data });
     return response.json();
   };
-  const code = async () => (await post("/__test/code")).code as string;
   return {
     reset: async () => void (await post("/__test/reset")),
-    code,
-    pair: async () =>
-      void (await post("/api/pair/exchange", {
-        code: await code(),
-        name: "Pixel",
-      })),
     set: async (values) => void (await post("/__test/state", values)),
     factories: async (factories) =>
       void (await post("/__test/state", { snapshotFactories: factories })),
     state: async () => (await request.post("/__test/actions")).json(),
-    revoke: async () => void (await post("/__test/revoke")),
   };
 }
 

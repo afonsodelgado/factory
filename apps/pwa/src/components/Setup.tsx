@@ -7,8 +7,8 @@ import { useApp } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
 
 export function Setup() {
-  const { me, setMe, navigate } = useApp();
-  const { health, recheck } = usePushHealth(me);
+  const { me, installation, navigate } = useApp();
+  const { health, push, setPush, recheck } = usePushHealth();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const host = hostName();
@@ -16,11 +16,11 @@ export function Setup() {
   const https = location.protocol === "https:";
 
   const enable = async () => {
-    if (!me) return;
+    if (!push || !installation) return;
     setBusy(true);
     setProblem(undefined);
     try {
-      setMe({ ...me, push: await turnOn(me) });
+      setPush(await turnOn(push.vapid_public_key, installation));
       recheck();
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
@@ -35,11 +35,11 @@ export function Setup() {
         <ul className="checks">
           <Check
             ok={!!me}
-            label={me ? `Paired with ${host}` : `Not connected to ${host}`}
+            label={me ? `Connected to ${host}` : `Not connected to ${host}`}
             detail={
               me
-                ? `as ${me.device.name}`
-                : "Pairing is checked again when it answers."
+                ? `as ${me.caller}, through Tailscale`
+                : `Open factory on a phone signed in to Tailscale as ${host}'s owner.`
             }
           />
           <Check
@@ -88,7 +88,7 @@ export function Setup() {
               type="button"
               className="btn pri"
               disabled={
-                !me || busy || support !== "ready" || health === "blocked"
+                !push || busy || support !== "ready" || health === "blocked"
               }
               onClick={enable}
             >

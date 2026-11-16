@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api/client.ts";
 import { cache, type Draft } from "./api/cache.ts";
-import type { ActionBody, LocalFactory, Me, Receipt } from "./api/types.ts";
+import type {
+  ActionBody,
+  LocalFactory,
+  PushState,
+  Receipt,
+} from "./api/types.ts";
 import { reconcile, type PushHealth } from "./push.ts";
 import { hostName } from "./format.ts";
 import { useApp } from "./state.tsx";
@@ -20,22 +25,28 @@ export function useNow(): number {
   return savedAt ? Date.parse(savedAt) : now;
 }
 
-export function usePushHealth(me: Me | undefined) {
+export function usePushHealth() {
+  const { me, installation } = useApp();
   const [health, setHealth] = useState<PushHealth>();
+  const [push, setPush] = useState<PushState>();
   const [round, setRound] = useState(0);
   useEffect(() => {
-    if (!me) return;
+    if (!me || !installation) return;
     let current = true;
-    reconcile(me).then(
-      (next) => current && setHealth(next),
+    reconcile(installation).then(
+      (next) => {
+        if (!current) return;
+        setHealth(next.health);
+        setPush(next.push);
+      },
       () => current && setHealth("off"),
     );
     return () => {
       current = false;
     };
-  }, [me, round]);
+  }, [me, installation, round]);
   const recheck = useCallback(() => setRound((n) => n + 1), []);
-  return { health, recheck };
+  return { health, push, setPush, recheck };
 }
 
 export function useBlocked(): string | undefined {
@@ -45,8 +56,8 @@ export function useBlocked(): string | undefined {
   switch (reach) {
     case "offline":
       return `Actions need ${host}. Nothing is saved to send later.`;
-    case "serve-down":
-      return `factory serve isn't running on ${host}, so nothing can be sent.`;
+    case "node-down":
+      return `factory node isn't running on ${host}, so nothing can be sent.`;
     case "restarting":
       return `factory is restarting on ${host}. Try again in a moment.`;
   }
@@ -79,31 +90,30 @@ export function usePreview(
 }
 
 export function useDraft(factory: LocalFactory, itemKey: string) {
-  const { me } = useApp();
-  const device = me?.device.id;
+  const { account } = useApp();
   const [draft, setLocal] = useState<Draft>({});
   const touched = useRef(false);
   useEffect(() => {
-    if (!device) return;
+    if (!account) return;
     let current = true;
-    cache.draft(device, factory.incarnation, itemKey).then((saved) => {
+    cache.draft(account, factory.incarnation, itemKey).then((saved) => {
       if (current && saved && !touched.current) setLocal(saved);
     });
     return () => {
       current = false;
     };
-  }, [device, factory.incarnation, itemKey]);
+  }, [account, factory.incarnation, itemKey]);
   const setDraft = useCallback(
     (next: Draft) => {
       touched.current = true;
       setLocal(next);
-      if (device) cache.saveDraft(device, factory.incarnation, itemKey, next);
+      if (account) cache.saveDraft(account, factory.incarnation, itemKey, next);
     },
-    [device, factory.incarnation, itemKey],
+    [account, factory.incarnation, itemKey],
   );
   const dropDraft = useCallback(() => {
-    if (device) cache.dropDraft(device, factory.incarnation, itemKey);
-  }, [device, factory.incarnation, itemKey]);
+    if (account) cache.dropDraft(account, factory.incarnation, itemKey);
+  }, [account, factory.incarnation, itemKey]);
   return { draft, setDraft, dropDraft };
 }
 

@@ -592,11 +592,8 @@ func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
 
 	typist := &paneTypist{}
 	restarted := phoneRuntime(dir, typist, phoneSnapshot("UserPromptSubmit", question))
-	if receipt, err := restarted.LookupReceipt(ReceiptRequest{Device: "phone-a", Operation: answer.Operation}); err != nil || receipt.Status != StatusQueued {
-		t.Fatalf("after a restart the receipt is %+v, %v; want still queued", receipt, err)
-	}
-	if _, err := restarted.LookupReceipt(ReceiptRequest{Device: "phone-b", Operation: answer.Operation}); err == nil {
-		t.Fatal("another device read this phone's receipt")
+	if receipt, err := restarted.LookupReceipt(ReceiptRequest{Operation: answer.Operation}); err != nil || receipt.Status != StatusQueued {
+		t.Fatalf("after a restart the owner reads a paired phone's receipt as %+v, %v; want still queued", receipt, err)
 	}
 	idle := phoneSnapshot("Stop", question)
 	restarted.SetSnapshot(idle)
@@ -609,7 +606,7 @@ func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
 	idle.Items[0].Hook.Submit = &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q1 answers:", At: phoneNow.Add(time.Second)}
 	restarted.SetSnapshot(idle)
 	restarted.SettleReceipts(idle.Items, func(string) time.Time { return idle.At })
-	if receipt, _ := restarted.LookupReceipt(ReceiptRequest{Device: "phone-a", Operation: answer.Operation}); receipt.Status != StatusDelivered {
+	if receipt, _ := restarted.LookupReceipt(ReceiptRequest{Operation: answer.Operation}); receipt.Status != StatusDelivered {
 		t.Fatalf("a received answer reads %+v; want delivered", receipt)
 	}
 }

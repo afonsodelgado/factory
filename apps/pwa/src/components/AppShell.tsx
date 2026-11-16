@@ -39,7 +39,7 @@ function HostChip() {
   const [mark, tone, state] =
     reach === "online"
       ? ["●", "grn", `connected to ${host}`]
-      : reach === "serve-down" || reach === "unpaired"
+      : reach === "node-down"
         ? ["✕", "red", `${host} is not serving this phone`]
         : reach === "offline"
           ? ["!", "yel", `${host} is offline`]
@@ -70,29 +70,76 @@ function ReachBanner() {
         be answered until {host} is back. Trying again every 15s.
       </Banner>
     );
-  if (reach === "serve-down")
+  if (reach === "node-down")
     return (
       <Banner
         tone="err"
         glyph="✕"
-        title={`${host} is up, but factory serve isn't running.`}
+        title={`${host} is up, but its factory node isn't running.`}
       >
-        Tailscale answered, the app server didn't. Start it with{" "}
-        <code>factory phone start</code> on {host}. No notifications are sent
-        while it is down.
+        Tailscale answered, the node didn't. Start it with{" "}
+        <code>factory node run</code> on {host}. No notifications are sent while
+        it is down.
       </Banner>
     );
   if (reach === "restarting")
     return (
-      <Banner
-        tone="info"
-        glyph="◌"
-        title="factory is moving between the hub and factory serve."
-      >
+      <Banner tone="info" glyph="◌" title={`factory is restarting on ${host}.`}>
         This takes a few seconds. The list reconnects by itself.
       </Banner>
     );
   return null;
+}
+
+export function Refused() {
+  const { refusal } = useApp();
+  const host = hostName();
+  const owner = refusal?.owner;
+  return (
+    <div className="shell">
+      <header className="tb">
+        <span className="mode">factory</span>
+        <span
+          className="host"
+          aria-label={`${host} refuses this Tailscale account`}
+        >
+          <span className="dot red" aria-hidden="true">
+            ✕
+          </span>
+          {host}
+        </span>
+      </header>
+      <main className="body">
+        <div className="pad stack page">
+          <p className="big-g red" aria-hidden="true">
+            ✕
+          </p>
+          <h1>
+            {owner
+              ? `${host} answers ${owner} only`
+              : `${host} needs your Tailscale login`}
+          </h1>
+          <p>
+            {refusal?.login ? (
+              <>
+                This phone is signed in to Tailscale as{" "}
+                <b className="ink">{refusal.login}</b>.{" "}
+              </>
+            ) : (
+              "This device reached factory without a Tailscale login, as a tagged machine does. "
+            )}
+            factory nodes answer their owner and no one else, so nothing from{" "}
+            {host} is shown or kept here.
+          </p>
+          <p className="sm mute">
+            {owner
+              ? `Switch to ${owner} in the Tailscale app, then open factory again.`
+              : "Sign in to Tailscale as the node's owner on this device, then open factory again."}
+          </p>
+        </div>
+      </main>
+    </div>
+  );
 }
 
 function Banner(props: {

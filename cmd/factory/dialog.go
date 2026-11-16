@@ -89,7 +89,7 @@ func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
 		if err != nil {
 			return nil, err
 		}
-		actions := phoneActions{phoneSetup(cfg)}
+		actions := phoneActions{cfg}
 		status, err := actions.Status()
 		if err != nil {
 			return nil, err

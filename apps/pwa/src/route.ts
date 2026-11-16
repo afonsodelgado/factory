@@ -6,12 +6,9 @@ export type Route =
   | { screen: "item"; route: string; item: string }
   | { screen: "link"; key: string }
   | { screen: "setup" }
-  | { screen: "phone" }
-  | { screen: "pair"; code: string };
+  | { screen: "phone" };
 
-export function parse(location: Pick<Location, "pathname" | "hash">): Route {
-  const code = new URLSearchParams(location.hash.slice(1)).get("pair");
-  if (code) return { screen: "pair", code };
+export function parse(location: Pick<Location, "pathname">): Route {
   const parts = location.pathname
     .split("/")
     .filter(Boolean)

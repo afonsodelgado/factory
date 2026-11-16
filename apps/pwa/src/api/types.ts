@@ -94,12 +94,11 @@ export type LocalFactory = {
 };
 
 export type Snapshot = {
+  node?: string;
   revision: number;
   server_time: string;
   factories: LocalFactory[];
 };
-
-export type Device = { id: string; name: string; paired_at: string };
 
 export type PushState = {
   vapid_public_key: string;
@@ -110,11 +109,13 @@ export type PushState = {
 };
 
 export type Me = {
-  device: Device;
+  caller: string;
+  node: string;
   version: string;
   server_time: string;
-  push: PushState;
 };
+
+export type Refusal = { owner?: string; login?: string };
 
 export type Link = {
   route: string;

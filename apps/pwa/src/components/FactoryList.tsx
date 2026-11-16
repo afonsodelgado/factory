@@ -109,8 +109,7 @@ function Counts({ factories }: { factories: LocalFactory[] }) {
 }
 
 function SetupNudge() {
-  const { me } = useApp();
-  const { health } = usePushHealth(me);
+  const { health } = usePushHealth();
   if (!health || health === "on") return null;
   return (
     <Link className="banner info" href={paths.setup()}>

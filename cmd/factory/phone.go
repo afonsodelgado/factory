@@ -1,25 +1,25 @@
 package main
 
 import (
-	"cmp"
+	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
-	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
-const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id> | test | check"
+const phoneUsage = "usage: factory phone status | test | check"
 
 func runPhone(args []string) int {
-	if len(args) == 0 {
+	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, phoneUsage)
 		return 2
 	}
@@ -28,37 +28,15 @@ func runPhone(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory phone:", err)
 		return 1
 	}
-	setup := phoneSetup(cfg)
 	switch args[0] {
-	case "start":
-		err = setup.Start()
-	case "stop":
-		err = setup.Stop()
 	case "status":
-		err = printPhoneStatus(os.Stdout, setup)
-	case "enable":
-		err = setup.Enable()
-	case "disable":
-		err = setup.Disable()
-	case "configure":
-		err = configurePhone(setup, args[1:])
-	case "pair":
-		err = printPairing(os.Stdout, setup)
-	case "devices":
-		err = printDevices(os.Stdout, setup)
+		err = printPhoneStatus(os.Stdout, cfg)
 	case "test":
-		err = printTestPush(os.Stdout, setup)
+		err = printTestPush(os.Stdout, cfg)
 	case "check":
-		problems := summarize("factory phone check · checks only, changes nothing", phoneDoctor(cfg))
-		if problems > 0 {
+		if summarize("factory phone check · checks only, changes nothing", phoneDoctor(cfg)) > 0 {
 			return 1
 		}
-	case "revoke":
-		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, phoneUsage)
-			return 2
-		}
-		err = setup.Revoke(args[1])
 	default:
 		fmt.Fprintln(os.Stderr, phoneUsage)
 		return 2
@@ -70,20 +48,42 @@ func runPhone(args []string) int {
 	return 0
 }
 
-func printTestPush(w io.Writer, setup phone.Setup) error {
-	results, err := setup.Test()
+func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
+	subs, err := phone.Open(cfg.StateDir).Subscriptions()
+	return dialog.PhoneContext{Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
+}
+
+func printPhoneStatus(w io.Writer, cfg *state.Config) error {
+	status, err := phoneStatus(cfg)
 	if err != nil {
+		return err
+	}
+	url := "unknown; put node.hostname, this machine's ts.net name, in " + cfg.ConfigFile()
+	if status.Hostname != "" {
+		url = "https://" + status.Hostname
+	}
+	running := "not running; start it with factory node run"
+	if status.Running {
+		running = "running"
+	}
+	fmt.Fprintf(w, "node      %s\nurl       %s\nport      127.0.0.1:%d\nnotify    %d subscribed\n", running, url, status.Port, status.Subscriptions)
+	return nil
+}
+
+var errPushRejected = errors.New("a test notification did not reach the phone's push service")
+
+func printTestPush(w io.Writer, cfg *state.Config) error {
+	client, err := localNode(cfg)
+	if err != nil {
+		return err
+	}
+	var results []phone.Delivery
+	if err := client.Do(context.Background(), http.MethodPost, "/api/push/test", nil, &results); err != nil {
 		return err
 	}
 	if len(results) == 0 {
 		fmt.Fprintln(w, "No phone has turned on notifications yet.")
 		return nil
-	}
-	names := map[string]string{}
-	if devices, err := setup.Devices(); err == nil {
-		for _, d := range devices {
-			names[d.ID] = d.Name
-		}
 	}
 	var failed error
 	for _, r := range results {
@@ -91,62 +91,9 @@ func printTestPush(w io.Writer, setup phone.Setup) error {
 		if !r.Accepted {
 			outcome, failed = r.Problem, errPushRejected
 		}
-		fmt.Fprintf(w, "%s: %s\n", cmp.Or(names[r.Device], r.Device), outcome)
+		fmt.Fprintf(w, "%s: %s\n", r.Subscription, outcome)
 	}
 	return failed
-}
-
-var errPushRejected = errors.New("a test notification did not reach the phone's push service")
-
-var errPhoneInNode = errors.New("the phone app runs inside the node; restart factory node run to serve it")
-
-func phoneSetup(cfg *state.Config) phone.Setup {
-	return phone.Setup{Config: cfg, Bundle: bundle.Files, Start: func() error { return errPhoneInNode }}
-}
-
-func configurePhone(setup phone.Setup, args []string) error {
-	flags := flag.NewFlagSet("phone configure", flag.ContinueOnError)
-	port := flags.Int("port", 0, "loopback port that tailscale serve forwards to")
-	hostname := flags.String("hostname", "", "this machine's full Tailscale name, such as devbox.tail1234.ts.net")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() > 0 {
-		return fmt.Errorf("unexpected %q; give only --port and --hostname", flags.Arg(0))
-	}
-	if *port == 0 && *hostname == "" {
-		return errors.New("give --port, --hostname or both")
-	}
-	return setup.Configure(*port, *hostname)
-}
-
-func printPhoneStatus(w io.Writer, setup phone.Setup) error {
-	status, err := setup.Status()
-	if err != nil {
-		return err
-	}
-	s := status.Settings
-	fmt.Fprintf(w, "enabled   %v\nurl       %s\nport      127.0.0.1:%d\n", s.Enabled, s.Origin(), s.ListenPort())
-	if status.Serving != nil {
-		fmt.Fprintf(w, "serving   yes, by the node, version %s\n", status.Serving.Version)
-	} else {
-		fmt.Fprintln(w, "serving   no")
-	}
-	fmt.Fprintf(w, "devices   %d\n", len(status.Devices))
-	return nil
-}
-
-func printPairing(w io.Writer, setup phone.Setup) error {
-	pairing, err := setup.Pair()
-	if err != nil {
-		return err
-	}
-	lines, err := phone.QR(pairing.URL)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "%s\n\nScan it, or open this on the phone before %s:\n%s\n", strings.Join(lines, "\n"), pairing.Expires.Local().Format("15:04:05"), pairing.URL)
-	return nil
 }
 
 func phoneDoctor(cfg *state.Config) []install.Check {
@@ -155,46 +102,13 @@ func phoneDoctor(cfg *state.Config) []install.Check {
 	return install.PhoneChecks(o)
 }
 
-type phoneActions struct{ setup phone.Setup }
+type phoneActions struct{ cfg *state.Config }
 
-func (a phoneActions) Status() (dialog.PhoneContext, error) {
-	status, err := a.setup.Status()
-	if err != nil {
-		return dialog.PhoneContext{}, err
-	}
-	c := dialog.PhoneContext{Enabled: status.Settings.Enabled, Running: status.Running, Hostname: status.Settings.Hostname, Port: status.Settings.ListenPort(), Devices: []dialog.PhoneDevice{}}
-	if status.Serving != nil {
-		c.Owner = "the node runs the factories"
-	}
-	for _, d := range status.Devices {
-		c.Devices = append(c.Devices, dialog.PhoneDevice{ID: d.ID, Name: d.Name, Paired: d.PairedAt.Local().Format("2006-01-02 15:04")})
-	}
-	return c, nil
-}
-
-func (a phoneActions) Enable() error  { return a.setup.Enable() }
-func (a phoneActions) Disable() error { return a.setup.Disable() }
-func (a phoneActions) Start() error   { return a.setup.Start() }
-func (a phoneActions) Stop() error    { return a.setup.Stop() }
-
-func (a phoneActions) Configure(port int, hostname string) error {
-	return a.setup.Configure(port, hostname)
-}
-
-func (a phoneActions) Revoke(id string) error { return a.setup.Revoke(id) }
-
-func (a phoneActions) Pair() (dialog.PhonePairing, error) {
-	pairing, err := a.setup.Pair()
-	if err != nil {
-		return dialog.PhonePairing{}, err
-	}
-	lines, err := phone.QR(pairing.URL)
-	return dialog.PhonePairing{URL: pairing.URL, Expires: pairing.Expires, QR: lines}, err
-}
+func (a phoneActions) Status() (dialog.PhoneContext, error) { return phoneStatus(a.cfg) }
 
 func (a phoneActions) Test() (string, error) {
 	var b strings.Builder
-	err := printTestPush(&b, a.setup)
+	err := printTestPush(&b, a.cfg)
 	outcome := strings.ReplaceAll(strings.TrimSpace(b.String()), "\n", "; ")
 	if errors.Is(err, errPushRejected) {
 		return "", errors.New(outcome)
@@ -204,19 +118,8 @@ func (a phoneActions) Test() (string, error) {
 
 func (a phoneActions) Check() []dialog.CheckRow {
 	var rows []dialog.CheckRow
-	for _, c := range phoneDoctor(a.setup.Config) {
+	for _, c := range phoneDoctor(a.cfg) {
 		rows = append(rows, dialog.CheckRow{Name: c.Name, Mark: checkMarks[c.Mark], Detail: c.Detail, Fix: c.Fix})
 	}
 	return rows
-}
-
-func printDevices(w io.Writer, setup phone.Setup) error {
-	devices, err := setup.Devices()
-	if err != nil {
-		return err
-	}
-	for _, d := range devices {
-		fmt.Fprintf(w, "%s  %s  paired %s\n", d.ID, d.Name, d.PairedAt.Local().Format("2006-01-02 15:04"))
-	}
-	return nil
 }

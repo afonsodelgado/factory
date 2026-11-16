@@ -130,15 +130,15 @@ func Doctor(o Options) []Check {
 var phoneMarks = map[string]Mark{phone.Passed: Pass, phone.Failed: Fail, phone.Skipped: Skip}
 
 func PhoneChecks(o Options) []Check {
-	if o.Config == nil || !o.Config.Phone.Enabled {
-		return []Check{{Name: "phone", Mark: Skip, Detail: "off; optional. factory phone configure --hostname <this machine's ts.net name>, then factory phone enable, sets it up"}}
+	if o.Config == nil || o.Config.NodeHostname() == "" {
+		return []Check{{Name: "phone", Mark: Skip, Detail: "off; optional. Put node.hostname: <this machine's ts.net name> in config.yml and run factory node run to serve the phone app"}}
 	}
 	probe := o.PhoneProbe
 	if probe.Tailscale == nil {
 		probe = phone.SystemProbe()
 	}
 	var checks []Check
-	for _, c := range phone.Checks(context.Background(), o.Config.Phone, probe) {
+	for _, c := range phone.Checks(context.Background(), o.Config.Machine, probe) {
 		checks = append(checks, Check{Name: c.Name, Mark: phoneMarks[c.State], Detail: c.Detail, Fix: c.Fix})
 	}
 	return checks

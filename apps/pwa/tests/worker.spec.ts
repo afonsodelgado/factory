@@ -11,7 +11,6 @@ test("the installed shell opens offline and never caches private routes", async 
   context,
 }) => {
   const server = fake(page.request);
-  await server.pair();
   await server.factories([factory("csv-export", [question()])]);
   await page.goto("/");
   await controlled(page);

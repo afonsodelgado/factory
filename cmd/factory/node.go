@@ -97,6 +97,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string) (*runningNo
 	if err := os.MkdirAll(cfg.SessionsDir(), 0o700); err != nil {
 		return nil, err
 	}
+	vapidKey, err := node.Migrate(cfg)
+	if err != nil {
+		return nil, err
+	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	if err := adoptSession(cfg, tm); err != nil {
 		return nil, err
@@ -132,22 +136,20 @@ func startNode(ctx context.Context, cfg *state.Config, owner string) (*runningNo
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
 	api := &node.API{Commands: node.Commands{Runtime: queue}, Version: version, Node: id, Boot: uuid.NewString()}
 	go api.Poll(ctx)
-	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.Phone.Origin(), OpaquePath: phone.GrantPrefix}
+	app := phoneApp(ctx, cfg, api, pages, vapidKey)
+	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage}
 	unixListener, err := node.ListenUnix(cfg.NodeSocket())
 	if err != nil {
 		n.close()
 		return nil, err
 	}
-	n.serve(unixListener, api.Handler(gate.Principal))
+	n.serve(unixListener, api.With(app, gate.Principal))
 	tcp, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.NodePort())))
 	if err != nil {
 		n.close()
 		return nil, fmt.Errorf("port %d is taken; free it or pick another with node.port in %s: %w", cfg.NodePort(), cfg.ConfigFile(), err)
 	}
-	mux := http.NewServeMux()
-	api.Register(mux, gate.Principal, node.NetworkKinds...)
-	mux.Handle("/", phoneApp(ctx, cfg, queue, pages, n))
-	n.serve(tcp, gate.Wrap(mux))
+	n.serve(tcp, gate.Wrap(api.With(app, gate.Principal, node.NetworkKinds...)))
 	return n, nil
 }
 
@@ -160,26 +162,18 @@ func (n *runningNode) serve(ln net.Listener, handler http.Handler) {
 func nodeHosts(cfg *state.Config) []string {
 	port := strconv.Itoa(cfg.NodePort())
 	hosts := []string{"127.0.0.1:" + port, "localhost:" + port}
-	if cfg.Phone.Hostname != "" {
-		hosts = append(hosts, cfg.Phone.Hostname)
+	if hostname := cfg.NodeHostname(); hostname != "" {
+		hosts = append(hosts, hostname)
 	}
 	return hosts
 }
 
-func phoneApp(ctx context.Context, cfg *state.Config, owner phone.Owner, pages *review.Server, n *runningNode) http.Handler {
-	settings := cfg.Phone
-	if !settings.Enabled {
-		return http.NotFoundHandler()
-	}
+func phoneApp(ctx context.Context, cfg *state.Config, api *node.API, pages *review.Server, vapidKey string) http.Handler {
 	store := phone.Open(cfg.StateDir)
-	pusher := &phone.Pusher{Store: store, Origin: settings.Origin(), Client: phone.PublicClient()}
+	pusher := &phone.Pusher{Store: store, Origin: cfg.NodeOrigin(), Client: phone.PublicClient()}
 	go pusher.Run(ctx)
-	server := &phone.Server{Store: store, Owner: owner, Review: pages.MobileHandler(), Push: pusher, VAPIDKey: settings.VAPIDPublicKey, Shell: phone.Shell(bundle.Files), Host: settings.Hostname, Version: version}
+	server := &phone.Server{Store: store, Factories: api.Factories, Connected: api.Connected, Review: pages.MobileHandler(), Push: pusher, VAPIDKey: vapidKey, Shell: phone.Shell(bundle.Files)}
 	go server.Poll(ctx)
-	if control, err := host.Listen(phone.ControlPath(cfg.StateDir), phone.Control{Config: cfg, Server: server, Version: version, Stop: func() {}}.Handle); err == nil {
-		os.Chmod(phone.ControlPath(cfg.StateDir), 0o600)
-		n.closers = append(n.closers, control)
-	}
 	return server.Handler()
 }
 

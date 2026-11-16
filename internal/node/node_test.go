@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -74,7 +76,7 @@ func serveNode(t *testing.T, r *host.Runtime) (Queue, *Client) {
 		t.Fatal(err)
 	}
 	api := &API{Commands: Commands{Runtime: queue}, Now: func() time.Time { return testNow }}
-	server := &http.Server{Handler: api.Handler(func(*http.Request) (string, bool) { return "owner", true })}
+	server := &http.Server{Handler: api.With(http.NotFoundHandler(), func(*http.Request) (string, bool) { return "owner", true })}
 	go server.Serve(listener)
 	go api.Poll(ctx)
 	t.Cleanup(func() {
@@ -236,6 +238,72 @@ func TestOnlyTheOwnersLoginThroughLocalServeReachesTheAPI(t *testing.T) {
 				t.Fatalf("got %d (handler reached %v); want %d", w.Code, reached, c.status)
 			}
 		})
+	}
+}
+
+func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.T) {
+	const host = "devbox.tail1234.ts.net"
+	api := &API{Node: "node-1", Version: "test"}
+	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key"}).Handler()
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage}
+	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
+	cases := []struct {
+		name, method, path, login, origin, media string
+		headers                                  []string
+		status                                   int
+		shows                                    string
+	}{
+		{"the owner's identity", "GET", "/api/me", "alice@example.com", "", "", nil, 200, `"node":"node-1"`},
+		{"a paired phone's old cookie without a login", "GET", "/api/me", "", "", "", []string{"Cookie", phone.DatabaseName + "=x; factory_device=secret"}, 401, ""},
+		{"the old pairing status route", "POST", "/api/pair/status", "alice@example.com", "https://" + host, "application/json", nil, 404, ""},
+		{"the old pairing exchange route", "POST", "/api/pair/exchange", "alice@example.com", "https://" + host, "application/json", nil, 404, ""},
+		{"another account's API call", "GET", "/api/snapshot", "mallory@example.com", "", "", nil, 403, `"owner":"alice@example.com"`},
+		{"another account opening the app", "GET", "/", "mallory@example.com", "", "", nil, 403, "answers alice@example.com only"},
+		{"a text/plain approval through a review grant", "POST", "/rt/grant/r/k/_api/approve", "alice@example.com", "null", "text/plain", nil, 415, ""},
+		{"an approval from another origin through a review grant", "POST", "/rt/grant/r/k/_api/approve", "alice@example.com", "https://evil.example", "application/json", nil, 403, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(c.method, "https://"+host+c.path, strings.NewReader("{}"))
+			r.RemoteAddr = "127.0.0.1:50000"
+			for header, value := range map[string]string{LoginHeader: c.login, "Origin": c.origin, "Content-Type": c.media} {
+				if value != "" {
+					r.Header.Set(header, value)
+				}
+			}
+			for i := 0; i+1 < len(c.headers); i += 2 {
+				r.Header.Set(c.headers[i], c.headers[i+1])
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != c.status || !strings.Contains(w.Body.String(), c.shows) {
+				t.Fatalf("got %d %q; want %d showing %q", w.Code, w.Body.String(), c.status, c.shows)
+			}
+		})
+	}
+}
+
+func TestAnOpenAppStreamMarksOnlyItsInstallationConnected(t *testing.T) {
+	api := &API{}
+	server := httptest.NewServer(api.With(http.NotFoundHandler(), func(*http.Request) (string, bool) { return "owner", true }))
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/api/events?installation=pixel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bufio.NewScanner(resp.Body)
+	for lines.Scan() && !strings.HasPrefix(lines.Text(), "event: ") {
+	}
+	if !api.Connected("pixel") || api.Connected("ipad") || api.Connected("") {
+		t.Fatal("the open stream did not mark exactly its own installation connected, so resolutions would be pushed to an open app or withheld from a closed one")
+	}
+	resp.Body.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for api.Connected("pixel") {
+		if time.Now().After(deadline) {
+			t.Fatal("the closed app still counts as connected, so its phone would miss the resolved notification")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

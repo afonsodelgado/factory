@@ -64,14 +64,14 @@ type serveStatus struct {
 	AllowFunnel map[string]bool
 }
 
-func Checks(ctx context.Context, settings state.Phone, probe Probe) []Check {
+func Checks(ctx context.Context, m state.Machine, probe Probe) []Check {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return append(tailscaleChecks(ctx, settings, probe), pushReachable(ctx, probe))
+	return append(tailscaleChecks(ctx, m, probe), pushReachable(ctx, probe))
 }
 
-func tailscaleChecks(ctx context.Context, settings state.Phone, probe Probe) []Check {
-	host, port := settings.Hostname, settings.ListenPort()
+func tailscaleChecks(ctx context.Context, m state.Machine, probe Probe) []Check {
+	host, port := m.NodeHostname(), m.NodePort()
 	var status tailscaleStatus
 	out, err := probe.Tailscale(ctx, "status", "--json")
 	switch {
@@ -105,9 +105,9 @@ func skipped(names ...string) []Check {
 func machineName(name, host string) Check {
 	switch {
 	case host == "":
-		return Check{Name: "ts.net name", State: Failed, Detail: "phone.hostname is not set", Fix: "factory phone configure --hostname " + name}
+		return Check{Name: "ts.net name", State: Failed, Detail: "node.hostname is not set", Fix: "put node.hostname: " + name + " in config.yml, then restart the node"}
 	case name != host:
-		return Check{Name: "ts.net name", State: Failed, Detail: fmt.Sprintf("phone.hostname is %s, but this machine is %s", host, name), Fix: "factory phone configure --hostname " + name}
+		return Check{Name: "ts.net name", State: Failed, Detail: fmt.Sprintf("node.hostname is %s, but this machine is %s", host, name), Fix: "put node.hostname: " + name + " in config.yml, then restart the node"}
 	}
 	return Check{Name: "ts.net name", State: Passed, Detail: host}
 }

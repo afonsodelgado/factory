@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -33,8 +34,9 @@ type Machine struct {
 }
 
 type Node struct {
-	Owner string `yaml:"owner,omitempty"`
-	Port  int    `yaml:"port,omitempty"`
+	Owner    string `yaml:"owner,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Hostname string `yaml:"hostname,omitempty"`
 }
 
 func (m Machine) NodePort() int {
@@ -42,6 +44,15 @@ func (m Machine) NodePort() int {
 		return m.Node.Port
 	}
 	return m.Phone.ListenPort()
+}
+
+func (m Machine) NodeHostname() string { return cmp.Or(m.Node.Hostname, m.Phone.Hostname) }
+
+func (m Machine) NodeOrigin() string {
+	if m.NodeHostname() == "" {
+		return ""
+	}
+	return "https://" + m.NodeHostname()
 }
 
 type Phone struct {
@@ -57,8 +68,6 @@ func (p Phone) ListenPort() int {
 	}
 	return p.Port
 }
-
-func (p Phone) Origin() string { return "https://" + p.Hostname }
 
 type Remote struct {
 	Host     string `yaml:"host"`
@@ -128,6 +137,9 @@ func (m Machine) Validate() error {
 	if m.Node.Port < 0 || m.Node.Port > 65535 {
 		return fmt.Errorf("node.port %d must be between 1 and 65535", m.Node.Port)
 	}
+	if m.Node.Hostname != "" && !tailnetDNS.MatchString(m.Node.Hostname) {
+		return fmt.Errorf("node.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", m.Node.Hostname)
+	}
 	return m.Phone.validate()
 }
 
@@ -137,8 +149,6 @@ func (p Phone) validate() error {
 		return fmt.Errorf("phone.port %d must be between 1 and 65535", p.Port)
 	case p.Hostname != "" && !tailnetDNS.MatchString(p.Hostname):
 		return fmt.Errorf("phone.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", p.Hostname)
-	case p.Enabled && p.Hostname == "":
-		return errors.New("phone.enabled needs phone.hostname, this machine's full Tailscale name; run factory phone configure --hostname")
 	}
 	return nil
 }

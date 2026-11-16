@@ -36,7 +36,7 @@ type tracked struct {
 
 type job struct {
 	ID       string    `json:"id"`
-	Device   string    `json:"device"`
+	Device   string    `json:"device,omitempty"`
 	Endpoint string    `json:"endpoint"`
 	Tag      string    `json:"tag"`
 	Resolved bool      `json:"resolved,omitempty"`
@@ -80,7 +80,7 @@ func alertsOf(factories []host.LocalFactory) (map[string]alert, map[string]bool)
 	return open, active
 }
 
-func (s Store) Reconcile(factories []host.LocalFactory, connected func(device string) bool, now time.Time) (bool, error) {
+func (s Store) Reconcile(factories []host.LocalFactory, connected func(installation string) bool, now time.Time) (bool, error) {
 	subs, err := s.Subscriptions()
 	if err != nil {
 		return false, err
@@ -113,7 +113,8 @@ func (s Store) Reconcile(factories []host.LocalFactory, connected func(device st
 			item.Open, item.Revision, item.Changed = false, item.Revision+1, now
 			unsent := l.cancel(key)
 			if active[item.Incarnation] && item.Alerted {
-				queued = l.queue(subs, key, item, func(device string) bool { return unsent[device] || connected(device) }, now) || queued
+				clearsItself := func(sub Subscription) bool { return unsent[sub.Endpoint] || connected(sub.Installation) }
+				queued = l.queue(subs, key, item, clearsItself, now) || queued
 			}
 		}
 		for key, item := range l.Items {
@@ -127,7 +128,7 @@ func (s Store) Reconcile(factories []host.LocalFactory, connected func(device st
 	return queued, err
 }
 
-func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func(string) bool, now time.Time) bool {
+func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func(Subscription) bool, now time.Time) bool {
 	payload := Payload{Tag: key, Title: item.Title, Body: needsYou, URL: "/n/" + key, Revision: item.Revision, Resolved: !item.Open}
 	if payload.Resolved {
 		payload.Body = resolvedBody
@@ -135,10 +136,10 @@ func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func
 	data, _ := json.Marshal(payload)
 	queued := false
 	for _, sub := range subs {
-		if skip != nil && skip(sub.Device) {
+		if skip != nil && skip(sub) {
 			continue
 		}
-		l.Jobs = append(l.Jobs, job{ID: uuid.NewString(), Device: sub.Device, Endpoint: sub.Endpoint, Tag: key, Resolved: payload.Resolved, Payload: string(data), Due: now})
+		l.Jobs = append(l.Jobs, job{ID: uuid.NewString(), Endpoint: sub.Endpoint, Tag: key, Resolved: payload.Resolved, Payload: string(data), Due: now})
 		queued = true
 	}
 	return queued
@@ -151,7 +152,7 @@ func (l *ledger) cancel(key string) map[string]bool {
 			return false
 		}
 		if !j.Sending && !j.Resolved {
-			unsent[j.Device] = true
+			unsent[j.Endpoint] = true
 		}
 		return true
 	})
@@ -164,10 +165,6 @@ func (s Store) Link(key string) (Link, bool) {
 		return Link{}, false
 	}
 	return l.Items[key].Link, true
-}
-
-func (s Store) dropJobs(device string) error {
-	return s.dropJobsWhere(func(j job) bool { return j.Device == device })
 }
 
 func (s Store) dropJobsWhere(drop func(job) bool) error {

@@ -12,15 +12,24 @@ import (
 const LoginHeader = "Tailscale-User-Login"
 
 type Gate struct {
-	Owner      string
-	Hosts      []string
-	Origin     string
-	OpaquePath string
+	Owner       string
+	Hosts       []string
+	Origin      string
+	OpaquePath  string
+	RefusalPage func(w http.ResponseWriter, owner, login string)
 }
 
 func (g Gate) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if status, problem := g.refusal(r); problem != "" {
+		login, status, problem := g.identity(r)
+		switch {
+		case status == http.StatusForbidden && login != "":
+			g.refuseAccount(w, r, login, problem)
+			return
+		case problem == "":
+			status, problem = g.requestRefusal(r)
+		}
+		if problem != "" {
 			fail(w, status, problem)
 			return
 		}
@@ -30,12 +39,21 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 
 func (g Gate) Principal(*http.Request) (string, bool) { return g.Owner, true }
 
-func (g Gate) refusal(r *http.Request) (int, string) {
-	if status, problem := g.identityRefusal(r); problem != "" {
-		return status, problem
+func (g Gate) refuseAccount(w http.ResponseWriter, r *http.Request, login, problem string) {
+	if g.RefusalPage != nil && opensPage(r) {
+		g.RefusalPage(w, g.Owner, login)
+		return
 	}
+	reply(w, http.StatusForbidden, map[string]any{"error": problem, "owner": g.Owner, "login": login})
+}
+
+func opensPage(r *http.Request) bool {
+	return r.Method == http.MethodGet && !strings.HasPrefix(r.URL.Path, "/api/") && !strings.Contains(r.URL.Path, "/_api/")
+}
+
+func (g Gate) requestRefusal(r *http.Request) (int, string) {
 	if !slices.Contains(g.Hosts, r.Host) {
-		return http.StatusMisdirectedRequest, "unknown host " + r.Host
+		return http.StatusMisdirectedRequest, "this node does not know the name " + r.Host + "; if it is this machine's Tailscale name, set node.hostname to it in config.yml and restart the node"
 	}
 	if !mutates(r) {
 		return 0, ""
@@ -49,22 +67,22 @@ func (g Gate) refusal(r *http.Request) (int, string) {
 	return 0, ""
 }
 
-func (g Gate) identityRefusal(r *http.Request) (int, string) {
+func (g Gate) identity(r *http.Request) (string, int, string) {
 	if !fromLoopback(r.RemoteAddr) {
-		return http.StatusForbidden, "the node answers only Tailscale Serve on this machine"
+		return "", http.StatusForbidden, "the node answers only Tailscale Serve on this machine"
 	}
 	logins := r.Header.Values(LoginHeader)
 	if len(logins) != 1 {
-		return http.StatusUnauthorized, "this request carries no single Tailscale login; open the node through its tailnet address with a user-owned device"
+		return "", http.StatusUnauthorized, "this request carries no single Tailscale login; open the node through its tailnet address with a user-owned device"
 	}
 	login, ok := decodeLogin(logins[0])
 	if !ok {
-		return http.StatusUnauthorized, "this request's Tailscale login is malformed"
+		return "", http.StatusUnauthorized, "this request's Tailscale login is malformed"
 	}
 	if g.Owner == "" || !strings.EqualFold(login, g.Owner) {
-		return http.StatusForbidden, "this node belongs to " + g.Owner + ", not " + login
+		return login, http.StatusForbidden, "this node belongs to " + g.Owner + ", not " + login
 	}
-	return 0, ""
+	return login, 0, ""
 }
 
 func fromLoopback(remote string) bool {

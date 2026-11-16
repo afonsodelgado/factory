@@ -54,10 +54,10 @@ func (a *API) now() time.Time {
 	return a.Now()
 }
 
-func (a *API) Handler(principal Principal) http.Handler {
+func (a *API) With(app http.Handler, principal Principal, kinds ...string) http.Handler {
 	mux := http.NewServeMux()
-	a.Register(mux, principal)
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
+	a.Register(mux, principal, kinds...)
+	mux.Handle("/", app)
 	return mux
 }
 
@@ -95,7 +95,7 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 }
 
 func (a *API) me(w http.ResponseWriter, r *http.Request, caller string) {
-	reply(w, http.StatusOK, Me{Caller: caller, Version: a.Version, ServerTime: a.now()})
+	reply(w, http.StatusOK, Me{Caller: caller, Node: a.Node, Version: a.Version, ServerTime: a.now()})
 }
 
 func (a *API) snapshot(w http.ResponseWriter, r *http.Request, _ string) {
@@ -156,6 +156,22 @@ func (a *API) publish(local []host.LocalFactory) {
 	a.broadcast(event("snapshot", a.current))
 }
 
+func (a *API) Factories() (int64, []host.LocalFactory, bool) {
+	snap, ok := a.Latest()
+	return snap.Revision, snap.Factories, ok
+}
+
+func (a *API) Connected(installation string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for s := range a.streams {
+		if installation != "" && s.installation == installation {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) lose() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -166,7 +182,10 @@ func (a *API) lose() {
 	a.broadcast(event("unavailable", map[string]any{"retry": true}))
 }
 
-type stream struct{ next chan []byte }
+type stream struct {
+	installation string
+	next         chan []byte
+}
 
 func (s *stream) offer(e []byte) {
 	for {
@@ -193,8 +212,8 @@ func event(name string, value any) []byte {
 	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", name, data)
 }
 
-func (a *API) subscribe() *stream {
-	s := &stream{next: make(chan []byte, 1)}
+func (a *API) subscribe(installation string) *stream {
+	s := &stream{installation: installation, next: make(chan []byte, 1)}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.streams == nil {
@@ -221,7 +240,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request, _ string) {
 		fail(w, http.StatusInternalServerError, "streaming is not supported")
 		return
 	}
-	s := a.subscribe()
+	s := a.subscribe(r.URL.Query().Get("installation"))
 	defer a.unsubscribe(s)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -243,14 +262,14 @@ func (a *API) events(w http.ResponseWriter, r *http.Request, _ string) {
 	}
 }
 
-func (c Commands) Operation(w http.ResponseWriter, r *http.Request, caller string) {
+func (c Commands) Operation(w http.ResponseWriter, r *http.Request, _ string) {
 	op := r.PathValue("operation")
 	if uuid.Validate(op) != nil {
 		fail(w, http.StatusNotFound, "no such operation")
 		return
 	}
 	var receipt host.Receipt
-	answer, err := c.call(r.Context(), "receipt", "", host.ReceiptRequest{Device: caller, Operation: op}, &receipt)
+	answer, err := c.call(r.Context(), "receipt", "", host.ReceiptRequest{Operation: op}, &receipt)
 	switch {
 	case err != nil:
 		unavailable(w)

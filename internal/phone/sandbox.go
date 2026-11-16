@@ -20,7 +20,6 @@ const (
 )
 
 type grant struct {
-	device  string
 	factory string
 	expires time.Time
 }
@@ -30,7 +29,7 @@ type grants struct {
 	tokens map[string]grant
 }
 
-func (g *grants) mint(device, factory string, now time.Time) string {
+func (g *grants) mint(factory string, now time.Time) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.tokens == nil {
@@ -42,12 +41,12 @@ func (g *grants) mint(device, factory string, now time.Time) string {
 		}
 	}
 	for token, held := range g.tokens {
-		if held.device == device && held.factory == factory && held.expires.Sub(now) > grantLifetime/2 {
+		if held.factory == factory && held.expires.Sub(now) > grantLifetime/2 {
 			return token
 		}
 	}
 	token := base64.RawURLEncoding.EncodeToString(randomBytes(24))
-	g.tokens[token] = grant{device: device, factory: factory, expires: now.Add(grantLifetime)}
+	g.tokens[token] = grant{factory: factory, expires: now.Add(grantLifetime)}
 	return token
 }
 
@@ -76,7 +75,7 @@ func factoryOf(escapedPath string) (string, bool) {
 	return factory, err == nil && factory != ""
 }
 
-func (s *Server) openReview(w http.ResponseWriter, r *http.Request, device Device) {
+func (s *Server) openReview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		fail(w, http.StatusMethodNotAllowed, "open review pages with GET")
 		return
@@ -86,7 +85,7 @@ func (s *Server) openReview(w http.ResponseWriter, r *http.Request, device Devic
 		fail(w, http.StatusNotFound, "no such review page")
 		return
 	}
-	target := GrantPrefix + s.grants.mint(device.ID, factory, s.now()) + r.URL.EscapedPath()
+	target := GrantPrefix + s.grants.mint(factory, s.now()) + r.URL.EscapedPath()
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -114,7 +113,7 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 	escaped := strings.TrimPrefix(r.URL.EscapedPath(), GrantPrefix+token)
 	path, err := url.PathUnescape(escaped)
 	switch {
-	case !live || !s.Store.Paired(held.device):
+	case !live:
 		if opensPage(r.Method, path) {
 			page(w, http.StatusUnauthorized, expiredPage, nil)
 			return
@@ -130,7 +129,7 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 		forward := r.Clone(r.Context())
 		forward.URL.Path, forward.URL.RawPath = path, escaped
 		forward.Header.Set(review.PrefixHeader, GrantPrefix+token)
-		s.review(w, forward, Device{ID: held.device})
+		s.review(w, forward)
 	}
 }
 

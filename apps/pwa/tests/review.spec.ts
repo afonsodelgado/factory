@@ -16,7 +16,6 @@ test("a phone comments, sends and approves on a plan page", async ({
   page,
 }) => {
   const server = fake(page.request);
-  await server.pair();
   await page.goto(plan);
   await expect(overlay(page).locator(".top")).toContainText(
     `${key} / plan.html`,
@@ -86,7 +85,6 @@ test("a new page version waits until the phone's comment is saved", async ({
   page,
 }) => {
   const server = fake(page.request);
-  await server.pair();
   await page.goto(plan);
   await bar(page).getByRole("button", { name: "Comment" }).tap();
   await page.locator("#fonts").tap();
@@ -108,8 +106,6 @@ test("a new page version waits until the phone's comment is saved", async ({
 test("the comment panel stays open when the sandboxed page reloads", async ({
   page,
 }) => {
-  const server = fake(page.request);
-  await server.pair();
   await page.goto(plan);
   await bar(page).locator('[data-action="panel"]').tap();
   await expect(overlay(page).locator(".panel")).toBeVisible();
@@ -129,7 +125,6 @@ test("the desktop overlay keeps hover picking at a wide window", async ({
     baseURL: "http://127.0.0.1:4324",
   });
   const page = await context.newPage();
-  await fake(page.request).pair();
   await page.goto(plan);
   await expect(bar(page)).toContainText("Comment");
   await bar(page)

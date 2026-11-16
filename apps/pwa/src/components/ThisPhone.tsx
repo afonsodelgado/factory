@@ -9,19 +9,19 @@ import { AppShell } from "./AppShell.tsx";
 import { Check } from "./Setup.tsx";
 
 export function ThisPhone() {
-  const { me, reach, setMe, retry } = useApp();
-  const { health, recheck } = usePushHealth(me);
+  const { me, installation, reach, retry } = useApp();
+  const { health, push, setPush, recheck } = usePushHealth();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const host = hostName();
   const online = reach === "online";
 
   const change = async (work: () => Promise<PushState>, failure: string) => {
-    if (!me) return;
+    if (!push || !installation) return;
     setBusy(true);
     setProblem(undefined);
     try {
-      setMe({ ...me, push: await work() });
+      setPush(await work());
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       setProblem(`${failure} ${reason}`);
@@ -31,10 +31,13 @@ export function ThisPhone() {
     }
   };
   const subscribe = () =>
-    change(() => turnOn(me!), "Notifications are not on.");
+    change(
+      () => turnOn(push!.vapid_public_key, installation!),
+      "Notifications are not on.",
+    );
   const unsubscribe = () =>
     change(
-      turnOff,
+      () => turnOff(push?.endpoint ?? ""),
       `Couldn't turn notifications off, so they are still on for ${host}.`,
     );
 
@@ -48,31 +51,31 @@ export function ThisPhone() {
             label={location.host}
             detail={
               online && me
-                ? `reachable over HTTPS · factory serve ${me.version}`
+                ? `reachable over HTTPS · factory node ${me.version}`
                 : `${host} can't be reached right now.`
             }
           />
           {me ? (
             <Check
               ok
-              label={`Paired as ${me.device.name}`}
-              detail={`since ${day(me.device.paired_at)} · revoke it in the hub's Phone popup`}
+              label={`Signed in as ${me.caller}`}
+              detail={`through Tailscale · ${host} answers this login only`}
             />
           ) : null}
           <Notifications
             health={health}
-            busy={busy || !me}
+            busy={busy || !push}
             onSubscribe={subscribe}
           />
-          {me ? (
+          {push ? (
             <Check
-              ok={!!me.push.last_sent && !me.push.problem}
-              warn={!!me.push.problem}
+              ok={!!push.last_sent && !push.problem}
+              warn={!!push.problem}
               label="Last notification"
               detail={
-                me.push.problem ??
-                (me.push.last_sent
-                  ? `${day(me.push.last_sent)} · ${clock(me.push.last_sent)}`
+                push.problem ??
+                (push.last_sent
+                  ? `${day(push.last_sent)} · ${clock(push.last_sent)}`
                   : "none yet")
               }
             />
@@ -101,7 +104,7 @@ export function ThisPhone() {
             <button
               type="button"
               className="btn"
-              disabled={busy || !me}
+              disabled={busy || !push}
               onClick={unsubscribe}
             >
               Turn off notifications
@@ -110,7 +113,7 @@ export function ThisPhone() {
             <button
               type="button"
               className="btn pri"
-              disabled={busy || !me}
+              disabled={busy || !push}
               onClick={subscribe}
             >
               Turn on notifications

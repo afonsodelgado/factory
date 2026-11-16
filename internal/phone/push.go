@@ -2,6 +2,7 @@ package phone
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -39,9 +40,9 @@ type Pusher struct {
 }
 
 type Delivery struct {
-	Device   string `json:"device"`
-	Accepted bool   `json:"accepted"`
-	Problem  string `json:"problem,omitempty"`
+	Subscription string `json:"subscription"`
+	Accepted     bool   `json:"accepted"`
+	Problem      string `json:"problem,omitempty"`
 }
 
 func PublicClient() *http.Client {
@@ -129,12 +130,12 @@ func (p *Pusher) Test(ctx context.Context) ([]Delivery, error) {
 	payload := Payload{Tag: "test", Title: "factory · test", Body: "Notifications work on this phone.", URL: "/"}
 	results := []Delivery{}
 	for _, sub := range subs {
-		j := job{Device: sub.Device, Endpoint: sub.Endpoint, Payload: string(mustJSON(payload))}
-		status, _, problem := p.send(ctx, keys, sub, j)
-		results = append(results, Delivery{Device: sub.Device, Accepted: accepted(status), Problem: problem})
-		p.Store.recordDelivery(sub.Device, sub.Endpoint, p.now(), problem)
+		data, _ := json.Marshal(payload)
+		status, _, problem := p.send(ctx, keys, sub, job{Endpoint: sub.Endpoint, Payload: string(data)})
+		results = append(results, Delivery{Subscription: sub.ID, Accepted: accepted(status), Problem: problem})
+		p.Store.recordDelivery(sub.Endpoint, p.now(), problem)
 		if gone(status) {
-			p.Store.UnsubscribeEndpoint(sub.Device, sub.Endpoint)
+			p.Store.Unsubscribe(sub.Endpoint)
 		}
 	}
 	return results, nil
@@ -142,8 +143,8 @@ func (p *Pusher) Test(ctx context.Context) ([]Delivery, error) {
 
 func (p *Pusher) send(ctx context.Context, keys vapidKeys, sub Subscription, j job) (int, time.Duration, string) {
 	if sub.P256dh == "" {
-		found, ok := p.Store.SubscriptionOf(j.Device)
-		if !ok || found.Endpoint != j.Endpoint {
+		found, ok := p.Store.SubscriptionAt(j.Endpoint)
+		if !ok {
 			return http.StatusGone, 0, "the phone unsubscribed"
 		}
 		sub = found
@@ -210,7 +211,7 @@ func (s Store) takeDue(now time.Time) ([]job, error) {
 
 func (s Store) settle(sent job, status int, retry time.Duration, problem string, now time.Time) {
 	if gone(status) {
-		s.UnsubscribeEndpoint(sent.Device, sent.Endpoint)
+		s.Unsubscribe(sent.Endpoint)
 		return
 	}
 	final := accepted(status) || !transient(status)
@@ -230,6 +231,6 @@ func (s Store) settle(sent job, status int, retry time.Duration, problem string,
 		return nil
 	})
 	if final {
-		s.recordDelivery(sent.Device, sent.Endpoint, now, problem)
+		s.recordDelivery(sent.Endpoint, now, problem)
 	}
 }
