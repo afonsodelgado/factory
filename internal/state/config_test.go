@@ -153,8 +153,8 @@ func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.
 	if want := (AgentSetting{Tool: ToolCodex, Model: "gpt-5.6-sol", Effort: "low"}); merged.Supervisor != want {
 		t.Errorf("supervisor = %+v; want %+v, the repo's effort over the global tool and model", merged.Supervisor, want)
 	}
-	if merged.Stalled().String() != "2h0m0s" || merged.RemoteControl() || !slices.Equal(merged.Codex.WritableDirs, []string{"/global", "/repo"}) {
-		t.Errorf("stalled %v, remote control %v, writable dirs %v; want the repo's 2h and false, and both dirs", merged.Stalled(), merged.RemoteControl(), merged.Codex.WritableDirs)
+	if merged.Stalled().String() != "2h0m0s" || !slices.Equal(merged.Codex.WritableDirs, []string{"/global", "/repo"}) {
+		t.Errorf("stalled %v, writable dirs %v; want the repo's 2h and both dirs", merged.Stalled(), merged.Codex.WritableDirs)
 	}
 	os.MkdirAll(RepoDir(repo), 0o755)
 	os.WriteFile(RepoConfigPath(repo), []byte("stalled_after: 45m\n"), 0o644)

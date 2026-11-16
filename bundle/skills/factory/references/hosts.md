@@ -10,7 +10,6 @@ The factory app sets `FACTORY_SUPERVISOR` to the tool this session runs in: `cla
 | The agent's final message | A message `stage <role> done: <result file>` arrives in this session when the agent finishes. Read the `factory-result` JSON from that file and continue as the skill says for `done`, `blocked` or `failed`. |
 | Workflow fan-out for design variants | Start the variants one after another with `"${FACTORY_BIN:-factory}" stage start --role designer`, waiting for each `done` message. |
 | `scripts/wait-for-review.sh` with `run_in_background` | Run `"${FACTORY_BIN:-factory}" stage ci <pr numbers…>` and end your turn. The app waits for CI and CodeRabbit and types the summary into this session. |
-| PushNotification | Skip it. The factory app alerts on every open attention item. |
 | AskUserQuestion | Always ask in plain text, in the factory-app form. |
 | Browser QA on a server | `"${FACTORY_BIN:-factory}" stage start --role qa --task <file>`, as for any role. `stage qa done: <file>` arrives once the developer has run it on the laptop and its report is back. |
 | ToolSearch for the Chrome tools | Skip the preflight check. QA always runs on `claude`, which `"${FACTORY_BIN:-factory}" stage start --role qa` opens with Chrome. |

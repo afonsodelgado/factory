@@ -37,7 +37,6 @@ type Profile struct {
 	Agents          map[string]AgentSetting `yaml:"agents"`
 	Supervisor      AgentSetting            `yaml:"supervisor"`
 	StalledAfter    string                  `yaml:"stalled_after"`
-	Claude          Claude                  `yaml:"claude"`
 	Codex           Codex                   `yaml:"codex"`
 }
 
@@ -108,9 +107,6 @@ func (c *Config) WithProfile(p Profile) *Config {
 	merged.Supervisor = p.Supervisor.Over(c.Supervisor)
 	if positiveDuration(p.StalledAfter) {
 		merged.StalledAfter = p.StalledAfter
-	}
-	if p.Claude.RemoteControl != nil {
-		merged.Claude.RemoteControl = p.Claude.RemoteControl
 	}
 	merged.Codex.WritableDirs = slices.Concat(c.Codex.WritableDirs, p.Codex.WritableDirs)
 	return &merged

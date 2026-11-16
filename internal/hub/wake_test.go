@@ -43,13 +43,13 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := PlanWake(c.item, false, false, hooks, nil).Command; got != c.want {
+			if got := PlanWake(c.item, false, hooks, nil).Command; got != c.want {
 				t.Errorf("wake runs %q, want %q", got, c.want)
 			}
 		})
 	}
 
-	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), false, false, nil, nil)
+	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), false, nil, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
 	}
@@ -66,7 +66,7 @@ func TestThePanesOwnSessionIsLiveAfterTheBridgeContinuesIt(t *testing.T) {
 
 	hook := hookFor(f, pane.Token, hooks)
 	if hook != live {
-		t.Fatalf("hookFor read session %s; want the pane's own 06c7ff87, or status and delivery read a file frozen since remote control continued the session", hook.SessionID)
+		t.Fatalf("hookFor read session %s; want the pane's own 06c7ff87, or status and delivery read a file frozen since the session moved to a new id", hook.SessionID)
 	}
 	if reason := Refusal(Target{Label: "release-0-2", Pane: pane, Hook: hook}); !strings.Contains(reason, "busy") {
 		t.Errorf("refusal = %q; want busy, because the live session is working on a prompt", reason)

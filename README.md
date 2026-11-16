@@ -304,8 +304,6 @@ alerts:
   bell: false
   desktop: false
 icons: nerd
-claude:
-  remote_control: true
 review:
   port: 7417
   browser: chrome
@@ -320,7 +318,7 @@ State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/fa
 
 Add and configure repos from the hub: press `n`, then `+ add a repo…`, or `ctrl+e` on a listed repo. `ctrl+s` saves only the form's keys; `esc` cancels. A malformed file is shown as an error and cannot be overwritten. If the file changes while settings are open, reopen the form before saving.
 
-Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA, design and CodeRabbit settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after`, `claude.remote_control` and `codex.writable_dirs`.
+Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA, design and CodeRabbit settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after` and `codex.writable_dirs`.
 
 ```yaml
 commands: {build: make build, lint: make lint, test: make test}

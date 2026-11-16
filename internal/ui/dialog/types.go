@@ -35,10 +35,9 @@ type RepoOption struct {
 	PipelineProblem string           `json:"pipeline_problem,omitempty"`
 	Agents          []AgentOption    `json:"agents"`
 
-	RemoteControl bool               `json:"remote_control"`
-	Supervisor    state.AgentSetting `json:"supervisor,omitzero"`
-	GitURL        string             `json:"git_url,omitempty"`
-	NoGitRemote   string             `json:"no_git_remote,omitempty"`
+	Supervisor  state.AgentSetting `json:"supervisor,omitzero"`
+	GitURL      string             `json:"git_url,omitempty"`
+	NoGitRemote string             `json:"no_git_remote,omitempty"`
 }
 
 type AgentOption struct {

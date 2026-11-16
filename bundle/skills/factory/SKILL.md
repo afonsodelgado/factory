@@ -62,9 +62,9 @@ date -u +%Y-%m-%dT%H:%M:%SZ; echo "$CLAUDE_CODE_SESSION_ID"
 
 Write the first line to `updated_at` and to the `at` of every history entry you add, and the
 second to `session_id`. Never write a time by hand and never copy one from an earlier entry:
-the app reads the time in stage and the stall clock from these values. Remote control can
-move the session to a new id in the middle of a session, so refresh `session_id` on every
-write, not only on start and resume.
+the app reads the time in stage and the stall clock from these values. The session id can
+change in the middle of a session, so refresh `session_id` on every write, not only on
+start and resume.
 
 ### The repo config
 
@@ -84,7 +84,7 @@ Each repo has `.factory/config.yml` (template: `templates/factory.yml`). You and
 | `coderabbit` | `false` skips stage 6 |
 | `pipelines`, `default_pipeline` | optional; add or override pipeline presets for this repo (see "The pipeline") |
 | `agents` | optional; override the global agent settings for this repo (see "Agent tools and models") |
-| `supervisor`, `stalled_after`, `claude.remote_control`, `codex.writable_dirs` | optional; override the global config for this repo. The factory app reads them, not you |
+| `supervisor`, `stalled_after`, `codex.writable_dirs` | optional; override the global config for this repo. The factory app reads them, not you |
 
 When it is missing everywhere, stop at preflight and ask the user to add the repo from the hub: press n, then + add a repo…, and enter the main checkout.
 
@@ -132,8 +132,8 @@ Write every role to `state.agents`, including the ones that run on their frontma
 1. **Preflight.** Read the repo config, then run these checks and stop with a clear message if one fails:
    - `gh auth status` succeeds.
    - The working tree is clean. Untracked tool caches do not count: ignore `?? .impeccable/` and `?? .revmux/` lines in `git status --porcelain`.
-   - In `qa.mode: browser` only, and not on a server (`FACTORY_SERVER` unset, since QA then runs on the laptop): browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome --remote-control` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
-   - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id> --remote-control <id>`, adding `--chrome` in browser mode.
+   - In `qa.mode: browser` only, and not on a server (`FACTORY_SERVER` unset, since QA then runs on the laptop): browser tools are available. ToolSearch for `mcp__claude-in-chrome__tabs_context_mcp` must find it. If it does not, tell the user to restart with `claude --chrome` and stop. Browser QA cannot run without it. In `qa.mode: terminal`, Chrome is not needed.
+   - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id>`, adding `--chrome` in browser mode.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
    - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the repo config's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
@@ -146,7 +146,7 @@ Write every role to `state.agents`, including the ones that run on their frontma
 Every question, gate, tripped cap and second failure follows the same order, so the factory app can show that the factory needs the user:
 
 1. Write `state.json` first: `waiting_on: "user"`, a one-sentence `waiting_reason`, and an open item in `attention` with the current `stage` (format and ids: `references/attention.md`).
-2. Then ask, and send the push notification.
+2. Then ask.
 3. When the answer arrives, whether it came from the factory panel or was typed in the session, resolve the item first with one Bash call, `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> --waiting-on <agent|ci|none> <item id>`, which sets `resolved_at` and `waiting_on` without you editing the file, and only then act on it. The command rewrites the file, so read `state.json` again before your next edit. A message in the session that settles an open item answers it even without the id. `<item id> handled:` means the user settled the item outside the panel, in the session or in a stage agent's pane. It is never an answer or an approval in itself: resolve the item, go on only if what you waited for is already on record (an approval in a thread, a decision in the session, a stage agent's report), and otherwise ask again.
 
 **Under the factory app** (`FACTORY=1` in your environment; check with `echo $FACTORY`): ask in plain text, never through AskUserQuestion. Number the questions, give each one its options and your recommended answer, and end with exactly this line:
@@ -185,7 +185,7 @@ Wherever a stage below says to spawn an agent or SendMessage it, use the start a
 
 ## Notifications
 
-Send a PushNotification only when the user has to act: a question, a lit gate, a tripped cap, a second failure, and the handoff. Never for progress. When `FACTORY_SERVER` is set, you run on a server that pushes to the developer's phone by itself for every open attention item: send no PushNotification there.
+Never send a PushNotification. The factory app alerts the developer on every open attention item.
 
 ## Artifacts
 
@@ -279,7 +279,7 @@ Write `handoff.md` and post it to the user. Include:
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 - the walkthrough's threads still open, each with its page and the fixer's last answer; when the pipeline skipped `walkthrough`, say so
 
-Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done, and send the push notification. The user tests, merges and deploys. Never merge.
+Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done. The user tests, merges and deploys. Never merge.
 
 ## Limits
 
