@@ -60,7 +60,7 @@ func (g *grants) held(token string, now time.Time) (grant, bool) {
 
 func (g grant) opens(escapedPath string) bool {
 	switch escapedPath {
-	case "/_access", "/_review/overlay.js", "/events/review":
+	case "/_access", "/_review/overlay.js":
 		return true
 	}
 	factory, ok := factoryOf(escapedPath)

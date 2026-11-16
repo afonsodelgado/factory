@@ -42,7 +42,7 @@ func (s *Server) OpenCount(fileURL string) (int, bool) {
 }
 
 func (s *Server) ThreadsChanged(f Factory) {
-	s.broadcast(event{"threads", f.Key})
+	s.broadcast(event{"threads", f.Key, f.Key})
 }
 
 func (s *Server) mutation(next http.HandlerFunc) http.HandlerFunc {

@@ -334,18 +334,42 @@ func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
 		t.Fatalf("a comment sent straight to the cookie-protected review path answered %d; want it refused", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest("GET", g.http.URL+"/rt/"+token+"/events/review", nil)
+	req, _ := http.NewRequest("GET", g.http.URL+"/rt/"+token+"/r/k/_api/events", nil)
 	req.Host = testHost
 	stream, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil || stream.StatusCode != 200 {
 		t.Fatalf("review stream: %v %v", err, stream)
 	}
 	defer stream.Body.Close()
+	seen := make(chan string, 16)
 	ended := make(chan bool)
 	go func() {
-		io.Copy(io.Discard, stream.Body)
+		lines := bufio.NewScanner(stream.Body)
+		for lines.Scan() {
+			if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+				seen <- data
+			}
+		}
 		ended <- true
 	}()
+	otherGrant := g.do("GET", "/r/k2/plan.html", "", "Cookie", cookie).Header.Get("Location")
+	otherComment := `{"page":"plan.html","intent":"fix","text":"Smaller.","anchor":{"url":"https://` + testHost + otherGrant + `"}}`
+	for _, post := range [][2]string{{otherGrant, otherComment}, {grantPath, comment}} {
+		threads := strings.TrimSuffix(post[0], "/plan.html") + "/_api/threads"
+		if resp := g.do("POST", threads, post[1], "Origin", "", "Origin", "null"); resp.StatusCode != 200 {
+			t.Fatalf("a comment through %s answered %d", threads, resp.StatusCode)
+		}
+	}
+	for data := ""; data != "k"; {
+		select {
+		case data = <-seen:
+			if data == "k2" || strings.HasPrefix(data, "k2/") {
+				t.Fatalf("the review stream of a grant for k sent %q; want only its own factory's events", data)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the review stream never sent the grant's own factory's comment")
+		}
+	}
 	g.server.Store.Revoke(device.ID)
 	g.server.Revoke(device.ID)
 	select {

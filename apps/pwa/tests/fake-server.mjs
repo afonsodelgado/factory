@@ -103,7 +103,7 @@ function page(key, prefix = "") {
 <h1>plan</h1><section id="risks"><h2>Risks</h2><ul><li id="fonts">Fonts differ between macOS and Linux.</li>
 <li><a id="link" href="https://example.com/">Large invoices exceed the budget.</a></li></ul></section>
 <p style="height:1200px">filler</p>
-<script src="${prefix}/_review/overlay.js" data-factory-review data-mobile data-theme="dark" data-events="${prefix}/events/review" data-access="${prefix}/_access" data-api="${prefix}/r/${key}/_api" data-page="${key}/plan.html" data-file="plan.html" data-label="${key}" data-back="/f/${key}/pages" data-revision="r1" defer></script>
+<script src="${prefix}/_review/overlay.js" data-factory-review data-mobile data-theme="dark" data-events="${prefix}/r/${key}/_api/events" data-access="${prefix}/_access" data-api="${prefix}/r/${key}/_api" data-page="${key}/plan.html" data-file="plan.html" data-label="${key}" data-back="/f/${key}/pages" data-revision="r1" defer></script>
 </body></html>`;
 }
 
@@ -112,6 +112,7 @@ async function review(req, res, key, rest, prefix = "") {
     for (const s of reviewStreams) s.write(`event: threads\ndata: ${key}\n\n`);
   };
   const method = req.method;
+  if (rest === "_api/events") return stream(req, res, reviewStreams);
   if (rest === "plan.html") {
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
@@ -340,7 +341,6 @@ async function sandboxed(req, res, token, rest) {
   if (rest === "/_access") return res.writeHead(204).end();
   if (rest === "/_review/overlay.js")
     return serveFile(res, overlay, "no-store");
-  if (rest === "/events/review") return stream(req, res, reviewStreams);
   const reviewPath = /^\/r\/([^/]+)\/(.+)$/.exec(rest);
   if (reviewPath)
     return await review(req, res, reviewPath[1], reviewPath[2], `/rt/${token}`);

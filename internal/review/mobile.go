@@ -43,7 +43,6 @@ func (s *Server) ServeMobile(path string) error {
 func (s *Server) MobileHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
-	mux.HandleFunc("GET /events/review", s.serveEvents)
 	mux.HandleFunc("GET /r/{key}/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		prefix := r.Header.Get(PrefixHeader)
 		s.servePage(func(f Factory, rel, revision string) []byte { return s.mobileTag(prefix, f, rel, revision) })(w, r)
@@ -53,6 +52,7 @@ func (s *Server) MobileHandler() http.Handler {
 	mux.HandleFunc("PATCH /r/{key}/_api/threads/{id}", s.updateThread)
 	mux.HandleFunc("DELETE /r/{key}/_api/threads/{id}", s.deleteThread)
 	mux.HandleFunc("POST /r/{key}/_api/threads/{id}/replies", s.replyThread)
+	mux.HandleFunc("GET /r/{key}/_api/events", s.serveFactoryEvents)
 	mux.HandleFunc("GET /r/{key}/_api/status", s.action("status"))
 	mux.HandleFunc("POST /r/{key}/_api/send", s.action("send"))
 	mux.HandleFunc("POST /r/{key}/_api/approve", s.action("approve"))
@@ -65,7 +65,7 @@ func (s *Server) MobileHandler() http.Handler {
 func (s *Server) mobileTag(prefix string, f Factory, rel, revision string) []byte {
 	key := url.PathEscape(f.Key)
 	return fmt.Appendf(nil, `<script src="%s" data-factory-review data-mobile data-theme="dark" data-events="%s" data-access="%s" data-api="%s" data-page="%s" data-file="%s" data-label="%s" data-back="%s" data-revision="%s" defer></script>`,
-		html.EscapeString(prefix+"/_review/overlay.js"), html.EscapeString(prefix+"/events/review"), html.EscapeString(prefix+"/_access"),
+		html.EscapeString(prefix+"/_review/overlay.js"), html.EscapeString(prefix+"/r/"+key+"/_api/events"), html.EscapeString(prefix+"/_access"),
 		html.EscapeString(prefix+"/r/"+key+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), html.EscapeString(f.Label), html.EscapeString("/f/"+key+"/pages"), revision)
 }
 
