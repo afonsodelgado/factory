@@ -3,10 +3,12 @@ package dialog
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -333,6 +335,35 @@ func TestPhonePopupKeepsThePairingLinkAndKeysVisibleAt80x24(t *testing.T) {
 	p.Update(phonePaired{pairing: PhonePairing{URL: link, Expires: time.Date(2026, 11, 16, 12, 5, 0, 0, time.UTC), QR: qr}})
 	if screen := p.View().Content; !strings.Contains(screen, link) || !strings.Contains(screen, "esc back") {
 		t.Fatalf("pairing at 80x24 shows:\n%s\nwant the whole link and the way back when the QR does not fit", screen)
+	}
+
+	devices := make([]PhoneDevice, 8)
+	for i := range devices {
+		devices[i] = PhoneDevice{ID: fmt.Sprintf("d-%d", i), Name: fmt.Sprintf("Phone %d", i+1), Paired: "2026-11-16 12:00"}
+	}
+	crowded := NewPhone(PhoneContext{Enabled: true, Running: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Devices: devices}, &fakePhoneActions{})
+	crowded.Update(tea.WindowSizeMsg{Width: 74, Height: 18})
+	hintRows := []string{"e turn off   s stop   c configure   p pair   t test push   h checks", "r revoke   esc close"}
+	plain := regexp.MustCompile("\x1b\\[[0-9;:]*m")
+	intact := func(screen string, want ...string) bool {
+		lines := strings.Split(plain.ReplaceAllString(screen, ""), "\n")
+		for _, w := range want {
+			if !slices.ContainsFunc(lines, func(l string) bool { return strings.TrimSpace(l) == w }) {
+				return false
+			}
+		}
+		return true
+	}
+	crowded.Update(phoneDone{status: crowded.Context, problem: "Phone 1: the push service could not be reached: Post \"https://push.invalid/qa-sub\": dial tcp: lookup push.invalid: no such host (end)"})
+	if screen := crowded.View().Content; !strings.Contains(screen, "(end)") || !intact(screen, hintRows...) {
+		t.Fatalf("a test-push error with 8 phones at 80x24 shows:\n%s\nwant the whole error above both intact key rows", screen)
+	}
+	for range devices {
+		crowded.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	crowded.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if screen := crowded.View().Content; !strings.Contains(screen, "Phone 8") || !strings.Contains(screen, "keeps it.") || !intact(screen, hintRows...) {
+		t.Fatalf("revoking the last of 8 phones at 80x24 shows:\n%s\nwant that phone, the whole prompt and both intact key rows", screen)
 	}
 }
 

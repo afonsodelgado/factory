@@ -314,38 +314,70 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 		c.Put(1, 2+i, row.label, theme.Muted)
 		c.PutMax(checkDetailX-10, 2+i, row.value, row.ink, c.W-checkDetailX+9)
 	}
-	y := 7
-	c.Put(1, y, "Paired phones", theme.Bright)
-	y++
-	if len(p.Context.Devices) == 0 {
-		c.Put(3, y, "none yet; p shows a code to scan", theme.Muted)
-		y++
+	c.Put(1, devicesTop-1, "Paired phones", theme.Bright)
+	hints := packHints(p.mainHints(), c.W-2)
+	hintsTop := c.H - len(hints)
+	space := hintsTop - devicesTop
+	text, ink := p.mainMessage()
+	var lines []string
+	if text != "" {
+		lines = theme.Wrap(text, c.W-2)
 	}
-	for i, d := range p.Context.Devices {
-		ink := theme.Text
-		if i == p.cursor {
+	if fitsBelowOneDevice := space - 2; !p.revoking && len(lines) > fitsBelowOneDevice {
+		lines = clipLines(lines, max(fitsBelowOneDevice, 1), c.W-2)
+	}
+	y := devicesTop + p.drawDevices(c, max(space-1-len(lines), 1)) + 1
+	for i, line := range lines {
+		c.Put(1, y+i, line, ink)
+	}
+	for i, line := range hints {
+		c.Put(1, hintsTop+i, line, theme.Text)
+	}
+}
+
+const devicesTop = 8
+
+func (p *Phone) drawDevices(c *theme.Canvas, rows int) int {
+	devices := p.Context.Devices
+	if len(devices) == 0 {
+		c.Put(3, devicesTop, "none yet; p shows a code to scan", theme.Muted)
+		return 1
+	}
+	shown := min(len(devices), rows)
+	first := max(p.cursor-shown+1, 0)
+	if shown < len(devices) {
+		c.Right(c.W-2, devicesTop-1, fmt.Sprintf("%d–%d of %d", first+1, first+shown, len(devices)), theme.Muted)
+	}
+	for i, d := range devices[first : first+shown] {
+		y, ink := devicesTop+i, theme.Text
+		if first+i == p.cursor {
 			c.Put(1, y, "›", theme.Key)
 			ink = theme.Bright
 		}
 		c.PutMax(3, y, d.Name, ink, 24)
 		c.PutMax(28, y, "paired "+d.Paired, theme.Muted, c.W-29)
-		y++
 	}
-	y++
+	return shown
+}
+
+func (p *Phone) mainMessage() (string, theme.Ink) {
 	switch {
 	case p.revoking:
-		paragraph(c, y, fmt.Sprintf("Revoke %s? It loses access and its notifications at once. y revokes, any other key keeps it.", p.Context.Devices[p.cursor].Name), theme.FgInk(theme.Yellow))
+		return fmt.Sprintf("Revoke %s? It loses access and its notifications at once. y revokes, any other key keeps it.", p.Context.Devices[p.cursor].Name), theme.FgInk(theme.Yellow)
 	case p.busy != "":
-		paragraph(c, y, "◌ "+p.busy, theme.FgInk(theme.Yellow))
+		return "◌ " + p.busy, theme.FgInk(theme.Yellow)
 	case p.problem != "":
-		paragraph(c, y, "✗ "+p.problem, theme.FgInk(theme.Red))
+		return "✗ " + p.problem, theme.FgInk(theme.Red)
 	case p.notice != "":
-		paragraph(c, y, "✓ "+p.notice, theme.FgInk(theme.Green))
+		return "✓ " + p.notice, theme.FgInk(theme.Green)
 	}
-	hints := packHints(p.mainHints(), c.W-2)
-	for i, line := range hints {
-		c.Put(1, c.H-len(hints)+i, line, theme.Text)
-	}
+	return "", theme.Text
+}
+
+func clipLines(lines []string, keep, width int) []string {
+	kept := append([]string(nil), lines[:keep]...)
+	kept[keep-1] = theme.Truncate(lines[keep-1]+" "+lines[keep], width)
+	return kept
 }
 
 func (p *Phone) mainHints() []string {
