@@ -33,13 +33,15 @@ type Snapshot struct {
 }
 
 type Server struct {
-	Store   Store
-	Owner   Owner
-	Host    string
-	Version string
-	Shell   http.Handler
-	Review  http.Handler
-	Now     func() time.Time
+	Store    Store
+	Owner    Owner
+	Host     string
+	Version  string
+	Shell    http.Handler
+	Review   http.Handler
+	Push     *Pusher
+	VAPIDKey string
+	Now      func() time.Time
 
 	grants    grants
 	mu        sync.Mutex
@@ -49,10 +51,11 @@ type Server struct {
 }
 
 type stream struct {
-	device string
-	next   chan []byte
-	closed chan struct{}
-	once   sync.Once
+	device    string
+	snapshots bool
+	next      chan []byte
+	closed    chan struct{}
+	once      sync.Once
 }
 
 func (s *stream) close() { s.once.Do(func() { close(s.closed) }) }
@@ -85,6 +88,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.authed(s.events))
 	mux.HandleFunc("GET /api/operations/{operation}", s.authed(s.operation))
 	mux.HandleFunc("POST /api/factories/{key}/actions", s.authed(s.act))
+	mux.HandleFunc("POST /api/push/subscription", s.authed(s.subscribePush))
+	mux.HandleFunc("DELETE /api/push/subscription", s.authed(s.unsubscribePush))
+	mux.HandleFunc("GET /api/links/{key}", s.authed(s.link))
 	mux.HandleFunc("POST /api/pair/status", s.pairStatus)
 	mux.HandleFunc("POST /api/pair/exchange", s.pairExchange)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
@@ -198,10 +204,64 @@ type me struct {
 	Device     Device    `json:"device"`
 	Version    string    `json:"version"`
 	ServerTime time.Time `json:"server_time"`
+	Push       pushState `json:"push"`
+}
+
+type pushState struct {
+	Key        string    `json:"vapid_public_key"`
+	Subscribed bool      `json:"subscribed"`
+	Endpoint   string    `json:"endpoint,omitempty"`
+	LastSent   time.Time `json:"last_sent,omitzero"`
+	Problem    string    `json:"problem,omitempty"`
+}
+
+func (s *Server) pushStateOf(device string) pushState {
+	sub, subscribed := s.Store.SubscriptionOf(device)
+	return pushState{Key: s.VAPIDKey, Subscribed: subscribed, Endpoint: sub.Endpoint, LastSent: sub.LastSent, Problem: sub.Problem}
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request, device Device) {
-	reply(w, http.StatusOK, me{Device: device, Version: s.Version, ServerTime: s.now()})
+	reply(w, http.StatusOK, me{Device: device, Version: s.Version, ServerTime: s.now(), Push: s.pushStateOf(device.ID)})
+}
+
+type subscriptionBody struct {
+	Endpoint       string `json:"endpoint"`
+	ExpirationTime *int64 `json:"expirationTime"`
+	Keys           struct {
+		P256dh string `json:"p256dh"`
+		Auth   string `json:"auth"`
+	} `json:"keys"`
+}
+
+func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request, device Device) {
+	var body subscriptionBody
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sub := Subscription{Device: device.ID, Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, Since: s.now()}
+	if err := s.Store.Subscribe(sub); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	reply(w, http.StatusOK, s.pushStateOf(device.ID))
+}
+
+func (s *Server) unsubscribePush(w http.ResponseWriter, r *http.Request, device Device) {
+	if err := s.Store.Unsubscribe(device.ID); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	reply(w, http.StatusOK, s.pushStateOf(device.ID))
+}
+
+func (s *Server) link(w http.ResponseWriter, r *http.Request, _ Device) {
+	link, ok := s.Store.Link(r.PathValue("key"))
+	if !ok {
+		fail(w, http.StatusNotFound, "This notification's item is no longer known.")
+		return
+	}
+	reply(w, http.StatusOK, link)
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request, _ Device) {
@@ -243,19 +303,40 @@ func (s *Server) refresh(ctx context.Context) {
 		s.lose()
 		return
 	}
-	factories, _ := json.Marshal(local.Factories)
+	if s.publish(local.Factories) && s.Push != nil {
+		queued, err := s.Store.Reconcile(local.Factories, s.connected, s.now())
+		if err == nil && queued {
+			s.Push.Wake()
+		}
+	}
+}
+
+func (s *Server) publish(local []host.LocalFactory) bool {
+	factories, _ := json.Marshal(local)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.current != nil && bytes.Equal(factories, s.factories) {
-		return
+		return false
 	}
 	revision := s.now().UnixMilli()
 	if s.current != nil && revision <= s.current.Revision {
 		revision = s.current.Revision + 1
 	}
 	s.factories = factories
-	s.current = &Snapshot{Revision: revision, ServerTime: s.now(), Factories: local.Factories}
+	s.current = &Snapshot{Revision: revision, ServerTime: s.now(), Factories: local}
 	s.broadcast(event("snapshot", s.current))
+	return true
+}
+
+func (s *Server) connected(device string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for st := range s.streams {
+		if st.snapshots && st.device == device {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) lose() {
@@ -304,6 +385,7 @@ func (s *Server) subscribe(device string) *stream {
 	st := s.watch(device)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	st.snapshots = true
 	if s.current != nil {
 		st.offer(event("snapshot", s.current))
 	} else {

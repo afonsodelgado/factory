@@ -1,6 +1,8 @@
 package host
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -307,6 +309,7 @@ func localPage(f review.Factory, row ArtifactRow) LocalPage {
 
 type LocalItem struct {
 	AttentionItem
+	Key        string          `json:"key"`
 	Answer     *Receipt        `json:"answer,omitempty"`
 	Send       Eligibility     `json:"send"`
 	Permission *PermissionMenu `json:"permission,omitempty"`
@@ -398,11 +401,21 @@ func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalIte
 			li.Send = Eligibility{Ready: true, Reason: "Types the option you pick into the session."}
 		}
 	}
+	li.Key = ItemKey(Incarnation(it.Factory), li.ID, item.Since, item.Pane)
 	if claimed, ok := m.Claim(ClaimKey(it.Factory.Key(), li.ID)); ok && claimed.ItemSince.Equal(item.Since) {
 		public := claimed.Public()
 		li.Answer = &public
 	}
 	return li
+}
+
+func ItemKey(incarnation, id string, since time.Time, pane *tmux.Pane) string {
+	identity := []string{incarnation, id, since.UTC().Format(time.RFC3339Nano)}
+	if pane != nil {
+		identity = append(identity, pane.ID)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(identity, "\x00")))
+	return base64.RawURLEncoding.EncodeToString(sum[:12])
 }
 
 func (m *Runtime) resolutions(f factory.Factory) []Resolution {
