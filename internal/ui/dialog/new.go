@@ -38,6 +38,7 @@ type NewFactoryModel struct {
 	place          int
 	probes         map[string]probe
 	Probe          func(remote string) (string, error)
+	ProbeNode      func(name string) (string, error)
 }
 
 const supervisorRole = "supervisor"
@@ -55,8 +56,17 @@ type probedMsg struct {
 }
 
 func NewFactory(c NewContext) *NewFactoryModel {
-	place := slices.Index(c.Remotes, c.Default) + 1
-	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, place: place, probes: map[string]probe{}, repoPath: sharedRepoDirectory(c.Repos)}
+	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, place: defaultPlace(c), probes: map[string]probe{}, repoPath: sharedRepoDirectory(c.Repos)}
+}
+
+func defaultPlace(c NewContext) int {
+	if i := slices.IndexFunc(c.Nodes, func(n NodeChoice) bool { return n.Name == c.Target }); i >= 0 {
+		return i + 1
+	}
+	if i := slices.Index(c.Remotes, c.Default); i >= 0 {
+		return len(c.Nodes) + 1 + i
+	}
+	return 0
 }
 
 const firstStageRow = 1
@@ -91,19 +101,43 @@ func (m *NewFactoryModel) stageAgents() map[string]state.AgentSetting {
 func (m *NewFactoryModel) Init() tea.Cmd { return m.probe() }
 
 func (m *NewFactoryModel) remote() string {
-	if m.place == 0 {
+	if m.place <= len(m.Context.Nodes) {
 		return ""
 	}
-	return m.Context.Remotes[m.place-1]
+	return m.Context.Remotes[m.place-1-len(m.Context.Nodes)]
+}
+
+func (m *NewFactoryModel) nodeChoice() (NodeChoice, bool) {
+	if m.place == 0 || m.place > len(m.Context.Nodes) {
+		return NodeChoice{}, false
+	}
+	return m.Context.Nodes[m.place-1], true
+}
+
+func (m *NewFactoryModel) node() string {
+	choice, _ := m.nodeChoice()
+	return choice.Name
+}
+
+func (m *NewFactoryModel) placeName() string {
+	if choice, ok := m.nodeChoice(); ok {
+		return shortName(choice.Name)
+	}
+	return m.remote()
 }
 
 func (m *NewFactoryModel) probe() tea.Cmd {
-	name := m.remote()
-	if _, started := m.probes[name]; name == "" || started || m.Probe == nil {
+	name, check := m.remote(), m.Probe
+	if choice, ok := m.nodeChoice(); ok {
+		name, check = choice.Name, m.ProbeNode
+		if choice.Unreachable {
+			return nil
+		}
+	}
+	if _, started := m.probes[name]; name == "" || started || check == nil {
 		return nil
 	}
 	m.probes[name] = probe{}
-	check := m.Probe
 	return func() tea.Msg {
 		text, err := check(name)
 		return probedMsg{remote: name, text: text, err: err}
@@ -111,16 +145,36 @@ func (m *NewFactoryModel) probe() tea.Cmd {
 }
 
 func (m *NewFactoryModel) moveOn(delta int) tea.Cmd {
-	places := len(m.Context.Remotes) + 1
+	places := len(m.Context.Remotes) + len(m.Context.Nodes) + 1
 	m.place = (m.place + delta + places) % places
 	return m.probe()
 }
 
+func (m *NewFactoryModel) elsewhere() bool {
+	return len(m.Context.Remotes)+len(m.Context.Nodes) > 0
+}
+
 func (m *NewFactoryModel) choosesPlace() bool {
-	return len(m.Context.Remotes) > 0 && !m.addingRepo()
+	return m.elsewhere() && !m.addingRepo()
+}
+
+func (m *NewFactoryModel) nodeProblem(choice NodeChoice) string {
+	short, repo := shortName(choice.Name), m.selectedRepo()
+	switch p := m.probes[choice.Name]; {
+	case repo.NoGitRemote != "":
+		return repo.Name + " has no git remote, so " + short + " has nothing to clone. Push it to one first (git remote add origin <url>, then git push), or pick this machine with ←."
+	case choice.Unreachable:
+		return m.id() + " can't start on " + short + " while it is unreachable. Pick another node with ←→; N shows what is known about " + short + "."
+	case p.done && p.err != nil:
+		return p.err.Error()
+	}
+	return ""
 }
 
 func (m *NewFactoryModel) remoteProblem() string {
+	if choice, ok := m.nodeChoice(); ok {
+		return m.nodeProblem(choice)
+	}
 	name, repo := m.remote(), m.selectedRepo()
 	switch p := m.probes[name]; {
 	case name == "":
@@ -163,7 +217,7 @@ func (m *NewFactoryModel) existing() (Existing, bool) {
 		}
 	}
 	for _, e := range m.Context.Elsewhere {
-		elsewhereMatters := e.Remote != "" || m.remote() != ""
+		elsewhereMatters := e.Remote != "" || m.placeName() != ""
 		if elsewhereMatters && !e.Retired && m.named(e) {
 			return e, true
 		}
@@ -656,7 +710,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Remote: m.remote()}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Remote: m.remote(), Node: m.node()}
 	return tea.Quit
 }
 
@@ -730,7 +784,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		m.drawRepoPath(c, y, w)
 		return
 	}
-	if len(m.Context.Remotes) > 0 {
+	if m.elsewhere() {
 		y = m.drawPlaces(c, y, w)
 	}
 	c.Put(1, y, "Factory id", theme.Bright.B())
@@ -764,7 +818,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	if m.Context.Here && len(m.Context.Repos) > 1 {
 		hints = "⏎ next: pipeline   ↑↓ another repo   ctrl+e settings   esc cancel"
 	}
-	if len(m.Context.Remotes) > 0 {
+	if m.elsewhere() {
 		hints = "⏎ next: pipeline   ↑↓ repo   ←→ runs on   ctrl+e settings   esc cancel"
 	}
 	e, _ := m.existing()
@@ -810,7 +864,7 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	case m.name == "":
 		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
 	case m.id() != "" && !factory.IsReservedID(m.name):
-		add(fmt.Sprintf("%s is a new factory%s. You'll write its prompt next.", m.id(), onRemote(m.remote())), theme.Muted)
+		add(fmt.Sprintf("%s is a new factory%s. You'll write its prompt next.", m.id(), onRemote(m.placeName())), theme.Muted)
 	}
 	return spans
 }
@@ -819,19 +873,30 @@ func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
 	c.Put(1, y, "Runs on", theme.Bright.B())
 	y++
 	x := 3
-	for i, name := range slices.Concat([]string{"this machine"}, m.Context.Remotes) {
+	defaultAt := defaultPlace(m.Context)
+	for i, name := range m.placeNames() {
 		mark, ink := "○ ", theme.Text
-		if i == m.place {
+		unreachable := i > 0 && i <= len(m.Context.Nodes) && m.Context.Nodes[i-1].Unreachable
+		switch {
+		case i == m.place:
 			mark, ink = "● ", theme.Bright
+		case unreachable:
+			mark, ink = "↮ ", theme.Quiet
 		}
 		x = c.Put(x, y, mark+name, ink)
-		isDefault := i == slices.Index(m.Context.Remotes, m.Context.Default)+1
-		if isDefault {
+		if i == defaultAt {
 			x = c.Put(x+2, y, "default", theme.Muted)
+		}
+		if unreachable {
+			x = c.Put(x+2, y, "unreachable", theme.Muted)
 		}
 		x += 3
 	}
 	y++
+	if choice, ok := m.nodeChoice(); ok {
+		m.drawNodeState(c, y, w, choice)
+		return y + 2
+	}
 	name := m.remote()
 	p := m.probes[name]
 	switch {
@@ -847,9 +912,32 @@ func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
 	return y + 2
 }
 
+func (m *NewFactoryModel) placeNames() []string {
+	names := []string{"this machine"}
+	for _, n := range m.Context.Nodes {
+		names = append(names, shortName(n.Name))
+	}
+	return append(names, m.Context.Remotes...)
+}
+
+func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeChoice) {
+	short := shortName(choice.Name)
+	p := m.probes[choice.Name]
+	switch {
+	case choice.Unreachable:
+		c.PutMax(3, y, "✗ "+short+" is unreachable, so nothing starts there now.", theme.FgInk(theme.Red), w-3)
+	case !p.done:
+		c.PutMax(3, y, "◌ checking "+short+"…", theme.FgInk(theme.Cyan), w-3)
+	case p.err != nil:
+		c.PutMax(3, y, "✗ "+p.err.Error(), theme.FgInk(theme.Red), w-3)
+	default:
+		c.PutMax(3, y, "↔ "+p.text, theme.FgInk(theme.Cyan), w-3)
+	}
+}
+
 func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	repo := m.selectedRepo()
-	if name := m.remote(); name != "" {
+	if name := m.placeName(); name != "" {
 		m.drawRemotePreview(c, x, y, w, name)
 		return
 	}

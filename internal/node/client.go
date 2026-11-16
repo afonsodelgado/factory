@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,12 +11,20 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
-const answerWait = 2 * time.Second
+const (
+	answerWait  = 2 * time.Second
+	connectWait = 5 * time.Second
+	streamIdle  = 2*heartbeat + 5*time.Second
+)
+
+var errStalled = errors.New("the node's event stream went quiet")
 
 type Client struct {
 	HTTP *http.Client
@@ -151,4 +160,60 @@ func AttachCommand(ctx context.Context, c *Client, name string, r host.AttachReq
 		return nil, err
 	}
 	return []string{"ssh", "-t", "-o", "ClearAllForwardings=yes", name, "factory", "host", "attach", view}, nil
+}
+
+func (c *Client) Follow(ctx context.Context, snapshot func(Snapshot), beat func()) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var stalled atomic.Bool
+	idle := time.AfterFunc(connectWait, func() {
+		stalled.Store(true)
+		cancel()
+	})
+	defer idle.Stop()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+"/api/events", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&failure)
+		return StatusError{Status: resp.StatusCode, Message: failure.Error}
+	}
+	idle.Reset(streamIdle)
+	lines := bufio.NewScanner(resp.Body)
+	lines.Buffer(make([]byte, 64*1024), 16<<20)
+	kind := ""
+	for lines.Scan() {
+		idle.Reset(streamIdle)
+		line := lines.Text()
+		data, isData := strings.CutPrefix(line, "data: ")
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			kind = strings.TrimPrefix(line, "event: ")
+		case isData && kind == "unavailable":
+			return ErrUnavailable
+		case isData && kind == "snapshot":
+			var s Snapshot
+			if json.Unmarshal([]byte(data), &s) == nil {
+				snapshot(s)
+			}
+		case strings.HasPrefix(line, ":"):
+			beat()
+		}
+	}
+	if stalled.Load() {
+		return errStalled
+	}
+	if err := lines.Err(); err != nil {
+		return err
+	}
+	return errors.New("the node closed its event stream")
 }

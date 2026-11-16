@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/afonsodelgado/factory/internal/catalog"
+	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -291,7 +294,7 @@ func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *tes
 }
 
 func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(t *testing.T) {
-	actions := &fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}
+	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}}
 	n := NewNodes(NodesContext{Machine: "macbook", Tailnet: "tail5e2c.ts.net", Version: "0.9.4", Factories: 2, NeedsYou: 1, Phone: actions.status}, actions)
 	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
 	golden.RequireEqual(t, n.View().Content)
@@ -307,6 +310,149 @@ func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(
 	}
 	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   esc back") {
 		t.Fatalf("⏎ on this machine in an 80×24 terminal, scrolled down, shows:\n%s\nwant the last fix, the summary and every key", details)
+	}
+}
+
+type fakeNodeActions struct {
+	fakePhoneActions
+	answers    map[string]NodeAnswer
+	candidates []node.Candidate
+	report     node.CheckReport
+	added      []string
+	removed    []string
+}
+
+func (f *fakeNodeActions) Ask(_ context.Context, name string, _ []string) (NodeAnswer, error) {
+	answer, ok := f.answers[name]
+	if !ok {
+		return NodeAnswer{}, errors.New("dial " + name + ": no route to host")
+	}
+	return answer, nil
+}
+
+func (f *fakeNodeActions) Seen(context.Context, string) (node.Peer, error) {
+	return node.Peer{Online: false, LastSeen: nodesNow.Add(-13 * time.Minute)}, nil
+}
+
+func (f *fakeNodeActions) Machines(context.Context) (node.Inventory, error) {
+	return node.Inventory{}, nil
+}
+
+func (f *fakeNodeActions) Candidates(context.Context) ([]node.Candidate, error) {
+	return f.candidates, nil
+}
+
+func (f *fakeNodeActions) Inspect(context.Context, string) (node.CheckReport, error) {
+	return f.report, nil
+}
+
+func (f *fakeNodeActions) Add(_ context.Context, _, name string) (node.AddResult, error) {
+	f.added = append(f.added, name)
+	return node.AddResult{}, nil
+}
+
+func (f *fakeNodeActions) Remove(_, id string) error {
+	f.removed = append(f.removed, id)
+	return nil
+}
+
+func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
+func (f *fakeNodeActions) Clone(context.Context, string, string, string) error { return nil }
+
+var nodesNow = time.Date(2026, 11, 16, 12, 10, 0, 0, time.Local)
+
+func threeNodes(t *testing.T) (*Nodes, *fakeNodeActions) {
+	t.Helper()
+	actions := &fakeNodeActions{
+		fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}},
+		answers: map[string]NodeAnswer{"homelab.tail5e2c.ts.net": {
+			Snapshot: node.Snapshot{Version: "0.9.4", Factories: []host.LocalFactory{{ID: "rate-limits"}, {ID: "doctor-json", NeedsSince: nodesNow}}},
+			Report:   node.Report{At: nodesNow},
+		}},
+	}
+	n := NewNodes(NodesContext{
+		Machine: "macbook", Tailnet: "tail5e2c.ts.net", Version: "0.9.4", Factories: 2, NeedsYou: 1, Phone: actions.status, Home: "https://macbook.tail5e2c.ts.net",
+		Others: []NodeRow{
+			{ID: "n-homelab", Name: "homelab.tail5e2c.ts.net", OS: "linux"},
+			{ID: "n-build-box", Name: "build-box.tail5e2c.ts.net", OS: "linux", Version: "0.9.3", Factories: 2, Contact: nodesNow.Add(-12 * time.Minute)},
+		},
+	}, actions)
+	n.Now = func() time.Time { return nodesNow }
+	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
+	runNodes(n, n.Init())
+	return n, actions
+}
+
+func runNodes(n *Nodes, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			runNodes(n, c)
+		}
+	case nil:
+	default:
+		_, next := n.Update(msg)
+		runNodes(n, next)
+	}
+}
+
+func pressNodes(n *Nodes, keys ...string) {
+	for _, k := range keys {
+		msg := tea.KeyPressMsg{Code: rune(k[0]), Text: k}
+		if special, ok := map[string]rune{"enter": tea.KeyEnter, "esc": tea.KeyEscape}[k]; ok {
+			msg = tea.KeyPressMsg{Code: special}
+		}
+		_, cmd := n.Update(msg)
+		runNodes(n, cmd)
+	}
+}
+
+func TestNodesPopupListsEveryNodeAndAnUnreachableOneAt90x30(t *testing.T) {
+	n, _ := threeNodes(t)
+	golden.RequireEqual(t, n.View().Content)
+}
+
+func TestNodesPopupRemovesAnotherNodeOnlyAfterYesAndNeverThisMachine(t *testing.T) {
+	n, actions := threeNodes(t)
+	pressNodes(n, "x")
+	if screen := n.View().Content; !strings.Contains(screen, "factory node uninstall") || len(actions.removed) > 0 {
+		t.Fatalf("x on this machine shows:\n%s\nremoved %v; want a refusal that points to factory node uninstall and nothing removed", screen, actions.removed)
+	}
+	pressNodes(n, "j", "j", "x")
+	golden.RequireEqual(t, n.View().Content)
+	pressNodes(n, "y")
+	if !slices.Equal(actions.removed, []string{"n-build-box"}) || strings.Contains(n.View().Content, "build-box") {
+		t.Errorf("y removed %v and the list shows:\n%s\nwant build-box gone, by its node id", actions.removed, n.View().Content)
+	}
+}
+
+func TestAddingANodeShowsDisabledMachinesAndOffersNoEnterForARefusal(t *testing.T) {
+	n, actions := threeNodes(t)
+	actions.candidates = []node.Candidate{
+		{Name: "studio.tail5e2c.ts.net", Short: "studio", OS: "macOS", State: node.StateNode, Detail: "factory 0.9.4", Selectable: true},
+		{Name: "nas.tail5e2c.ts.net", Short: "nas", OS: "linux", State: node.StateNoNode, Detail: "no node answers at https://nas.tail5e2c.ts.net", Fix: "factory node install", On: "nas"},
+		{Name: "ci-runner.tail5e2c.ts.net", Short: "ci-runner", OS: "linux", State: node.StateTagged, Detail: "tagged tag:ci, so it can't show it is yours", Fix: node.UntagFix, On: "ci-runner"},
+		{Name: "old-mini.tail5e2c.ts.net", Short: "old-mini", OS: "macOS", State: node.StateOffline, Detail: "offline", LastSeen: nodesNow.Add(-72 * time.Hour)},
+	}
+	actions.report = node.CheckReport{
+		Target:  node.Candidate{Name: "studio.tail5e2c.ts.net", Short: "studio", State: node.StateFunnel},
+		Refusal: "Funnel is on, so anyone on the internet reaches its node",
+		Checks: []node.Check{
+			{Name: "tailscale", Mark: node.MarkOK, Detail: "studio is online, logged in as alice@example.com"},
+			{Name: "funnel", Mark: node.MarkFail, Detail: "Funnel is on, so anyone on the internet reaches its node", Fix: "tailscale funnel --https=443 off", On: "studio"},
+		},
+	}
+	pressNodes(n, "a")
+	t.Run("pick", func(t *testing.T) { golden.RequireEqual(t, n.View().Content) })
+	pressNodes(n, "enter")
+	refusal := n.View().Content
+	t.Run("refusal", func(t *testing.T) { golden.RequireEqual(t, refusal) })
+	pressNodes(n, "enter")
+	if strings.Contains(refusal, "⏎") || len(actions.added) > 0 {
+		t.Fatalf("a refused check shows:\n%s\nand ⏎ added %v; want no ⏎ hint and nothing added", refusal, actions.added)
 	}
 }
 
@@ -359,6 +505,31 @@ func TestNewFactoryChecksIDsOnRemotesWithoutWaitingForThem(t *testing.T) {
 	}
 	if here := typed("tag-search", "right", "left", "enter"); here.step != 2 {
 		t.Error("an unreachable remote blocked a factory on this machine")
+	}
+}
+
+func TestNewFactoryStartsOnTheDefaultNodeAndNeverFallsBackFromAnUnreachableOne(t *testing.T) {
+	context := NewContext{
+		Repos:  []RepoOption{{Name: "cowork", Path: "/r/cowork", GitURL: "git@github.com:acme/cowork.git"}},
+		Nodes:  []NodeChoice{{Name: "build-box.tail5e2c.ts.net", Unreachable: true}, {Name: "homelab.tail5e2c.ts.net"}},
+		Target: "build-box.tail5e2c.ts.net",
+	}
+	m := NewFactory(context)
+	m.Update(tea.WindowSizeMsg{Width: 86, Height: 26})
+	for _, r := range "csv" {
+		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.step != 1 || m.node() != "build-box.tail5e2c.ts.net" {
+		t.Fatalf("⏎ with the unreachable default node went to step %d on %q; want it held there, never moved to this machine", m.step, m.node())
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m.Update(probedMsg{remote: "homelab.tail5e2c.ts.net", text: "homelab is ready"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.prompt.text = "Export contacts."
+	m.start()
+	if r, _ := m.Result(); r.(NewResult).Node != "homelab.tail5e2c.ts.net" || r.(NewResult).Remote != "" {
+		t.Errorf("picking homelab started %+v; want it created on homelab", r)
 	}
 }
 

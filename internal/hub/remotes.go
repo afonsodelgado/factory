@@ -85,6 +85,7 @@ type remoteMsg struct {
 
 type attachedMsg struct {
 	key, role, token, view string
+	words                  []string
 	err                    error
 }
 
@@ -374,6 +375,9 @@ func remotePath(f factory.Factory, path string) string {
 func (m *Model) linkOf(f factory.Factory) *link { return m.link(f.Remote.Name) }
 
 func (m *Model) unreachable(f factory.Factory) bool {
+	if f.OnNode() {
+		return m.nodeUnreachable(f)
+	}
 	return f.Remote != nil && m.linkOf(f).state(m.Now()) != connected
 }
 
@@ -381,6 +385,9 @@ var pastTense = map[string]string{"wake": "woken", "pause": "paused", "archive":
 
 func (m *Model) remoteAct(it Item, action string, fields map[string]any) error {
 	f := it.Factory
+	if f.OnNode() {
+		return m.nodeAct(it, action)
+	}
 	if m.unreachable(f) {
 		return fmt.Errorf("%s is unreachable, so %s was not %s. Nothing changed.", f.Remote.Name, f.Label(), pastTense[action])
 	}
@@ -512,6 +519,9 @@ func (m *Model) attachSelected() tea.Cmd {
 	if !ok || it.Factory.Remote == nil || m.Engine == nil || m.unreachable(it.Factory) {
 		return nil
 	}
+	if it.Factory.OnNode() {
+		return m.attachOnNode(it)
+	}
 	w := m.wires[it.Factory.Key()]
 	var cmds []tea.Cmd
 	if w.Pane != nil {
@@ -523,10 +533,9 @@ func (m *Model) attachSelected() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *Model) attach(it Item, role, token string) tea.Cmd {
-	key := it.Factory.Key()
+func (m *Model) mayAttach(key, role, token string) bool {
 	if _, ok := m.proxyPane(key, role, token); ok {
-		return nil
+		return false
 	}
 	if m.attempts == nil {
 		m.attempts = map[string]attempt{}
@@ -534,9 +543,17 @@ func (m *Model) attach(it Item, role, token string) tea.Cmd {
 	id := key + "|" + role + "|" + token
 	a := m.attempts[id]
 	if a.busy || m.Now().Sub(a.at) < attachRetry {
-		return nil
+		return false
 	}
 	m.attempts[id] = attempt{at: m.Now(), busy: true}
+	return true
+}
+
+func (m *Model) attach(it Item, role, token string) tea.Cmd {
+	key := it.Factory.Key()
+	if !m.mayAttach(key, role, token) {
+		return nil
+	}
 	target := remote.PaneTarget{Target: remote.Target{ID: it.Factory.Label(), Incarnation: it.Factory.Remote.Incarnation}, Role: role, Token: token}
 	cfg, name := m.Config, it.Factory.Remote.Name
 	return func() tea.Msg {
@@ -565,12 +582,22 @@ func (m *Model) attached(msg attachedMsg) tea.Cmd {
 	return m.load()
 }
 
-func (m *Model) openProxy(it Item, msg attachedMsg) error {
+func (m *Model) proxyWords(it Item, msg attachedMsg) ([]string, error) {
+	if msg.words != nil {
+		return msg.words, nil
+	}
 	client, err := remote.For(m.Config, it.Factory.Remote.Name)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat([]string{"ssh"}, client.Args(true, []string{"factory", "host", "attach", msg.view})), nil
+}
+
+func (m *Model) openProxy(it Item, msg attachedMsg) error {
+	words, err := m.proxyWords(it, msg)
 	if err != nil {
 		return err
 	}
-	words := slices.Concat([]string{"ssh"}, client.Args(true, []string{"factory", "host", "attach", msg.view}))
 	quoted := make([]string, len(words))
 	for i, w := range words {
 		quoted[i] = factory.ShellQuote(w)
@@ -597,7 +624,7 @@ func (m *Model) dropProxies() {
 		return
 	}
 	for _, p := range m.snap.Panes {
-		if !strings.HasPrefix(p.Repo, "remote:") {
+		if !strings.HasPrefix(p.Repo, "remote:") && !strings.HasPrefix(p.Repo, "node:") {
 			continue
 		}
 		if _, listed := m.snap.Find(p.Repo); !listed {
@@ -680,6 +707,9 @@ func (m *Model) forgetRemote(key string) error {
 }
 
 func (m *Model) groupOf(f factory.Factory) selector.Group {
+	if f.OnNode() {
+		return m.nodeGroup(f)
+	}
 	if f.Remote == nil {
 		return selector.Group{Name: f.RepoName(), Path: tilde(f.Repo)}
 	}

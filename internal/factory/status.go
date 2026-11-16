@@ -42,6 +42,15 @@ func (s Status) String() string {
 	return statusWords[s]
 }
 
+func ParseStatus(word string) (Status, bool) {
+	for s, w := range statusWords {
+		if w == word {
+			return s, true
+		}
+	}
+	return Running, false
+}
+
 func (s Status) Asleep() bool {
 	return s == Stalled || s == Exited || s == Gone
 }

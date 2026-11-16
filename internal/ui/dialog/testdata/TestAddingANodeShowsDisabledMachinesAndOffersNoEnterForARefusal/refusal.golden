@@ -1,0 +1,28 @@
+ [1;38;2;247;118;142mstudio can't be added[m                                                           [38;2;86;95;137m2 of 2[m 
+                                                                                        
+   [38;2;158;206;106m✓[m [38;2;169;177;214mtailscale[m    [38;2;169;177;214mstudio is online, logged in as alice@example.com[m                      
+   [38;2;247;118;142m✗[m [38;2;169;177;214mfunnel[m       [38;2;169;177;214mFunnel is on, so anyone on the internet reaches its node[m              
+                  [38;2;86;95;137mfix[m  [38;2;86;95;137mon studio  [m[38;2;192;202;245mtailscale funnel --https=443 off[m                      
+                                                                                        
+ [38;2;247;118;142m✗ factory never adds a node the internet can reach, and a node with Funnel on refuses[m  
+ [38;2;247;118;142mevery request until it is off. Nothing was changed.[m                                    
+                                                                                        
+ [38;2;169;177;214mTurn Funnel off on studio, then r checks again.[m                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;169;177;214mr check again   esc back[m                                                               

@@ -55,6 +55,13 @@ type NewContext struct {
 	Remotes   []string     `json:"remotes,omitempty"`
 	Default   string       `json:"default,omitempty"`
 	Elsewhere []Existing   `json:"elsewhere,omitempty"`
+	Nodes     []NodeChoice `json:"nodes,omitempty"`
+	Target    string       `json:"target,omitempty"`
+}
+
+type NodeChoice struct {
+	Name        string `json:"name"`
+	Unreachable bool   `json:"unreachable,omitempty"`
 }
 
 type ToolOption struct {
@@ -76,6 +83,7 @@ type NewResult struct {
 	Select     string                        `json:"select,omitempty"`
 	Wake       bool                          `json:"wake,omitempty"`
 	Remote     string                        `json:"remote,omitempty"`
+	Node       string                        `json:"node,omitempty"`
 }
 
 type SettingsContext struct {
@@ -174,10 +182,14 @@ type RemoteRow struct {
 }
 
 type CheckRow struct {
-	Name   string `json:"name"`
-	Mark   string `json:"mark"`
-	Detail string `json:"detail"`
-	Fix    string `json:"fix"`
+	Name   string   `json:"name"`
+	Mark   string   `json:"mark"`
+	Detail string   `json:"detail"`
+	Fix    string   `json:"fix"`
+	On     string   `json:"on,omitempty"`
+	Lines  []string `json:"lines,omitempty"`
+	ActKey string   `json:"act_key,omitempty"`
+	Act    string   `json:"act,omitempty"`
 }
 
 type RemoteActions interface {

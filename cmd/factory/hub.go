@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -95,9 +98,14 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		Watch:   watch,
 		Open:    openURL,
 		Tunnels: tunnels,
-		Bell:    os.Stderr,
-		Notify:  notify,
-		Icons:   icons,
+		Roster: func(ctx context.Context) (node.Roster, error) {
+			var roster node.Roster
+			err := runtime.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster)
+			return roster, err
+		},
+		Bell:   os.Stderr,
+		Notify: notify,
+		Icons:  icons,
 		DialogCommand: func(kind string) string {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},

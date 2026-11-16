@@ -283,6 +283,9 @@ type LocalFactory struct {
 	Message     Eligibility  `json:"message"`
 	CanPause    bool         `json:"can_pause"`
 	CanWake     bool         `json:"can_wake"`
+	Pane        string       `json:"pane,omitempty"`
+	StageRole   string       `json:"stage_role,omitempty"`
+	StagePane   string       `json:"stage_pane,omitempty"`
 }
 
 type LocalPage struct {
@@ -368,6 +371,12 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	}
 	if it.Status == factory.NeedsYou {
 		lf.NeedsSince = NeedsSince(it)
+	}
+	if lf.CanPause {
+		lf.Pane = it.Pane.Token
+	}
+	if s := it.Stage; s != nil && s.Pane != nil && !s.Pane.Dead {
+		lf.StageRole, lf.StagePane = s.Run.Role, s.Pane.Token
 	}
 	for _, item := range AttentionItems(it, m.snap.At, m.threadCounter()) {
 		lf.Items = append(lf.Items, m.localItem(it, item, target))
