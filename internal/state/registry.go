@@ -27,6 +27,7 @@ type Entry struct {
 	Supervisor  AgentSetting `json:"supervisor,omitzero"`
 	Branches    []string     `json:"branches,omitempty"`
 	Incarnation string       `json:"incarnation,omitempty"`
+	Paused      bool         `json:"paused,omitempty"`
 
 	Agents map[string]AgentSetting `json:"agents,omitempty"`
 }

@@ -238,12 +238,12 @@ func TestRemoteAnswerKeepsTheDraftWhenTheServerIsAwayOrSilent(t *testing.T) {
 
 	m.links["homelab"].ok = true
 	m.deliver("handled")
-	mark, sent := m.panel.sent[key]
+	mark, sent := m.claim(key)
 	if len(m.later) != 1 || !sent {
 		t.Fatalf("a reachable server got %d sends", len(m.later))
 	}
 	m.answered(answeredMsg{mark: mark, err: remote.ErrUncertain})
-	if _, still := m.panel.sent[key]; still || !strings.Contains(m.panel.refused[key], "Outcome unknown") {
+	if _, still := m.claim(key); still || !strings.Contains(m.panel.refused[key], "Outcome unknown") {
 		t.Fatalf("a lost reply reads %q; want outcome unknown, never a claim that it was sent or not", m.panel.refused[key])
 	}
 }

@@ -1,8 +1,6 @@
 package hub
 
 import (
-	"time"
-
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
@@ -33,19 +31,6 @@ func (m *Model) execution() *host.Runtime {
 	}
 	r.SetSnapshot(localOnly(m.snap))
 	r.Pages = m.Review
-	r.Queued = func(a host.Answer) {
-		if it, ok := m.snap.Find(a.Factory); ok {
-			a.Draft = m.draftPath(it.Factory, a.ItemID)
-		}
-		m.panel.sent[a.Factory+"|"+a.ItemID] = a
-	}
-	r.Pending = m.stillQueued
-	r.Sent = func(a host.Answer, at time.Time) {
-		if pending, ok := m.panel.sent[a.Factory+"|"+a.ItemID]; ok && a.Draft == "" {
-			a.Draft = pending.Draft
-		}
-		m.recordSent(a, at)
-	}
 	r.Refused = m.dropAnswer
 	if first && m.Config.StateDir != "" {
 		m.report(r.Recover())

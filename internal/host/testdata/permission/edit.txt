@@ -1,0 +1,13 @@
+────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ src/export.ts
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 12  export function rows(data) {
+ 13 -  return data.map(toRow)
+ 13 +  return data.filter(Boolean).map(toRow)
+ 14  }
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to export.ts?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No, and tell Claude what to do differently (esc)

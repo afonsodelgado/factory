@@ -135,6 +135,18 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.TypeAnswer(r)
 		}
+	case "local":
+		value = m.Local()
+	case "act":
+		var r ActionRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.act(request.Op, r)
+		}
+	case "receipt":
+		var r ReceiptRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.LookupReceipt(r)
+		}
 	default:
 		return Message{T: "error", Error: "unknown host action: " + request.T}
 	}

@@ -434,7 +434,7 @@ func (m *Model) deliverRemote(it Item, mark sentMark, text string) {
 		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable."
 		return
 	}
-	m.panel.sent[key] = mark
+	m.execution().PutClaim(mark)
 	payload := map[string]any{"id": f.Label(), "incarnation": f.Remote.Incarnation, "ItemID": mark.ItemID, "ItemSince": mark.ItemSince, "Text": text, "LeavesOpen": mark.LeavesOpen}
 	cfg, name := m.Config, f.Remote.Name
 	m.later = append(m.later, func() tea.Msg {
@@ -448,13 +448,13 @@ func (m *Model) answered(msg answeredMsg) {
 	key := msg.mark.Factory + "|" + msg.mark.ItemID
 	switch {
 	case errors.Is(msg.err, remote.ErrUncertain):
-		delete(m.panel.sent, key)
+		m.execution().DropClaim(key)
 		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
-		delete(m.panel.sent, key)
+		m.execution().DropClaim(key)
 		m.panel.refused[key] = "Not sent. " + withFullStop(msg.err.Error())
 	default:
-		m.recordSent(msg.mark, msg.at)
+		m.execution().RecordSent(msg.mark, msg.at)
 	}
 }
 

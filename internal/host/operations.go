@@ -123,6 +123,9 @@ func (m *Runtime) saveQueue(queue []QueuedType) bool {
 
 func (m *Runtime) Recover() error {
 	m.allowRememberedTunnels()
+	if err := m.loadReceipts(); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(m.queuePath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -134,8 +137,8 @@ func (m *Runtime) Recover() error {
 		return err
 	}
 	for _, q := range m.typeQueue {
-		if q.Answers != nil && m.Queued != nil {
-			m.Queued(*q.Answers)
+		if q.Answers != nil {
+			m.restoreClaim(*q.Answers)
 		}
 		if q.Delivers != "" {
 			m.inboxQueued[q.Delivers] = true
