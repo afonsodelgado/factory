@@ -170,7 +170,7 @@ func startReview(cfg *state.Config) (pages *review.Server, phoneProblem string, 
 		return nil, "", err
 	}
 	if err := pages.ServeMobile(review.MobileSocket(cfg.StateDir)); err != nil {
-		return pages, "The phone cannot open review pages: " + err.Error() + ". A shorter FACTORY_STATE_DIR fixes a socket path that is too long.", nil
+		return pages, "Phone review pages are off; a shorter FACTORY_STATE_DIR may fix it: " + err.Error(), nil
 	}
 	return pages, "", nil
 }
