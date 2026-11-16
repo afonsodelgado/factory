@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func (s *Server) Store(f Factory) (*Store, error) {
@@ -91,7 +92,20 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &n) {
 		return
 	}
+	n.Anchor.URL = withoutGrant(n.Anchor.URL, r.Header.Get(PrefixHeader))
 	s.respond(w, r, func(st *Store) (any, error) { return st.Create(n) })
+}
+
+func withoutGrant(address, prefix string) string {
+	if prefix == "" || address == "" {
+		return address
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return ""
+	}
+	u.Path, u.RawPath = strings.TrimPrefix(u.Path, prefix), ""
+	return u.String()
 }
 
 func (s *Server) updateThread(w http.ResponseWriter, r *http.Request) {

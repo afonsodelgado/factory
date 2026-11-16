@@ -204,6 +204,20 @@ func TestAPairingCodeWorksOnceWithinItsTTL(t *testing.T) {
 	if resp := g.do("POST", "/api/pair/exchange", `{"code":"`+late+`"}`); resp.StatusCode != 410 {
 		t.Fatalf("an expired code answered %d; want 410", resp.StatusCode)
 	}
+
+	for range failuresKept {
+		g.do("POST", "/api/pair/status", `{"code":"wrong"}`)
+	}
+	fresh, _, _ := g.server.Store.NewCode(g.now)
+	resp := g.do("POST", "/api/pair/exchange", `{"code":"`+fresh+`","name":"\u001b[31mEVIL\u001b[0m\n\u001b]0;pwned\u0007第二行🙂\r"}`)
+	var exchanged struct{ Device Device }
+	json.NewDecoder(resp.Body).Decode(&exchanged)
+	if resp.StatusCode != 200 {
+		t.Fatalf("a code minted after a burst of wrong ones answered %d; want it to pair, so a tailnet client cannot lock the owner out", resp.StatusCode)
+	}
+	if exchanged.Device.Name != "[31mEVIL[0m ]0;pwned第二行🙂" {
+		t.Fatalf("the device was named %q; want its control characters dropped so the hub and CLI never print raw terminal escapes", exchanged.Device.Name)
+	}
 }
 
 func TestRevokingAPhoneClosesItsOpenStream(t *testing.T) {
@@ -254,7 +268,11 @@ func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "plan.html"), []byte("<body>pdf plan</body>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}, {Key: "k2", Label: "pdf", Dir: other}})
 	sockets, err := os.MkdirTemp("", "fr")
 	if err != nil {
 		t.Fatal(err)
@@ -289,8 +307,28 @@ func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
 	if resp := g.do("GET", "/api/snapshot", ""); resp.StatusCode != 401 {
 		t.Fatalf("the phone API without the cookie answered %d; a grant must not open it", resp.StatusCode)
 	}
-	if resp := g.do("POST", "/rt/"+token+"/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Origin", "", "Origin", "null"); resp.StatusCode != 200 {
+	comment := `{"page":"plan.html","intent":"fix","text":"Bigger.","anchor":{"url":"https://` + testHost + grantPath + `"}}`
+	if resp := g.do("POST", "/rt/"+token+"/r/k/_api/threads", comment, "Origin", "", "Origin", "null"); resp.StatusCode != 200 {
 		t.Fatalf("the granted page's comment answered %d", resp.StatusCode)
+	}
+	if stored, _ := os.ReadFile(review.StorePath(dir)); !strings.Contains(string(stored), `/r/k/plan.html"`) || strings.Contains(string(stored), token) {
+		t.Fatalf("threads.json holds %s; want the page's address without the grant, which works as a credential", stored)
+	}
+	if resp := g.do("OPTIONS", "/rt/"+token+"/r/k/_api/approve", "", "Origin", "", "Origin", "null", "Content-Type", ""); resp.StatusCode != 204 {
+		t.Fatalf("the sandboxed page's preflight answered %d; want 204 so its JSON comments and approvals can follow", resp.StatusCode)
+	}
+	for name, headers := range map[string][]string{
+		"a text/plain approval":           {"Origin", "", "Origin", "null", "Content-Type", "", "Content-Type", "text/plain"},
+		"an approval from another origin": {"Origin", "", "Origin", "https://evil.example"},
+	} {
+		if resp := g.do("POST", "/rt/"+token+"/r/k/_api/approve", `{"page":"plan.html"}`, headers...); resp.StatusCode != 403 && resp.StatusCode != 415 {
+			t.Fatalf("%s through a grant answered %d; want it refused before it reaches the factory", name, resp.StatusCode)
+		}
+	}
+	for _, path := range []string{"/r/k2/plan.html", "/r/k%2F..%2Fk2/plan.html"} {
+		if resp := g.do("GET", "/rt/"+token+path, ""); resp.StatusCode == 200 {
+			t.Fatalf("a grant minted for one factory opened %s: %s; want it limited to its own factory", path, body(resp))
+		}
 	}
 	if resp := g.do("POST", "/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Cookie", cookie); resp.StatusCode != 405 {
 		t.Fatalf("a comment sent straight to the cookie-protected review path answered %d; want it refused", resp.StatusCode)

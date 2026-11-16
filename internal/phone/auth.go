@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -92,6 +93,7 @@ func (s Store) NewCode(now time.Time) (string, time.Time, error) {
 	err := update(s, codesFile, func(c *codes) error {
 		c.live(now)
 		c.Codes = append(c.Codes, code{Hash: hashOf(given), Expires: expires})
+		c.Failures = nil
 		return nil
 	})
 	return given, expires, err
@@ -108,7 +110,7 @@ func (s Store) CodeExpiry(given string, now time.Time) (time.Time, error) {
 }
 
 func (s Store) Exchange(given, name string, now time.Time) (Device, string, error) {
-	name = strings.TrimSpace(name)
+	name = printable(name)
 	switch {
 	case name == "":
 		name = "Phone"
@@ -131,6 +133,19 @@ func (s Store) Exchange(given, name string, now time.Time) (Device, string, erro
 		return s.write(devicesFile, d)
 	})
 	return device.Public(), secret, err
+}
+
+func printable(name string) string {
+	visible := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return -1
+		}
+		return r
+	}, name)
+	return strings.Join(strings.Fields(visible), " ")
 }
 
 func (s Store) takeCode(given string, now time.Time, consume bool) (time.Time, error) {
