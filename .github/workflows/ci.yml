@@ -31,6 +31,13 @@ jobs:
               - 'bundle/**'
               - 'go.mod'
               - 'go.sum'
+              - 'apps/pwa/**'
+              - 'apps/web/public/fonts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - '.nvmrc'
               - 'Makefile'
               - '.gitignore'
               - '.github/workflows/ci.yml'
@@ -38,6 +45,7 @@ jobs:
             web:
               - 'apps/**'
               - 'packages/**'
+              - 'bundle/review/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -66,6 +74,15 @@ jobs:
       - name: Install tmux and jq (macos)
         if: runner.os == 'macOS'
         run: brew install tmux jq
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - run: make pwa-build
+      - run: make pwa-embed
       - run: make go-build
       - run: make go-lint
       - run: make go-test
@@ -88,6 +105,10 @@ jobs:
       - run: make web-typecheck
       - run: make web-test
       - run: make web-build
+      - run: make pwa-lint
+      - run: make pwa-typecheck
+      - run: make pwa-test
+      - run: make pwa-build
 
   ci:
     name: ci

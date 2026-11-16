@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"time"
 
@@ -18,6 +19,7 @@ const (
 
 type Setup struct {
 	Config *state.Config
+	Bundle fs.FS
 	Start  func() error
 	Now    func() time.Time
 }
@@ -108,6 +110,9 @@ func (s Setup) Enable() error {
 	}
 	if settings.Hostname == "" {
 		return errors.New("set this machine's Tailscale name first: factory phone configure --hostname devbox.tail1234.ts.net")
+	}
+	if _, err := App(s.Bundle); err != nil {
+		return err
 	}
 	public, err := s.store().VAPIDKey(settings.VAPIDPublicKey)
 	if err != nil {

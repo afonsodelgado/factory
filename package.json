@@ -6,10 +6,10 @@
     "node": "24.x"
   },
   "scripts": {
-    "build": "make web-build",
-    "lint": "make web-lint",
-    "typecheck": "make web-typecheck",
-    "test": "make web-test",
+    "build": "make web-build pwa-build",
+    "lint": "make web-lint pwa-lint",
+    "typecheck": "make web-typecheck pwa-typecheck",
+    "test": "make web-test pwa-test",
     "dev": "make web-dev"
   },
   "devDependencies": {

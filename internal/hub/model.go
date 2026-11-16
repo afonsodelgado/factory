@@ -600,7 +600,7 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.reviewRequest(e)
 	case "delete":
 		return m.deleteRequest(e)
-	case "local", "act", "receipt":
+	case "local", "act", "receipt", "preview":
 		e.Respond(m.execution().Handle(e.Message))
 	case "paste":
 		if e.Pane == "panel" {

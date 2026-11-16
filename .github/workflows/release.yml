@@ -11,6 +11,13 @@ on:
       - 'bundle/**'
       - 'go.mod'
       - 'go.sum'
+      - 'apps/pwa/**'
+      - 'apps/web/public/fonts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+      - '.nvmrc'
       - '.github/workflows/release.yml'
 
 permissions:
@@ -55,6 +62,20 @@ jobs:
       - name: Install tmux and jq
         if: steps.tag.outputs.skip != 'true'
         run: sudo apt-get update && sudo apt-get install -y tmux jq
+      - uses: actions/setup-node@v4
+        if: steps.tag.outputs.skip != 'true'
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        if: steps.tag.outputs.skip != 'true'
+        with:
+          run_install: false
+      - name: Build and embed the phone app
+        if: steps.tag.outputs.skip != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          make pwa-build
+          make pwa-embed
       - if: steps.tag.outputs.skip != 'true'
         run: go test ./...
       - name: Build the four binaries
@@ -69,6 +90,13 @@ jobs:
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
               -ldflags "-s -w -X main.version=${TAG}" \
               -o "dist/factory_${os}_${arch}" ./cmd/factory
+          done
+      - name: Check that every binary carries the phone app
+        if: steps.tag.outputs.skip != 'true'
+        run: |
+          stamp=$(jq -r .version apps/pwa/dist/build.json)
+          for binary in dist/factory_*; do
+            grep -q "shell-$stamp" "$binary" || { echo "$binary lacks the phone app $stamp"; exit 1; }
           done
       - name: Publish the release
         if: steps.tag.outputs.skip != 'true'
