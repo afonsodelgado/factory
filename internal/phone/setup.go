@@ -134,7 +134,7 @@ func (s Setup) Disable() error {
 
 func (s Setup) Stop() error {
 	if !Running(s.Config.StateDir) {
-		return nil
+		return Release(s.Config)
 	}
 	if err := s.control(host.Message{T: "stop"}, nil); err != nil {
 		return err

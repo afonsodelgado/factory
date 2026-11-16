@@ -79,9 +79,14 @@ func serve(cfg *state.Config) error {
 	}
 	go server.Poll(ctx)
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	go phone.KeepOwner(ctx, cfg, func() error { return startHost(cfg, tm, true) }, reportOnce())
+	owned := make(chan struct{})
+	go func() {
+		defer close(owned)
+		phone.KeepOwner(ctx, cfg, func() error { return startHost(cfg, tm, true) }, reportOnce())
+	}()
 	fmt.Printf("factory serve: %s on 127.0.0.1:%d\n", settings.Origin(), settings.ListenPort())
 	<-ctx.Done()
+	<-owned
 	return phone.Release(cfg)
 }
 

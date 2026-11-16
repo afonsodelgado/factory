@@ -185,4 +185,20 @@ func TestTheRuntimeChangesHandsBetweenServeAndTheHubWithoutLosingAQueuedMessage(
 	}
 }
 
+func TestPhoneStopReleasesAFallbackWhoseServeDied(t *testing.T) {
+	m := newPhoneMachine(t)
+	serve := m.command("serve")
+	if err := serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { serve.Process.Kill(); serve.Wait() })
+	fallback := m.waitForOwner(t, phone.ModeLocal)
+	serve.Process.Kill()
+	serve.Wait()
+	if out, err := m.command("phone", "stop").CombinedOutput(); err != nil {
+		t.Fatalf("phone stop: %v\n%s", err, out)
+	}
+	waitFor(t, "phone stop to release the fallback its dead serve left behind", func() bool { return !alive(fallback.PID) })
+}
+
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
