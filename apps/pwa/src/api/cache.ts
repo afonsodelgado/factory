@@ -1,4 +1,4 @@
-import type { Receipt, Snapshot } from "./types.ts";
+import type { Receipt, Roster, Snapshot } from "./types.ts";
 
 export const DATABASE = "factory-phone";
 const STORE = "records";
@@ -9,6 +9,7 @@ export type MessageResult = { text: string; receipt: Receipt; at: string };
 export type Pending = {
   operation: string;
   factory: string;
+  node?: string;
   item?: string;
   at: string;
 };
@@ -49,6 +50,8 @@ const scope = (account: string, incarnation: string) =>
   `${account}:${incarnation}`;
 
 export const accountOf = (node: string, owner: string) => `${node}/${owner}`;
+export const ownerOf = (account: string) =>
+  account.slice(account.indexOf("/") + 1);
 
 export const cache = {
   installation: async () => {
@@ -73,6 +76,24 @@ export const cache = {
       await remove(name);
     }
     await remove("device");
+  },
+
+  roster: (account: string) => read<Roster>(`roster:${account}`),
+  saveRoster: (account: string, roster: Roster) =>
+    write(`roster:${account}`, roster),
+  announced: (account: string) => read<string[]>(`announced:${account}`),
+  announce: (account: string, nodes: string[]) =>
+    write(`announced:${account}`, nodes),
+
+  keepNodes: async (owner: string, nodes: string[]) => {
+    for (const key of await keys()) {
+      const name = String(key);
+      const scope = name.split(":")[1] ?? "";
+      const node = scope.slice(0, scope.indexOf("/"));
+      const unlisted =
+        scope.endsWith(`/${owner}`) && node && !nodes.includes(node);
+      if (unlisted) await remove(name);
+    }
   },
 
   snapshot: (account: string) => read<SavedSnapshot>(`snapshot:${account}`),

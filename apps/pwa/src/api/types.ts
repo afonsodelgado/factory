@@ -91,14 +91,76 @@ export type LocalFactory = {
   message: Eligibility;
   can_pause: boolean;
   can_wake: boolean;
+  node?: string;
 };
 
 export type Snapshot = {
   node?: string;
+  version?: string;
   revision: number;
   server_time: string;
   factories: LocalFactory[];
+  roster?: Roster;
 };
+
+export type Member = {
+  id: string;
+  name: string;
+  owner: string;
+  tailnet: string;
+  os?: string;
+  self?: boolean;
+  pending: number;
+};
+
+export type Roster = {
+  id: string;
+  home: string;
+  self: string;
+  removed?: boolean;
+  members: Member[];
+  leaving?: Member[];
+};
+
+export type Check = {
+  name: string;
+  mark: string;
+  detail: string;
+  fix?: string;
+  on?: string;
+  lines?: string[];
+  at: string;
+};
+
+export type Readiness = {
+  node: string;
+  at: string;
+  checks: Check[] | null;
+  problems: number;
+};
+
+export type Candidate = {
+  name: string;
+  short: string;
+  os: string;
+  state: string;
+  detail: string;
+  fix?: string;
+  on?: string;
+  last_seen?: string;
+  selectable: boolean;
+  hello?: { version: string; os: string };
+};
+
+export type CheckReport = {
+  target: Candidate;
+  checks: Check[] | null;
+  refusal?: string;
+  problems: number;
+  at: string;
+};
+
+export type Added = { member: Member; report: CheckReport; roster: Roster };
 
 export type PushState = {
   vapid_public_key: string;

@@ -3,6 +3,7 @@ import { api } from "./api/client.ts";
 import { FactoryDetail } from "./components/FactoryDetail.tsx";
 import { FactoryList } from "./components/FactoryList.tsx";
 import { AttentionItem } from "./components/AttentionItem.tsx";
+import { AddNode, CheckNode, NodeDetail } from "./components/Nodes.tsx";
 import { Exposed, Setup } from "./components/Setup.tsx";
 import { ThisPhone } from "./components/ThisPhone.tsx";
 import { AppShell, Refused } from "./components/AppShell.tsx";
@@ -29,6 +30,9 @@ export function App() {
   if (reach === "funnel") return <Exposed />;
   if (route.screen === "setup") return <Setup />;
   if (route.screen === "phone") return <ThisPhone />;
+  if (route.screen === "node") return <NodeDetail id={route.id} />;
+  if (route.screen === "add") return <AddNode />;
+  if (route.screen === "check") return <CheckNode name={route.name} />;
   if (route.screen === "link") return <LinkResolver notification={route.key} />;
   if (!wide) return <Stack route={route} />;
   const selected =

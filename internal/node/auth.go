@@ -19,6 +19,7 @@ type Gate struct {
 	Home        func() string
 	OpaquePath  string
 	RefusalPage func(w http.ResponseWriter, owner, login string)
+	ExposedPage func(w http.ResponseWriter, problem string, fixes []string)
 	Exposure    *Exposure
 }
 
@@ -30,7 +31,7 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			g.refuseAccount(w, r, login, problem)
 			return
 		case problem != "":
-		case g.exposed(w), g.cors(w, r):
+		case g.exposed(w, r), g.cors(w, r):
 			return
 		default:
 			status, problem = g.requestRefusal(r)
@@ -58,10 +59,14 @@ func (g Gate) untilExposed(parent context.Context) context.Context {
 
 func (g Gate) Principal(*http.Request) (string, bool) { return g.Owner, true }
 
-func (g Gate) exposed(w http.ResponseWriter) bool {
+func (g Gate) exposed(w http.ResponseWriter, r *http.Request) bool {
 	problem, fixes := g.Exposure.Refusal()
-	if problem == "" {
+	switch {
+	case problem == "":
 		return false
+	case g.ExposedPage != nil && opensPage(r):
+		g.ExposedPage(w, problem, fixes)
+		return true
 	}
 	reply(w, http.StatusForbidden, map[string]any{"error": problem, "funnel": true, "fixes": fixes})
 	return true

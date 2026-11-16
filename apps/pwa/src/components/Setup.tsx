@@ -163,13 +163,12 @@ export function Check(props: {
   label: ReactNode;
   detail?: ReactNode;
   warn?: boolean;
+  look?: [string, string];
   children?: ReactNode;
 }) {
-  const [glyph, tone] = props.ok
-    ? ["✓", "grn"]
-    : props.warn
-      ? ["!", "yel"]
-      : ["○", "org"];
+  const [glyph, tone] =
+    props.look ??
+    (props.ok ? ["✓", "grn"] : props.warn ? ["!", "yel"] : ["○", "org"]);
   return (
     <li>
       <span className={`g ${tone}`} aria-hidden="true">

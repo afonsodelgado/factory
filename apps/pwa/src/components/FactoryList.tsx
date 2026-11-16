@@ -4,7 +4,7 @@ import { clock, hostName, itemTag, kindLook, statusLook } from "../format.ts";
 import { usePushHealth, useNow } from "../hooks.ts";
 import { age, group, needsYou } from "../order.ts";
 import { paths } from "../route.ts";
-import { useApp } from "../state.tsx";
+import { useApp, type NodeView } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
 import { Link } from "./Link.tsx";
 
@@ -12,6 +12,7 @@ export function FactoryList({ selected }: { selected?: string }) {
   const { reach, snapshot } = useApp();
   return (
     <AppShell>
+      <Joined />
       {snapshot ? (
         <Populated factories={snapshot.factories} selected={selected} />
       ) : reach === "loading" || reach === "online" ? (
@@ -25,16 +26,45 @@ export function FactoryList({ selected }: { selected?: string }) {
   );
 }
 
+function Joined() {
+  const { joined, nodes } = useApp();
+  return joined.map((name) => {
+    const count =
+      nodes.find((n) => n.short === name)?.snapshot?.factories.length ?? 0;
+    return (
+      <div key={name} className="banner info" role="status">
+        <span className="gl" aria-hidden="true">
+          ↔
+        </span>
+        <span className="bh">{name} joined your nodes.</span>
+        <span className="x">
+          {count
+            ? `Its factories show here, marked ↔ ${name}.`
+            : `It has no factories yet. Those you start or move there show here, marked ↔ ${name}.`}{" "}
+          Nothing to set up on this phone.
+        </span>
+      </div>
+    );
+  });
+}
+
+function useLost() {
+  const { nodeOf } = useApp();
+  return (f: LocalFactory) => nodeOf(f).lost;
+}
+
 function Populated(props: { factories: LocalFactory[]; selected?: string }) {
-  const { savedAt } = useApp();
+  const { savedAt, multi, nodeOf } = useApp();
   const now = useNow();
-  const groups = group(props.factories);
+  const lost = useLost();
+  const groups = group(props.factories, lost);
   if (props.factories.length === 0)
     return (
       <>
         <Counts factories={props.factories} />
         <SetupNudge />
         <Empty />
+        <Asking />
       </>
     );
   return (
@@ -62,28 +92,73 @@ function Populated(props: { factories: LocalFactory[]; selected?: string }) {
           <span aria-hidden="true">✓ </span>Nothing needs you.
         </p>
       )}
-      {groups.repos.map((repo) => (
-        <section key={repo.repo}>
-          <h2 className="grp">
-            <span className="n">
-              <span aria-hidden="true">▪ </span>
-              {repo.name}
-            </span>
-            <span className="p">{repo.repo}</span>
-          </h2>
-          <Rows
-            factories={repo.factories}
-            selected={props.selected}
-            now={now}
-          />
-        </section>
-      ))}
+      {groups.repos.map((repo) => {
+        const node = multi ? nodeOf(repo.factories[0]) : undefined;
+        return (
+          <section key={`${repo.repo}:${repo.node ?? ""}`}>
+            <h2 className="grp">
+              <span className={`n${node?.lost ? " mute" : ""}`}>
+                <span aria-hidden="true">▪ </span>
+                {repo.name}
+              </span>
+              {node ? (
+                <NodeMark node={node} now={now} />
+              ) : (
+                <span className="p">{repo.repo}</span>
+              )}
+            </h2>
+            <Rows
+              factories={repo.factories}
+              selected={props.selected}
+              now={now}
+            />
+          </section>
+        );
+      })}
       <Done factories={groups.done} selected={props.selected} now={now} />
+      <Asking />
     </nav>
   );
 }
 
-function Counts({ factories }: { factories: LocalFactory[] }) {
+function NodeMark({ node, now }: { node: NodeView; now: number }) {
+  if (!node.lost) return <span className="nd">↔ {node.short}</span>;
+  const lostFor = node.savedAt ? ` · lost ${age(node.savedAt, now)}` : "";
+  return (
+    <span className="nd lost">
+      ↮ {node.short}
+      {lostFor}
+    </span>
+  );
+}
+
+function Asking() {
+  const { nodes, multi } = useApp();
+  const asking = nodes.filter((n) => n.reach === "loading" && !n.snapshot);
+  if (!multi || asking.length === 0) return null;
+  return (
+    <div aria-busy="true">
+      <p className="grp">
+        <span className="n mute">
+          ◌ asking {asking.map((n) => n.short).join(", ")}…
+        </span>
+      </p>
+      {[0, 1, 2].map((n) => (
+        <div key={n} className="skel" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+          <i className="w2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Counts(props: { factories: LocalFactory[] }) {
+  const lost = useLost();
+  const factories = props.factories.filter((f) => !lost(f));
+  const unreachable = props.factories.length - factories.length;
   const count = (words: string[]) =>
     factories.filter((f) => words.includes(f.status)).length;
   const need = factories.filter(needsYou).length;
@@ -93,6 +168,7 @@ function Counts({ factories }: { factories: LocalFactory[] }) {
     ["yel", "☾ {n} asleep", count(["stalled", "exited", "gone"])],
     ["cyn", "◌ {n} starting", count(["starting"])],
     ["red", "✕ {n} failed", count(["failed to start", "unreachable"])],
+    ["dk", "↮ {n} unreachable", unreachable],
   ];
   return (
     <p className="counts">
@@ -142,16 +218,25 @@ function Rows(props: RowsProps) {
   );
 }
 
+const lostLook = { glyph: "↮", tone: "dk" };
+
 function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
   const { factory, selected, now } = props;
-  const look = statusLook(factory.status);
-  const waiting = needsYou(factory);
+  const { multi, nodeOf } = useApp();
+  const node = nodeOf(factory);
+  const lost = node.lost && factory.status !== "done";
+  const look = lost ? lostLook : statusLook(factory.status);
+  const waiting = needsYou(factory) && !lost;
   const stage = waiting
     ? [factory.repo_name, factory.stage].filter(Boolean).join(" · ")
     : factory.stage;
+  const asOf =
+    lost && node.savedAt
+      ? [stage, `as of ${clock(node.savedAt)}`].filter(Boolean).join(", ")
+      : stage;
   return (
     <Link
-      className={`row${factory.status === "done" ? " done" : ""}${selected ? " on" : ""}`}
+      className={`row${factory.status === "done" ? " done" : ""}${lost ? " lost" : ""}${selected ? " on" : ""}`}
       href={paths.factory(factory.route)}
       aria-current={selected ? "true" : undefined}
     >
@@ -159,10 +244,13 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
         {look.glyph}
       </span>
       <span className="id">{factory.id}</span>
-      <span className={`w ${look.tone}`}>{factory.status}</span>
+      <span className={`w ${look.tone}`}>
+        {lost ? "unreachable" : factory.status}
+      </span>
       {factory.status === "done" ? null : (
         <span className="l2">
-          <span className="stage">{stage}</span>
+          {multi && waiting ? <span className="nd">↔ {node.short}</span> : null}
+          <span className="stage">{asOf}</span>
           <span className="age">{age(factory.needs_since, now)}</span>
         </span>
       )}
@@ -228,10 +316,11 @@ function Loading() {
 }
 
 function Empty() {
-  const host = hostName();
+  const { multi, nodes } = useApp();
+  const where = multi ? `your ${nodes.length} nodes` : hostName();
   return (
     <div className="empty">
-      <h2>No factories on {host}</h2>
+      <h2>No factories on {where}</h2>
       <p>
         Factories are started from the hub, not from the phone. Press{" "}
         <code>n</code> in the hub, or run{" "}

@@ -193,7 +193,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	app := phoneApp(ctx, cfg, api, pages, vapidKey)
 	exposure := &node.Exposure{Tailscale: ts}
 	go exposure.Watch(ctx)
-	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage, Exposure: exposure}
+	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage(cfg.NodeName()), ExposedPage: phone.ExposedPage(cfg.NodeName()), Exposure: exposure}
 	unixListener, err := node.ListenUnix(cfg.NodeSocket())
 	if err != nil {
 		n.close()
