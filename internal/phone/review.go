@@ -31,7 +31,7 @@ func ReviewProxy(socket string) http.Handler {
 			if errors.Is(r.Context().Err(), context.Canceled) {
 				return
 			}
-			if opensPage(r) {
+			if opensPage(r.Method, r.URL.Path) {
 				page(w, http.StatusServiceUnavailable, changingPage, nil)
 				return
 			}
@@ -40,8 +40,8 @@ func ReviewProxy(socket string) http.Handler {
 	}
 }
 
-func opensPage(r *http.Request) bool {
-	return r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/r/") && !strings.Contains(r.URL.Path, "/_api/")
+func opensPage(method, path string) bool {
+	return method == http.MethodGet && strings.HasPrefix(path, "/r/") && !strings.Contains(path, "/_api/")
 }
 
 func (s *Server) review(w http.ResponseWriter, r *http.Request, device Device) {

@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const PrefixHeader = "X-Factory-Phone-Prefix"
+
 func MobileSocket(stateDir string) string { return filepath.Join(stateDir, "phone", "review.sock") }
 
 func (s *Server) ServeMobile(path string) error {
@@ -42,7 +44,10 @@ func (s *Server) MobileHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
 	mux.HandleFunc("GET /events/review", s.serveEvents)
-	mux.HandleFunc("GET /r/{key}/{path...}", s.servePage(s.mobileTag))
+	mux.HandleFunc("GET /r/{key}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		prefix := r.Header.Get(PrefixHeader)
+		s.servePage(func(f Factory, rel, revision string) []byte { return s.mobileTag(prefix, f, rel, revision) })(w, r)
+	})
 	mux.HandleFunc("GET /r/{key}/_api/threads", s.listThreads)
 	mux.HandleFunc("POST /r/{key}/_api/threads", s.createThread)
 	mux.HandleFunc("PATCH /r/{key}/_api/threads/{id}", s.updateThread)
@@ -57,10 +62,11 @@ func (s *Server) MobileHandler() http.Handler {
 	})
 }
 
-func (s *Server) mobileTag(f Factory, rel, revision string) []byte {
+func (s *Server) mobileTag(prefix string, f Factory, rel, revision string) []byte {
 	key := url.PathEscape(f.Key)
-	return fmt.Appendf(nil, `<script src="/_review/overlay.js" data-factory-review data-mobile data-theme="dark" data-events="/events/review" data-api="%s" data-page="%s" data-file="%s" data-label="%s" data-back="%s" data-revision="%s" defer></script>`,
-		html.EscapeString("/r/"+key+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), html.EscapeString(f.Label), html.EscapeString("/f/"+key+"/pages"), revision)
+	return fmt.Appendf(nil, `<script src="%s" data-factory-review data-mobile data-theme="dark" data-events="%s" data-access="%s" data-api="%s" data-page="%s" data-file="%s" data-label="%s" data-back="%s" data-revision="%s" defer></script>`,
+		html.EscapeString(prefix+"/_review/overlay.js"), html.EscapeString(prefix+"/events/review"), html.EscapeString(prefix+"/_access"),
+		html.EscapeString(prefix+"/r/"+key+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), html.EscapeString(f.Label), html.EscapeString("/f/"+key+"/pages"), revision)
 }
 
 func MobilePath(f Factory, fileURL string) (string, bool) {

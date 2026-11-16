@@ -109,7 +109,7 @@ function start(config) {
 
   async function checkAccess() {
     try {
-      answered((await fetch("/api/me", { cache: "no-store" })).status);
+      answered((await fetch(config.access, { cache: "no-store" })).status);
     } catch {
       reachable(unreachable);
     }

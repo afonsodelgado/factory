@@ -264,19 +264,35 @@ func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
 	if resp := g.do("GET", "/r/k/plan.html", ""); resp.StatusCode != 401 || !strings.Contains(body(resp), DatabaseName) {
 		t.Fatalf("an unpaired page load answered %d; want the 401 page that clears the phone's saved data", resp.StatusCode)
 	}
-	if resp := g.do("GET", "/_review/overlay.js", ""); resp.StatusCode != 401 {
-		t.Fatalf("the overlay script without a cookie answered %d; want 401", resp.StatusCode)
+	if resp := g.do("GET", "/rt/nope/r/k/plan.html", ""); resp.StatusCode != 401 || !strings.Contains(body(resp), "expired") {
+		t.Fatalf("a page link nobody granted answered %d; want the expired page", resp.StatusCode)
 	}
-	if resp := g.do("GET", "/r/k/plan.html", "", "Cookie", cookie); resp.StatusCode != 200 || !strings.Contains(body(resp), "data-mobile") {
-		t.Fatalf("the paired phone's page answered %d; want the page with the phone overlay", resp.StatusCode)
+	opened := g.do("GET", "/r/k/plan.html", "", "Cookie", cookie)
+	grantPath := opened.Header.Get("Location")
+	if opened.StatusCode != 303 || !strings.HasPrefix(grantPath, "/rt/") || !strings.HasSuffix(grantPath, "/r/k/plan.html") {
+		t.Fatalf("the paired phone opening a page answered %d to %q; want a redirect into its sandboxed grant", opened.StatusCode, grantPath)
 	}
-	if resp := g.do("POST", "/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Cookie", cookie); resp.StatusCode != 200 {
-		t.Fatalf("the paired phone's comment answered %d", resp.StatusCode)
+	token := strings.Split(grantPath, "/")[2]
+	granted := g.do("GET", grantPath, "")
+	rendered := body(granted)
+	if granted.StatusCode != 200 || !strings.Contains(rendered, "data-mobile") || !strings.Contains(rendered, `data-api="/rt/`+token+`/r/k/_api"`) {
+		t.Fatalf("the granted page answered %d with %q; want the phone overlay pointed at the grant", granted.StatusCode, rendered)
+	}
+	if policy := granted.Header.Get("Content-Security-Policy"); !strings.HasPrefix(policy, "sandbox ") || strings.Contains(policy, "allow-same-origin") {
+		t.Fatalf("a review page carried the policy %q; its scripts must run in an opaque origin, away from the phone API", policy)
+	}
+	if resp := g.do("GET", "/api/snapshot", ""); resp.StatusCode != 401 {
+		t.Fatalf("the phone API without the cookie answered %d; a grant must not open it", resp.StatusCode)
+	}
+	if resp := g.do("POST", "/rt/"+token+"/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Origin", "", "Origin", "null"); resp.StatusCode != 200 {
+		t.Fatalf("the granted page's comment answered %d", resp.StatusCode)
+	}
+	if resp := g.do("POST", "/r/k/_api/threads", `{"page":"plan.html","intent":"fix","text":"Bigger."}`, "Cookie", cookie); resp.StatusCode != 405 {
+		t.Fatalf("a comment sent straight to the cookie-protected review path answered %d; want it refused", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest("GET", g.http.URL+"/events/review", nil)
+	req, _ := http.NewRequest("GET", g.http.URL+"/rt/"+token+"/events/review", nil)
 	req.Host = testHost
-	req.Header.Set("Cookie", cookie)
 	stream, err := http.DefaultTransport.RoundTrip(req)
 	if err != nil || stream.StatusCode != 200 {
 		t.Fatalf("review stream: %v %v", err, stream)
@@ -294,10 +310,14 @@ func TestReviewPagesNeedThePhoneAndCloseWithItsPairing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the revoked phone's review stream stayed open")
 	}
+	if resp := g.do("GET", "/rt/"+token+"/_access", ""); resp.StatusCode != 401 {
+		t.Fatalf("a revoked phone's grant answered %d; want 401", resp.StatusCode)
+	}
 
 	again, _ := g.pair()
 	pages.Close()
-	if resp := g.do("GET", "/r/k/_api/threads", "", "Cookie", again); resp.StatusCode != 503 {
+	reopened := strings.Split(g.do("GET", "/r/k/plan.html", "", "Cookie", again).Header.Get("Location"), "/")[2]
+	if resp := g.do("GET", "/rt/"+reopened+"/r/k/_api/threads", ""); resp.StatusCode != 503 {
 		t.Fatalf("with the runtime handing over, the review API answered %d; want a retryable 503, never the 502 that means factory serve is down", resp.StatusCode)
 	}
 }

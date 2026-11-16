@@ -41,6 +41,7 @@ type Server struct {
 	Review  http.Handler
 	Now     func() time.Time
 
+	grants    grants
 	mu        sync.Mutex
 	current   *Snapshot
 	factories []byte
@@ -87,9 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pair/status", s.pairStatus)
 	mux.HandleFunc("POST /api/pair/exchange", s.pairExchange)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
-	mux.HandleFunc("GET /_review/overlay.js", s.authed(s.review))
-	mux.HandleFunc("GET /events/review", s.authed(s.review))
-	mux.HandleFunc("/r/", s.authed(s.review))
+	mux.HandleFunc("/r/", s.authed(s.openReview))
+	mux.HandleFunc(grantPrefix+"{token}/{rest...}", s.sandboxed)
 	mux.Handle("/", s.shell())
 	return s.guard(mux)
 }
@@ -113,7 +113,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if mutates(r) {
-			if problem, status := s.mutationProblem(r); problem != "" {
+			if problem, status := s.mutationProblem(r); problem != "" && !strings.HasPrefix(r.URL.Path, grantPrefix) {
 				fail(w, status, problem)
 				return
 			}
@@ -155,7 +155,7 @@ func (s *Server) authed(next authedHandler) http.HandlerFunc {
 		device, paired := s.Store.Authenticate(secret)
 		if !ok || !paired {
 			http.SetCookie(w, &http.Cookie{Name: CookieName, Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
-			if opensPage(r) {
+			if opensPage(r.Method, r.URL.Path) {
 				page(w, http.StatusUnauthorized, unpairedPage, DatabaseName)
 				return
 			}
