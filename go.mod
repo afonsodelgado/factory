@@ -17,6 +17,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/rivo/uniseg v0.4.7
 	github.com/sahilm/fuzzy v0.1.3
+	rsc.io/qr v0.2.0
 )
 
 require (

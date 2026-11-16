@@ -253,6 +253,71 @@ func TestRemotesPopupFirstSetupAddsTheRemoteEvenWhenItsCheckFails(t *testing.T) 
 	}
 }
 
+type fakePhoneActions struct {
+	status  PhoneContext
+	revoked []string
+}
+
+func (f *fakePhoneActions) Status() (PhoneContext, error) { return f.status, nil }
+func (f *fakePhoneActions) Enable() error {
+	f.status.Enabled, f.status.Running = true, true
+	return nil
+}
+func (f *fakePhoneActions) Disable() error              { return nil }
+func (f *fakePhoneActions) Start() error                { return nil }
+func (f *fakePhoneActions) Stop() error                 { return nil }
+func (f *fakePhoneActions) Configure(int, string) error { return nil }
+func (f *fakePhoneActions) Test() (string, error)       { return "", nil }
+func (f *fakePhoneActions) Pair() (PhonePairing, error) {
+	f.status.Devices = append(f.status.Devices, PhoneDevice{ID: "d-1", Name: "Pixel", Paired: "2026-11-16 12:00"})
+	return PhonePairing{URL: "https://devbox.tail1234.ts.net/#pair=abc", Expires: time.Date(2026, 11, 16, 12, 5, 0, 0, time.UTC), QR: []string{"█▀▀█", "█▄▄█"}}, nil
+}
+func (f *fakePhoneActions) Revoke(id string) error {
+	f.revoked = append(f.revoked, id)
+	f.status.Devices = nil
+	return nil
+}
+func (f *fakePhoneActions) Check() []CheckRow {
+	return []CheckRow{{Name: "serve", Mark: "fail", Detail: "https://devbox.tail1234.ts.net/ does not forward to http://127.0.0.1:7418", Fix: "tailscale serve --bg --https=443 http://127.0.0.1:7418"}}
+}
+
+func TestPhonePopupTurnsOnPairsRevokesAndShowsFailingChecks(t *testing.T) {
+	actions := &fakePhoneActions{status: PhoneContext{Hostname: "devbox.tail1234.ts.net", Port: 7418}}
+	p := NewPhone(actions.status, actions)
+	p.Now = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
+	p.Update(tea.WindowSizeMsg{Width: 88, Height: 30})
+	pressKey := func(key tea.KeyPressMsg) {
+		_, cmd := p.Update(key)
+		for cmd != nil {
+			msg := cmd()
+			if _, ticking := msg.(phoneTick); ticking {
+				return
+			}
+			_, cmd = p.Update(msg)
+		}
+	}
+	press := func(key string) { pressKey(tea.KeyPressMsg{Code: rune(key[0]), Text: key}) }
+
+	press("e")
+	if screen := p.View().Content; !strings.Contains(screen, "running") || !strings.Contains(screen, "e turn off") {
+		t.Fatalf("after e the popup shows:\n%s\nwant Phone on and factory serve running", screen)
+	}
+	press("p")
+	if screen := p.View().Content; !strings.Contains(screen, "█▀▀█") || !strings.Contains(screen, "#pair=abc") || !strings.Contains(screen, "expires in 5:00") {
+		t.Fatalf("pairing shows:\n%s\nwant the QR, the link and the five-minute countdown", screen)
+	}
+	pressKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	press("r")
+	press("y")
+	if !slices.Equal(actions.revoked, []string{"d-1"}) || strings.Contains(p.View().Content, "paired 2026-11-16") {
+		t.Fatalf("revoked %v; the list shows:\n%s\nwant the paired phone revoked and gone", actions.revoked, p.View().Content)
+	}
+	press("h")
+	if screen := p.View().Content; !strings.Contains(screen, "✗") || !strings.Contains(screen, "tailscale serve --bg --https=443") {
+		t.Fatalf("checks show:\n%s\nwant the failing serve mapping with its fix", screen)
+	}
+}
+
 func TestRemotesListShowsLinkDefaultAndPush(t *testing.T) {
 	r := remotesPopup(RemotesContext{
 		Remotes: []RemoteRow{

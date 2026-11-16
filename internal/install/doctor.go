@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -47,6 +48,7 @@ type Options struct {
 	ConfigErr  error
 	Repos      []string
 	Config     *state.Config
+	PhoneProbe phone.Probe
 }
 
 func run(name string, args ...string) (string, error) {
@@ -122,7 +124,24 @@ func nerdFontInstallCommand() string {
 }
 
 func Doctor(o Options) []Check {
-	return doctor(o, chrome(o), nerdFont(o))
+	return doctor(o, append([]Check{chrome(o), nerdFont(o)}, PhoneChecks(o)...)...)
+}
+
+var phoneMarks = map[string]Mark{phone.Passed: Pass, phone.Failed: Fail, phone.Skipped: Skip}
+
+func PhoneChecks(o Options) []Check {
+	if o.Config == nil || !o.Config.Phone.Enabled {
+		return []Check{{Name: "phone", Mark: Skip, Detail: "off; optional. factory phone configure --hostname <this machine's ts.net name>, then factory phone enable, sets it up"}}
+	}
+	probe := o.PhoneProbe
+	if probe.Tailscale == nil {
+		probe = phone.SystemProbe()
+	}
+	var checks []Check
+	for _, c := range phone.Checks(context.Background(), o.Config.Phone, probe) {
+		checks = append(checks, Check{Name: c.Name, Mark: phoneMarks[c.State], Detail: c.Detail, Fix: c.Fix})
+	}
+	return checks
 }
 
 func ServerDoctor(o Options, gitURLs []string) []Check {

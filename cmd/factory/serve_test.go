@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -37,6 +39,7 @@ func newPhoneMachine(t *testing.T) phoneMachine {
 	writeFile(t, filepath.Join(s.bin, "tailscale"), "#!/bin/sh\nexit 1\n")
 	os.Chmod(filepath.Join(s.bin, "tailscale"), 0o755)
 	writeFile(t, filepath.Join(m.repo, ".claude", "factory", "csv", "state.json"), `{"id": "csv", "stage": "requirements"}`)
+	writeFile(t, filepath.Join(m.repo, ".claude", "factory", "csv", "plan.html"), "<html><body><h1>plan</h1></body></html>")
 	writeFile(t, filepath.Join(local, "config", "config.yml"), fmt.Sprintf("repos:\n  - %s\nreview:\n  port: %d\nphone:\n  enabled: true\n  port: %d\n  hostname: %s\n", m.repo, freePort(t), m.port, m.hostname))
 	m.env = append(m.env, "HOME="+filepath.Join(local, "home"), "FACTORY_CONFIG_DIR="+filepath.Join(local, "config"), "FACTORY_STATE_DIR="+m.stateDir,
 		"CLAUDE_CONFIG_DIR="+filepath.Join(local, "claude"), "FACTORY_TMUX_SOCKET="+s.tmux)
@@ -145,6 +148,8 @@ func TestTheRuntimeChangesHandsBetweenServeAndTheHubWithoutLosingAQueuedMessage(
 		status, body := m.call(t, "GET", "/api/snapshot", "")
 		return status == 200 && json.Unmarshal([]byte(body), &snap) == nil && len(snap.Factories) == 1
 	})
+	m.auditRoutes(t, snap.Factories[0])
+	m.openPlan(t, snap.Factories[0].Route, "the headless fallback")
 	op := uuid.NewString()
 	action := fmt.Sprintf(`{"operation":%q,"incarnation":%q,"action":"message","text":"also export as tsv"}`, op, snap.Factories[0].Incarnation)
 	status, body := m.call(t, "POST", "/api/factories/"+strings.ReplaceAll(snap.Factories[0].Key, "/", "%2F")+"/actions", action)
@@ -164,6 +169,7 @@ func TestTheRuntimeChangesHandsBetweenServeAndTheHubWithoutLosingAQueuedMessage(
 	if !strings.Contains(body, `"status":"queued"`) {
 		t.Fatalf("receipt after the hub took over: %s; want the message still queued, not lost or typed twice", body)
 	}
+	m.openPlan(t, snap.Factories[0].Route, "the hub")
 
 	m.tmux(t, "send-keys", "-t", hub, "q")
 	m.waitForOwner(t, phone.ModeLocal)
@@ -202,3 +208,40 @@ func TestPhoneStopReleasesAFallbackWhoseServeDied(t *testing.T) {
 }
 
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+func (m *phoneMachine) openPlan(t *testing.T, route, owner string) {
+	t.Helper()
+	var body string
+	waitFor(t, owner+" to serve the plan to the phone", func() bool {
+		var status int
+		status, body = m.call(t, "GET", "/r/"+route+"/plan.html", "")
+		return status == 200
+	})
+	if !strings.Contains(body, "data-mobile") {
+		t.Fatalf("plan page while %s owns the runtime:\n%s\nwant the phone overlay", owner, body)
+	}
+}
+
+func (m *phoneMachine) auditRoutes(t *testing.T, f host.LocalFactory) {
+	t.Helper()
+	actions := "/api/factories/" + strings.ReplaceAll(f.Key, "/", "%2F") + "/actions"
+	for _, action := range []string{"delete", "archive", "unarchive", "create", "open"} {
+		body := fmt.Sprintf(`{"operation":%q,"incarnation":%q,"action":%q}`, uuid.NewString(), f.Incarnation, action)
+		if status, reply := m.call(t, "POST", actions, body); status == 200 {
+			t.Errorf("the phone ran %s: %s", action, reply)
+		}
+	}
+	for _, path := range []string{"/api/factories", "/api/remotes", "/api/host", "/api/review", "/r/" + f.Route + "/_api/console", "/r/" + f.Route + "/_api/threads/t-1/shot"} {
+		if status, _ := m.call(t, "POST", path, `{}`); status == 200 {
+			t.Errorf("%s answered 200; the phone gateway must not expose it", path)
+		}
+	}
+	_, appErr := phone.App(bundle.Files)
+	status, body := m.call(t, "GET", "/", "")
+	switch {
+	case appErr == nil && (status != 200 || !strings.Contains(body, `id="root"`)):
+		t.Errorf("the embedded app's shell answered %d %q", status, body)
+	case appErr != nil && (status != 503 || !strings.Contains(body, "make build")):
+		t.Errorf("a build without the app answered %d %q; want the run make build page", status, body)
+	}
+}

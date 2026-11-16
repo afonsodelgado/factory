@@ -14,13 +14,15 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
 const serveReady = 10 * time.Second
 
-const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id> | test"
+const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id> | test | check"
 
 func runPhone(args []string) int {
 	if len(args) == 0 {
@@ -52,6 +54,11 @@ func runPhone(args []string) int {
 		err = printDevices(os.Stdout, setup)
 	case "test":
 		err = printTestPush(os.Stdout, setup)
+	case "check":
+		problems := summarize("factory phone check · checks only, changes nothing", phoneDoctor(cfg))
+		if problems > 0 {
+			return 1
+		}
 	case "revoke":
 		if len(args) != 2 {
 			fmt.Fprintln(os.Stderr, phoneUsage)
@@ -145,8 +152,71 @@ func printPairing(w io.Writer, setup phone.Setup) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Open this on the phone before %s:\n%s\n", pairing.Expires.Local().Format("15:04:05"), pairing.URL)
+	lines, err := phone.QR(pairing.URL)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "%s\n\nScan it, or open this on the phone before %s:\n%s\n", strings.Join(lines, "\n"), pairing.Expires.Local().Format("15:04:05"), pairing.URL)
 	return nil
+}
+
+func phoneDoctor(cfg *state.Config) []install.Check {
+	o := doctorOptions()
+	o.Config = cfg
+	return install.PhoneChecks(o)
+}
+
+type phoneActions struct{ setup phone.Setup }
+
+func (a phoneActions) Status() (dialog.PhoneContext, error) {
+	status, err := a.setup.Status()
+	if err != nil {
+		return dialog.PhoneContext{}, err
+	}
+	c := dialog.PhoneContext{Enabled: status.Settings.Enabled, Running: status.Running, Hostname: status.Settings.Hostname, Port: status.Settings.ListenPort(), Devices: []dialog.PhoneDevice{}}
+	if status.Serving != nil && status.Serving.Owner != nil {
+		c.Owner = ownerPhrase(status.Serving.Owner.Mode)
+	}
+	for _, d := range status.Devices {
+		c.Devices = append(c.Devices, dialog.PhoneDevice{ID: d.ID, Name: d.Name, Paired: d.PairedAt.Local().Format("2006-01-02 15:04")})
+	}
+	return c, nil
+}
+
+func (a phoneActions) Enable() error  { return a.setup.Enable() }
+func (a phoneActions) Disable() error { return a.setup.Disable() }
+func (a phoneActions) Start() error   { return a.setup.Start() }
+func (a phoneActions) Stop() error    { return a.setup.Stop() }
+
+func (a phoneActions) Configure(port int, hostname string) error {
+	return a.setup.Configure(port, hostname)
+}
+
+func (a phoneActions) Revoke(id string) error { return a.setup.Revoke(id) }
+
+func (a phoneActions) Pair() (dialog.PhonePairing, error) {
+	pairing, err := a.setup.Pair()
+	if err != nil {
+		return dialog.PhonePairing{}, err
+	}
+	lines, err := phone.QR(pairing.URL)
+	return dialog.PhonePairing{URL: pairing.URL, Expires: pairing.Expires, QR: lines}, err
+}
+
+func (a phoneActions) Test() (string, error) {
+	var b strings.Builder
+	if err := printTestPush(&b, a.setup); err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(strings.TrimSpace(b.String()), "\n", "; "), nil
+}
+
+func (a phoneActions) Check() []dialog.CheckRow {
+	var rows []dialog.CheckRow
+	for _, c := range phoneDoctor(a.setup.Config) {
+		rows = append(rows, dialog.CheckRow{Name: c.Name, Mark: checkMarks[c.Mark], Detail: c.Detail, Fix: c.Fix})
+	}
+	return rows
 }
 
 func printDevices(w io.Writer, setup phone.Setup) error {

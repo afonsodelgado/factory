@@ -40,6 +40,12 @@ func (s *Server) ServeMobile(path string) error {
 	return nil
 }
 
+func (s *Server) ServesMobile() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mobile != nil
+}
+
 func (s *Server) MobileHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
