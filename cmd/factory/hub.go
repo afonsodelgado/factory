@@ -81,7 +81,7 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer server.Close()
-	pages, err := startReview(cfg)
+	pages, phoneProblem, err := startReview(cfg)
 	if err != nil {
 		return err
 	}
@@ -124,6 +124,7 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		Bell:    os.Stderr,
 		Notify:  notify,
 		Icons:   icons,
+		Problem: phoneProblem,
 		DialogCommand: func(kind string) string {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},
@@ -155,24 +156,23 @@ func reviewOpener(pages *review.Server, chrome *review.Browser) func(string) {
 	}
 }
 
-func startReview(cfg *state.Config) (*review.Server, error) {
+func startReview(cfg *state.Config) (pages *review.Server, phoneProblem string, err error) {
 	token, err := review.Token(cfg.StateDir)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	overlay, err := bundle.Files.ReadFile("review/overlay.js")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	pages, err := review.Listen(cfg.Review.Port, token, overlay)
+	pages, err = review.Listen(cfg.Review.Port, token, overlay)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := pages.ServeMobile(review.MobileSocket(cfg.StateDir)); err != nil {
-		pages.Close()
-		return nil, err
+		return pages, "The phone cannot open review pages: " + err.Error() + ". A shorter FACTORY_STATE_DIR fixes a socket path that is too long.", nil
 	}
-	return pages, nil
+	return pages, "", nil
 }
 
 func lockHub(path string) (func(), error) {

@@ -224,6 +224,26 @@ func TestTurningPhoneOnWhileTheHubRunsServesItsReviewPages(t *testing.T) {
 	m.openPlan(t, snap.Factories[0].Route, "the hub that started with Phone off")
 }
 
+func TestTheReviewServerStartsWhenTheStateDirIsTooLongForThePhoneSocket(t *testing.T) {
+	base, err := os.MkdirTemp("/tmp", "frl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	stateDir := filepath.Join(base, strings.Repeat("a", 92-len(base)-1))
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pages, phoneProblem, err := startReview(&state.Config{StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("a %d-byte state dir stopped the review server: %v; want the hub to start without phone review pages", len(stateDir), err)
+	}
+	pages.Close()
+	if phoneProblem == "" {
+		t.Error("the phone socket could not open and nothing said so; want a notice naming the problem")
+	}
+}
+
 func TestPhoneStopReleasesAFallbackWhoseServeDied(t *testing.T) {
 	m := newPhoneMachine(t)
 	serve := m.command("serve")

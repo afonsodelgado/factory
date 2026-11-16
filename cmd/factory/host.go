@@ -145,11 +145,14 @@ func serveHost(cfg *state.Config, local bool) error {
 		return err
 	}
 	defer server.Close()
-	pages, err := startReview(cfg)
+	pages, phoneProblem, err := startReview(cfg)
 	if err != nil {
 		return err
 	}
 	defer pages.Close()
+	if phoneProblem != "" {
+		fmt.Fprintln(os.Stderr, "factory host:", phoneProblem)
+	}
 	pages.SetActions(host.ReviewActions(events))
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	loader := &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}

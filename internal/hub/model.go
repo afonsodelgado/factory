@@ -50,6 +50,7 @@ type Model struct {
 	Notify        func(text string)
 	Now           func() time.Time
 	Icons         theme.Icons
+	Problem       string
 
 	snap          Snapshot
 	selected      string
@@ -126,6 +127,9 @@ func NewModel(m Model) *Model {
 	model.dialogs = map[string]json.RawMessage{}
 	if model.Now == nil {
 		model.Now = time.Now
+	}
+	if model.Problem != "" {
+		model.notice = problem(model.Problem)
 	}
 	return model
 }
