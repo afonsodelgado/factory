@@ -287,11 +287,21 @@ func (m *Model) noteLink(name, text string) {
 	}
 }
 
-func (m *Model) clockOf(key string) time.Time {
-	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
-		return m.snap.At.Add(m.linkOf(it.Factory).offset)
+func (m *Model) settleRemoteClaims() {
+	open := map[string]bool{}
+	for _, it := range m.remoteItems() {
+		for _, item := range attentionItems(it, m.snap.At, nil) {
+			open[draftKey(it.Factory, item.ID)] = true
+		}
 	}
-	return m.snap.At
+	for key, mark := range m.claims {
+		if !host.Remote(mark.Factory) || open[key] {
+			continue
+		}
+		delete(m.panel.drafts, key)
+		os.Remove(mark.Draft)
+		m.dropClaim(key)
+	}
 }
 
 func (m *Model) remoteItems() []Item {
@@ -434,7 +444,8 @@ func (m *Model) deliverRemote(it Item, mark sentMark, text string) {
 		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable."
 		return
 	}
-	m.execution().PutClaim(mark)
+	m.putClaim(mark)
+	m.report(m.ask("put-claim", mark, nil))
 	payload := map[string]any{"id": f.Label(), "incarnation": f.Remote.Incarnation, "ItemID": mark.ItemID, "ItemSince": mark.ItemSince, "Text": text, "LeavesOpen": mark.LeavesOpen}
 	cfg, name := m.Config, f.Remote.Name
 	m.later = append(m.later, func() tea.Msg {
@@ -448,13 +459,15 @@ func (m *Model) answered(msg answeredMsg) {
 	key := msg.mark.Factory + "|" + msg.mark.ItemID
 	switch {
 	case errors.Is(msg.err, remote.ErrUncertain):
-		m.execution().DropClaim(key)
+		m.dropClaim(key)
 		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
-		m.execution().DropClaim(key)
+		m.dropClaim(key)
 		m.panel.refused[key] = "Not sent. " + withFullStop(msg.err.Error())
 	default:
-		m.execution().RecordSent(msg.mark, msg.at)
+		msg.mark.At = msg.at
+		m.putClaim(msg.mark)
+		m.report(m.ask("record-sent", host.SentRecord{Answer: msg.mark, At: msg.at}, nil))
 	}
 }
 

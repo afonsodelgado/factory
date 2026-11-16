@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/afonsodelgado/factory/internal/host"
 )
+
+const answerWait = 2 * time.Second
 
 type Client struct {
 	HTTP *http.Client
@@ -69,4 +76,71 @@ func (c *Client) Do(ctx context.Context, method, path string, body, into any) er
 		return nil
 	}
 	return json.Unmarshal(data, into)
+}
+
+func (c *Client) Call(ctx context.Context, m host.Message) (host.Message, error) {
+	data := m.Data
+	if len(data) == 0 {
+		data = json.RawMessage("null")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+"/api/commands/"+url.PathEscape(m.T), bytes.NewReader(data))
+	if err != nil {
+		return host.Message{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if m.Op != "" {
+		req.Header.Set(OperationHeader, m.Op)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return host.Message{}, ErrUnavailable
+	}
+	defer resp.Body.Close()
+	var answer host.Message
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusConflict, http.StatusUnprocessableEntity:
+		if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
+			return host.Message{}, err
+		}
+		return answer, nil
+	case http.StatusServiceUnavailable:
+		return host.Message{}, ErrUnavailable
+	}
+	var failure struct {
+		Error string `json:"error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&failure)
+	return host.Message{}, StatusError{Status: resp.StatusCode, Message: failure.Error}
+}
+
+func (c *Client) Request(ctx context.Context, kind, op string, payload, into any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	answer, err := c.Call(ctx, host.Message{T: kind, Op: op, Data: data})
+	switch {
+	case err != nil:
+		return err
+	case answer.T == "uncertain":
+		return UncertainError{Message: answer.Error}
+	case answer.T != "done":
+		return errors.New(answer.Error)
+	case into == nil:
+		return nil
+	}
+	return json.Unmarshal(answer.Data, into)
+}
+
+type UncertainError struct{ Message string }
+
+func (e UncertainError) Error() string {
+	return e.Message + "; the outcome is unknown, so check before trying again"
+}
+
+func Answers(socket string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), answerWait)
+	defer cancel()
+	var me Me
+	return Unix(socket).Do(ctx, http.MethodGet, "/api/me", nil, &me) == nil
 }

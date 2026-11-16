@@ -2,6 +2,8 @@ package factory
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,6 +40,34 @@ type Location struct {
 	Home        string
 	Repo        string
 	Creating    time.Time
+}
+
+func (f Factory) MarshalJSON() ([]byte, error) {
+	type plain Factory
+	wire := struct {
+		plain
+		StateErr string `json:",omitempty"`
+	}{plain: plain(f)}
+	if f.StateErr != nil {
+		wire.StateErr = f.StateErr.Error()
+	}
+	return json.Marshal(wire)
+}
+
+func (f *Factory) UnmarshalJSON(data []byte) error {
+	type plain Factory
+	var wire struct {
+		plain
+		StateErr string `json:",omitempty"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*f = Factory(wire.plain)
+	if wire.StateErr != "" {
+		f.StateErr = errors.New(wire.StateErr)
+	}
+	return nil
 }
 
 func (f Factory) Key() string {

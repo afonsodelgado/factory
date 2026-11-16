@@ -44,14 +44,7 @@ type sentMark = host.Answer
 
 const repeatWindow = time.Second
 
-func (m *Model) settleReceipts() {
-	for _, settled := range m.execution().SettleReceipts(m.snap.Items, m.clockOf) {
-		if settled.Refused != "" {
-			m.panel.refused[settled.Key] = settled.Refused
-			continue
-		}
-		delete(m.panel.drafts, settled.Key)
-	}
+func (m *Model) clearRefusals() {
 	open := map[string]bool{}
 	for _, it := range m.snap.Items {
 		for _, item := range attentionItems(it, m.snap.At, nil) {
@@ -65,12 +58,8 @@ func (m *Model) settleReceipts() {
 	}
 }
 
-func (m *Model) claim(key string) (sentMark, bool) {
-	return m.execution().Claim(key)
-}
-
 func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled) {
-	for _, item := range slices.Concat(attentionItems(it, m.snap.At, m.threadCounter(it.Factory)), m.qaItems(it)) {
+	for _, item := range slices.Concat(attentionItems(it, m.snap.At, nil), m.qaItems(it)) {
 		mark, sent := m.claim(draftKey(it.Factory, item.ID))
 		if item.ID == "" || !sent {
 			shown = append(shown, item)
@@ -216,7 +205,7 @@ func (m *Model) discardDraft() {
 	key := draftKey(it.Factory, item.ID)
 	delete(m.panel.drafts, key)
 	delete(m.panel.refused, key)
-	m.execution().DropClaim(key)
+	m.dropClaim(key)
 	os.Remove(m.draftPath(it.Factory, item.ID))
 }
 
@@ -279,9 +268,6 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	key := draftKey(it.Factory, item.ID)
-	if m.Typist == nil {
-		return
-	}
 	d := m.draft(it.Factory, item)
 	if action != "handled" && unanswered(item, d) != "" {
 		return
@@ -302,10 +288,7 @@ func (m *Model) deliver(action string) {
 		m.deliverRemote(it, mark, text)
 		return
 	}
-	m.queueAnswer(it, mark, text)
-	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "answered "+item.ID+" from the panel")
-	}
+	m.queueAnswer(mark, text)
 }
 
 func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool {
@@ -318,12 +301,15 @@ func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool 
 	return p.key != "" && p.key != draftKey(it.Factory, item.ID) && m.Now().Sub(p.at) < repeatWindow
 }
 
-func (m *Model) queueAnswer(it Item, mark sentMark, text string) {
-	m.execution().QueueAnswer(it, mark, text)
-}
-
-func (m *Model) dropAnswer(answer sentMark, reason string) {
-	m.panel.refused[answer.Key()] = "Not sent. " + reason
+func (m *Model) queueAnswer(mark sentMark, text string) {
+	var claimed sentMark
+	if err := m.ask("queue-answer", host.QueuedAnswer{Answer: mark, Text: text}, &claimed); err != nil {
+		m.panel.refused[mark.Key()] = withFullStop(err.Error())
+		return
+	}
+	if claimed.Factory != "" {
+		m.putClaim(claimed)
+	}
 }
 
 func unanswered(item panel.Item, d *panel.Draft) string {
@@ -362,7 +348,7 @@ func (m *Model) panelView() panel.View {
 	v.Item = max(0, min(m.panel.item, len(v.Items)-1))
 	if f.State != nil {
 		for _, a := range f.State.Artifacts() {
-			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter(f)))
+			v.Artifacts = append(v.Artifacts, artifactRow(a, nil))
 		}
 	}
 	v.PRs = m.prsFor(f)
@@ -835,10 +821,6 @@ func (m *Model) openCmd(url string) tea.Cmd {
 	if it, ok := m.selectedItem(); ok && it.Factory.Remote != nil {
 		page, _ := liveStageOf(it.Factory, url)
 		return m.openRemote(it.Factory.Remote.Name, remote.Open{Factory: it.Factory.Label(), URL: url, Page: page, Key: m.wires[it.Factory.Key()].ReviewKey})
-	}
-	url = m.reviewURL(url)
-	if live := m.openLive(url); live != nil {
-		return live
 	}
 	open := m.Open
 	return func() tea.Msg {

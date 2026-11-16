@@ -6,10 +6,17 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
+const OperationHeader = "Factory-Operation"
+
 type Snapshot struct {
-	Revision   int64               `json:"revision"`
-	ServerTime time.Time           `json:"server_time"`
-	Factories  []host.LocalFactory `json:"factories"`
+	Node        string              `json:"node"`
+	Version     string              `json:"version"`
+	Protocol    int                 `json:"protocol"`
+	MinProtocol int                 `json:"min_protocol"`
+	Boot        string              `json:"boot"`
+	Revision    int64               `json:"revision"`
+	ServerTime  time.Time           `json:"server_time"`
+	Factories   []host.LocalFactory `json:"factories"`
 }
 
 type Me struct {

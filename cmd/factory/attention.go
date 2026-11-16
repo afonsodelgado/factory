@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -28,9 +29,29 @@ func runAttention(args []string) int {
 		fmt.Fprintln(os.Stderr, attentionUsage)
 		return 2
 	}
-	if err := state.ResolveAttention(filepath.Join(*dir, "state.json"), flags.Arg(0), *waitingOn, time.Now()); err != nil {
+	abs, err := filepath.Abs(*dir)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory attention:", err)
 		return 1
 	}
+	instruction, err := resolution(host.ResolveRequest{Dir: abs, ID: flags.Arg(0), WaitingOn: *waitingOn})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory attention:", err)
+		return 1
+	}
+	fmt.Println(instruction)
 	return 0
+}
+
+func resolution(r host.ResolveRequest) (string, error) {
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	runtime, err := localNode(cfg)
+	if err != nil {
+		return "", err
+	}
+	var instruction string
+	return instruction, runtime.Request(context.Background(), "resolve", "", r, &instruction)
 }

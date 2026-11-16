@@ -203,9 +203,6 @@ func (m *Runtime) stillQueued(a Answer) bool {
 
 func (m *Runtime) dropAnswer(a Answer, reason string) {
 	m.settle(a.Key(), StatusRefused, "Not sent. "+reason)
-	if m.Refused != nil {
-		m.Refused(a, reason)
-	}
 }
 
 func (m *Runtime) unwanted(a Answer) string {
@@ -238,6 +235,9 @@ func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []S
 	open := openSince(items)
 	var settled []Settlement
 	for _, key := range slices.Sorted(maps.Keys(m.receipts.Claims)) {
+		if Remote(m.receipts.Claims[key].Factory) {
+			continue
+		}
 		if s, done := m.settleClaim(m.receipts.Claims[key], open, items, clock); done {
 			settled = append(settled, s)
 		}

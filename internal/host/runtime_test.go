@@ -715,3 +715,54 @@ func TestPauseMarksTheFactoryOnlyWhenThePauseWorked(t *testing.T) {
 		t.Fatalf("wake returned %v with the marker %v; want it cleared", err, paused())
 	}
 }
+
+func TestRuntimeActionsLeaveStateJSONToTheSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	written := `{"id":"csv","attention":[{"id":"q-csv-1","kind":"question","resolved_at":null}]}`
+	if err := os.WriteFile(path, []byte(written), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	question := asked("q-csv-1", "question", "Which region?")
+	snap := phoneSnapshot("Stop", question)
+	snap.Items[0].Factory.Dir = dir
+	typist := &paneTypist{}
+	r := phoneRuntime(t.TempDir(), typist, snap)
+	call := func(kind string, payload any) Message {
+		data, _ := json.Marshal(payload)
+		return r.Handle(Message{T: kind, Op: uuid.NewString(), Data: data})
+	}
+
+	answer := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActAnswer, Item: "q-csv-1", Since: question.CreatedAt.Time, Answers: []string{"eu"}}
+	data, _ := json.Marshal(answer)
+	acted := r.Handle(Message{T: "act", Op: answer.Operation, Data: data})
+	resolved := call("resolve", ResolveRequest{Dir: dir, ID: "q-csv-1", WaitingOn: "agent"})
+	var instruction string
+	json.Unmarshal(resolved.Data, &instruction)
+	if after, _ := os.ReadFile(path); acted.T != "done" || len(typist.typed) != 1 || string(after) != written {
+		t.Fatalf("answer %+v typed %q and left state.json as %s; want the answer typed and state.json untouched", acted, typist.typed, after)
+	}
+	if resolved.T != "done" || !strings.Contains(instruction, path) || !strings.Contains(instruction, `"resolved_at"`) || !strings.Contains(instruction, `"waiting_on" to "agent"`) {
+		t.Fatalf("resolve answered %+v; want an instruction naming the file and fields for the supervisor to write", resolved)
+	}
+
+	snap.Items[0].Factory.State.Attention[0].ResolvedAt = state.Time{Time: phoneNow}
+	r.SetSnapshot(snap)
+	if again := call("resolve", ResolveRequest{Dir: dir, ID: "q-csv-1"}); again.T != "error" {
+		t.Fatalf("resolving an item the supervisor already closed gave %+v; want a refusal", again)
+	}
+}
+
+func TestAnAnswerFromTheHubNeverRetypesAnItemAlreadyAnswered(t *testing.T) {
+	question := asked("q-csv-1", "question", "Which region?")
+	typist := &paneTypist{}
+	r := phoneRuntime(t.TempDir(), typist, phoneSnapshot("Stop", question))
+	answer := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActAnswer, Item: "q-csv-1", Since: question.CreatedAt.Time, Answers: []string{"eu"}}
+	data, _ := json.Marshal(answer)
+	r.Handle(Message{T: "act", Op: answer.Operation, Data: data})
+	again, _ := json.Marshal(QueuedAnswer{Answer: Answer{Factory: "/r/app:csv", ItemID: "q-csv-1", ItemSince: question.CreatedAt.Time, Source: SourceHub, Action: ActAnswer}, Text: "q-csv-1 answers: us"})
+	r.Handle(Message{T: "queue-answer", Data: again})
+	if len(typist.typed) != 1 {
+		t.Fatalf("typed %q; a hub answer for an item the phone already answered must not be typed again", typist.typed)
+	}
+}

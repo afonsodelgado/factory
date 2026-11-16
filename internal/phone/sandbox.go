@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	grantPrefix   = "/rt/"
+	GrantPrefix   = "/rt/"
 	grantLifetime = 12 * time.Hour
 	sandboxPolicy = "sandbox allow-scripts allow-forms allow-modals"
 	sandboxOrigin = "null"
@@ -86,7 +86,7 @@ func (s *Server) openReview(w http.ResponseWriter, r *http.Request, device Devic
 		fail(w, http.StatusNotFound, "no such review page")
 		return
 	}
-	target := grantPrefix + s.grants.mint(device.ID, factory, s.now()) + r.URL.EscapedPath()
+	target := GrantPrefix + s.grants.mint(device.ID, factory, s.now()) + r.URL.EscapedPath()
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -111,7 +111,7 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 	}
 	token := r.PathValue("token")
 	held, live := s.grants.held(token, s.now())
-	escaped := strings.TrimPrefix(r.URL.EscapedPath(), grantPrefix+token)
+	escaped := strings.TrimPrefix(r.URL.EscapedPath(), GrantPrefix+token)
 	path, err := url.PathUnescape(escaped)
 	switch {
 	case !live || !s.Store.Paired(held.device):
@@ -129,7 +129,7 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 	default:
 		forward := r.Clone(r.Context())
 		forward.URL.Path, forward.URL.RawPath = path, escaped
-		forward.Header.Set(review.PrefixHeader, grantPrefix+token)
+		forward.Header.Set(review.PrefixHeader, GrantPrefix+token)
 		s.review(w, forward, Device{ID: held.device})
 	}
 }

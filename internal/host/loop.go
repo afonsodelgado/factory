@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -28,10 +29,6 @@ func (m *Runtime) Run(ctx context.Context, events <-chan Event) error {
 			}
 			if e.T == "hello" || e.T == "gone" {
 				continue
-			}
-			if e.T == "handoff" && m.Fallback {
-				e.Respond(Message{T: "done"})
-				return nil
 			}
 			m.Tick()
 			e.Respond(m.Handle(e.Message))
@@ -96,7 +93,54 @@ func (m *Runtime) handle(request Message) Message {
 	case "repo":
 		var r RepoRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
-			m.AddRepo(r.Repo)
+			m.Register(r)
+		}
+	case "create":
+		var r CreateRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Create(r)
+		}
+	case "wake-all":
+		err = m.WakeAll()
+	case "removal":
+		var r DeleteRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Removal(r)
+		}
+	case "resolve":
+		var r ResolveRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Resolve(r)
+		}
+	case "attach":
+		var r AttachRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Attach(r)
+		}
+	case "queue-answer":
+		var r QueuedAnswer
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.QueueAnswerFor(r)
+		}
+	case "put-claim":
+		var a Answer
+		if err = json.Unmarshal(request.Data, &a); err == nil {
+			m.PutClaim(a)
+		}
+	case "drop-claim":
+		var key string
+		if err = json.Unmarshal(request.Data, &key); err == nil {
+			m.DropClaim(key)
+		}
+	case "forget-claims":
+		var prefix string
+		if err = json.Unmarshal(request.Data, &prefix); err == nil {
+			m.ForgetClaims(func(key string) bool { return strings.HasPrefix(key, prefix) })
+		}
+	case "record-sent":
+		var r SentRecord
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			m.RecordSent(r.Answer, r.At)
 		}
 	case "link":
 		var r remote.LinkRequest
@@ -131,7 +175,7 @@ func (m *Runtime) handle(request Message) Message {
 			err = m.ReturnQA(r)
 		}
 	case "snapshot":
-		value = m.snap
+		value = m.Presentation()
 	case "view":
 		value = m.View()
 	case "answer":

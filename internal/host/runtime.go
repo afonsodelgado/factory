@@ -40,20 +40,17 @@ type Answer struct {
 }
 
 type Runtime struct {
-	ShowArchived bool
-	Fallback     bool
-	Pages        *review.Server
-	Config       *state.Config
-	Loader       *Loader
-	Engine       StageEngine
-	TM           tmux.Client
-	Session      string
-	Typist       Typist
-	Now          func() time.Time
-	Refused      func(Answer, string)
-	Console      Console
-	Log          *EventLog
-	Push         *Pusher
+	Pages   *review.Server
+	Config  *state.Config
+	Loader  *Loader
+	Engine  StageEngine
+	TM      tmux.Client
+	Session string
+	Typist  Typist
+	Now     func() time.Time
+	Console Console
+	Log     *EventLog
+	Push    *Pusher
 
 	snap        Snapshot
 	typeQueue   []QueuedType
@@ -179,7 +176,7 @@ func factoryBin() string {
 func (m *Runtime) ClearTyped(pane string) { delete(m.typedAt, pane) }
 
 func (m *Runtime) selectExisting(key string) (string, error) {
-	if it, ok := m.snap.Find(key); ok && it.Factory.Archived() && !m.ShowArchived {
+	if it, ok := m.snap.Find(key); ok && it.Factory.Archived() {
 		return "", fmt.Errorf("%s is archived. In the factory list, H shows archived factories and a on the row unarchives it.", it.Factory.Label())
 	}
 	return key, nil

@@ -29,6 +29,19 @@ type Machine struct {
 	DefaultRemote string            `yaml:"default_remote,omitempty"`
 	Push          Push              `yaml:"push,omitempty"`
 	Phone         Phone             `yaml:"phone,omitempty"`
+	Node          Node              `yaml:"node,omitempty"`
+}
+
+type Node struct {
+	Owner string `yaml:"owner,omitempty"`
+	Port  int    `yaml:"port,omitempty"`
+}
+
+func (m Machine) NodePort() int {
+	if m.Node.Port != 0 {
+		return m.Node.Port
+	}
+	return m.Phone.ListenPort()
 }
 
 type Phone struct {
@@ -92,7 +105,7 @@ func LoadMachine(configDir string) (Machine, error) {
 }
 
 func (m Machine) Equal(other Machine) bool {
-	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone
+	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone && m.Node == other.Node
 }
 
 func (m Machine) Validate() error {
@@ -111,6 +124,9 @@ func (m Machine) Validate() error {
 	}
 	if m.Push.Topic != "" && !pushTopic.MatchString(m.Push.Topic) {
 		return errors.New("push.topic may hold only letters, digits, - and _; run factory remote push to generate one")
+	}
+	if m.Node.Port < 0 || m.Node.Port > 65535 {
+		return fmt.Errorf("node.port %d must be between 1 and 65535", m.Node.Port)
 	}
 	return m.Phone.validate()
 }
@@ -201,6 +217,7 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 		{"default_remote", m.DefaultRemote, m.DefaultRemote == ""},
 		{"push", m.Push, m.Push == Push{}},
 		{"phone", m.Phone, m.Phone == Phone{}},
+		{"node", m.Node, m.Node == Node{}},
 	}
 	for _, key := range keys {
 		if err := setKey(file, key.name, key.value, key.zero); err != nil {

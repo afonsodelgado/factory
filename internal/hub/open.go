@@ -2,55 +2,42 @@ package hub
 
 import (
 	"encoding/json"
-	"fmt"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type OpenRequest = host.OpenRequest
 type RepoRequest = host.RepoRequest
 type DeleteRequest = host.DeleteRequest
 
-func (m *Model) deleteRequest(e Event) tea.Cmd {
-	var r DeleteRequest
-	var steps []factory.RemovalStep
-	err := json.Unmarshal(e.Data, &r)
-	if err == nil {
-		steps, err = m.deleteRequested(r)
-	}
-	report, _ := json.Marshal(factory.Report(steps))
-	reply := Message{T: "done", Data: report}
-	if err != nil {
-		reply = Message{T: "error", Error: err.Error(), Data: report}
-	}
-	e.Respond(reply)
-	return m.load()
+type ShowRequest struct {
+	Here   string `json:"here,omitempty"`
+	Notice string `json:"notice,omitempty"`
+	Select string `json:"select,omitempty"`
 }
 
-func (m *Model) deleteRequested(r DeleteRequest) ([]factory.RemovalStep, error) {
-	key := state.Key(r.Repo, r.Slug)
-	if _, listed := m.snap.Find(key); listed || m.Loader == nil {
-		return m.delete(key)
-	}
-	f, ok := m.Loader.Lookup(r.Repo, r.Slug)
-	if !ok {
-		return nil, fmt.Errorf("the hub does not list %s", key)
-	}
-	return m.deleteFactory(f)
-}
-
-func (m *Model) repoRequest(e Event) tea.Cmd {
-	var r RepoRequest
+func (m *Model) showRequest(e Event) tea.Cmd {
+	var r ShowRequest
 	err := json.Unmarshal(e.Data, &r)
 	if err == nil {
-		m.addRepo(r)
+		m.show(r)
 	}
 	m.reply(e, err)
 	return m.load()
+}
+
+func (m *Model) show(r ShowRequest) {
+	if r.Here != "" {
+		m.here = r.Here
+	}
+	if r.Notice != "" {
+		m.notice = news(r.Notice)
+	}
+	if r.Select != "" {
+		m.wanted = r.Select
+	}
 }
 
 func (m *Model) reply(e Event, err error) {
@@ -63,43 +50,4 @@ func (m *Model) reply(e Event, err error) {
 		reply = Message{T: "error", Error: err.Error()}
 	}
 	e.Respond(reply)
-}
-
-func (m *Model) addRepo(r RepoRequest) {
-	if r.Forget {
-		m.forgetRepo(r.Repo)
-		return
-	}
-	if r.Here {
-		m.here = r.Repo
-	}
-	if r.Notice != "" {
-		m.notice = news(r.Notice)
-	}
-	m.execution().AddRepo(r.Repo)
-}
-
-func (m *Model) forgetRepo(repo string) {
-	if m.here == repo {
-		m.here = ""
-	}
-	m.execution().ForgetRepo(repo)
-}
-
-func (m *Model) openRequest(e Event) tea.Cmd {
-	var r OpenRequest
-	err := json.Unmarshal(e.Data, &r)
-	if err == nil {
-		err = m.open(r)
-	}
-	m.reply(e, err)
-	return m.load()
-}
-
-func (m *Model) open(r OpenRequest) error {
-	key, err := m.execution().Open(r)
-	if key != "" {
-		m.choose(key)
-	}
-	return err
 }

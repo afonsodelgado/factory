@@ -22,7 +22,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
-	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 const cloneTimeout = 10 * time.Minute
@@ -72,6 +71,9 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		if req.Op == "" {
 			return nil, remote.Rejected, errors.New("a create needs an operation id")
 		}
+		if _, err := localNode(cfg); err != nil {
+			return nil, remote.Failed, err
+		}
 		return settled(host.Journal(cfg.StateDir, req.Op, req.Action, req.Data, true, func() host.Message {
 			listing, err := createHere(cfg, c)
 			if err != nil {
@@ -114,7 +116,8 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		if err != nil {
 			return nil, remote.Failed, err
 		}
-		return forward(cfg, "delete", req.Op, mustJSON(hub.DeleteRequest{Repo: f.Repo, Slug: f.Slug}))
+		confirmed := host.WorkDigest(factory.CheckWork(factory.PlanRemoval(f, cfg)))
+		return forward(cfg, "delete", req.Op, mustJSON(host.DeleteRequest{Repo: f.Repo, Slug: f.Slug, Work: confirmed}))
 	case "stage", "review", "qa-claim", "qa-return":
 		return forward(cfg, req.Action, req.Op, req.Data)
 	case "view":
@@ -140,11 +143,7 @@ func serveRequest(cfg *state.Config, req remote.Request) (json.RawMessage, remot
 		if err := json.Unmarshal(req.Data, &pane); err != nil {
 			return nil, remote.Rejected, err
 		}
-		id, err := host.PrepareView(tmux.Client{Socket: cfg.Tmux.Socket}, f, pane.Role, pane.Token)
-		if err != nil {
-			return nil, remote.Failed, err
-		}
-		return completed(id)
+		return forward(cfg, "attach", "", mustJSON(host.AttachRequest{Key: f.Key(), Role: pane.Role, Token: pane.Token}))
 	}
 	return nil, remote.Rejected, fmt.Errorf("this server does not know the action %q; run factory update on both machines", req.Action)
 }
@@ -163,10 +162,13 @@ func mustServerID(cfg *state.Config) string {
 }
 
 func forward(cfg *state.Config, kind, op string, data json.RawMessage) (json.RawMessage, remote.Status, error) {
-	if err := startHost(cfg, tmux.Client{Socket: cfg.Tmux.Socket}, false); err != nil {
+	runtime, err := localNode(cfg)
+	if err != nil {
 		return nil, remote.Failed, err
 	}
-	reply, err := send(cfg.SocketPath(), hub.Message{T: kind, Op: op, Pane: "cli", Data: data})
+	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
+	defer cancel()
+	reply, err := runtime.Call(ctx, host.Message{T: kind, Op: op, Data: data})
 	switch {
 	case err != nil && op != "":
 		return nil, remote.Uncertain, err

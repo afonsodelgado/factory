@@ -209,7 +209,10 @@ func (m *Model) launchQA(run remote.QARun) error {
 		return err
 	}
 	launch := factory.StageLaunch{Setting: run.Job.Setting, Kickoff: "Read " + filepath.Join(run.Dir, run.Job.Prompt) + " and follow it.", Chrome: true}
-	return m.execution().TypeLaunch(pane, launchScript(run), launch.Command())
+	if err := host.WriteFile(launchScript(run), launch.Command()+"\n"); err != nil {
+		return err
+	}
+	return m.Engine.Type(pane, ". "+factory.ShellQuote(launchScript(run)))
 }
 
 func (m *Model) tendQA(name string) {

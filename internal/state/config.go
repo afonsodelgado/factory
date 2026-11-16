@@ -153,6 +153,9 @@ func (c *Config) DraftsDir() string    { return filepath.Join(c.StateDir, "draft
 func (c *Config) ActivityDir() string  { return filepath.Join(c.StateDir, "activity") }
 func (c *Config) SocketPath() string   { return filepath.Join(c.StateDir, "hub.sock") }
 func (c *Config) LockPath() string     { return filepath.Join(c.StateDir, "hub.lock") }
+func (c *Config) NodeSocket() string   { return filepath.Join(c.StateDir, "node.sock") }
+func (c *Config) NodeLockPath() string { return filepath.Join(c.StateDir, "node.lock") }
+func (c *Config) HubViewLock() string  { return filepath.Join(c.StateDir, "hub-view.lock") }
 func (c *Config) RulesPath() string    { return filepath.Join(c.ConfigDir, "rules.md") }
 
 func SessionsDir(stateDir string) string {

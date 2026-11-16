@@ -17,6 +17,8 @@ func NewQueue() Queue { return Queue{events: make(chan host.Event, 64)} }
 
 func (q Queue) Events() <-chan host.Event { return q.events }
 
+func (q Queue) Sink() chan<- host.Event { return q.events }
+
 func (q Queue) Call(ctx context.Context, m host.Message) (host.Message, error) {
 	reply := make(chan host.Message, 1)
 	select {

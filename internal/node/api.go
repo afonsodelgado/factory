@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,14 +18,17 @@ import (
 )
 
 const (
+	Protocol    = 1
+	MinProtocol = 1
 	maxBody     = 64 << 10
+	commandWait = time.Minute
 	heartbeat   = 15 * time.Second
 	pollEvery   = time.Second
 	runtimeWait = 10 * time.Second
 	retryAfter  = "2"
 )
 
-var ErrUnavailable = errors.New("the factory runtime is not answering; it may be changing between the hub and factory serve")
+var ErrUnavailable = errors.New("the factory node is not answering; check that factory node run is running")
 
 type Principal func(*http.Request) (string, bool)
 
@@ -33,6 +37,8 @@ type Commands struct{ Runtime Caller }
 type API struct {
 	Commands
 	Version string
+	Node    string
+	Boot    string
 	Now     func() time.Time
 
 	mu        sync.Mutex
@@ -50,6 +56,14 @@ func (a *API) now() time.Time {
 
 func (a *API) Handler(principal Principal) http.Handler {
 	mux := http.NewServeMux()
+	a.Register(mux, principal)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
+	return mux
+}
+
+var NetworkKinds = []string{"create", "removal", "delete", "archive", "unarchive", "wake", "pause", "wake-all"}
+
+func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string) {
 	route := func(pattern string, serve func(http.ResponseWriter, *http.Request, string)) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			caller, ok := principal(r)
@@ -67,8 +81,17 @@ func (a *API) Handler(principal Principal) http.Handler {
 	route("GET /api/operations/{operation}", a.Operation)
 	route("POST /api/factories/{key}/actions", a.Act)
 	route("POST /api/factories/{key}/preview", a.Preview)
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
-	return mux
+	mux.HandleFunc("POST /api/commands/{kind}", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := principal(r); !ok {
+			fail(w, http.StatusUnauthorized, "this request has no owner identity")
+			return
+		}
+		if len(kinds) > 0 && !slices.Contains(kinds, r.PathValue("kind")) {
+			fail(w, http.StatusNotFound, "no such command on this listener")
+			return
+		}
+		a.Command(w, r)
+	})
 }
 
 func (a *API) me(w http.ResponseWriter, r *http.Request, caller string) {
@@ -129,7 +152,7 @@ func (a *API) publish(local []host.LocalFactory) {
 		revision = a.current.Revision + 1
 	}
 	a.factories = factories
-	a.current = &Snapshot{Revision: revision, ServerTime: a.now(), Factories: local}
+	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local}
 	a.broadcast(event("snapshot", a.current))
 }
 
@@ -283,6 +306,32 @@ func (c Commands) Act(w http.ResponseWriter, r *http.Request, caller string) {
 		reply(w, http.StatusConflict, receipt)
 	default:
 		reply(w, http.StatusOK, receipt)
+	}
+}
+
+func (c Commands) Command(w http.ResponseWriter, r *http.Request) {
+	op := r.Header.Get(OperationHeader)
+	if op != "" && uuid.Validate(op) != nil {
+		fail(w, http.StatusBadRequest, OperationHeader+" must be a UUID")
+		return
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, host.MaxMessage))
+	if err != nil || !json.Valid(data) {
+		fail(w, http.StatusBadRequest, "the request body is not JSON")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), commandWait)
+	defer cancel()
+	answer, err := c.Runtime.Call(ctx, host.Message{T: r.PathValue("kind"), Op: op, Data: data})
+	switch {
+	case err != nil:
+		unavailable(w)
+	case answer.T == "done":
+		reply(w, http.StatusOK, answer)
+	case answer.T == "uncertain":
+		reply(w, http.StatusConflict, answer)
+	default:
+		reply(w, http.StatusUnprocessableEntity, answer)
 	}
 }
 

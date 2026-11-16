@@ -15,7 +15,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
-	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
@@ -30,19 +29,15 @@ const (
 )
 
 type Model struct {
-	host    *host.Runtime
 	Config  *state.Config
 	Engine  *Engine
 	Layout  Layout
 	Server  *Server
-	Loader  *Loader
+	Node    Node
 	Events  chan Event
 	Watch   *Watcher
 	GitHub  *GitHub
-	Typist  Typist
 	Open    func(url string)
-	Review  *review.Server
-	Chrome  *review.Browser
 	Tunnels *remote.Tunnels
 
 	DialogCommand func(kind string) string
@@ -87,9 +82,14 @@ type Model struct {
 	claiming      map[string]remote.QARun
 	returning     map[string]bool
 	checkouts     map[string]string
+	claims        map[string]host.Answer
+	lastSettled   string
+	presented     bool
+	parked        map[string]bool
+	confirmedWork string
+	wanted        string
 }
 
-type snapshotMsg Snapshot
 type pollMsg struct{}
 type focusPollMsg struct{}
 type activeMsg string
@@ -143,7 +143,7 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) load() tea.Cmd {
-	if m.Loader == nil {
+	if m.Node == nil {
 		return nil
 	}
 	layout, repos := m.Layout, m.Config.Repos
@@ -151,7 +151,11 @@ func (m *Model) load() tea.Cmd {
 		if m.Engine != nil {
 			m.Engine.Adopt(layout, repos)
 		}
-		return snapshotMsg(m.Loader.Load())
+		var p host.Presentation
+		if err := m.ask("snapshot", nil, &p); err != nil {
+			return nodeLostMsg{err}
+		}
+		return presentationMsg(p)
 	}
 }
 
@@ -187,7 +191,7 @@ func (m *Model) watchDirs() {
 }
 
 func (m *Model) poll() tea.Cmd {
-	if m.Loader == nil {
+	if m.Node == nil {
 		return nil
 	}
 	return tea.Tick(pollEvery, func(time.Time) tea.Msg { return pollMsg{} })
@@ -223,10 +227,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.measureWindow()
-	case snapshotMsg:
-		m.apply(Snapshot(msg))
+	case presentationMsg:
+		m.applyPresentation(host.Presentation(msg))
 		cmd = tea.Batch(m.pending...)
 		m.pending = nil
+	case nodeLostMsg:
+		m.notice = problem("The factory node is not answering, so this list is not updating: " + msg.err.Error() + ". Check factory node run.")
 	case pollMsg:
 		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes())
 	case remoteMsg:
@@ -301,9 +307,8 @@ func (m *Model) refresh() {
 	for _, it := range s.Items {
 		m.loaded[it.Factory.Key()] = it.Status
 	}
-	m.settleReceipts()
-	m.queueInbox()
-	m.flushTypeQueue()
+	m.clearRefusals()
+	m.settleRemoteClaims()
 	m.settle()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
@@ -312,19 +317,22 @@ func (m *Model) refresh() {
 	}
 	m.planWakes()
 	m.notePipelines()
-	m.closeFinishedStages()
 	rows := selector.Visible(m.data())
+	if _, ok := m.snap.Find(m.wanted); ok {
+		m.choose(m.wanted)
+		m.wanted = ""
+	}
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		m.choose(m.landing(rows, starting))
 	} else if m.itemArrived(m.selected, shownBefore) {
 		m.panel.tab = panel.Attention
 	}
 	m.ensureSlot()
+	m.fitNewPanes()
 	m.dropProxies()
 	m.showSelected()
 	m.arrange()
 	m.watchDirs()
-	m.syncReview()
 	if first {
 		m.pending = append(m.pending, m.refreshPRs(false))
 	}
@@ -410,7 +418,7 @@ func (m *Model) planWakes() {
 			continue
 		}
 		_, profile := m.repoConfig(it.Factory.Repo)
-		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), hooks, m.writableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+		m.wakes[it.Factory.Key()] = PlanWake(it, profile.BrowserQA(), hooks, host.WritableDirsFor(m.Config, it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
 	}
 }
 
@@ -576,9 +584,6 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 }
 
 func (m *Model) handleEvent(e Event) tea.Cmd {
-	if e.Op != "" && journaled(e) {
-		return m.journal(e)
-	}
 	switch e.T {
 	case "hello", "resize":
 		if strings.HasPrefix(e.Pane, "dialog:") {
@@ -596,18 +601,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.viewerKey(e.Pane, e.K, e.Text)
 	case "result":
 		return m.dialogResult(e)
-	case "open":
-		return m.openRequest(e)
-	case "repo":
-		return m.repoRequest(e)
-	case "stage":
-		return m.stageRequest(e)
-	case "review":
-		return m.reviewRequest(e)
-	case "delete":
-		return m.deleteRequest(e)
-	case "local", "act", "receipt", "preview":
-		e.Respond(m.execution().Handle(e.Message))
+	case "show":
+		return m.showRequest(e)
 	case "paste":
 		if e.Pane == "panel" {
 			m.paste(e.Text)
@@ -618,38 +613,10 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		}
 	default:
 		if e.Pane == "cli" {
-			e.Respond(Message{T: "error", Error: "the interactive factory hub is open on this machine and holds its runtime, so it cannot serve a laptop. Close it, then run factory host run"})
+			e.Respond(Message{T: "error", Error: "the hub only shows factories; send " + e.T + " to the node over its socket"})
 		}
 	}
 	return nil
-}
-
-func journaled(e Event) bool {
-	switch e.T {
-	case "open", "delete", "stage":
-		return true
-	case "review":
-		var r ReviewRequest
-		return json.Unmarshal(e.Data, &r) == nil && r.Action != "open" && r.Action != "stack"
-	}
-	return false
-}
-
-func (m *Model) journal(e Event) tea.Cmd {
-	var cmd tea.Cmd
-	reply := m.execution().Execute(e.Op, e.T, e.Data, func() Message {
-		inner := e
-		inner.Op, inner.From, inner.Reply = "", nil, make(chan Message, 1)
-		cmd = m.handleEvent(inner)
-		select {
-		case r := <-inner.Reply:
-			return r
-		default:
-			return Message{T: "error", Error: "the hub did not answer " + e.T}
-		}
-	})
-	e.Respond(reply)
-	return cmd
 }
 
 func (m *Model) viewerKey(pane, key, text string) tea.Cmd {

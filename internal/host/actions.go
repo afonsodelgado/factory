@@ -57,14 +57,14 @@ func (m *Runtime) Unarchive(it Item) error {
 }
 
 func (m *Runtime) Delete(r DeleteRequest) ([]factory.RemovalStep, error) {
-	it, ok := m.snap.Find(state.Key(r.Repo, r.Slug))
-	if !ok && m.Loader != nil {
-		it.Factory, ok = m.Loader.Lookup(r.Repo, r.Slug)
+	f, err := m.deletable(r)
+	if err != nil {
+		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("no factory %s", r.Slug)
+	if m.workChanged(f, r.Work) {
+		return nil, fmt.Errorf("%s has uncommitted or unpushed work that was not confirmed, or it changed since the confirmation; nothing was deleted. Run the delete again to see it", f.Label())
 	}
-	return m.DeleteFactory(it.Factory)
+	return m.DeleteFactory(f)
 }
 
 func (m *Runtime) DeleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {

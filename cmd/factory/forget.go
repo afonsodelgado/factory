@@ -1,13 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 
-	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -55,8 +57,8 @@ func runForget(args []string) int {
 		fmt.Printf("The hub has no repo at %s. Nothing changed.\n", install.HomeRelative(repo))
 		return 0
 	}
-	if hubRunning(cfg) {
-		request(cfg.SocketPath(), "repo", hub.RepoRequest{Repo: repo, Forget: true})
+	if node.Answers(cfg.NodeSocket()) {
+		node.Unix(cfg.NodeSocket()).Request(context.Background(), "repo", "", host.RepoRequest{Repo: repo, Forget: true}, nil)
 	}
 	fmt.Printf("The hub no longer lists %s. Its factories, worktrees and .factory/ stay; run factory there to add it back.\n", install.HomeRelative(repo))
 	return 0

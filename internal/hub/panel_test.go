@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -43,7 +44,18 @@ func questionFactory(hookEvent string, at time.Time) Snapshot {
 	return Snapshot{At: at, Panes: []tmux.Pane{pane}, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &pane}}}
 }
 
-func panelKeys(tm *teatest.TestModel, keys ...string) {
+type sender interface{ Send(tea.Msg) }
+
+type direct struct{ m *Model }
+
+func (d direct) Send(msg tea.Msg) { d.m.Update(msg) }
+
+func drive(m *Model, width, height int) direct {
+	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return direct{m}
+}
+
+func panelKeys(tm sender, keys ...string) {
 	for _, k := range keys {
 		text := ""
 		switch {
@@ -68,7 +80,7 @@ func keystrokes(s string) []string {
 	return keys
 }
 
-func typeText(tm *teatest.TestModel, s string) {
+func typeText(tm sender, s string) {
 	panelKeys(tm, keystrokes(s)...)
 }
 
@@ -77,8 +89,8 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 	snap := questionFactory("Stop", now)
 	snap.Items[0].Factory.State.Attention[0].Questions = nil
 	typist := &fakeTypist{}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	model.SetSnapshot(snap)
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+	node.show(model, snap)
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
 	panelKeys(tm, "right", "left")
 	typeText(tm, "yes")
@@ -94,7 +106,7 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 
 func TestQQuitsFromThePanelUnlessItIsTypedIntoAnAnswer(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
-	idle := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd})
+	idle, node := withNode(Model{Config: &state.Config{StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
 	tm := teatest.NewTestModel(t, idle, teatest.WithInitialTermSize(34, 44))
 	panelKeys(tm, "q")
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
@@ -102,8 +114,8 @@ func TestQQuitsFromThePanelUnlessItIsTypedIntoAnAnswer(t *testing.T) {
 	snap := questionFactory("Stop", now)
 	snap.Items[0].Factory.State.Attention[0].Questions = nil
 	typist := &fakeTypist{}
-	answering := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	answering.SetSnapshot(snap)
+	answering, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+	node.show(answering, snap)
 	tm = teatest.NewTestModel(t, answering, teatest.WithInitialTermSize(34, 44))
 	panelKeys(tm, "right", "left")
 	typeText(tm, "q")
@@ -183,9 +195,9 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 				return snap
 			}
 			typist := &fakeTypist{}
-			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-			model.SetSnapshot(snapshot())
-			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+			model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+			node.show(model, snapshot())
+			tm := drive(model, 34, 44)
 			panelKeys(tm, c.keys...)
 			for _, l := range c.later {
 				next := snapshot()
@@ -194,13 +206,10 @@ func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 				if l.main != nil {
 					next.Items[0].Hook.Main = l.main
 				}
-				tm.Send(snapshotMsg(next))
+				tm.Send(node.present(next))
 				panelKeys(tm, l.keys...)
 			}
-			if err := tm.Quit(); err != nil {
-				t.Fatal(err)
-			}
-			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+			final := model
 			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
 			hidden := c.hides == "" || !strings.Contains(view, c.hides)
 			sent := strings.Contains(strings.Join(typist.typed, "\n"), c.sends)
@@ -233,20 +242,17 @@ func TestAnsweringTakesTheFactoryOffNeedsYouUntilTheAnswerIsLost(t *testing.T) {
 				snap.Items[0].Unblocked = factory.Running
 				return snap
 			}
-			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: &fakeTypist{}, Now: func() time.Time { return now }, Icons: theme.Nerd})
-			model.SetSnapshot(snapshot(now))
-			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+			model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: &fakeTypist{}})
+			node.show(model, snapshot(now))
+			tm := drive(model, 34, 44)
 			panelKeys(tm, "ctrl+s")
 			later := snapshot(now.Add(c.after))
 			later.Items[0].Hook.Submits = c.submits
 			if len(c.submits) > 0 {
 				later.Items[0].Hook.Submit = &c.submits[len(c.submits)-1]
 			}
-			tm.Send(snapshotMsg(later))
-			if err := tm.Quit(); err != nil {
-				t.Fatal(err)
-			}
-			final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+			tm.Send(node.present(later))
+			final := model
 			view := escapes.ReplaceAllString(final.PanelView(109, 28), "")
 			if got := final.snap.Items[0].Status; got != c.status || !strings.Contains(view, c.shows) {
 				t.Errorf("status %s, panel:\n%s\nwant %s and %q: the factory list must follow the panel, and a lost answer must ask again", got, view, c.status, c.shows)
@@ -262,8 +268,8 @@ func TestAfterTheLastAnswerEnterGoesToTheNextFactoryThatNeedsYou(t *testing.T) {
 	other.Factory.Slug = "eng-7460-exports"
 	other.Factory.State = &state.State{ID: "ENG-7460", Stage: "plan", WaitingOn: "user", Attention: []state.Attention{{ID: "gate-7460-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}}}
 	snap.Items = append(snap.Items, other)
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: &fakeTypist{}, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	model.SetSnapshot(snap)
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: &fakeTypist{}})
+	node.show(model, snap)
 	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
 	panelKeys(tm, "ctrl+s", "enter")
 	if err := tm.Quit(); err != nil {
@@ -280,8 +286,8 @@ func TestASmallPanelKeepsTheItemAndItsApproveRow(t *testing.T) {
 	snap := questionFactory("Stop", now)
 	snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", Body: "The architect wrote plan.html.", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 	snap.Items[0].Factory.State.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "plan.html", Title: "Implementation plan"}}}}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	model.SetSnapshot(snap)
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
+	node.show(model, snap)
 	view := escapes.ReplaceAllString(model.PanelView(84, 10), "")
 	if !strings.Contains(view, "gate-7452-plan") || !strings.Contains(view, "Approve") {
 		t.Errorf("panel at laptop size:\n%s\nwant the item and its Approve row, not only the notes box and its status", view)
@@ -302,17 +308,13 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	reRaised := withCap(now.Add(2*time.Second), now.Add(2*time.Second))
 	reRaised.Items[0].Hook.Submit = firstReceived
 	typist := &fakeTypist{}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	model.SetSnapshot(withCap(now.Add(-time.Hour), now))
-	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+	node.show(model, withCap(now.Add(-time.Hour), now))
+	tm := drive(model, 34, 44)
 	panelKeys(tm, "ctrl+r")
-	tm.Send(snapshotMsg(resolved))
-	tm.Send(snapshotMsg(reRaised))
+	tm.Send(node.present(resolved))
+	tm.Send(node.present(reRaised))
 	panelKeys(tm, "ctrl+r")
-	if err := tm.Quit(); err != nil {
-		t.Fatal(err)
-	}
-	tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
 	if len(typist.typed) != 2 {
 		t.Errorf("typed %q; the cap tripped again under the same id, so continue must send a second time", typist.typed)
 	}
@@ -322,8 +324,8 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	asking := questionFactory("Stop", now).Items[0]
 	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd})
-	model.SetSnapshot(Snapshot{At: now, Items: []Item{quiet, asking}})
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
+	node.show(model, Snapshot{At: now, Items: []Item{quiet, asking}})
 
 	opened := []panel.Tab{model.panel.tab}
 	model.choose(asking.Factory.Key())
@@ -333,10 +335,10 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 
 	nowAsking := quiet
 	nowAsking.Factory.State = &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
-	model.SetSnapshot(Snapshot{At: now.Add(time.Second), Items: []Item{nowAsking, asking}})
+	node.show(model, Snapshot{At: now.Add(time.Second), Items: []Item{nowAsking, asking}})
 	opened = append(opened, model.panel.tab)
 	model.switchTab(1)
-	model.SetSnapshot(Snapshot{At: now.Add(2 * time.Second), Items: []Item{nowAsking, asking}})
+	node.show(model, Snapshot{At: now.Add(2 * time.Second), Items: []Item{nowAsking, asking}})
 	opened = append(opened, model.panel.tab)
 
 	if want := []panel.Tab{panel.Attention, panel.Attention, panel.PRs, panel.Attention, panel.PRs}; !slices.Equal(opened, want) || model.selected != nowAsking.Factory.Key() {
@@ -360,8 +362,8 @@ func TestUnreadableStateIsSaidNotHidden(t *testing.T) {
 		t.Fatal(err)
 	}
 	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
-	model := NewModel(Model{Config: cfg, Now: time.Now, Icons: theme.Nerd})
-	model.SetSnapshot(loader.Load())
+	model, node := withNode(Model{Config: cfg, Now: time.Now, Icons: theme.Nerd}, host.Runtime{})
+	node.show(model, loader.Load())
 
 	view := escapes.ReplaceAllString(model.PanelView(109, 20), "")
 	if !strings.Contains(view, "state.json cannot be read") {
@@ -385,8 +387,8 @@ func TestQuestionBatchPanel(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			typist := &fakeTypist{}
-			model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Typist: typist, Now: func() time.Time { return now }, Icons: theme.Nerd})
-			model.SetSnapshot(questionFactory(c.hook, now))
+			model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+			node.show(model, questionFactory(c.hook, now))
 			tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
 			panelKeys(tm, "down", "enter", "down")
 			typeText(tm, "429 with Retry-After.")

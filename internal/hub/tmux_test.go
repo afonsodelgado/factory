@@ -424,8 +424,9 @@ func TestWakeTypesNothingIntoAPaneThatLeftItsShell(t *testing.T) {
 	polledAtTheShell := pane(t, e.TM, id)
 	polledAtTheShell.Command = "zsh"
 	exited := Item{Status: factory.Exited, Pane: &polledAtTheShell, Factory: factory.Factory{Repo: "/repo", Slug: "eng-3-z", Worktree: t.TempDir(), Entry: &state.Entry{SessionID: "s3"}}}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l})
-	model.snap = Snapshot{At: time.Now(), Items: []Item{exited}}
+	panes := &host.Panes{TM: e.TM, Session: e.Session}
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l}, host.Runtime{Engine: panes, Typist: panes, TM: e.TM})
+	node.show(model, Snapshot{At: time.Now(), Items: []Item{exited}})
 
 	err = model.wake(exited.Factory.Key())
 	time.Sleep(300 * time.Millisecond)
@@ -498,7 +499,10 @@ func TestPausingTheShownFactoryKeepsTheHubWhenItsViewerIsGone(t *testing.T) {
 	if err := e.TM.KillPane(viewer); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Pause(&l, "/repo", "x"); err != nil {
+	if err := e.Unshow(&l, "/repo", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&host.Panes{TM: e.TM, Session: e.Session}).Pause("/repo", "x"); err != nil {
 		t.Fatal(err)
 	}
 	panes, _ := e.TM.Panes()

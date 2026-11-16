@@ -211,11 +211,15 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 }
 
 func (m *Runtime) WritableDirs(repo, checkout string, setting state.AgentSetting) []string {
+	return WritableDirsFor(m.Config, repo, checkout, setting)
+}
+
+func WritableDirsFor(config *state.Config, repo, checkout string, setting state.AgentSetting) []string {
 	if setting.ToolName() != state.ToolCodex {
 		return nil
 	}
-	cfg, _ := m.repoConfig(repo)
-	return factory.CodexWritableDirs(cmp.Or(checkout, repo), cfg.Codex.WritableDirs)
+	profile, _ := state.ReadProfile(repo)
+	return factory.CodexWritableDirs(cmp.Or(checkout, repo), config.WithProfile(profile).Codex.WritableDirs)
 }
 
 func (m *Runtime) CloseFinishedStages() {

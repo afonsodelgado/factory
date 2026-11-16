@@ -205,11 +205,8 @@ func (e *Engine) killStage(p tmux.Pane) error {
 	return e.TM.KillWindow(p.WindowID)
 }
 
-func (e *Engine) Pause(l *Layout, repo, slug string) error {
+func (e *Engine) Unshow(l *Layout, repo, slug string) error {
 	if err := e.hideStageOf(l, repo, slug); err != nil {
-		return err
-	}
-	if err := e.KillStages(repo, slug, ""); err != nil {
 		return err
 	}
 	panes, err := e.TM.Panes()
@@ -217,24 +214,36 @@ func (e *Engine) Pause(l *Layout, repo, slug string) error {
 		return err
 	}
 	pane, ok := host.FactoryPane(panes, repo, slug)
-	if !ok {
+	if !ok || pane.ID != l.Slot {
 		return nil
 	}
-	if pane.ID == l.Slot {
-		if err := e.ensureSlotViewer(); err != nil {
-			return err
-		}
-		viewer, found := e.SlotViewer()
-		if found {
-			if err := e.Select(l, viewer); err != nil {
-				return err
-			}
-		}
-		panes, err = e.TM.Panes()
-		if err != nil {
-			return err
-		}
-		pane, _ = byID(panes, pane.ID)
+	if err := e.ensureSlotViewer(); err != nil {
+		return err
 	}
-	return e.TM.KillWindow(pane.WindowID)
+	if viewer, found := e.SlotViewer(); found {
+		return e.Select(l, viewer)
+	}
+	return nil
+}
+
+func (m *Model) unshow(f factory.Factory) {
+	if m.Engine != nil && f.Remote == nil {
+		m.report(m.Engine.Unshow(&m.Layout, f.Repo, f.Slug))
+	}
+}
+
+func (m *Model) fitNewPanes() {
+	if m.Engine == nil {
+		return
+	}
+	seen := map[string]bool{}
+	arrived := false
+	for _, p := range m.snap.Panes {
+		seen[p.ID] = true
+		arrived = arrived || !m.parked[p.ID]
+	}
+	m.parked = seen
+	if arrived {
+		m.Engine.FitParking(m.Layout)
+	}
 }

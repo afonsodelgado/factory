@@ -91,7 +91,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pair/exchange", s.pairExchange)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
 	mux.HandleFunc("/r/", s.authed(s.openReview))
-	mux.HandleFunc(grantPrefix+"{token}/{rest...}", s.sandboxed)
+	mux.HandleFunc(GrantPrefix+"{token}/{rest...}", s.sandboxed)
 	mux.Handle("/", s.shell())
 	return s.guard(mux)
 }
@@ -135,7 +135,7 @@ func mutates(r *http.Request) bool {
 
 func (s *Server) mutationProblem(r *http.Request) (string, int) {
 	origin := "https://" + s.Host
-	if strings.HasPrefix(r.URL.Path, grantPrefix) {
+	if strings.HasPrefix(r.URL.Path, GrantPrefix) {
 		origin = sandboxOrigin
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))

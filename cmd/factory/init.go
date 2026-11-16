@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -46,9 +48,9 @@ func runInit(args []string) int {
 	if r.ProfileWritten && r.CopiedFrom == "" {
 		fmt.Println("CodeRabbit is off. Turn it on from the hub’s n dialog (ctrl+e) only if CodeRabbit reviews this repo's pull requests.")
 	}
-	if cfg, err := state.LoadConfig(); r.Remembered && err == nil && hubRunning(cfg) {
+	if cfg, err := state.LoadConfig(); r.Remembered && err == nil && node.Answers(cfg.NodeSocket()) {
 		if repo, ok := configuredRepo(cfg.Repos, r.Repo); ok {
-			request(cfg.SocketPath(), "repo", hub.RepoRequest{Repo: repo})
+			node.Unix(cfg.NodeSocket()).Request(context.Background(), "repo", "", host.RepoRequest{Repo: repo}, nil)
 		}
 	}
 	return 0

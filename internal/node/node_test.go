@@ -7,10 +7,12 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -188,5 +190,115 @@ func TestASupersededCheckNeverPostsItsResultAndNeverHoldsUpAnswers(t *testing.T)
 	case text := <-posted:
 		t.Fatalf("the superseded check posted %q", text)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestOnlyTheOwnersLoginThroughLocalServeReachesTheAPI(t *testing.T) {
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{"devbox.tail1234.ts.net"}, Origin: "https://devbox.tail1234.ts.net", OpaquePath: "/rt/"}
+	reached := false
+	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
+	cases := []struct {
+		name   string
+		peer   string
+		logins []string
+		method string
+		path   string
+		origin string
+		status int
+	}{
+		{"the owner through Serve", "127.0.0.1:50000", []string{"alice@example.com"}, http.MethodGet, "/api/snapshot", "", http.StatusOK},
+		{"the owner's encoded login", "[::1]:50000", []string{"=?utf-8?q?alice=40example.com?="}, http.MethodGet, "/api/snapshot", "", http.StatusOK},
+		{"no login header", "127.0.0.1:50000", nil, http.MethodGet, "/api/snapshot", "", http.StatusUnauthorized},
+		{"two login headers", "127.0.0.1:50000", []string{"alice@example.com", "alice@example.com"}, http.MethodGet, "/api/snapshot", "", http.StatusUnauthorized},
+		{"a malformed login", "127.0.0.1:50000", []string{"=?utf-8?q?alice=ZZ?="}, http.MethodGet, "/api/snapshot", "", http.StatusUnauthorized},
+		{"another tailnet user", "127.0.0.1:50000", []string{"mallory@example.com"}, http.MethodGet, "/api/snapshot", "", http.StatusForbidden},
+		{"the owner's headers from the network", "100.101.102.103:50000", []string{"alice@example.com"}, http.MethodGet, "/api/snapshot", "", http.StatusForbidden},
+		{"a mutation from another origin", "127.0.0.1:50000", []string{"alice@example.com"}, http.MethodPost, "/api/commands/wake", "https://evil.example", http.StatusForbidden},
+		{"an opaque origin outside the review grant", "127.0.0.1:50000", []string{"alice@example.com"}, http.MethodPost, "/api/commands/wake", "null", http.StatusForbidden},
+		{"an opaque origin on the review grant", "127.0.0.1:50000", []string{"alice@example.com"}, http.MethodPost, "/rt/grant/r/k/_api/threads", "null", http.StatusOK},
+		{"a native client without an origin", "127.0.0.1:50000", []string{"alice@example.com"}, http.MethodPost, "/api/commands/wake", "", http.StatusOK},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			reached = false
+			r := httptest.NewRequest(c.method, "https://devbox.tail1234.ts.net"+c.path, strings.NewReader("{}"))
+			r.RemoteAddr = c.peer
+			r.Header.Set("Content-Type", "application/json")
+			for _, login := range c.logins {
+				r.Header.Add(LoginHeader, login)
+			}
+			if c.origin != "" {
+				r.Header.Set("Origin", c.origin)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != c.status || reached != (c.status == http.StatusOK) {
+				t.Fatalf("got %d (handler reached %v); want %d", w.Code, reached, c.status)
+			}
+		})
+	}
+}
+
+func TestTheNodeSocketIsOwnerOnlyAndNeverReplacesSomeoneElsesFile(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "fnode-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	os.Chmod(dir, 0o755)
+	socket := filepath.Join(dir, "node.sock")
+	target := filepath.Join(dir, "elsewhere")
+	os.WriteFile(target, []byte("keep"), 0o644)
+	if err := os.Symlink(target, socket); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListenUnix(socket); err == nil {
+		t.Fatal("listened through a symlink at the socket path")
+	}
+	os.Remove(socket)
+	os.WriteFile(socket, []byte("not a socket"), 0o600)
+	if _, err := ListenUnix(socket); err == nil {
+		t.Fatal("replaced a regular file at the socket path")
+	}
+	if data, _ := os.ReadFile(target); string(data) != "keep" {
+		t.Fatal("the symlink's target was changed")
+	}
+	os.Remove(socket)
+	ln, err := ListenUnix(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	dirInfo, _ := os.Stat(dir)
+	sockInfo, _ := os.Lstat(socket)
+	if dirInfo.Mode().Perm() != 0o700 || sockInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("state dir %v, socket %v; want 0700 and 0600 so no other local user reaches the owner principal", dirInfo.Mode().Perm(), sockInfo.Mode().Perm())
+	}
+}
+
+func TestASecondNodeOrAnOldOwnerProcessIsRefusedWithoutTakingOver(t *testing.T) {
+	dir := t.TempDir()
+	nodeLock, oldHub := filepath.Join(dir, "node.lock"), filepath.Join(dir, "hub.lock")
+	release, err := Lock(nodeLock, oldHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Lock(nodeLock, oldHub); !errors.Is(err, ErrRunning) {
+		t.Fatalf("a second node got %v; want ErrRunning", err)
+	}
+	release()
+	held, err := flock(oldHub)
+	if err != nil || held == nil {
+		t.Fatal(err)
+	}
+	defer held()
+	var old OldOwnerError
+	if _, err := Lock(nodeLock, oldHub); !errors.As(err, &old) || !strings.Contains(err.Error(), "never stops them") {
+		t.Fatalf("a node beside an old hub got %v; want a refusal naming the old process to stop", err)
+	}
+	if again, err := flock(nodeLock); err != nil || again == nil {
+		t.Error("the refused node kept its lock, so a later node could never start")
+	} else {
+		again()
 	}
 }

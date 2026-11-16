@@ -14,6 +14,7 @@ import (
 
 const (
 	stopWait = 10 * time.Second
+	lockPoll = 50 * time.Millisecond
 	testWait = 8 * time.Second
 )
 
@@ -32,9 +33,8 @@ type Status struct {
 }
 
 type Serving struct {
-	Version string     `json:"version"`
-	PID     int        `json:"pid"`
-	Owner   *OwnerInfo `json:"owner,omitempty"`
+	Version string `json:"version"`
+	PID     int    `json:"pid"`
 }
 
 type Pairing struct {
@@ -142,7 +142,7 @@ func (s Setup) Disable() error {
 
 func (s Setup) Stop() error {
 	if !Running(s.Config.StateDir) {
-		return Release(s.Config)
+		return nil
 	}
 	if err := s.control(host.Message{T: "stop"}, nil); err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s Setup) Stop() error {
 	deadline := time.Now().Add(stopWait)
 	for Running(s.Config.StateDir) {
 		if time.Now().After(deadline) {
-			return errors.New("factory serve did not stop within " + stopWait.String())
+			return errors.New("the phone app did not stop within " + stopWait.String())
 		}
 		time.Sleep(lockPoll)
 	}
@@ -212,11 +212,7 @@ func (c Control) Handle(e host.Event) {
 func (c Control) handle(m host.Message) host.Message {
 	switch m.T {
 	case "status":
-		serving := Serving{Version: c.Version, PID: os.Getpid()}
-		if info, running := CurrentOwner(c.Config); running {
-			serving.Owner = &info
-		}
-		return done(serving)
+		return done(Serving{Version: c.Version, PID: os.Getpid()})
 	case "stop":
 		return done(nil)
 	case "test":

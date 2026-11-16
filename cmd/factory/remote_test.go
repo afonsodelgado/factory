@@ -21,6 +21,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -84,9 +85,37 @@ func newStandIn(t *testing.T) standIn {
 		t.Fatalf("tmux: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", s.tmux, "kill-server").Run() })
-	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\n", freePort(t)))
+	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\nnode:\n  port: %d\n  owner: owner@example.com\n", freePort(t), freePort(t)))
 	writeFile(t, filepath.Join(client, "config", "config.yml"), "remotes:\n  homelab:\n    host: homelab\n")
+	s.serverNode(t, s.server, s.tmux)
 	return s
+}
+
+func (s standIn) serverNode(t *testing.T, root, socket string) {
+	t.Helper()
+	process := exec.Command(filepath.Join(s.bin, "factory"), "node", "run")
+	process.Env = append(slices.Clone(s.env), "HOME="+filepath.Join(root, "home"), "FACTORY_CONFIG_DIR="+filepath.Join(root, "config"),
+		"FACTORY_STATE_DIR="+filepath.Join(root, "state"), "CLAUDE_CONFIG_DIR="+filepath.Join(root, "claude"), "FACTORY_TMUX_SOCKET="+socket)
+	var log strings.Builder
+	process.Stdout, process.Stderr = &log, &log
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- process.Wait() }()
+	t.Cleanup(func() {
+		process.Process.Signal(os.Interrupt)
+		<-exited
+	})
+	nodeSocket := filepath.Join(root, "state", "node.sock")
+	waitFor(t, "the server's node to answer on "+nodeSocket, func() bool {
+		select {
+		case err := <-exited:
+			t.Fatalf("the server's node exited: %v\n%s", err, log.String())
+		default:
+		}
+		return node.Answers(nodeSocket)
+	})
 }
 
 func (s standIn) serveGit(t *testing.T, url, path string) {
@@ -229,19 +258,66 @@ func TestRemoteAddTakesItsFlagsInAnyOrder(t *testing.T) {
 	}
 }
 
-func TestARemoteRequestFailsAtOnceWhileAnInteractiveHubHoldsTheServerRuntime(t *testing.T) {
+func TestARemoteRequestFailsAtOnceWithoutANodeAndNeverStartsAnOwner(t *testing.T) {
 	cfg := &state.Config{StateDir: t.TempDir()}
-	unlock, err := lockHub(cfg.LockPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
 	for _, op := range []string{"", uuid.NewString()} {
 		_, status, err := forward(cfg, "open", op, nil)
-		if status != remote.Failed || err == nil || !strings.Contains(err.Error(), "factory host run") {
-			t.Fatalf("a request with op %q got %q, %v; want a failure naming factory host run, since the hub would create panes without the server environment", op, status, err)
+		if status != remote.Failed || err == nil || !strings.Contains(err.Error(), "factory node run") {
+			t.Fatalf("a request with op %q got %q, %v; want a failure naming factory node run: host request only adapts to the running node", op, status, err)
 		}
 	}
+	if _, err := os.Stat(cfg.LockPath()); err == nil {
+		t.Error("host request took the runtime lock; it must never start an owner of its own")
+	}
+}
+
+func TestASecondNodeRefusesAndTheFirstKeepsItsSocket(t *testing.T) {
+	s := newStandIn(t)
+	onServer := []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+	out, err := s.factory(t, s.root, onServer, "node", "run")
+	if err == nil || !strings.Contains(out, "already runs") {
+		t.Fatalf("a second node exited with %v:\n%s\nwant a refusal naming the running node", err, out)
+	}
+	if !node.Answers(filepath.Join(s.server, "state", "node.sock")) {
+		t.Fatal("the refused node unlinked or broke the running node's socket")
+	}
+}
+
+func TestClosingTheHubLeavesTheNodeRunningStages(t *testing.T) {
+	s := newStandIn(t)
+	repo := gitRepo(t, s.root, "https://git.example/acme/app.git")
+	serverDir := func(name string) string { return filepath.Join(s.server, name) }
+	tmuxServer := func(args ...string) string {
+		out, err := exec.Command("tmux", append([]string{"-L", s.tmux}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("tmux %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	args := []string{"new-window", "-d", "-t", "factory:", "-n", "viewer", "-P", "-F", "#{window_id}"}
+	for _, kv := range []string{"HOME=" + serverDir("home"), "FACTORY_CONFIG_DIR=" + serverDir("config"), "FACTORY_STATE_DIR=" + serverDir("state"), "CLAUDE_CONFIG_DIR=" + serverDir("claude"), "FACTORY_TMUX_SOCKET=" + s.tmux, "PATH=" + s.bin + string(os.PathListSeparator) + os.Getenv("PATH"), "SHELL=" + filepath.Join(s.bin, "shell")} {
+		args = append(args, "-e", kv)
+	}
+	viewer := tmuxServer(append(args, filepath.Join(s.bin, "factory")+" hub; exec sleep 600")...)
+	hubLock := (&state.Config{StateDir: serverDir("state")}).HubViewLock()
+	waitFor(t, "the hub to open against the node", func() bool { return fileLocked(hubLock) })
+	tmuxServer("kill-window", "-t", viewer)
+	waitFor(t, "the hub to close", func() bool { return !fileLocked(hubLock) })
+
+	runtime := node.Unix(filepath.Join(serverDir("state"), "node.sock"))
+	ctx := context.Background()
+	if err := runtime.Request(ctx, "repo", "", host.RepoRequest{Repo: repo}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Request(ctx, "open", uuid.NewString(), host.OpenRequest{Name: "csv", Repo: repo, Prompt: "Export contacts."}, nil); err != nil {
+		t.Fatalf("creating a factory with the hub closed: %v", err)
+	}
+	writeFile(t, filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv", "state.json"), `{"id": "csv", "stage": "implement"}`)
+	if err := runtime.Request(ctx, "stage", uuid.NewString(), host.StageRequest{Action: "start", Role: "engineer", Text: "Implement the plan.", Factory: "csv"}, nil); err != nil {
+		t.Fatalf("starting a stage with the hub closed: %v", err)
+	}
+	windows := func() string { return tmuxServer("list-windows", "-a", "-F", "#{window_name}") }
+	waitFor(t, "the engineer's stage window", func() bool { return strings.Contains(windows(), host.StageParkName("csv", "engineer")) })
 }
 
 func TestRemoteDoctorSkipsWhatNeedsAWorkingLink(t *testing.T) {
@@ -377,8 +453,9 @@ func (s standIn) secondServer(t *testing.T, name string) (string, string) {
 		}
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", socket, "kill-server").Run() })
-	writeFile(t, filepath.Join(root, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\n", freePort(t)))
+	writeFile(t, filepath.Join(root, "config", "config.yml"), fmt.Sprintf("review:\n  port: %d\nnode:\n  port: %d\n  owner: owner@example.com\n", freePort(t), freePort(t)))
 	writeFile(t, filepath.Join(root, "home", ".gitconfig"), readOr(filepath.Join(s.server, "home", ".gitconfig")))
+	s.serverNode(t, root, socket)
 	return root, socket
 }
 
@@ -428,9 +505,6 @@ func TestRemoteAttachKeepsPaneIdentityAndAgentAlive(t *testing.T) {
 	}
 	homelab, _ := remote.For(cfg, "homelab")
 	build, _ := remote.For(cfg, "build")
-	if out, err := exec.Command("tmux", "-L", s.tmux, "kill-window", "-t", "factory:host").CombinedOutput(); err != nil {
-		t.Fatalf("stopping homelab's host: %v\n%s", err, out)
-	}
 	csv, csvPane := paneOf(t, homelab, "csv")
 	_, apiPane := paneOf(t, build, "api")
 	if csvPane.ID != apiPane.ID {

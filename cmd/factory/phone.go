@@ -7,11 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/install"
@@ -19,8 +15,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
-
-const serveReady = 10 * time.Second
 
 const phoneUsage = "usage: factory phone start | stop | status | enable | disable | configure [--port n] [--hostname name] | pair | devices | revoke <device id> | test | check"
 
@@ -104,8 +98,10 @@ func printTestPush(w io.Writer, setup phone.Setup) error {
 
 var errPushRejected = errors.New("a test notification did not reach the phone's push service")
 
+var errPhoneInNode = errors.New("the phone app runs inside the node; restart factory node run to serve it")
+
 func phoneSetup(cfg *state.Config) phone.Setup {
-	return phone.Setup{Config: cfg, Bundle: bundle.Files, Start: func() error { return startServe(cfg) }}
+	return phone.Setup{Config: cfg, Bundle: bundle.Files, Start: func() error { return errPhoneInNode }}
 }
 
 func configurePhone(setup phone.Setup, args []string) error {
@@ -131,26 +127,13 @@ func printPhoneStatus(w io.Writer, setup phone.Setup) error {
 	}
 	s := status.Settings
 	fmt.Fprintf(w, "enabled   %v\nurl       %s\nport      127.0.0.1:%d\n", s.Enabled, s.Origin(), s.ListenPort())
-	switch {
-	case status.Serving != nil && status.Serving.Owner != nil:
-		fmt.Fprintf(w, "serving   yes, version %s; %s\n", status.Serving.Version, ownerPhrase(status.Serving.Owner.Mode))
-	case status.Serving != nil:
-		fmt.Fprintf(w, "serving   yes, version %s; no runtime yet\n", status.Serving.Version)
-	default:
+	if status.Serving != nil {
+		fmt.Fprintf(w, "serving   yes, by the node, version %s\n", status.Serving.Version)
+	} else {
 		fmt.Fprintln(w, "serving   no")
 	}
 	fmt.Fprintf(w, "devices   %d\n", len(status.Devices))
 	return nil
-}
-
-func ownerPhrase(mode string) string {
-	switch mode {
-	case phone.ModeHub:
-		return "the hub runs the factories"
-	case phone.ModeLocal:
-		return "factory serve runs the factories while the hub is closed"
-	}
-	return "an incompatible factory holds the runtime; restart it with this version"
 }
 
 func printPairing(w io.Writer, setup phone.Setup) error {
@@ -180,8 +163,8 @@ func (a phoneActions) Status() (dialog.PhoneContext, error) {
 		return dialog.PhoneContext{}, err
 	}
 	c := dialog.PhoneContext{Enabled: status.Settings.Enabled, Running: status.Running, Hostname: status.Settings.Hostname, Port: status.Settings.ListenPort(), Devices: []dialog.PhoneDevice{}}
-	if status.Serving != nil && status.Serving.Owner != nil {
-		c.Owner = ownerPhrase(status.Serving.Owner.Mode)
+	if status.Serving != nil {
+		c.Owner = "the node runs the factories"
 	}
 	for _, d := range status.Devices {
 		c.Devices = append(c.Devices, dialog.PhoneDevice{ID: d.ID, Name: d.Name, Paired: d.PairedAt.Local().Format("2006-01-02 15:04")})
@@ -236,55 +219,4 @@ func printDevices(w io.Writer, setup phone.Setup) error {
 		fmt.Fprintf(w, "%s  %s  paired %s\n", d.ID, d.Name, d.PairedAt.Local().Format("2006-01-02 15:04"))
 	}
 	return nil
-}
-
-func startServe(cfg *state.Config) error {
-	if phone.Running(cfg.StateDir) {
-		return nil
-	}
-	bin, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	logPath := filepath.Join(phone.Open(cfg.StateDir).Dir, "serve.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		return err
-	}
-	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	defer log.Close()
-	cmd := exec.Command(bin, "serve")
-	cmd.Stdout, cmd.Stderr = log, log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	exited := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(exited)
-	}()
-	deadline := time.Now().Add(serveReady)
-	for {
-		if controlAnswers(cfg) {
-			return nil
-		}
-		select {
-		case <-exited:
-			tail, _ := os.ReadFile(logPath)
-			lines := strings.Split(strings.TrimSpace(string(tail)), "\n")
-			return fmt.Errorf("factory serve stopped at once: %s", lines[len(lines)-1])
-		case <-time.After(100 * time.Millisecond):
-		}
-		if time.Now().After(deadline) {
-			return errors.New("factory serve did not answer within " + serveReady.String() + "; read " + logPath)
-		}
-	}
-}
-
-func controlAnswers(cfg *state.Config) bool {
-	status, err := phoneSetup(cfg).Status()
-	return err == nil && status.Serving != nil
 }

@@ -1,47 +1,111 @@
 package hub
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
-type hostEngine struct{ model *Model }
+const nodeWait = time.Minute
 
-func (e hostEngine) NewStagePane(s host.StagePane) (string, error) {
-	return e.model.Engine.NewStagePane(e.model.Layout, s)
+type Node interface {
+	Call(ctx context.Context, m host.Message) (host.Message, error)
 }
 
-func (e hostEngine) KillStages(repo, slug, role string) error {
-	return e.model.Engine.KillStages(repo, slug, role)
+type presentationMsg host.Presentation
+
+type nodeLostMsg struct{ err error }
+
+func (m *Model) ask(kind string, payload, into any) error {
+	return m.call(kind, "", payload, into)
 }
 
-func (e hostEngine) Type(pane, text string) error { return e.model.Engine.Type(pane, text) }
+func (m *Model) effect(kind string, payload, into any) error {
+	return m.call(kind, uuid.NewString(), payload, into)
+}
 
-func (m *Model) execution() *host.Runtime {
-	first := m.host == nil
-	if m.host == nil {
-		m.host = host.New(host.Runtime{})
+func (m *Model) call(kind, op string, payload, into any) error {
+	if m.Node == nil {
+		return errors.New("the hub is not connected to a factory node")
 	}
-	r := m.host
-	r.ShowArchived = m.showArchived
-	r.Config, r.Loader, r.Typist, r.Now = m.Config, m.Loader, m.Typist, m.Now
-	if m.Engine != nil {
-		r.Engine = hostEngine{m}
-		r.TM = m.Engine.TM
-		r.Session = m.Engine.Session
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
 	}
-	r.SetSnapshot(localOnly(m.snap))
-	r.Pages = m.Review
-	r.Refused = m.dropAnswer
-	if first && m.Config.StateDir != "" {
-		m.report(r.Recover())
+	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
+	defer cancel()
+	answer, err := m.Node.Call(ctx, host.Message{T: kind, Op: op, Data: data})
+	switch {
+	case err != nil:
+		return err
+	case answer.T == "uncertain":
+		return errors.New(answer.Error + "; the outcome is unknown, so look before trying again")
+	case answer.T != "done":
+		return errors.New(answer.Error)
+	case into == nil:
+		return nil
 	}
-	return r
+	return json.Unmarshal(answer.Data, into)
 }
 
-func (e hostEngine) NewFactoryPane(n host.NewPane) (string, error) {
-	return e.model.Engine.NewFactoryPane(e.model.Layout, n)
+func (m *Model) applyPresentation(p host.Presentation) {
+	m.claims = p.Claims
+	for _, settled := range m.newlySettled(p.Settled) {
+		if settled.Outcome == host.StatusRefused && settled.Reason != "" {
+			m.panel.refused[settled.Key()] = settled.Reason
+			continue
+		}
+		delete(m.panel.drafts, settled.Key())
+	}
+	if p.Notice != "" {
+		m.notice = problem(p.Notice)
+	}
+	if p.Repos != nil {
+		m.Config.Repos = p.Repos
+	}
+	m.apply(p.Snapshot)
 }
 
-func (e hostEngine) Pause(repo, slug string) error {
-	return e.model.Engine.Pause(&e.model.Layout, repo, slug)
+func (m *Model) newlySettled(settled []host.Answer) []host.Answer {
+	catchingUp := !m.presented
+	m.presented = true
+	last := m.lastSettled
+	if len(settled) > 0 {
+		m.lastSettled = settlementOf(settled[len(settled)-1])
+	}
+	if catchingUp {
+		return nil
+	}
+	for i := len(settled) - 1; i >= 0; i-- {
+		if settlementOf(settled[i]) == last {
+			return settled[i+1:]
+		}
+	}
+	return settled
+}
+
+func settlementOf(a host.Answer) string {
+	return a.Key() + "|" + a.Operation + "|" + a.SettledAt.String() + "|" + a.At.String() + "|" + a.Outcome
+}
+
+func (m *Model) claim(key string) (sentMark, bool) {
+	a, ok := m.claims[key]
+	return a, ok
+}
+
+func (m *Model) putClaim(a sentMark) {
+	if m.claims == nil {
+		m.claims = map[string]host.Answer{}
+	}
+	m.claims[a.Key()] = a
+}
+
+func (m *Model) dropClaim(key string) {
+	delete(m.claims, key)
+	m.report(m.ask("drop-claim", key, nil))
 }
