@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 )
 
 const (
@@ -121,6 +124,79 @@ func (b *Browser) start() (context.Context, error) {
 	}
 	b.tabs = nil
 	return root, nil
+}
+
+type Headless struct {
+	Profile string
+	URL     string
+	PID     int
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func LaunchHeadless(profile, exec string, noSandbox bool) (*Headless, error) {
+	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.UserDataDir(profile), remote.WebSocket)
+	if exec != "" {
+		opts = append(opts, chromedp.ExecPath(exec))
+	}
+	if noSandbox {
+		opts = append(opts, chromedp.NoSandbox)
+	}
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	ctx, cancelCtx := chromedp.NewContext(alloc)
+	h := &Headless{Profile: profile, ctx: ctx, cancel: func() { cancelCtx(); cancelAlloc() }}
+	if err := chromedp.Do(ctx); err != nil {
+		h.Close()
+		return nil, fmt.Errorf("headless Chrome did not start: %w", err)
+	}
+	h.PID = chromedp.FromContext(ctx).Browser.Process().Pid
+	port, err := devToolsPort(profile)
+	if err != nil {
+		h.Close()
+		return nil, err
+	}
+	h.URL = "http://127.0.0.1:" + port
+	return h, nil
+}
+
+func devToolsPort(profile string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
+	if err != nil {
+		return "", fmt.Errorf("headless Chrome did not report its debugging port: %w", err)
+	}
+	port, _, _ := strings.Cut(string(data), "\n")
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", fmt.Errorf("headless Chrome reported the debugging port %q", port)
+	}
+	return port, nil
+}
+
+func (h *Headless) Navigate(ctx context.Context, url string) error {
+	run, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	defer context.AfterFunc(ctx, cancel)()
+	return chromedp.Do(run, chromedp.Navigate(url))
+}
+
+func (h *Headless) SetCookies(url string, cookies []Cookie) error {
+	steps := make([]chromedp.Action[chromedp.Void], 0, len(cookies))
+	for _, c := range cookies {
+		steps = append(steps, call(network.SetCookie, network.SetCookieParams{Name: c.Name, Value: c.Value, URL: url, Domain: c.Domain, Path: c.Path}))
+	}
+	return chromedp.Do(h.ctx, steps...)
+}
+
+func (h *Headless) Close() error {
+	h.cancel()
+	var err error
+	for range 50 {
+		if err = os.RemoveAll(h.Profile); err == nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return err
 }
 
 func (b *Browser) OpenPage(url string) error {

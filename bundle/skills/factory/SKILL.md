@@ -81,6 +81,8 @@ Each repo has `.factory/config.yml` (template: `templates/factory.yml`). You and
 | `qa.mode` | `browser` (Chrome against a local stack) or `terminal` (a scratch tmux server) |
 | `qa.notes` | optional; a repo file with environment, seeding and port steps for QA |
 | `qa.api_port`, `qa.web_port`, `qa.start`, `qa.health` | browser mode only: how the local stack runs |
+| `qa.health_status`, `qa.startup_timeout` | browser mode only: the status `qa.health` answers once the stack is ready (default 200) and how long startup may take (default `2m`) |
+| `qa.seed`, `qa.sign_in` | browser mode only: the command that seeds an isolated test environment, and the command that signs in and prints the session cookies as a JSON list of `{name, value}`; write `none` for an app without fixtures or sign-in |
 | `coderabbit` | `false` skips stage 6 |
 | `pipelines`, `default_pipeline` | optional; add or override pipeline presets for this repo (see "The pipeline") |
 | `agents` | optional; override the global agent settings for this repo (see "Agent tools and models") |

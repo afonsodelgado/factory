@@ -24,12 +24,16 @@ type Profile struct {
 		Files  []string `yaml:"files"`
 	} `yaml:"design"`
 	QA struct {
-		Mode    string `yaml:"mode"`
-		Notes   string `yaml:"notes"`
-		APIPort int    `yaml:"api_port"`
-		WebPort int    `yaml:"web_port"`
-		Start   string `yaml:"start"`
-		Health  string `yaml:"health"`
+		Mode           string `yaml:"mode"`
+		Notes          string `yaml:"notes"`
+		APIPort        int    `yaml:"api_port"`
+		WebPort        int    `yaml:"web_port"`
+		Start          string `yaml:"start"`
+		Health         string `yaml:"health"`
+		HealthStatus   int    `yaml:"health_status"`
+		StartupTimeout string `yaml:"startup_timeout"`
+		Seed           string `yaml:"seed"`
+		SignIn         string `yaml:"sign_in"`
 	} `yaml:"qa"`
 	CodeRabbit      *bool                   `yaml:"coderabbit"`
 	Pipelines       map[string][]string     `yaml:"pipelines"`
@@ -101,6 +105,8 @@ func CheckProfileKeys(repo string) error {
 func (p Profile) BrowserQA() bool {
 	return p.QA.Mode == "browser"
 }
+
+const NotNeeded = "none"
 
 func (c *Config) WithProfile(p Profile) *Config {
 	merged := *c

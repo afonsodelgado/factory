@@ -4,14 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 )
 
-var ErrUnavailable = errors.New("the factory runtime is not answering; it may be changing between the hub and factory serve")
+var ErrUnavailable = node.ErrUnavailable
 
 const ownerWait = 10 * time.Second
 

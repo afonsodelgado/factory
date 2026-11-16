@@ -18,4 +18,8 @@ qa:
   web_port: 3001
   start: npm run dev
   health: http://localhost:3000/api/health
+  health_status: 200
+  startup_timeout: 2m
+  seed: ""
+  sign_in: ""
 coderabbit: true

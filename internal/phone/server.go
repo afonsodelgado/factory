@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 )
 
 const (
@@ -26,11 +25,7 @@ const (
 	retryAfter = "2"
 )
 
-type Snapshot struct {
-	Revision   int64               `json:"revision"`
-	ServerTime time.Time           `json:"server_time"`
-	Factories  []host.LocalFactory `json:"factories"`
-}
+type Snapshot = node.Snapshot
 
 type Server struct {
 	Store    Store
@@ -441,89 +436,18 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, device Device) {
 	}
 }
 
-func (s *Server) operation(w http.ResponseWriter, r *http.Request, device Device) {
-	op := r.PathValue("operation")
-	if uuid.Validate(op) != nil {
-		fail(w, http.StatusNotFound, "no such operation")
-		return
-	}
-	var receipt host.Receipt
-	answer, err := request(r.Context(), s.Owner, "receipt", "", host.ReceiptRequest{Device: device.ID, Operation: op}, &receipt)
-	switch {
-	case err != nil:
-		unavailable(w)
-	case answer.T == "error" && answer.Error == host.ErrNoOperation.Error():
-		fail(w, http.StatusNotFound, answer.Error)
-	case answer.T != "done":
-		fail(w, http.StatusInternalServerError, answer.Error)
-	default:
-		reply(w, http.StatusOK, receipt)
-	}
-}
+func (s *Server) commands() node.Commands { return node.Commands{Runtime: s.Owner} }
 
-type actionBody struct {
-	Operation   string    `json:"operation"`
-	Incarnation string    `json:"incarnation"`
-	Action      string    `json:"action"`
-	Item        string    `json:"item,omitempty"`
-	Since       time.Time `json:"since,omitzero"`
-	Answers     []string  `json:"answers,omitempty"`
-	Text        string    `json:"text,omitempty"`
-	Option      string    `json:"option,omitempty"`
-	Fingerprint string    `json:"fingerprint,omitempty"`
+func (s *Server) operation(w http.ResponseWriter, r *http.Request, device Device) {
+	s.commands().Operation(w, r, device.ID)
 }
 
 func (s *Server) preview(w http.ResponseWriter, r *http.Request, device Device) {
-	var body actionBody
-	if err := decode(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	action := host.ActionRequest{Device: device.ID, Factory: r.PathValue("key"), Incarnation: body.Incarnation, Action: body.Action, Item: body.Item, Since: body.Since, Answers: body.Answers, Text: body.Text}
-	var preview host.Preview
-	answer, err := request(r.Context(), s.Owner, "preview", "", action, &preview)
-	switch {
-	case err != nil:
-		unavailable(w)
-	case answer.T != "done":
-		fail(w, http.StatusConflict, answer.Error)
-	default:
-		reply(w, http.StatusOK, preview)
-	}
+	s.commands().Preview(w, r, device.ID)
 }
 
-const reusedOperation = "operation id already belongs to a different request"
-
 func (s *Server) act(w http.ResponseWriter, r *http.Request, device Device) {
-	var body actionBody
-	if err := decode(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if uuid.Validate(body.Operation) != nil {
-		fail(w, http.StatusBadRequest, "operation must be a UUID")
-		return
-	}
-	action := host.ActionRequest{
-		Operation: body.Operation, Device: device.ID, Factory: r.PathValue("key"), Incarnation: body.Incarnation, Action: body.Action,
-		Item: body.Item, Since: body.Since, Answers: body.Answers, Text: body.Text, Option: body.Option, Fingerprint: body.Fingerprint,
-	}
-	var receipt host.Receipt
-	answer, err := request(r.Context(), s.Owner, "act", body.Operation, action, &receipt)
-	switch {
-	case err != nil:
-		unavailable(w)
-	case answer.T == "uncertain":
-		reply(w, http.StatusConflict, map[string]any{"error": answer.Error, "operation": body.Operation, "status": host.StatusUnknown})
-	case answer.T == "error" && answer.Error == reusedOperation:
-		fail(w, http.StatusConflict, answer.Error)
-	case answer.T == "error":
-		fail(w, http.StatusBadRequest, answer.Error)
-	case receipt.Status == host.StatusStale:
-		reply(w, http.StatusConflict, receipt)
-	default:
-		reply(w, http.StatusOK, receipt)
-	}
+	s.commands().Act(w, r, device.ID)
 }
 
 type pairBody struct {

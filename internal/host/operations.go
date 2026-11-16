@@ -21,6 +21,8 @@ type Operation struct {
 	Reply  Message         `json:"reply"`
 }
 
+const ReusedOperation = "operation id already belongs to a different request"
+
 func (m *Runtime) Execute(id, action string, data json.RawMessage, effect func() Message) Message {
 	return Journal(m.Config.StateDir, id, action, data, false, effect)
 }
@@ -38,7 +40,7 @@ func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, 
 			return Message{T: "error", Error: err.Error()}
 		}
 		if op.Action != action || !sameJSON(op.Data, data) {
-			return Message{T: "error", Error: "operation id already belongs to a different request"}
+			return Message{T: "error", Error: ReusedOperation}
 		}
 		if op.Status == "accepted" && !resumable {
 			return Message{T: "uncertain", Error: "outcome unknown; inspect the accepted operation before retrying"}

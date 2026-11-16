@@ -260,6 +260,15 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatalf("ran the create %d times, replies %+v %+v", runs, first, retry)
 		}
 	})
+	t.Run("a delete accepted before a crash answers uncertain instead of deleting again", func(t *testing.T) {
+		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"Repo":"/r/app","Slug":"csv"}`)
+		if err := savePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "delete", Data: data, Status: "accepted"}); err != nil {
+			t.Fatal(err)
+		}
+		if reply := New(Runtime{Config: &state.Config{StateDir: dir}}).Handle(Message{T: "delete", Op: op, Data: data}); reply.T != "uncertain" {
+			t.Fatalf("a retried interrupted delete gave %+v; want uncertain, never a second removal", reply)
+		}
+	})
 	recovered := func(t *testing.T, f fixture, entry QueuedType) (chan string, *Runtime) {
 		t.Helper()
 		calls := make(chan string, 8)
