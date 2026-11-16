@@ -446,11 +446,34 @@ func (m *Runtime) answerItem(it Item, r ActionRequest) (Receipt, error) {
 	if reason := Unqueueable(supervisorTarget(it)); reason != "" {
 		return refused(r, "Not sent. "+reason), nil
 	}
-	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), ActionText(item, r.Action, r.Answers, r.Text))
+	text := supervisorText(it, item, r)
 	mark := Answer{ItemSince: item.Since, Factory: r.Factory, ItemID: item.ID, Head: state.PromptHead(text), LeavesOpen: r.Action == ActChanges, Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: r.Action}
 	m.QueueAnswer(it, mark, text)
 	m.note(it.Factory, "answered "+item.ID+" from a phone")
 	return m.receiptOf(mark), nil
+}
+
+func supervisorText(it Item, item AttentionItem, r ActionRequest) string {
+	return factory.ForSupervisor(it.Factory.Supervisor().ToolName(), ActionText(item, r.Action, r.Answers, r.Text))
+}
+
+type Preview struct {
+	Text string `json:"text"`
+}
+
+func (m *Runtime) Preview(r ActionRequest) (Preview, error) {
+	it, ok := m.snap.Find(r.Factory)
+	if !ok || it.Factory.Remote != nil || Incarnation(it.Factory) != r.Incarnation {
+		return Preview{}, errors.New("This factory changed since it was loaded.")
+	}
+	if r.Action == ActMessage {
+		return Preview{Text: r.Text}, nil
+	}
+	item, ok := openItem(it, r.Item, r.Since)
+	if !ok || !Fits(item, r.Action) {
+		return Preview{}, errors.New("This item was answered or replaced since it was loaded.")
+	}
+	return Preview{Text: supervisorText(it, item, r)}, nil
 }
 
 func missingInput(item AttentionItem, r ActionRequest) string {

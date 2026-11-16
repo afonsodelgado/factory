@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.authed(s.events))
 	mux.HandleFunc("GET /api/operations/{operation}", s.authed(s.operation))
 	mux.HandleFunc("POST /api/factories/{key}/actions", s.authed(s.act))
+	mux.HandleFunc("POST /api/factories/{key}/preview", s.authed(s.preview))
 	mux.HandleFunc("POST /api/push/subscription", s.authed(s.subscribePush))
 	mux.HandleFunc("DELETE /api/push/subscription", s.authed(s.unsubscribePush))
 	mux.HandleFunc("GET /api/links/{key}", s.authed(s.link))
@@ -462,6 +463,25 @@ type actionBody struct {
 	Text        string    `json:"text,omitempty"`
 	Option      string    `json:"option,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
+}
+
+func (s *Server) preview(w http.ResponseWriter, r *http.Request, device Device) {
+	var body actionBody
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	action := host.ActionRequest{Device: device.ID, Factory: r.PathValue("key"), Incarnation: body.Incarnation, Action: body.Action, Item: body.Item, Since: body.Since, Answers: body.Answers, Text: body.Text}
+	var preview host.Preview
+	answer, err := request(r.Context(), s.Owner, "preview", "", action, &preview)
+	switch {
+	case err != nil:
+		unavailable(w)
+	case answer.T != "done":
+		fail(w, http.StatusConflict, answer.Error)
+	default:
+		reply(w, http.StatusOK, preview)
+	}
 }
 
 const reusedOperation = "operation id already belongs to a different request"

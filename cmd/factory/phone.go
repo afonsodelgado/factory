@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -94,7 +95,7 @@ func printTestPush(w io.Writer, setup phone.Setup) error {
 }
 
 func phoneSetup(cfg *state.Config) phone.Setup {
-	return phone.Setup{Config: cfg, Start: func() error { return startServe(cfg) }}
+	return phone.Setup{Config: cfg, Bundle: bundle.Files, Start: func() error { return startServe(cfg) }}
 }
 
 func configurePhone(setup phone.Setup, args []string) error {

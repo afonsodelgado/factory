@@ -146,6 +146,11 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.act(request.Op, r)
 		}
+	case "preview":
+		var r ActionRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Preview(r)
+		}
 	case "receipt":
 		var r ReceiptRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {

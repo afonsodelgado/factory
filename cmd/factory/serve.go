@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/review"
@@ -58,7 +59,7 @@ func serve(cfg *state.Config) error {
 	store := phone.Open(cfg.StateDir)
 	pusher := &phone.Pusher{Store: store, Origin: settings.Origin(), Client: phone.PublicClient()}
 	go pusher.Run(ctx)
-	server := &phone.Server{Store: store, Owner: phone.SocketOwner{Socket: cfg.SocketPath()}, Review: phone.ReviewProxy(review.MobileSocket(cfg.StateDir)), Push: pusher, VAPIDKey: settings.VAPIDPublicKey, Host: settings.Hostname, Version: version}
+	server := &phone.Server{Store: store, Owner: phone.SocketOwner{Socket: cfg.SocketPath()}, Review: phone.ReviewProxy(review.MobileSocket(cfg.StateDir)), Push: pusher, VAPIDKey: settings.VAPIDPublicKey, Shell: phone.Shell(bundle.Files), Host: settings.Hostname, Version: version}
 	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(settings.ListenPort())))
 	if err != nil {
 		return fmt.Errorf("port %d is taken; free it or pick another with factory phone configure --port: %w", settings.ListenPort(), err)
