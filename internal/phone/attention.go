@@ -2,6 +2,7 @@ package phone
 
 import (
 	"encoding/json"
+	"net/url"
 	"slices"
 	"time"
 
@@ -17,7 +18,7 @@ const (
 	resolvedBody = "Resolved elsewhere."
 )
 
-var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission"}
+var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission", "handoff"}
 
 type Link struct {
 	Route       string `json:"route"`
@@ -38,6 +39,7 @@ type job struct {
 	ID       string    `json:"id"`
 	Device   string    `json:"device,omitempty"`
 	Endpoint string    `json:"endpoint"`
+	Revision int64     `json:"revision,omitempty"`
 	Tag      string    `json:"tag"`
 	Resolved bool      `json:"resolved,omitempty"`
 	Payload  string    `json:"payload"`
@@ -53,6 +55,7 @@ type ledger struct {
 }
 
 type Payload struct {
+	Node     string `json:"node"`
 	Tag      string `json:"tag"`
 	Title    string `json:"title"`
 	Body     string `json:"body"`
@@ -80,7 +83,7 @@ func alertsOf(factories []host.LocalFactory) (map[string]alert, map[string]bool)
 	return open, active
 }
 
-func (s Store) Reconcile(factories []host.LocalFactory, connected func(installation string) bool, now time.Time) (bool, error) {
+func (s Store) Reconcile(node string, factories []host.LocalFactory, connected func(installation string) bool, now time.Time) (bool, error) {
 	subs, err := s.Subscriptions()
 	if err != nil {
 		return false, err
@@ -101,7 +104,7 @@ func (s Store) Reconcile(factories []host.LocalFactory, connected func(installat
 				item.Changed = now
 				l.Items[key] = &item
 				if l.Baseline && a.active {
-					item.Alerted = l.queue(subs, key, &item, nil, now)
+					item.Alerted = l.queue(node, subs, key, &item, nil, now)
 					queued = item.Alerted || queued
 				}
 			}
@@ -114,7 +117,7 @@ func (s Store) Reconcile(factories []host.LocalFactory, connected func(installat
 			unsent := l.cancel(key)
 			if active[item.Incarnation] && item.Alerted {
 				clearsItself := func(sub Subscription) bool { return unsent[sub.Endpoint] || connected(sub.Installation) }
-				queued = l.queue(subs, key, item, clearsItself, now) || queued
+				queued = l.queue(node, subs, key, item, clearsItself, now) || queued
 			}
 		}
 		for key, item := range l.Items {
@@ -128,8 +131,14 @@ func (s Store) Reconcile(factories []host.LocalFactory, connected func(installat
 	return queued, err
 }
 
-func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func(Subscription) bool, now time.Time) bool {
-	payload := Payload{Tag: key, Title: item.Title, Body: needsYou, URL: "/n/" + key, Revision: item.Revision, Resolved: !item.Open}
+func notificationTag(node, key string) string { return node + "/" + key }
+
+func linkPath(node, key string) string {
+	return "/n/" + url.PathEscape(node) + "/" + url.PathEscape(key)
+}
+
+func (l *ledger) queue(node string, subs []Subscription, key string, item *tracked, skip func(Subscription) bool, now time.Time) bool {
+	payload := Payload{Node: node, Tag: notificationTag(node, key), Title: item.Title, Body: needsYou, URL: linkPath(node, key), Revision: item.Revision, Resolved: !item.Open}
 	if payload.Resolved {
 		payload.Body = resolvedBody
 	}
@@ -139,7 +148,7 @@ func (l *ledger) queue(subs []Subscription, key string, item *tracked, skip func
 		if skip != nil && skip(sub) {
 			continue
 		}
-		l.Jobs = append(l.Jobs, job{ID: uuid.NewString(), Endpoint: sub.Endpoint, Tag: key, Resolved: payload.Resolved, Payload: string(data), Due: now})
+		l.Jobs = append(l.Jobs, job{ID: uuid.NewString(), Endpoint: sub.Endpoint, Revision: sub.Revision, Tag: key, Resolved: payload.Resolved, Payload: string(data), Due: now})
 		queued = true
 	}
 	return queued
@@ -165,6 +174,10 @@ func (s Store) Link(key string) (Link, bool) {
 		return Link{}, false
 	}
 	return l.Items[key].Link, true
+}
+
+func deleteJobs(jobs []job, endpoints []string) []job {
+	return slices.DeleteFunc(jobs, func(j job) bool { return slices.Contains(endpoints, j.Endpoint) })
 }
 
 func (s Store) dropJobsWhere(drop func(job) bool) error {

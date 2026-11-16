@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/remote"
 )
 
@@ -39,6 +40,7 @@ type Nodes struct {
 	Factories   func() int
 	Repos       func() map[string]string
 	Clone       func(ctx context.Context, url string) (string, error)
+	Phone       *phone.Store
 	ProbeWait   time.Duration
 	Now         func() time.Time
 
@@ -85,6 +87,7 @@ func (n *Nodes) hello() Hello {
 	if n.Factories != nil {
 		h.Factories = n.Factories()
 	}
+	h.Push = n.pushState()
 	return h
 }
 
@@ -113,11 +116,12 @@ func (n *Nodes) repoQuery() string {
 }
 
 type CheckReport struct {
-	Target   Candidate `json:"target"`
-	Checks   []Check   `json:"checks"`
-	Refusal  string    `json:"refusal,omitempty"`
-	Problems int       `json:"problems"`
-	At       time.Time `json:"at"`
+	Target       Candidate `json:"target"`
+	Checks       []Check   `json:"checks"`
+	Refusal      string    `json:"refusal,omitempty"`
+	Problems     int       `json:"problems"`
+	PushConflict bool      `json:"push_conflict,omitempty"`
+	At           time.Time `json:"at"`
 }
 
 func (c CheckReport) refused() bool { return c.Refusal != "" }
@@ -200,10 +204,17 @@ func (n *Nodes) check(ctx context.Context, typed string, d direction) (checked, 
 	c = n.pass(c, "node", c.hello.Version+" · "+peer.OS)
 	c = n.pass(c, "owner", c.hello.Owner+", same as you")
 	c = n.pass(c, "funnel", "off")
-	if d != adding {
+	switch d {
+	case joining:
 		return c, nil
+	case addingOnRequest:
+		return n.pushCheck(c), nil
 	}
-	return n.withReadiness(ctx, c)
+	c, err = n.withReadiness(ctx, c)
+	if c.report.refused() {
+		return c, err
+	}
+	return n.pushCheck(c), err
 }
 
 func refusalCheck(state string) string {
@@ -251,15 +262,16 @@ type AddResult struct {
 	Member Member      `json:"member"`
 	Report CheckReport `json:"report"`
 	Roster Roster      `json:"roster"`
+	Push   PushOutcome `json:"push"`
 }
 
 type RefusedError struct{ Report CheckReport }
 
 func (e RefusedError) Error() string { return e.Report.Refusal }
 
-func (n *Nodes) Add(ctx context.Context, op, typed string) (AddResult, error) {
+func (n *Nodes) Add(ctx context.Context, op, typed string, replaceKey bool) (AddResult, error) {
 	if done, ok := n.Dir.Op(op); ok {
-		return AddResult{Member: done.Member, Roster: n.Dir.Roster()}, nil
+		return AddResult{Member: done.Member, Roster: n.Dir.Roster(), Push: n.helloPush(ctx, done.Member)}, nil
 	}
 	if n.removed() {
 		return AddResult{}, ErrRemoved
@@ -271,8 +283,8 @@ func (n *Nodes) Add(ctx context.Context, op, typed string) (AddResult, error) {
 	if c.report.refused() {
 		return AddResult{Report: c.report}, RefusedError{Report: c.report}
 	}
-	m, err := n.enroll(ctx, op, c, "")
-	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster()}, err
+	m, push, err := n.enroll(ctx, op, c, "", replaceKey)
+	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster(), Push: push}, err
 }
 
 func (n *Nodes) memberOf(c checked) Member {
@@ -280,7 +292,7 @@ func (n *Nodes) memberOf(c checked) Member {
 	return Member{ID: c.hello.ID, Peer: c.peer.ID, Name: c.peer.Name, Owner: c.peer.Login, Tailnet: tailnet, OS: c.peer.OS}
 }
 
-func (n *Nodes) enroll(ctx context.Context, op string, c checked, intent string) (Member, error) {
+func (n *Nodes) enroll(ctx context.Context, op string, c checked, intent string, replaceKey bool) (Member, PushOutcome, error) {
 	id := uuid.NewString()
 	n.mu.Lock()
 	if n.joins == nil {
@@ -299,36 +311,41 @@ func (n *Nodes) enroll(ctx context.Context, op string, c checked, intent string)
 	target := Remote(c.peer.Name, n.HTTP)
 	var theirs Ledger
 	if err := target.Do(ctx, http.MethodPost, "/api/node/pull", Pull{From: n.Self.ID}, &theirs); err != nil {
-		return Member{}, fmt.Errorf("%s stopped answering before it joined; nothing was written: %w", c.peer.Short(), err)
+		return Member{}, PushOutcome{}, fmt.Errorf("%s stopped answering before it joined; nothing was written: %w", c.peer.Short(), err)
 	}
 	var prepared Joined
 	if err := target.Do(ctx, http.MethodPost, "/api/node/join/prepare", Prepare{Join: id, Coordinator: n.Self.Name, Intent: intent}, &prepared); err != nil {
-		return Member{}, fmt.Errorf("%s refused to join; nothing was written: %w", c.peer.Short(), err)
+		return Member{}, PushOutcome{}, fmt.Errorf("%s refused to join; nothing was written: %w", c.peer.Short(), err)
 	}
 	n.mu.Lock()
 	challenge, called := pending.challenge, pending.node
 	n.mu.Unlock()
 	if challenge == "" || called != prepared.Node || prepared.Node != c.hello.ID {
-		return Member{}, fmt.Errorf("%s did not prove it is the node that answered the check; nothing was written", c.peer.Short())
+		return Member{}, PushOutcome{}, fmt.Errorf("%s did not prove it is the node that answered the check; nothing was written", c.peer.Short())
 	}
 	m := n.memberOf(c)
 	ledger := n.Dir.Draft(m, op, theirs)
 	if _, stillListed := ledger.present()[n.Self.ID]; !stillListed {
-		return Member{}, fmt.Errorf("%s's history removes this node, so this node cannot add it; nothing was written", c.peer.Short())
+		return Member{}, PushOutcome{}, fmt.Errorf("%s's history removes this node, so this node cannot add it; nothing was written", c.peer.Short())
+	}
+	push, sharedKey, err := n.pushToSend(prepared.Push, replaceKey)
+	if err != nil {
+		return Member{}, PushOutcome{}, err
 	}
 	var committed Joined
-	if err := target.Do(ctx, http.MethodPost, "/api/node/join/commit", Commit{Join: id, Challenge: challenge, Ledger: ledger}, &committed); err != nil {
-		return Member{}, fmt.Errorf("%s did not take the node list: %w", c.peer.Short(), err)
+	commit := Commit{Join: id, Challenge: challenge, Ledger: ledger, Push: push, SharedKey: sharedKey, ReplaceKey: replaceKey}
+	if err := target.Do(ctx, http.MethodPost, "/api/node/join/commit", commit, &committed); err != nil {
+		return Member{}, PushOutcome{}, fmt.Errorf("%s did not take the node list: %w", c.peer.Short(), err)
 	}
 	if committed.Node != c.hello.ID {
-		return Member{}, fmt.Errorf("%s answered as another node during the join", c.peer.Short())
+		return Member{}, PushOutcome{}, fmt.Errorf("%s answered as another node during the join", c.peer.Short())
 	}
 	if err := n.Dir.Merge(ledger); err != nil {
-		return Member{}, err
+		return Member{}, PushOutcome{}, err
 	}
 	n.Dir.Ack(m.ID, committed.Clock)
 	n.Kick()
-	return m, nil
+	return m, n.pushOutcome(c.peer.Short(), committed.Push), nil
 }
 
 func (n *Nodes) Remove(op, id string) (Roster, error) {
@@ -448,6 +465,7 @@ func (n *Nodes) exchange(ctx context.Context, m Member) {
 	if err := Remote(m.Name, n.HTTP).Do(ctx, http.MethodPost, "/api/node/pull", Pull{From: n.Self.ID}, &theirs); err == nil {
 		n.Dir.Merge(theirs)
 	}
+	n.sendRecords(ctx, m)
 	n.tellRemoved(ctx, m)
 }
 
@@ -511,7 +529,7 @@ func (n *Nodes) prepare(ctx context.Context, p Prepare) (Joined, error) {
 		n.dropInvite(p.Join)
 		return Joined{}, fmt.Errorf("%s did not confirm the join: %w", coordinator.Short(), err)
 	}
-	return Joined{Node: n.Self.ID}, nil
+	return Joined{Node: n.Self.ID, Push: n.pushState()}, nil
 }
 
 func (n *Nodes) dropInvite(id string) {
@@ -571,11 +589,16 @@ func (n *Nodes) commit(ctx context.Context, c Commit) (Joined, error) {
 	if listed, ok := c.Ledger.present()[n.Self.ID]; !ok || listed.Name != n.Self.Name || !strings.HasPrefix(c.Ledger.Home, "https://") {
 		return Joined{}, errors.New("the node list sent with this join does not list this node under its own name with an https home")
 	}
-	if err := n.Dir.Adopt(c.Ledger); err != nil {
+	if err := n.stagePush(c); err != nil {
 		return Joined{}, err
 	}
+	if err := n.Dir.Adopt(c.Ledger); err != nil {
+		n.unstagePush()
+		return Joined{}, err
+	}
+	pushed, err := n.takePush(c)
 	n.Kick()
-	return Joined{Node: n.Self.ID, Clock: n.Dir.Clock()}, nil
+	return Joined{Node: n.Self.ID, Clock: n.Dir.Clock(), Push: pushed}, err
 }
 
 func (n *Nodes) requested(ctx context.Context, r JoinRequest) (AddResult, error) {
@@ -590,10 +613,10 @@ func (n *Nodes) requested(ctx context.Context, r JoinRequest) (AddResult, error)
 		return AddResult{Report: c.report}, RefusedError{Report: c.report}
 	}
 	if done, ok := n.Dir.Op(r.Operation); ok {
-		return AddResult{Member: done.Member, Roster: n.Dir.Roster()}, nil
+		return AddResult{Member: done.Member, Roster: n.Dir.Roster(), Push: n.helloPush(ctx, done.Member)}, nil
 	}
-	m, err := n.enroll(ctx, r.Operation, c, r.Operation)
-	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster()}, err
+	m, push, err := n.enroll(ctx, r.Operation, c, r.Operation, false)
+	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster(), Push: push}, err
 }
 
 func (n *Nodes) kicked(ctx context.Context, from string) (Kicked, bool) {
@@ -615,7 +638,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/nodes", n.homeOnly(n.addRoute))
 	route("POST /api/nodes/{id}/remove", n.homeOnly(n.removeRoute))
 	route("POST /api/nodes/join", socketOnly(n.joinRoute))
-	route("GET /api/readiness", n.readinessRoute)
+	route("GET /api/readiness", n.readinessWithPush)
 	route("GET /api/repos", func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.repos()) })
 	route("POST /api/clone", n.homeOrNative(n.cloneRoute))
 	route("GET /api/node/hello", nativeOnly(func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.hello()) }))
@@ -626,6 +649,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/node/join/prepare", nativeOnly(n.prepareRoute))
 	route("POST /api/node/join/verify", nativeOnly(n.verifyRoute))
 	route("POST /api/node/join/commit", nativeOnly(n.commitRoute))
+	route("POST /api/node/push/records", nativeOnly(n.recordsRoute))
 }
 
 func socketOnly(serve func(http.ResponseWriter, *http.Request, string)) func(http.ResponseWriter, *http.Request, string) {
@@ -664,7 +688,7 @@ func (n *Nodes) addRoute(w http.ResponseWriter, r *http.Request, _ string) {
 		fail(w, http.StatusBadRequest, "send {operation: a UUID, name}")
 		return
 	}
-	result, err := n.Add(r.Context(), body.Operation, body.Name)
+	result, err := n.Add(r.Context(), body.Operation, body.Name, body.ReplaceKey)
 	n.answer(w, result, err)
 }
 
@@ -688,9 +712,13 @@ func (n *Nodes) removeRoute(w http.ResponseWriter, r *http.Request, _ string) {
 	n.answer(w, roster, err)
 }
 
-func (n *Nodes) readinessRoute(w http.ResponseWriter, r *http.Request, _ string) {
+func (n *Nodes) readiness(r *http.Request) Report {
 	wanted := slices.DeleteFunc(r.URL.Query()["repo"], func(url string) bool { return remote.CheckCloneURL(url) != nil })
-	reply(w, http.StatusOK, n.Ready.Run(r.Context(), n.Self.Name, Scope{Wanted: wanted}))
+	return n.Ready.Run(r.Context(), n.Self.Name, Scope{Wanted: wanted})
+}
+
+func (n *Nodes) readinessRoute(w http.ResponseWriter, r *http.Request, _ string) {
+	reply(w, http.StatusOK, n.readiness(r))
 }
 
 type CloneRequest struct {

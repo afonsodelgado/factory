@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/phone"
 )
 
 const OperationHeader = "Factory-Operation"
@@ -47,8 +48,9 @@ func (b ActionBody) Request(caller, factory string) host.ActionRequest {
 }
 
 type NodeRequest struct {
-	Operation string `json:"operation,omitempty"`
-	Name      string `json:"name"`
+	Operation  string `json:"operation,omitempty"`
+	Name       string `json:"name"`
+	ReplaceKey bool   `json:"replace_push_key,omitempty"`
 }
 
 type RemoveRequest struct {
@@ -77,14 +79,18 @@ type Verify struct {
 }
 
 type Commit struct {
-	Join      string `json:"join"`
-	Challenge string `json:"challenge"`
-	Ledger    Ledger `json:"ledger"`
+	Join       string        `json:"join"`
+	Challenge  string        `json:"challenge"`
+	Ledger     Ledger        `json:"ledger"`
+	Push       *phone.Shared `json:"push,omitempty"`
+	SharedKey  string        `json:"shared_key,omitempty"`
+	ReplaceKey bool          `json:"replace_push_key,omitempty"`
 }
 
 type Joined struct {
-	Node  string `json:"node"`
-	Clock Clock  `json:"clock,omitempty"`
+	Node  string          `json:"node"`
+	Clock Clock           `json:"clock,omitempty"`
+	Push  *phone.KeyState `json:"push,omitempty"`
 }
 
 type JoinRequest struct {

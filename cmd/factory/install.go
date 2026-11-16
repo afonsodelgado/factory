@@ -393,8 +393,18 @@ func (s nodeSetup) offerJoin(ctx context.Context, c *node.Client, here string) (
 	}
 	fmt.Fprintln(s.out)
 	s.passed("joined", fmt.Sprintf("%s lists %s, and %s lists %s", target.Short, here, here, target.Short))
+	printPush(s.out, result.Push, target.Short, here)
 	s.passed("phone app", "trusts "+result.Roster.Home+", where your phone app lives")
 	return true, true, nil
+}
+
+func printPush(out io.Writer, push node.PushOutcome, from, to string) {
+	switch {
+	case push.Shared:
+		install.WriteCheck(out, install.Check{Name: "push key", Mark: install.Pass, Detail: "copied from " + from + " over the tailnet; never printed or written", Lines: []string{"anywhere but " + to + "'s state directory"}})
+	case push.Conflict != "":
+		install.WriteCheck(out, install.Check{Name: "push key", Mark: install.Warn, Detail: push.Conflict})
+	}
 }
 
 func (s nodeSetup) wantsToJoin(target node.Candidate, here string) bool {
@@ -402,7 +412,7 @@ func (s nodeSetup) wantsToJoin(target node.Candidate, here string) bool {
 	if target.Hello != nil {
 		factories = target.Hello.Factories
 	}
-	question := fmt.Sprintf("\nFound your factory node on %s, with %s. Join it? The hub on %s\nand your phone then list %s. [Y/n] ", target.Short, factoryCount(factories), target.Short, here)
+	question := fmt.Sprintf("\nFound your factory node on %s, with %s. Join it? The hub on %s\nand your phone then list %s, and %s notifies your phone with the same\npush key. [Y/n] ", target.Short, factoryCount(factories), target.Short, here, here)
 	switch s.join {
 	case alwaysJoin:
 		fmt.Fprint(s.out, question+"y (--join)\n")

@@ -72,13 +72,13 @@ func (m *Runtime) QueueAnswerFor(q QueuedAnswer) (Answer, error) {
 	if claimed, ok := m.Claim(q.Answer.Key()); ok && claimed.ItemSince.Equal(q.Answer.ItemSince) {
 		return claimed, nil
 	}
-	if !stillOpen(it.Factory.State, q.Answer.ItemID, q.Answer.ItemSince) {
+	item, open := openItem(it, q.Answer.ItemID, q.Answer.ItemSince)
+	if !open {
 		return Answer{}, errors.New("This item was answered or replaced since it was loaded. Nothing was sent.")
 	}
-	if reason := Unqueueable(supervisorTarget(it)); reason != "" {
+	if reason := m.answer(it, item, q.Answer, q.Text); reason != "" {
 		return Answer{}, errors.New("Not sent. " + reason)
 	}
-	m.QueueAnswer(it, q.Answer, q.Text)
 	m.note(it.Factory, "answered "+q.Answer.ItemID+" from the hub")
 	claimed, _ := m.Claim(q.Answer.Key())
 	return claimed, nil

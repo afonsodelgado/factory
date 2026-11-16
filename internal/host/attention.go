@@ -69,7 +69,7 @@ type AttentionItem struct {
 
 func (i AttentionItem) Answerable() bool {
 	switch i.Kind {
-	case "question", "gate", "comment", "cap", "failure":
+	case "question", "gate", "comment", "cap", "failure", "handoff":
 		return true
 	}
 	return false
@@ -85,6 +85,7 @@ const (
 	PermissionBody  = "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot."
 	AnswerInSession = "⏎ answer in the session"
 	WakeKey         = "w wake"
+	TestedKey       = "ctrl+k tested: closes it; merging stays with you"
 )
 
 func PermissionID(role string) string {
@@ -144,6 +145,9 @@ func permissionItem(prompt *state.PendingPrompt, role string, pane *tmux.Pane) A
 
 func fromAttention(st *state.State, a state.Attention, counter ThreadCounter) AttentionItem {
 	item := AttentionItem{ID: a.ID, Kind: a.Kind, Title: a.Title, Body: a.Body, ArtifactURL: a.ArtifactURL, ThreadID: a.ThreadID, Since: a.CreatedAt.Time, Stage: a.Stage()}
+	if a.Kind == "handoff" {
+		item.Action = TestedKey
+	}
 	for i, q := range a.Questions {
 		question := Question{Text: q}
 		if i < len(a.Options) {
@@ -408,6 +412,9 @@ func (m *Runtime) repoName(repo string) string {
 
 func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalItem {
 	li := LocalItem{AttentionItem: item, Send: Eligible(target, "the answer")}
+	if item.Kind == "handoff" && !li.Send.Ready {
+		li.Send = Eligibility{Ready: true, Queues: true, Reason: "No supervisor is running, so this wakes a fresh one and sends it once that one is at its prompt."}
+	}
 	if item.Kind == "permission" {
 		li.ID = PermissionID(item.Role)
 		li.Send = Eligibility{Reason: "Answer it in the session."}

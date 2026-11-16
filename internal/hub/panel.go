@@ -288,7 +288,8 @@ func (m *Model) gateNotes(item panel.Item, d *panel.Draft) string {
 
 func (m *Model) deliver(action string) {
 	it, item, ok := m.currentAttention()
-	if !ok || !item.Answerable() {
+	onlyTested := item.Kind == "handoff" && action != "handled"
+	if !ok || !item.Answerable() || onlyTested {
 		return
 	}
 	key := draftKey(it.Factory, item.ID)
@@ -297,7 +298,8 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	remote := it.Factory.Remote != nil
-	if reason := unqueueable(m.target(it)); reason != "" && !remote {
+	wakesItsSupervisor := item.Kind == "handoff"
+	if reason := unqueueable(m.target(it)); reason != "" && !remote && !wakesItsSupervisor {
 		m.panel.refused[key] = "Not sent. " + reason
 		m.saveDraft()
 		return

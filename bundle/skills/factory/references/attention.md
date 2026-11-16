@@ -1,6 +1,6 @@
 # Attention items
 
-An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and resolves it when the answer arrives: `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <item id>` checks that the item is still open and prints the exact edit (`resolved_at`, `waiting_on`, `updated_at`), which the supervisor then makes to `state.json` itself before it continues. The factory app shows open items (no `resolved_at`) in its panel and never writes them. It stops showing an item once its stage is `done` or `skipped`, or the factory is done.
+An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and resolves it when the answer arrives: `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <item id>` checks that the item is still open and prints the exact edit (`resolved_at`, `waiting_on`, `updated_at`), which the supervisor then makes to `state.json` itself before it continues. The factory app shows open items (no `resolved_at`) in its panel and never writes them. It stops showing an item once its stage is `done` or `skipped`, or the factory is done, except the `handoff` item, which stays, and notifies the phone once, until the user marks it tested.
 
 ```json
 {
@@ -22,7 +22,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | Field | Meaning |
 |---|---|
 | `id` | the item id, see below |
-| `kind` | `question`, `gate`, `comment`, `cap` or `failure` |
+| `kind` | `question`, `gate`, `comment`, `cap`, `failure` or `handoff` |
 | `title` | one line |
 | `body` | the context the user needs: the reason, the open findings, the thread excerpt |
 | `questions` | `question` only: the questions in order |
@@ -41,6 +41,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | artifact comment | `comment-<id>-<n>` |
 | cap | `cap-<id>-<stage>` |
 | failure | `fail-<id>-<stage>` |
+| handoff | `handoff-<id>`, written before `stages.handoff.status` becomes `done` |
 
 `<id>` is the factory id, as in the factory directory name. A cap or failure id ends with the stage key, which is how the app knows which stage `/factory skip` names and which limit a cap raises (`coderabbit_rounds` for `coderabbit`, `qa_rounds` otherwise).
 
@@ -57,6 +58,7 @@ The app delivers answers into the session as one message, in exactly these forms
 | cap, one more round | `<id> continue: raise <coderabbit_rounds\|qa_rounds> by one for this factory` |
 | cap or failure, skip | `/factory skip <stage>` |
 | failure, retry | `/factory resume` |
+| handoff, tested | `<id> tested: the developer tested the handoff` (resolve it and stop; never merge) |
 | any item, already handled | `<id> handled: settled outside the panel` (resolve it, do not ask it again) |
 | review page, send | `review-<id>-<n> comments: <batch file>` |
 

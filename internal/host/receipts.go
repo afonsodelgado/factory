@@ -230,6 +230,38 @@ func (m *Runtime) QueueAnswer(it Item, mark Answer, text string) {
 	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text, Answers: &mark})
 }
 
+func (m *Runtime) answer(it Item, item AttentionItem, mark Answer, text string) string {
+	reason := Unqueueable(supervisorTarget(it))
+	switch {
+	case reason == "":
+		m.QueueAnswer(it, mark, text)
+		return ""
+	case item.Kind != "handoff":
+		return reason
+	}
+	pane, err := m.wakeForHandoff(it)
+	if err != nil {
+		return err.Error()
+	}
+	m.PutClaim(mark)
+	m.QueueType(QueuedType{Pane: pane, Label: it.Factory.Label(), Text: text, Answers: &mark, NotBefore: m.Now().Add(resumeSettle)})
+	return ""
+}
+
+func (m *Runtime) wakeForHandoff(it Item) (string, error) {
+	switch {
+	case m.Engine == nil:
+		return "", errors.New(Refusal(supervisorTarget(it)))
+	case it.Pane == nil || it.Pane.Dead:
+		it.Status = factory.Gone
+	case factory.IsShell(it.Pane.Command):
+		it.Status = factory.Exited
+	default:
+		return "", errors.New(Refusal(supervisorTarget(it)))
+	}
+	return m.wake(it)
+}
+
 func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []Settlement {
 	open := openSince(items)
 	var settled []Settlement
@@ -242,6 +274,21 @@ func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []S
 		}
 	}
 	return settled
+}
+
+type RemoteObservation struct {
+	Items  []Item
+	Clocks map[string]time.Time
+}
+
+func (m *Runtime) SettleRemote(o RemoteObservation) {
+	open := openSince(o.Items)
+	clock := func(key string) time.Time { return o.Clocks[key] }
+	for _, key := range slices.Sorted(maps.Keys(m.receipts.Claims)) {
+		if Remote(key) {
+			m.settleClaim(m.receipts.Claims[key], open, o.Items, clock)
+		}
+	}
 }
 
 func openSince(items []Item) map[string]time.Time {
@@ -442,12 +489,11 @@ func (m *Runtime) answerItem(it Item, r ActionRequest) (Receipt, error) {
 	if receipt, claimed := m.alreadyClaimed(r); claimed {
 		return receipt, nil
 	}
-	if reason := Unqueueable(supervisorTarget(it)); reason != "" {
-		return refused(r, "Not sent. "+reason), nil
-	}
 	text := supervisorText(it, item, r)
 	mark := Answer{ItemSince: item.Since, Factory: r.Factory, ItemID: item.ID, Head: state.PromptHead(text), LeavesOpen: r.Action == ActChanges, Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: r.Action}
-	m.QueueAnswer(it, mark, text)
+	if reason := m.answer(it, item, mark, text); reason != "" {
+		return refused(r, "Not sent. "+reason), nil
+	}
 	m.note(it.Factory, "answered "+item.ID+" from a phone")
 	return m.receiptOf(mark), nil
 }

@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -464,8 +467,8 @@ func TestInstallJoinsAFoundNodeOnlyOnAYesOrAFlag(t *testing.T) {
 	if got := studio.Names(); len(got) != 1 {
 		t.Fatalf("studio lists %v before any yes; want nothing written", got)
 	}
-	if joined, err := offer("\n", true, askToJoin); !joined || err != nil {
-		t.Fatalf("pressing Enter joined %v, %v:\n%s", joined, err, &out)
+	if joined, err := offer("\n", true, askToJoin); !joined || err != nil || !strings.Contains(out.String(), "copied from macbook over the tailnet") {
+		t.Fatalf("pressing Enter joined %v, %v:\n%s\nwant the join and macbook's push key copied", joined, err, &out)
 	}
 	if joined, err := offer("", false, askToJoin); joined || err != nil || !strings.Contains(out.String(), "already shares") {
 		t.Errorf("installing again joined %v, %v:\n%s; want it to find the list it already shares", joined, err, &out)
@@ -474,5 +477,51 @@ func TestInstallJoinsAFoundNodeOnlyOnAYesOrAFlag(t *testing.T) {
 		if got := n.Names(); !slices.Equal(got, []string{"macbook", "studio"}) {
 			t.Errorf("%s lists %v after the join", n.Short(), got)
 		}
+	}
+}
+
+func TestPushKeyExportWritesOnlyANewPrivateFileAndImportNeverSilencesPhonesUnasked(t *testing.T) {
+	from, to := phone.Open(t.TempDir()), phone.Open(t.TempDir())
+	for _, store := range []phone.Store{from, to} {
+		if _, err := store.VAPIDKey(""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := to.Subscribe(phone.Subscription{Endpoint: "https://push.example/ipad", P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16)), Since: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := from.Export()
+	own, _ := to.KeyState()
+	file := filepath.Join(t.TempDir(), "push-key.json")
+	var out bytes.Buffer
+
+	if err := exportPushKey(from, file, &out); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the exported key file is %v (%v); want only its owner to read it", info, err)
+	}
+	if err := exportPushKey(from, file, &out); err == nil {
+		t.Error("export overwrote an existing file")
+	}
+	if err := importPushKey(to, file, false, nil, &out); err == nil {
+		t.Error("import replaced a key a phone is subscribed to without --replace")
+	}
+	if now, _ := to.KeyState(); now.Fingerprint != own.Fingerprint {
+		t.Fatal("a refused import still changed the key")
+	}
+	data, _ := os.ReadFile(file)
+	if err := importPushKey(to, "-", true, bytes.NewReader(data), &out); err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := to.KeyState(); now.Fingerprint != secret.Fingerprint() {
+		t.Errorf("after import --replace the node sends with %s; want the exported key %s", now.Fingerprint, secret.Fingerprint())
+	}
+	if strings.Contains(out.String(), secret.Private) {
+		t.Errorf("export or import printed the private key:\n%s", &out)
 	}
 }

@@ -2,6 +2,7 @@ package nodetest
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/phone"
 )
 
 const (
@@ -31,15 +33,43 @@ const (
 )
 
 type Tailnet struct {
-	T         testing.TB
-	ProbeWait time.Duration
-	ReadyWait time.Duration
+	T          testing.TB
+	ProbeWait  time.Duration
+	ReadyWait  time.Duration
+	PushClient *http.Client
 
 	mu       sync.Mutex
 	machines []*Machine
 	strays   []string
 	offset   time.Duration
 	base     *http.Transport
+	watched  map[string][]string
+}
+
+func (tn *Tailnet) Watch(path string) {
+	tn.mu.Lock()
+	defer tn.mu.Unlock()
+	if tn.watched == nil {
+		tn.watched = map[string][]string{}
+	}
+	tn.watched[path] = []string{}
+}
+
+func (tn *Tailnet) Bodies(path string) []string {
+	tn.mu.Lock()
+	defer tn.mu.Unlock()
+	return slices.Clone(tn.watched[path])
+}
+
+func (tn *Tailnet) record(req *http.Request) {
+	tn.mu.Lock()
+	defer tn.mu.Unlock()
+	if _, watched := tn.watched[req.URL.Path]; !watched || req.Body == nil {
+		return
+	}
+	data, _ := io.ReadAll(req.Body)
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	tn.watched[req.URL.Path] = append(tn.watched[req.URL.Path], string(data))
 }
 
 func New(t testing.TB) *Tailnet {
@@ -224,6 +254,7 @@ func (s serve) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("dial %s:443: %w", to.Name, syscall.ECONNREFUSED)
 	}
 	out := req.Clone(req.Context())
+	tn.record(out)
 	for name := range out.Header {
 		if strings.HasPrefix(http.CanonicalHeaderKey(name), "Tailscale-") {
 			out.Header.Del(name)
@@ -296,6 +327,8 @@ type Node struct {
 	Exposure *node.Exposure
 	Runtime  *Runtime
 	Local    *node.Client
+	Phone    phone.Store
+	Pusher   *phone.Pusher
 
 	mu     sync.Mutex
 	probes []node.Probe
@@ -380,7 +413,7 @@ func (m *Machine) Start() *Node {
 	n.Exposure = &node.Exposure{Tailscale: ts}
 	n.Exposure.Check(ctx)
 	gate := node.Gate{Owner: m.Login, Hosts: []string{m.Name}, Origin: "https://" + m.Name, Home: directory.Home, Exposure: n.Exposure}
-	app := http.NotFoundHandler()
+	app := n.phone(t, directory)
 	m.Serve(gate.Wrap(n.API.With(app, gate.Principal, node.NetworkKinds...)))
 	socket := filepath.Join(dir, "node.sock")
 	ln, err := node.ListenUnix(socket)
@@ -397,6 +430,27 @@ func (m *Machine) Start() *Node {
 	tn.mu.Unlock()
 	n.waitForSnapshot()
 	return n
+}
+
+func (n *Node) phone(t testing.TB, directory *node.Directory) http.Handler {
+	n.Phone = phone.Open(n.Dir)
+	if _, err := n.Phone.VAPIDKey(""); err != nil {
+		t.Fatal(err)
+	}
+	n.Nodes.Phone = &n.Phone
+	removed := func() bool { return directory.Roster().Removed }
+	n.Pusher = &phone.Pusher{Store: n.Phone, Origin: "https://" + n.Name, Client: cmp.Or(n.net.PushClient, http.DefaultClient), Now: n.net.Now, Removed: removed}
+	server := &phone.Server{Store: n.Phone, Factories: n.API.Factories, Connected: n.API.Connected, Push: n.Pusher, Node: n.ID, Changed: n.Nodes.Kick, Now: n.net.Now}
+	return server.Handler()
+}
+
+func (n *Node) Notify(ctx context.Context) error {
+	_, factories, _ := n.API.Factories()
+	if _, err := n.Phone.Reconcile(n.ID, factories, func(string) bool { return false }, n.net.Now()); err != nil {
+		return err
+	}
+	n.Pusher.Deliver(ctx)
+	return nil
 }
 
 func (n *Node) waitForSnapshot() {
@@ -430,8 +484,12 @@ func (tn *Tailnet) Settle(nodes ...*Node) {
 }
 
 func (n *Node) Add(name string) (node.AddResult, error) {
+	return n.AddWith(node.NodeRequest{Operation: uuid.NewString(), Name: name})
+}
+
+func (n *Node) AddWith(r node.NodeRequest) (node.AddResult, error) {
 	var result node.AddResult
-	err := n.Local.Do(context.Background(), http.MethodPost, "/api/nodes", node.NodeRequest{Operation: uuid.NewString(), Name: name}, &result)
+	err := n.Local.Do(context.Background(), http.MethodPost, "/api/nodes", r, &result)
 	return result, err
 }
 

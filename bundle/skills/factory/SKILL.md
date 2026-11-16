@@ -281,7 +281,12 @@ Write `handoff.md` and post it to the user. Include:
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 - the walkthrough's threads still open, each with its page and the fixer's last answer; when the pipeline skipped `walkthrough`, say so
 
-Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.json`, which is how the factory app knows the factory is done. The user tests, merges and deploys. Never merge.
+Then raise the handoff item, in this order, each a separate write to `state.json`:
+
+1. Append the `handoff-<id>` item (`references/attention.md`): kind `handoff`, title `Done, ready for you to test`, a body naming the PRs in merge order and the path of `handoff.md`, stage `handoff`, and `created_at` set now. This write is what notifies the user's phone, so it must land before the factory reads as done.
+2. Mark `stages.handoff.status` done and set `waiting_on` to null, which is how the factory app knows the factory is done. It keeps showing the handoff item, and nothing else, until the user marks it tested.
+
+The user tests, merges and deploys. Never merge. `handoff-<id> tested: the developer tested the handoff` means the user has finished testing: resolve the item with `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> --waiting-on none handoff-<id>`, make the edit it prints, and stop. Merge, push or start nothing; the factory app may have woken a fresh session just for this message. A factory that was done before handoff items existed never gets one.
 
 ## Limits
 
@@ -289,4 +294,4 @@ Then mark `stages.handoff.status` done and set `waiting_on` to null in `state.js
 
 ## Resume
 
-Read `state.json`, update `session_id`, and print a one-line status. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs.
+Read `state.json`, update `session_id`, and print a one-line status. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs. On a done factory nothing is left to run: wait for `handoff-<id> tested:` and resolve the item as stage 11 says.

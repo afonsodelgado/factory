@@ -194,44 +194,53 @@ func (m *Runtime) Wake(key string) error {
 	if !ok || !it.Status.Asleep() || m.Engine == nil {
 		return nil
 	}
+	_, err := m.wake(it)
+	return err
+}
+
+func (m *Runtime) wake(it Item) (string, error) {
 	hooks, _ := state.ReadHookFiles(m.Config.StateDir)
 	plan := PlanWake(it, WithoutTokens(hooks, m.snap.StageTokens), m.WritableDirs(it.Factory.Repo, it.Factory.Worktree, it.Factory.Supervisor()))
+	var pane string
 	switch plan.Kind {
 	case WakeNewPane:
 		dir := it.Factory.Worktree
 		if !DirExists(dir) {
-			return fmt.Errorf("the worktree %s is gone", dir)
+			return "", fmt.Errorf("the worktree %s is gone", dir)
 		}
-		pane, err := m.Engine.NewFactoryPane(NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: supervisorEnv(it.Factory.Supervisor())})
+		created, err := m.Engine.NewFactoryPane(NewPane{Repo: it.Factory.Repo, Slug: it.Factory.Slug, Dir: dir, Env: supervisorEnv(it.Factory.Supervisor())})
 		if err != nil {
-			return err
+			return "", err
 		}
-		if err := m.typeSupervisor(pane, it.Factory, plan.Command); err != nil {
-			return err
+		if err := m.typeSupervisor(created, it.Factory, plan.Command); err != nil {
+			return "", err
 		}
-		m.typeAfterStart(plan, pane, it)
+		m.typeAfterStart(plan, created, it)
+		pane = created
 	case WakeShell:
 		if now := m.refreshed(Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}).Pane; now == nil || !factory.IsShell(now.Command) {
-			return fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
+			return "", fmt.Errorf("%s's pane is no longer at a shell prompt, so wake typed nothing", it.Factory.Label())
 		}
 		if err := m.typeSupervisor(it.Pane.ID, it.Factory, plan.Command); err != nil {
-			return err
+			return "", err
 		}
 		m.typeAfterStart(plan, it.Pane.ID, it)
+		pane = it.Pane.ID
 	case WakeResume:
 		reason, err := Deliver(m.Engine, m.refreshed(Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}), plan.Command)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if reason != "" {
-			return errors.New(reason)
+			return "", errors.New(reason)
 		}
+		pane = it.Pane.ID
 	}
 	m.markPaused(it.Factory, false)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, plan.Note())
 	}
-	return nil
+	return pane, nil
 }
 
 func (m *Runtime) WakeAll() error {

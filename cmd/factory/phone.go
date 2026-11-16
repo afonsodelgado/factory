@@ -123,7 +123,11 @@ func printPhoneStatus(w io.Writer, cfg *state.Config) error {
 		running = "running"
 	}
 	fmt.Fprintf(w, "node      %s\nurl       %s\nport      127.0.0.1:%d\nnotify    %d subscribed\n", running, url, status.Port, status.Subscriptions)
-	return nil
+	keys, err := phone.Open(cfg.StateDir).KeyState()
+	if health, detail := keys.Health(); health != phone.HealthNoKey {
+		fmt.Fprintln(w, strings.TrimSpace("push key  "+keys.Fingerprint+" "+detail))
+	}
+	return err
 }
 
 var errPushRejected = errors.New("a test notification did not reach the phone's push service")
@@ -233,9 +237,9 @@ func (a nodeActions) Inspect(ctx context.Context, name string) (node.CheckReport
 	return report, err
 }
 
-func (a nodeActions) Add(ctx context.Context, op, name string) (node.AddResult, error) {
+func (a nodeActions) Add(ctx context.Context, op, name string, replaceKey bool) (node.AddResult, error) {
 	var result node.AddResult
-	err := a.local.Do(ctx, http.MethodPost, "/api/nodes", node.NodeRequest{Operation: op, Name: name}, &result)
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes", node.NodeRequest{Operation: op, Name: name, ReplaceKey: replaceKey}, &result)
 	return result, err
 }
 

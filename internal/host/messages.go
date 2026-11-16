@@ -41,6 +41,10 @@ func Handled(id string) string {
 	return id + " handled: settled outside the panel"
 }
 
+func Tested(id string) string {
+	return id + " tested: the developer tested the handoff"
+}
+
 func Instruction(id, text string) string {
 	return id + " " + strings.TrimSpace(text)
 }
@@ -75,6 +79,8 @@ const MaxMessageRunes = 4000
 
 func ActionText(item AttentionItem, action string, answers []string, text string) string {
 	switch {
+	case action == ActHandled && item.Kind == "handoff":
+		return Tested(item.ID)
 	case action == ActHandled:
 		return Handled(item.ID)
 	case action == ActAnswer && item.AsksQuestions():
