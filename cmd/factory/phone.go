@@ -99,7 +99,7 @@ func printTestPush(w io.Writer, cfg *state.Config) error {
 func phoneDoctor(cfg *state.Config) []install.Check {
 	o := doctorOptions()
 	o.Config = cfg
-	return install.PhoneChecks(o)
+	return install.NodeChecks(o)
 }
 
 type phoneActions struct{ cfg *state.Config }

@@ -100,7 +100,15 @@ factory doctor
 factory bootstrap
 ```
 
-**3. Open the hub.**
+**3. Install the node**, the always-on service that owns this machine's factories. It needs [Tailscale](https://tailscale.com/download) logged in as you, with HTTPS Certificates on for the tailnet and Funnel off.
+
+```sh
+factory node install
+```
+
+It checks Tailscale, HTTPS, Funnel and that nothing else serves `https://<machine>.<tailnet>.ts.net/`, saves your Tailscale login as `node.owner` and the machine's name as `node.hostname`, writes a launchd agent (macOS) or systemd user unit (Linux) that runs `factory node run`, waits for the node to answer, then runs `tailscale serve --bg --https=443 http://127.0.0.1:7418`. The first install prints that URL as a QR for the phone; it holds only the URL. See [The node service](#the-node-service).
+
+**4. Open the hub.**
 
 ```sh
 factory
@@ -202,7 +210,7 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 
 ## Use
 
-Every machine runs one node, which owns its factories: their tmux panes, review pages, attention, phone notifications and background work keep going whether or not a hub is open. Start it in the foreground with `factory node run --owner you@example.com`, where the owner is the Tailscale login allowed through Tailscale Serve (or set `node.owner` in `config.yml`, or `FACTORY_NODE_OWNER`). The node listens on an owner-only `node.sock` in the state directory, which the hub and the CLI use, and on `127.0.0.1:7418` (`node.port`), which accepts only requests from Tailscale Serve on this machine that carry the owner's `Tailscale-User-Login`; until `node.hostname` names this machine's Tailscale name, requests through Serve get 421 with a message saying so. A second `factory node run` for the same state directory refuses, and so does a node beside an open hub, `factory host run` or `factory serve` from an older release: stop those first; the node never stops them. `factory open`, the hub and every command that changes a factory refuse with this guidance when no node runs, before doing anything. `factory attention resolve` asks the node whether the item is open and prints the `state.json` edit for the supervisor to make; the node never writes `state.json`.
+Every machine runs one node, which owns its factories: their tmux panes, review pages, attention, phone notifications and background work keep going whether or not a hub is open. `factory node install` runs it as a service; `factory node run` runs it in the foreground instead. The owner is the Tailscale login allowed through Tailscale Serve: `--owner`, `FACTORY_NODE_OWNER` or `node.owner` in `config.yml`. When `node.owner` or `node.hostname` is not set, `factory node run` reads them from `tailscale status` and saves them; it never replaces a saved owner. Offline, it runs on the saved settings, and with no owner saved it stops with setup guidance. The node listens on an owner-only `node.sock` in the state directory, which the hub and the CLI use, and on `127.0.0.1:7418` (`node.port`), which accepts only requests from Tailscale Serve on this machine that carry the owner's `Tailscale-User-Login`; until `node.hostname` names this machine's Tailscale name, requests through Serve get 421 with a message saying so. Every 10 seconds the node reads `tailscale serve status`; while any Funnel entry is on, or it cannot tell, it answers the owner's requests over the network only with a 403 naming each `tailscale funnel … off` fix, and `node.sock` keeps answering. A second `factory node run` for the same state directory refuses, and so does a node beside an open hub, `factory host run` or `factory serve` from an older release: stop those first; the node never stops them. `factory open`, the hub and every command that changes a factory refuse with this guidance when no node runs, before doing anything. `factory attention resolve` asks the node whether the item is open and prints the `state.json` edit for the supervisor to make; the node never writes `state.json`.
 
 | Command | Does |
 |---|---|
@@ -249,6 +257,20 @@ The hub lists remote factories beside local ones, under a `↔ homelab` group, a
 
 Browser QA runs on the machine that holds the factory, in its own headless Chrome; no QA job waits for or runs on a laptop. Finish or interrupt QA started by an older version before you upgrade, then start it again on its node.
 
+### The node service
+
+| Command | Does |
+|---|---|
+| `factory node install` | checks that Tailscale is logged in on an untagged device, HTTPS Certificates are on, every Funnel entry is off and `https://<machine>.<tailnet>.ts.net/` serves nothing else; saves `node.owner` and `node.hostname`; writes and loads the service; waits for the node to answer; then serves it with `tailscale serve --bg --https=443 http://127.0.0.1:<node.port>` |
+| `factory node uninstall` | unloads and removes the service, and removes the Serve mapping only while it still points at the node |
+| `factory node status` | prints whether the service is installed and running, the running and configured versions, the port, the tailnet and the URL; it works while the node is stopped |
+
+On macOS the service is the launchd agent `~/Library/LaunchAgents/dev.factory.node.plist`. It starts when you log in: after a reboot the node waits for your login, and FileVault's login screen is not enough. On Linux it is the systemd user unit `~/.config/systemd/user/factory-node.service`, and install turns on lingering with `loginctl enable-linger` so the node starts at boot and keeps running after you log out; when that needs root, install says so and `sudo loginctl enable-linger <you>` fixes it. Both run this binary's absolute path in your home directory with `PATH`, `HOME`, `SHELL`, locale and the `FACTORY_*`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` variables of the shell that installed it, and nothing else from its environment. The node's log is `logs/node.log` in the state directory, readable only by you. A systemd stop leaves the tmux server and its agents running.
+
+Install refuses, before it changes anything, a tagged device (`sudo tailscale up --advertise-tags= --force-reauth`, then sign in as yourself), HTTPS Certificates off, a Funnel entry, which it lists with its own `tailscale funnel … off` command, and anything else on `https://<machine>.<tailnet>.ts.net/`. It adopts an existing mapping that already points at the node. If a step fails, it says which and records what it finished in `node-install.json` in the state directory: a service whose node never answers is unloaded again, and running install again completes the rest. The QR prints once, when an install first completes. Uninstall keeps factories, their panes, push keys, subscriptions, `config.yml` and every other Serve entry. On Linux, `tailscale serve` and `tailscale funnel` changes need sudo unless you are the Tailscale operator (`sudo tailscale set --operator=$USER`).
+
+`factory doctor` checks the node: Tailscale login, that `node.owner` is that untagged user, `node.hostname`, HTTPS certificates, the Serve mapping, every Funnel entry, the service and its unit, the running process, lingering, the permissions of the state directory, sockets and log, and the push services, each failure with its own fix.
+
 ### The phone app
 
 The phone app lists this machine's factories, tells you when one needs you, and lets you answer, approve, pause, wake, message a supervisor and review pages with the same comments as the desktop. Remote factories are not shown. It runs at `https://<machine>.<tailnet>.ts.net/` through [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve), so the phone needs Tailscale to act, but notifications arrive through the browser's push service on any network. The node serves it whenever it runs; there is no pairing. Every request must carry the node owner's Tailscale login, which Serve adds for a device signed in to Tailscale as that user. Anyone else on the tailnet gets a page that names the owner and shows nothing, and an app that was signed in as the owner clears what it saved. Press `P` in the hub for the Phone popup, or use the commands:
@@ -257,9 +279,9 @@ The phone app lists this machine's factories, tells you when one needs you, and 
 |---|---|
 | `factory phone status` | prints the app's URL, the loopback port, whether the node runs and how many browsers have notifications on |
 | `factory phone test` | asks the running node to send a test notification; "accepted" means the push service took it, not that the phone showed it |
-| `factory phone check` | checks Tailscale, HTTPS, the serve mapping, Funnel and the push services, with a fix for each failure |
+| `factory phone check` | runs the node checks of `factory doctor`: Tailscale, owner, HTTPS, the serve mapping, every Funnel entry, the service, permissions and the push services, with a fix for each failure |
 
-Once, on this machine: turn on HTTPS Certificates for the tailnet, put this machine's full Tailscale name in `config.yml` as `node.hostname` (for example `devbox.tail1234.ts.net`), then run `tailscale serve --bg --https=443 http://127.0.0.1:7418`. Never use Funnel. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Each browser that turns notifications on is kept by its push endpoint; opening the app again re-registers the same subscription without turning it off.
+`factory node install` sets up the URL once per machine; never use Funnel. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Each browser that turns notifications on is kept by its push endpoint; opening the app again re-registers the same subscription without turning it off.
 
 Upgrading from a release with pairing: the first `factory node run` moves `phone.hostname` and `phone.port` to `node.hostname` and `node.port`, keeps the push keys, every subscription and the queued notifications, then deletes the pairing codes and device hashes. Paired phones keep getting notifications and open the app again over the tailnet as the owner; operations a phone sent before the upgrade stay readable until they settle.
 

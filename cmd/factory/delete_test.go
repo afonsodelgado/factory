@@ -27,7 +27,7 @@ func shortStateDir(t *testing.T) string {
 	return stateDir
 }
 
-func scratchNode(t *testing.T, config string) {
+func scratchNode(t *testing.T, config string, ts node.Tailscale) *state.Config {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		if os.Getenv("CI") == "" {
@@ -47,7 +47,7 @@ func scratchNode(t *testing.T, config string) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	n, err := startNode(ctx, cfg, "owner@example.com")
+	n, err := startNode(ctx, cfg, "owner@example.com", ts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +55,7 @@ func scratchNode(t *testing.T, config string) {
 		cancel()
 		n.close()
 	})
+	return cfg
 }
 
 func TestDeleteRefusesUnpushedWorkWithoutATerminal(t *testing.T) {
@@ -83,7 +84,7 @@ func TestDeleteRefusesUnpushedWorkWithoutATerminal(t *testing.T) {
 	}
 	t.Setenv("FACTORY_CONFIG_DIR", config)
 	shortStateDir(t)
-	scratchNode(t, config)
+	scratchNode(t, config, node.Tailscale{Run: noTailscale})
 	t.Chdir(t.TempDir())
 	stdin, feed, err := os.Pipe()
 	if err != nil {
@@ -120,7 +121,7 @@ func TestDeleteOfAFactoryWhoseRepoIsGoneFinishesAndCanRunAgain(t *testing.T) {
 	if err := registry.Save(); err != nil {
 		t.Fatal(err)
 	}
-	scratchNode(t, config)
+	scratchNode(t, config, node.Tailscale{Run: noTailscale})
 
 	for run := 1; run <= 2; run++ {
 		var out bytes.Buffer

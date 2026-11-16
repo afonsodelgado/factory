@@ -156,7 +156,18 @@ commands:
               run this machine's node in the foreground: it owns the
               factories, their panes, review pages and notifications whether
               or not a hub is open; --owner is the Tailscale login allowed
-              through Tailscale Serve
+              through Tailscale Serve, read from Tailscale when not saved
+  node install
+              check Tailscale, HTTPS and Funnel, run the node as a launchd
+              agent or systemd user unit, then serve it at
+              https://<machine>.<tailnet>.ts.net; the first install prints that
+              URL as a QR
+  node uninstall
+              stop and remove the service and its Serve mapping; factories,
+              their state and phone notifications stay
+  node status
+              print the service, the running and configured versions, the
+              port and the tailnet, also while the node is stopped
   hub         show the node's factories in the factory tmux session
   host request
               answer one JSON request from another machine on stdin through

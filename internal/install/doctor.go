@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/node"
-	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -49,7 +48,8 @@ type Options struct {
 	ConfigErr  error
 	Repos      []string
 	Config     *state.Config
-	PhoneProbe phone.Probe
+	Run        node.Runner
+	DialTLS    func(ctx context.Context, address string) error
 }
 
 func run(name string, args ...string) (string, error) {
@@ -125,24 +125,7 @@ func nerdFontInstallCommand() string {
 }
 
 func Doctor(o Options) []Check {
-	return doctor(o, append([]Check{browserQA(o), nerdFont(o)}, PhoneChecks(o)...)...)
-}
-
-var phoneMarks = map[string]Mark{phone.Passed: Pass, phone.Failed: Fail, phone.Skipped: Skip}
-
-func PhoneChecks(o Options) []Check {
-	if o.Config == nil || o.Config.NodeHostname() == "" {
-		return []Check{{Name: "phone", Mark: Skip, Detail: "off; optional. Put node.hostname: <this machine's ts.net name> in config.yml and run factory node run to serve the phone app"}}
-	}
-	probe := o.PhoneProbe
-	if probe.Tailscale == nil {
-		probe = phone.SystemProbe()
-	}
-	var checks []Check
-	for _, c := range phone.Checks(context.Background(), o.Config.Machine, probe) {
-		checks = append(checks, Check{Name: c.Name, Mark: phoneMarks[c.State], Detail: c.Detail, Fix: c.Fix})
-	}
-	return checks
+	return doctor(o, append([]Check{browserQA(o), nerdFont(o)}, NodeChecks(o)...)...)
 }
 
 func ServerDoctor(o Options, gitURLs []string) []Check {
@@ -451,17 +434,7 @@ func Report(w io.Writer, checks []Check, header string) (problems, warnings int)
 	fmt.Fprintln(w, header)
 	fmt.Fprintln(w)
 	for _, c := range checks {
-		line := fmt.Sprintf("  %s %-12s %s", c.Mark, c.Name, c.Detail)
-		if c.Note != "" {
-			line = fmt.Sprintf("%-60s %s", line, c.Note)
-		}
-		fmt.Fprintln(w, strings.TrimRight(line, " "))
-		for _, l := range c.Lines {
-			fmt.Fprintf(w, "%17s%s\n", "", l)
-		}
-		if c.Fix != "" && c.Mark != Pass {
-			fmt.Fprintf(w, "%17sfix  %s\n", "", c.Fix)
-		}
+		WriteCheck(w, c)
 		switch c.Mark {
 		case Fail:
 			problems++
@@ -471,4 +444,18 @@ func Report(w io.Writer, checks []Check, header string) (problems, warnings int)
 	}
 	fmt.Fprintln(w)
 	return problems, warnings
+}
+
+func WriteCheck(w io.Writer, c Check) {
+	line := fmt.Sprintf("  %s %-12s %s", c.Mark, c.Name, c.Detail)
+	if c.Note != "" {
+		line = fmt.Sprintf("%-60s %s", line, c.Note)
+	}
+	fmt.Fprintln(w, strings.TrimRight(line, " "))
+	for _, l := range c.Lines {
+		fmt.Fprintf(w, "%17s%s\n", "", l)
+	}
+	if c.Fix != "" && c.Mark != Pass {
+		fmt.Fprintf(w, "%17sfix  %s\n", "", c.Fix)
+	}
 }

@@ -196,8 +196,15 @@ func TestASupersededCheckNeverPostsItsResultAndNeverHoldsUpAnswers(t *testing.T)
 	}
 }
 
+func funnelOff(t *testing.T) *Exposure {
+	t.Helper()
+	e := &Exposure{Tailscale: Tailscale{Run: func(context.Context, string, ...string) ([]byte, error) { return []byte("{}"), nil }}}
+	e.Check(context.Background())
+	return e
+}
+
 func TestOnlyTheOwnersLoginThroughLocalServeReachesTheAPI(t *testing.T) {
-	gate := Gate{Owner: "alice@example.com", Hosts: []string{"devbox.tail1234.ts.net"}, Origin: "https://devbox.tail1234.ts.net", OpaquePath: "/rt/"}
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{"devbox.tail1234.ts.net"}, Origin: "https://devbox.tail1234.ts.net", OpaquePath: "/rt/", Exposure: funnelOff(t)}
 	reached := false
 	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
 	cases := []struct {
@@ -246,7 +253,7 @@ func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.
 	const host = "devbox.tail1234.ts.net"
 	api := &API{Node: "node-1", Version: "test"}
 	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key"}).Handler()
-	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage}
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage, Exposure: funnelOff(t)}
 	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
 	cases := []struct {
 		name, method, path, login, origin, media string
@@ -394,7 +401,7 @@ func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	runtime := &recordingCaller{}
 	api := &API{Commands: Commands{Runtime: runtime}, Node: "node-1", Version: "test"}
 	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key", Review: pages.MobileHandler()}).Handler()
-	gate := Gate{Owner: "alice@example.com", Hosts: []string{name}, Origin: "https://" + name, OpaquePath: phone.GrantPrefix}
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{name}, Origin: "https://" + name, OpaquePath: phone.GrantPrefix, Exposure: funnelOff(t)}
 	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
 	request := func(method, path, origin string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "https://"+name+path, strings.NewReader(`{"key":"/r/app:csv"}`))

@@ -58,6 +58,9 @@ func newStandIn(t *testing.T) standIn {
 	if err := os.WriteFile(filepath.Join(s.bin, "claude"), []byte("#!/bin/sh\nexec sleep 600\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(s.bin, "tailscale"), []byte("#!/bin/sh\necho 'stand-in tailscale: not running' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(s.bin, "shell"), []byte("#!/bin/sh\n[ \"${1:-}\" = -l ] && shift\nexec /bin/sh \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

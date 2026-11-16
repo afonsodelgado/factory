@@ -1,9 +1,12 @@
 package install
 
 import (
+	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -170,4 +174,179 @@ func openCodeChecks(o Options) []Check {
 		return append(checks, Check{Name: "opencode plugin", Mark: Fail, Detail: "OpenCode panes cannot report their status", Fix: "factory bootstrap"})
 	}
 	return append(checks, Check{Name: "opencode plugin", Mark: Pass, Detail: "installed"})
+}
+
+var pushServices = []string{"fcm.googleapis.com:443", "web.push.apple.com:443", "updates.push.services.mozilla.com:443"}
+
+func NodeChecks(o Options) []Check {
+	if o.Config == nil {
+		return nil
+	}
+	run := o.Run
+	if run == nil {
+		run = node.System
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	checks := tailnetChecks(ctx, o.Config, node.Tailscale{Run: run})
+	checks = append(checks, serviceChecks(ctx, o, node.NewService(o.Config, o.Binary, o.Home, run))...)
+	return append(checks, permissions(o.Config), pushReach(ctx, o.DialTLS))
+}
+
+func tailnetChecks(ctx context.Context, cfg *state.Config, ts node.Tailscale) []Check {
+	self, err := ts.Status(ctx)
+	switch {
+	case errors.Is(err, node.ErrNoTailscale):
+		return append([]Check{{Name: "tailscale", Mark: Fail, Detail: "not installed", Fix: "install Tailscale from https://tailscale.com/download and log in"}}, skipped("owner", "ts.net name", "https cert", "serve", "funnel")...)
+	case errors.Is(err, node.ErrLoggedOut):
+		return append([]Check{{Name: "tailscale", Mark: Fail, Detail: "installed but not logged in or not running", Fix: "tailscale up"}}, skipped("owner", "ts.net name", "https cert", "serve", "funnel")...)
+	case err != nil:
+		return append([]Check{{Name: "tailscale", Mark: Fail, Detail: err.Error(), Fix: "tailscale status"}}, skipped("owner", "ts.net name", "https cert", "serve", "funnel")...)
+	}
+	host := cfg.NodeHostname()
+	checks := []Check{{Name: "tailscale", Mark: Pass, Detail: "logged in as " + self.Login + " on " + self.Tailnet}, ownerCheck(cfg, self), machineName(self.DNSName, host), certificate(self, host)}
+	sc, err := ts.Serve(ctx)
+	return append(checks, mapping(sc, err, host, cfg.NodePort()), funnel(sc, err))
+}
+
+func skipped(names ...string) []Check {
+	checks := make([]Check, len(names))
+	for i, name := range names {
+		checks[i] = Check{Name: name, Mark: Skip, Detail: "needs Tailscale first"}
+	}
+	return checks
+}
+
+func ownerCheck(cfg *state.Config, self node.Self) Check {
+	owner := cfg.Node.Owner
+	switch {
+	case self.Tagged:
+		return Check{Name: "owner", Mark: Fail, Detail: "this machine is a tagged Tailscale device, so Serve passes no user login and no phone can prove it is you", Lines: []string{"sign in as yourself when the command asks"}, Fix: node.UntagFix}
+	case owner == "":
+		return Check{Name: "owner", Mark: Fail, Detail: "node.owner is not set, so the node refuses to start", Fix: "factory node install  records " + self.Login}
+	case !strings.EqualFold(owner, self.Login):
+		return Check{Name: "owner", Mark: Fail, Detail: fmt.Sprintf("node.owner is %s, but Tailscale is logged in as %s, so the node refuses this device", owner, self.Login), Fix: "log Tailscale in as " + owner + ", or set node.owner: " + self.Login + " in config.yml and restart the node"}
+	}
+	return Check{Name: "owner", Mark: Pass, Detail: owner + ", an untagged user"}
+}
+
+func machineName(name, host string) Check {
+	fix := "put node.hostname: " + name + " in config.yml, then restart the node"
+	switch {
+	case host == "":
+		return Check{Name: "ts.net name", Mark: Fail, Detail: "node.hostname is not set, so requests through Serve get 421", Fix: fix}
+	case name != host:
+		return Check{Name: "ts.net name", Mark: Fail, Detail: fmt.Sprintf("node.hostname is %s, but this machine is %s", host, name), Fix: fix}
+	}
+	return Check{Name: "ts.net name", Mark: Pass, Detail: host}
+}
+
+func certificate(self node.Self, host string) Check {
+	if !self.HTTPS() {
+		return Check{Name: "https cert", Mark: Fail, Detail: "HTTPS is off for this tailnet", Fix: node.HTTPSFix}
+	}
+	return Check{Name: "https cert", Mark: Pass, Detail: "Tailscale can issue a certificate for " + cmp.Or(host, self.DNSName)}
+}
+
+func mapping(sc node.ServeConfig, err error, host string, port int) Check {
+	target := node.Target(port)
+	fix := "tailscale " + strings.Join(node.ServeArgs(port), " ")
+	if err != nil {
+		return Check{Name: "serve", Mark: Fail, Detail: err.Error(), Fix: fix}
+	}
+	switch found, uses := sc.Mapping(host, target); found {
+	case node.Foreign:
+		return Check{Name: "serve", Mark: Fail, Detail: fmt.Sprintf("https://%s serves %s, not the node", host, uses), Fix: "move that to another port, then " + fix}
+	case node.Unmapped:
+		return Check{Name: "serve", Mark: Fail, Detail: fmt.Sprintf("https://%s/ does not forward to %s", host, target), Fix: fix}
+	}
+	return Check{Name: "serve", Mark: Pass, Detail: fmt.Sprintf("https://%s/ → %s", host, target)}
+}
+
+func funnel(sc node.ServeConfig, err error) Check {
+	if err != nil {
+		return Check{Name: "funnel", Mark: Fail, Detail: "could not tell whether Funnel is on, so the node answers nothing over the network", Lines: []string{err.Error()}, Fix: "tailscale funnel status"}
+	}
+	funnels := sc.Funnels()
+	if len(funnels) == 0 {
+		return Check{Name: "funnel", Mark: Pass, Detail: "off on every port; the node stays on the tailnet"}
+	}
+	c := Check{Name: "funnel", Mark: Fail, Detail: "on, so the node answers nothing over the network until every entry is off"}
+	var fixes []string
+	for _, f := range funnels {
+		c.Lines = append(c.Lines, "public: "+f.Where)
+		fixes = append(fixes, f.Fix)
+	}
+	if note := node.PrivilegeNote(); note != "" {
+		c.Lines = append(c.Lines, strings.TrimSpace(note))
+	}
+	c.Fix = strings.Join(fixes, "  &&  ")
+	return c
+}
+
+func serviceChecks(ctx context.Context, o Options, svc node.Service) []Check {
+	st := svc.State(ctx)
+	record, _ := node.LoadInstall(o.Config.StateDir)
+	answers := node.Answers(o.Config.NodeSocket())
+	switch {
+	case !st.Installed && answers:
+		return []Check{{Name: "service", Mark: Fail, Detail: "not installed; a node runs in the foreground, and its factories stop with it", Fix: "stop factory node run, then factory node install"}}
+	case !st.Installed:
+		return []Check{{Name: "service", Mark: Fail, Detail: "not installed, so no node runs factories", Fix: "factory node install"}}
+	}
+	checks := []Check{{Name: "service", Mark: Pass, Detail: svc.Kind() + " at " + tilde(svc.UnitPath())}}
+	if record.Binary != "" && record.Binary != o.Binary {
+		checks[0] = Check{Name: "service", Mark: Fail, Detail: svc.Kind() + " runs " + record.Binary + ", not this binary", Fix: "factory node install"}
+	}
+	switch {
+	case !st.Running:
+		checks = append(checks, Check{Name: "node process", Mark: Fail, Detail: "the service is not running; its log is " + tilde(svc.Log), Fix: svc.RestartCommand()})
+	case !answers:
+		checks = append(checks, Check{Name: "node process", Mark: Fail, Detail: "pid " + st.PID + " runs, but node.sock does not answer; its log is " + tilde(svc.Log), Fix: svc.RestartCommand()})
+	default:
+		checks = append(checks, Check{Name: "node process", Mark: Pass, Detail: "pid " + st.PID + ", answering on node.sock"})
+	}
+	detail, fix, persists := svc.Boot(ctx, false)
+	if !persists {
+		return append(checks, Check{Name: "at boot", Mark: Warn, Detail: detail, Fix: fix})
+	}
+	return append(checks, Check{Name: "at boot", Mark: Pass, Detail: detail})
+}
+
+func permissions(cfg *state.Config) Check {
+	var open []string
+	for _, path := range []string{cfg.StateDir, filepath.Join(cfg.StateDir, "logs"), cfg.NodeSocket(), cfg.ReviewSocket(), filepath.Join(cfg.StateDir, "logs", "node.log"), node.InstallPath(cfg.StateDir)} {
+		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
+			open = append(open, path)
+		}
+	}
+	if len(open) > 0 {
+		return Check{Name: "permissions", Mark: Fail, Detail: "other users can reach the node's private files", Lines: open, Fix: "chmod go-rwx " + strings.Join(open, " ")}
+	}
+	return Check{Name: "permissions", Mark: Pass, Detail: "the state directory, sockets and logs are yours only"}
+}
+
+func pushReach(ctx context.Context, dialTLS func(context.Context, string) error) Check {
+	if dialTLS == nil {
+		dialTLS = dialPushService
+	}
+	var unreachable []string
+	for _, address := range pushServices {
+		if dialTLS(ctx, address) != nil {
+			unreachable = append(unreachable, strings.TrimSuffix(address, ":443"))
+		}
+	}
+	if len(unreachable) > 0 {
+		return Check{Name: "push reach", Mark: Fail, Detail: "cannot open TLS to " + strings.Join(unreachable, ", "), Fix: "allow outbound HTTPS from this machine to the browser push services"}
+	}
+	return Check{Name: "push reach", Mark: Pass, Detail: "reachable; this does not prove a phone gets notifications, so send a test push"}
+}
+
+func dialPushService(ctx context.Context, address string) error {
+	dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}}
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err == nil {
+		conn.Close()
+	}
+	return err
 }
