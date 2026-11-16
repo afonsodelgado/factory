@@ -2,6 +2,7 @@ package review
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -285,6 +286,48 @@ func TestThePhoneAndTheDesktopShareThreadsWithoutTheDesktopToken(t *testing.T) {
 		if resp.StatusCode == http.StatusOK {
 			t.Errorf("the phone reached the desktop browser endpoint %s", path)
 		}
+	}
+}
+
+func TestAPhonePageAskedForBeforeTheFactoriesAreListedWaitsForThem(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "plan.html"), "<html><body>plan</body></html>")
+	s, err := Listen(0, "desktop-token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	sockets, err := os.MkdirTemp("/tmp", "frm-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockets) })
+	socket := MobileSocket(sockets)
+	if err := s.ServeMobile(socket); err != nil {
+		t.Fatal(err)
+	}
+	phone := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", socket)
+	}}}
+	answered := make(chan int, 1)
+	go func() {
+		resp, err := phone.Get("http://review/r/k/plan.html")
+		if err != nil {
+			answered <- 0
+			return
+		}
+		resp.Body.Close()
+		answered <- resp.StatusCode
+	}()
+	select {
+	case status := <-answered:
+		t.Fatalf("a phone page asked for while the hub was still listing its factories answered %d; want it held until they are listed", status)
+	case <-time.After(200 * time.Millisecond):
+	}
+	s.SetFactories([]Factory{{Key: "k", Label: "csv", Dir: dir}})
+	if status := <-answered; status != 200 {
+		t.Fatalf("the held phone page answered %d once the factories were listed; want 200", status)
 	}
 }
 

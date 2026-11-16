@@ -42,6 +42,8 @@ type Server struct {
 	act       func(Action) (any, error)
 	browser   *Browser
 	forwarded map[string]bool
+	listed    chan struct{}
+	listOnce  sync.Once
 }
 
 type event struct {
@@ -73,6 +75,7 @@ func Listen(port int, token string, overlay []byte) (*Server, error) {
 		clients:   map[chan event]bool{},
 		stores:    map[string]*Store{},
 		forwarded: map[string]bool{},
+		listed:    make(chan struct{}),
 		now:       time.Now,
 	}
 	s.http = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
@@ -89,6 +92,7 @@ func (s *Server) Close() error {
 	if mobile != nil {
 		mobile.Close()
 	}
+	s.markListed()
 	return s.http.Close()
 }
 
@@ -116,6 +120,11 @@ func (s *Server) SetFactories(factories []Factory) {
 			delete(s.stores, dir)
 		}
 	}
+	s.markListed()
+}
+
+func (s *Server) markListed() {
+	s.listOnce.Do(func() { close(s.listed) })
 }
 
 func (s *Server) PageURL(fileURL string) (string, bool) {

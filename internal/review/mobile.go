@@ -36,7 +36,10 @@ func (s *Server) ServeMobile(path string) error {
 	s.mu.Lock()
 	s.mobile = mobile
 	s.mu.Unlock()
-	go mobile.Serve(ln)
+	go func() {
+		<-s.listed
+		mobile.Serve(ln)
+	}()
 	return nil
 }
 
