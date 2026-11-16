@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -298,8 +297,7 @@ func (m *Model) refresh() {
 	for _, it := range s.Items {
 		m.loaded[it.Factory.Key()] = it.Status
 	}
-	m.forgetClosedItems()
-	m.checkReceipts()
+	m.settleReceipts()
 	m.queueInbox()
 	m.flushTypeQueue()
 	m.settle()
@@ -602,6 +600,8 @@ func (m *Model) handleEvent(e Event) tea.Cmd {
 		return m.reviewRequest(e)
 	case "delete":
 		return m.deleteRequest(e)
+	case "local", "act", "receipt":
+		e.Respond(m.execution().Handle(e.Message))
 	case "paste":
 		if e.Pane == "panel" {
 			m.paste(e.Text)
@@ -814,23 +814,7 @@ func (m *Model) nextElsewhere() (Item, bool) {
 	return m.snap.Find(key)
 }
 
-func needsSince(it Item) time.Time {
-	var oldest time.Time
-	if it.Factory.State != nil {
-		for _, a := range it.Factory.State.OpenAttention() {
-			if oldest.IsZero() || a.CreatedAt.Before(oldest) {
-				oldest = a.CreatedAt.Time
-			}
-		}
-	}
-	if oldest.IsZero() && it.Hook != nil && it.Hook.Main != nil {
-		oldest = it.Hook.Main.At
-	}
-	if oldest.IsZero() {
-		oldest = it.Factory.StateMod
-	}
-	return oldest
-}
+func needsSince(it Item) time.Time { return host.NeedsSince(it) }
 
 func (m *Model) focusSession() {
 	it, ok := m.snap.Find(m.selected)
@@ -957,19 +941,7 @@ func (m *Model) row(it Item) selector.Row {
 	return row
 }
 
-func tilde(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if path == home {
-		return "~"
-	}
-	if strings.HasPrefix(path, home+string(filepath.Separator)) {
-		return "~" + strings.TrimPrefix(path, home)
-	}
-	return path
-}
+func tilde(path string) string { return host.Tilde(path) }
 
 func (m *Model) publish() {
 	if m.Server != nil {

@@ -30,12 +30,18 @@ type Answer struct {
 	Draft      string
 	Received   time.Time
 	LeavesOpen bool
+	Operation  string    `json:",omitempty"`
+	Device     string    `json:",omitempty"`
+	Source     string    `json:",omitempty"`
+	Action     string    `json:",omitempty"`
+	Outcome    string    `json:",omitempty"`
+	Reason     string    `json:",omitempty"`
+	SettledAt  time.Time `json:",omitzero"`
 }
 
 type Runtime struct {
 	ShowArchived bool
 	Pages        *review.Server
-	Queued       func(Answer)
 	Config       *state.Config
 	Loader       *Loader
 	Engine       StageEngine
@@ -43,9 +49,8 @@ type Runtime struct {
 	Session      string
 	Typist       Typist
 	Now          func() time.Time
-	Pending      func(Answer) bool
-	Sent         func(Answer, time.Time)
 	Refused      func(Answer, string)
+	Console      Console
 	Log          *EventLog
 	Push         *Pusher
 
@@ -54,6 +59,8 @@ type Runtime struct {
 	typedAt     map[string]time.Time
 	inboxQueued map[string]bool
 	notice      string
+	receipts    receiptFile
+	repoNames   map[string]string
 }
 
 func New(r Runtime) *Runtime {
@@ -62,6 +69,8 @@ func New(r Runtime) *Runtime {
 	}
 	r.typedAt = map[string]time.Time{}
 	r.inboxQueued = map[string]bool{}
+	r.receipts = receiptFile{Claims: map[string]Answer{}}
+	r.repoNames = map[string]string{}
 	return &r
 }
 
@@ -79,6 +88,7 @@ func (m *Runtime) Tick() {
 	if m.Loader != nil {
 		m.snap = m.withQA(m.Loader.Load())
 	}
+	m.SettleReceipts(m.snap.Items, func(string) time.Time { return m.snap.At })
 	m.QueueInbox()
 	m.FlushTypeQueue()
 	m.CloseFinishedStages()
@@ -102,22 +112,6 @@ func (m *Runtime) repoConfig(repo string) (*state.Config, state.Profile) {
 func (m *Runtime) currentPanes() []tmux.Pane {
 	panes, _ := m.TM.Panes()
 	return panes
-}
-
-func (m *Runtime) stillQueued(a Answer) bool {
-	return m.Pending == nil || m.Pending(a)
-}
-
-func (m *Runtime) recordSent(a Answer, at time.Time) {
-	if m.Sent != nil {
-		m.Sent(a, at)
-	}
-}
-
-func (m *Runtime) dropAnswer(a Answer, reason string) {
-	if m.Refused != nil {
-		m.Refused(a, reason)
-	}
 }
 
 func (m *Runtime) refreshed(t Target) Target {

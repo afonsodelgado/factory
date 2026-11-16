@@ -215,11 +215,8 @@ func (m *Runtime) ApproveFromPage(it Item, page string) (ReviewReply, error) {
 		return ReviewReply{}, fmt.Errorf("%s has no supervisor pane; wake it, then approve again", it.Factory.Label())
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), strings.TrimSpace(fmt.Sprintf("/factory approve %s %s", gate.Stage(), gate.ID)))
-	mark := Answer{Factory: it.Factory.Key(), ItemID: gate.ID, ItemSince: gate.CreatedAt.Time, Head: state.PromptHead(text)}
-	if m.Queued != nil {
-		m.Queued(mark)
-	}
-	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text, Answers: &mark})
+	mark := Answer{Factory: it.Factory.Key(), ItemID: gate.ID, ItemSince: gate.CreatedAt.Time, Head: state.PromptHead(text), Source: SourcePage, Action: ActApprove}
+	m.QueueAnswer(it, mark, text)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "approved "+gate.ID+" from the review page")
 	}

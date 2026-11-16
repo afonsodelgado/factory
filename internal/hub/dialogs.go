@@ -435,7 +435,7 @@ func (m *Model) rowAfter(key string) string {
 func (m *Model) forgetFactory(key string) {
 	ownDraft := func(draftKey string) bool { return strings.HasPrefix(draftKey, key+"|") }
 	maps.DeleteFunc(m.panel.drafts, func(k string, _ *panel.Draft) bool { return ownDraft(k) })
-	maps.DeleteFunc(m.panel.sent, func(k string, _ sentMark) bool { return ownDraft(k) })
+	m.execution().ForgetClaims(ownDraft)
 	maps.DeleteFunc(m.panel.refused, func(k string, _ string) bool { return ownDraft(k) })
 	delete(m.panel.prs, key)
 }

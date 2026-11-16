@@ -319,6 +319,10 @@ func (c Client) SendKeys(pane string, keys ...string) error {
 	return err
 }
 
+func (c Client) Capture(pane string, lines int) (string, error) {
+	return c.Run("capture-pane", "-p", "-J", "-t", pane, "-S", "-"+strconv.Itoa(lines))
+}
+
 func (c Client) SelectPane(pane string) error {
 	_, err := c.Run("select-pane", "-t", pane)
 	return err

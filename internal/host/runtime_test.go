@@ -492,3 +492,217 @@ func TestAnUnreadStateFileNeitherResolvesNorReopensAnItem(t *testing.T) {
 		t.Fatalf("after a scan that caught state.json mid-write, %d items opened again and the journal is at %d; want none, or the phone and laptop alert again for a question already seen", len(opened), log.Seq)
 	}
 }
+
+type paneTypist struct{ typed []string }
+
+func (p *paneTypist) Type(pane, text string) error {
+	p.typed = append(p.typed, pane+": "+text)
+	return nil
+}
+
+var phoneNow = time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+
+func phoneSnapshot(event string, attention ...state.Attention) Snapshot {
+	pane := tmux.Pane{ID: "%1", Command: "claude", Token: "sup"}
+	f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{ID: "csv", Stage: "plan", Attention: attention}}
+	hook := &state.HookFile{Main: &state.HookEvent{Event: event, At: phoneNow.Add(-time.Minute)}, Last: state.HookEvent{Event: event, At: phoneNow.Add(-time.Minute)}}
+	return Snapshot{At: phoneNow, Panes: []tmux.Pane{pane}, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &pane}}}
+}
+
+func phoneRuntime(stateDir string, typist Typist, snap Snapshot) *Runtime {
+	r := New(Runtime{Config: &state.Config{StateDir: stateDir}, TM: tmux.Client{Socket: "factory-test-" + uuid.NewString(), ConfigFile: "/dev/null"}, Typist: typist, Now: func() time.Time { return phoneNow }})
+	r.Recover()
+	r.SetSnapshot(snap)
+	return r
+}
+
+func asked(id, kind string, questions ...string) state.Attention {
+	return state.Attention{ID: id, Kind: kind, Questions: questions, CreatedAt: state.Time{Time: phoneNow.Add(-2 * time.Minute)}}
+}
+
+func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
+	items := []state.Attention{asked("q1", "question", "Which region?", "Which tier?"), asked("gate-csv-plan", "gate"), asked("c1", "comment"), asked("cap-csv-qa", "cap"), asked("fail-csv-qa", "failure")}
+	since := phoneNow.Add(-2 * time.Minute)
+	act := func(action, item string, answers []string, text string) ActionRequest {
+		return ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: action, Item: item, Since: since, Answers: answers, Text: text}
+	}
+	cases := []struct {
+		name    string
+		request ActionRequest
+		typed   string
+	}{
+		{"answers keep their order and fold to one line each", act(ActAnswer, "q1", []string{"eu-west", "pro\nwith SSO"}, ""), "%1: q1 answers:\n1) eu-west\n2) pro with SSO"},
+		{"approval carries the notes on one line", act(ActApprove, "gate-csv-plan", nil, "ship it,\nkeep retries"), "%1: /factory approve plan gate-csv-plan ship it, keep retries"},
+		{"changes", act(ActChanges, "gate-csv-plan", nil, "darker header"), "%1: gate-csv-plan changes: darker header"},
+		{"comment reply", act(ActReply, "c1", nil, "done"), "%1: c1 reply: done"},
+		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_rounds by one for this factory"},
+		{"retry a failure", act(ActRetry, "fail-csv-qa", nil, ""), "%1: /factory resume"},
+		{"skip a failure", act(ActSkip, "fail-csv-qa", nil, ""), "%1: /factory skip qa"},
+		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
+		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
+		{"another incarnation is stale", func() ActionRequest { r := act(ActRetry, "fail-csv-qa", nil, ""); r.Incarnation = "old"; return r }(), ""},
+		{"a replaced item is stale", func() ActionRequest {
+			r := act(ActRetry, "fail-csv-qa", nil, "")
+			r.Since = since.Add(time.Second)
+			return r
+		}(), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			typist := &paneTypist{}
+			r := phoneRuntime(t.TempDir(), typist, phoneSnapshot("Stop", items...))
+			receipt, err := r.Act(c.request)
+			got := strings.Join(typist.typed, "\n")
+			if err != nil || got != c.typed || (c.typed == "") != (receipt.Status == StatusStale) {
+				t.Errorf("typed %q with %+v, %v; want %q: the phone must send the hub's exact text or nothing", got, receipt, err, c.typed)
+			}
+		})
+	}
+	tooLong := act(ActMessage, "", nil, strings.Repeat("é", MaxMessageRunes+1))
+	if _, err := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop")).Act(tooLong); err == nil {
+		t.Error("a message over the limit was accepted")
+	}
+}
+
+func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
+	dir := t.TempDir()
+	question := asked("q1", "question", "Which region?")
+	busy := phoneRuntime(dir, &paneTypist{}, phoneSnapshot("UserPromptSubmit", question))
+	answer := ActionRequest{Operation: uuid.NewString(), Device: "phone-a", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActAnswer, Item: "q1", Since: question.CreatedAt.Time, Answers: []string{"eu-west"}}
+	if receipt, err := busy.Act(answer); err != nil || receipt.Status != StatusQueued {
+		t.Fatalf("an answer to a busy supervisor gave %+v, %v; want it queued", receipt, err)
+	}
+	second := answer
+	second.Operation, second.Device = uuid.NewString(), "phone-b"
+	if receipt, _ := busy.Act(second); receipt.Status != StatusStale {
+		t.Fatalf("a second device answering a reserved item got %+v; want stale, or the supervisor reads two answers", receipt)
+	}
+	if claim, ok := busy.Claim(ClaimKey("/r/app:csv", "q1")); !ok || claim.Source != SourcePhone {
+		t.Fatal("the hub does not see the phone's claim on the item, so it would offer the form again")
+	}
+
+	typist := &paneTypist{}
+	restarted := phoneRuntime(dir, typist, phoneSnapshot("UserPromptSubmit", question))
+	if receipt, err := restarted.LookupReceipt(ReceiptRequest{Device: "phone-a", Operation: answer.Operation}); err != nil || receipt.Status != StatusQueued {
+		t.Fatalf("after a restart the receipt is %+v, %v; want still queued", receipt, err)
+	}
+	if _, err := restarted.LookupReceipt(ReceiptRequest{Device: "phone-b", Operation: answer.Operation}); err == nil {
+		t.Fatal("another device read this phone's receipt")
+	}
+	idle := phoneSnapshot("Stop", question)
+	restarted.SetSnapshot(idle)
+	restarted.FlushTypeQueue()
+	restarted.FlushTypeQueue()
+	if len(typist.typed) != 1 {
+		t.Fatalf("typed %q after the restart; want the queued answer exactly once", typist.typed)
+	}
+	idle.At = phoneNow.Add(2 * time.Second)
+	idle.Items[0].Hook.Submit = &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q1 answers:", At: phoneNow.Add(time.Second)}
+	restarted.SetSnapshot(idle)
+	restarted.SettleReceipts(idle.Items, func(string) time.Time { return idle.At })
+	if receipt, _ := restarted.LookupReceipt(ReceiptRequest{Device: "phone-a", Operation: answer.Operation}); receipt.Status != StatusDelivered {
+		t.Fatalf("a received answer reads %+v; want delivered", receipt)
+	}
+}
+
+type fakeConsole struct {
+	screens map[string]string
+	after   map[string]string
+	pressed []string
+}
+
+func (c *fakeConsole) Capture(pane string) (string, error) { return c.screens[pane], nil }
+
+func (c *fakeConsole) Press(pane, key string) error {
+	c.pressed = append(c.pressed, pane+": "+key)
+	c.screens[pane] = c.after[pane]
+	return nil
+}
+
+func fixtureScreen(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "permission", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestAPermissionAnswerTypesOnlyIntoTheUnchangedPromptItWasPickedFrom(t *testing.T) {
+	bash, refusedScreen := fixtureScreen(t, "bash.txt"), fixtureScreen(t, "refused.txt")
+	if _, ok := ParsePermission(fixtureScreen(t, "edit.txt"), "Edit"); ok {
+		t.Error("parsed an edit prompt; unknown menus must fall back to answering in the session")
+	}
+	if menu, ok := ParsePermission(fixtureScreen(t, "bash-box.txt"), "Bash"); !ok || len(menu.Options) != 2 || !menu.Options[1].Tells || menu.Command[0] != "rm -rf build" {
+		t.Errorf("boxed Bash prompt parsed to %+v, %v", menu, ok)
+	}
+	setup := func(screen string) (*Runtime, *fakeConsole, *paneTypist, LocalItem) {
+		snap := phoneSnapshot("Stop")
+		designer := tmux.Pane{ID: "%5", Command: "claude", Token: "des", Repo: "/r/app", StageOf: "csv", Stage: "designer"}
+		hook := &state.HookFile{Prompt: &state.PendingPrompt{At: phoneNow, Tool: "Bash"}, Last: state.HookEvent{At: phoneNow}}
+		snap.Items[0].Stage = &StageView{Run: state.StageRun{Role: "designer", Token: "des"}, Pane: &designer, Hook: hook}
+		console := &fakeConsole{screens: map[string]string{"%1": "", "%5": screen}, after: map[string]string{"%5": refusedScreen}}
+		typist := &paneTypist{}
+		r := phoneRuntime(t.TempDir(), typist, snap)
+		r.Console = console
+		items := r.Local().Factories[0].Items
+		return r, console, typist, items[len(items)-1]
+	}
+	pick := func(item LocalItem, option, text string) ActionRequest {
+		fp := ""
+		if item.Permission != nil {
+			fp = item.Permission.Fingerprint
+		}
+		return ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActPermission, Item: item.ID, Since: item.Since, Option: option, Fingerprint: fp, Text: text}
+	}
+
+	r, console, _, item := setup(bash)
+	if item.ID != "permission-designer" || item.Permission == nil || len(item.Permission.Options) != 3 {
+		t.Fatalf("the stage's prompt projects as %+v; want its three options", item)
+	}
+	if receipt, err := r.Act(pick(item, "2", "")); err != nil || receipt.Status != StatusSending || strings.Join(console.pressed, ",") != "%5: 2" {
+		t.Fatalf("picking option 2 pressed %v with %+v, %v; want 2 typed into the designer's pane only", console.pressed, receipt, err)
+	}
+
+	r, console, _, item = setup(bash)
+	console.screens["%5"] = strings.Replace(bash, "npm test -- --run src/export", "rm -rf ~", 1)
+	if receipt, _ := r.Act(pick(item, "1", "")); receipt.Status != StatusStale || len(console.pressed) != 0 {
+		t.Fatalf("a changed prompt got %+v and presses %v; want nothing typed", receipt, console.pressed)
+	}
+
+	r, console, typist, item := setup(bash)
+	if _, err := r.Act(pick(item, "3", "")); err == nil || len(console.pressed) != 0 {
+		t.Fatal("a refusal without an instruction was typed")
+	}
+	if _, err := r.Act(pick(item, "3", "use the staging data")); err != nil || strings.Join(typist.typed, ",") != "%5: use the staging data" {
+		t.Fatalf("the refusal typed %q; want the instruction once Claude shows its prompt", typist.typed)
+	}
+}
+
+func TestPauseMarksTheFactoryOnlyWhenThePauseWorked(t *testing.T) {
+	f := newFixture(t)
+	r := f.runtime(t, recordingTypist{make(chan string, 8)})
+	r.Tick()
+	it, ok := r.Snapshot().Named("csv")
+	if !ok {
+		t.Fatal("the fixture factory is not listed")
+	}
+	paused := func() bool {
+		registry, _ := state.LoadRegistry(f.cfg.RegistryPath())
+		e := registry.Find(it.Factory.Repo, "csv")
+		return e != nil && e.Paused
+	}
+	working := r.Engine
+	r.Engine = stuckPanes{working}
+	if err := r.Pause(it.Factory.Key()); err == nil || paused() {
+		t.Fatalf("a failed pause returned %v and left the marker %v; want it restored, or a crash reads as a pause and its alerts go silent", err, paused())
+	}
+	r.Engine = working
+	if err := r.Pause(it.Factory.Key()); err != nil || !paused() {
+		t.Fatalf("pause returned %v with the marker %v; want it set", err, paused())
+	}
+	r.Tick()
+	if err := r.Wake(it.Factory.Key()); err != nil || paused() {
+		t.Fatalf("wake returned %v with the marker %v; want it cleared", err, paused())
+	}
+}

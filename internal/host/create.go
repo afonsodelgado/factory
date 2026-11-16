@@ -229,6 +229,7 @@ func (m *Runtime) Wake(key string) error {
 			return errors.New(reason)
 		}
 	}
+	m.markPaused(it.Factory, false)
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, plan.Note())
 	}
@@ -255,13 +256,28 @@ func (m *Runtime) Pause(key string) error {
 	if !ok || m.Engine == nil {
 		return nil
 	}
+	prior := m.markPaused(it.Factory, true)
 	if err := m.Engine.Pause(it.Factory.Repo, it.Factory.Slug); err != nil {
+		m.markPaused(it.Factory, prior)
 		return err
 	}
 	if m.Loader != nil {
 		m.Loader.Note(it.Factory, "paused from factory")
 	}
 	return nil
+}
+
+func (m *Runtime) markPaused(f factory.Factory, paused bool) bool {
+	var prior bool
+	if m.Loader == nil {
+		return prior
+	}
+	m.Loader.UpdateRegistry(func(r *state.Registry) {
+		if e := r.Find(f.Repo, f.Slug); e != nil {
+			prior, e.Paused = e.Paused, paused
+		}
+	})
+	return prior
 }
 
 func resolved(path string) string {

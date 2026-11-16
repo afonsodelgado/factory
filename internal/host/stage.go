@@ -325,6 +325,12 @@ func (m *Runtime) FlushTypeQueue() {
 		if q.Answers != nil && !m.stillQueued(*q.Answers) {
 			continue
 		}
+		if q.Answers != nil {
+			if reason := m.unwanted(*q.Answers); reason != "" {
+				m.dropAnswer(*q.Answers, reason)
+				continue
+			}
+		}
 		if m.Now().Before(q.NotBefore) {
 			waiting = append(waiting, q)
 			continue
@@ -366,7 +372,7 @@ func (m *Runtime) FlushTypeQueue() {
 		}
 		m.typedAt[q.Pane] = m.Now()
 		if q.Answers != nil {
-			m.recordSent(*q.Answers, typing.TypingAt)
+			m.RecordSent(*q.Answers, typing.TypingAt)
 		}
 		if q.Delivers != "" {
 			MarkDelivered(q.Record, q.Delivers)
@@ -378,7 +384,7 @@ func (m *Runtime) FlushTypeQueue() {
 
 func (m *Runtime) settleInterrupted(q QueuedType) {
 	if q.Answers != nil {
-		m.recordSent(*q.Answers, q.TypingAt)
+		m.RecordSent(*q.Answers, q.TypingAt)
 		return
 	}
 	if q.Delivers != "" {

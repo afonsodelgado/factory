@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 )
 
 type Tab int
@@ -20,51 +20,9 @@ func (t Tab) Next(delta int) Tab {
 	return Tab((int(t) + delta + 4) % 4)
 }
 
-type Question struct {
-	Text        string
-	Options     []string
-	Recommended string
-}
+type Question = host.Question
 
-func (q Question) RecommendedIndex() int {
-	for i, o := range q.Options {
-		if o == q.Recommended {
-			return i
-		}
-	}
-	return -1
-}
-
-func (q Question) TopRow() int {
-	if q.Recommended != "" && q.RecommendedIndex() < 0 {
-		return -1
-	}
-	return 0
-}
-
-type Item struct {
-	ID          string
-	Kind        string
-	Title       string
-	Body        string
-	Questions   []Question
-	Artifacts   []ArtifactRow
-	ArtifactURL string
-	ThreadID    string
-	Stage       string
-	Status      factory.Status
-	Since       time.Time
-	Detail      []string
-	Action      string
-}
-
-func (i Item) Answerable() bool {
-	switch i.Kind {
-	case "question", "gate", "comment", "cap", "failure":
-		return true
-	}
-	return false
-}
+type Item = host.AttentionItem
 
 type Draft struct {
 	Choice   []int    `json:"choice"`
@@ -138,14 +96,7 @@ type PR struct {
 	Problem string
 }
 
-type ArtifactRow struct {
-	Name        string
-	Title       string
-	URL         string
-	OpenThreads *int
-	CheckedAt   time.Time
-	Live        bool
-}
+type ArtifactRow = host.ArtifactRow
 
 type ActivityRow struct {
 	At      time.Time
