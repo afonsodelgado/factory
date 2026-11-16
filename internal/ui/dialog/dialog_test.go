@@ -318,6 +318,24 @@ func TestPhonePopupTurnsOnPairsRevokesAndShowsFailingChecks(t *testing.T) {
 	}
 }
 
+func TestPhonePopupKeepsThePairingLinkAndKeysVisibleAt80x24(t *testing.T) {
+	link := "https://devbox.tail1234.ts.net/#pair=mfrggzdfmztwq2lknnwg23tpob"
+	qr := make([]string, 19)
+	for i := range qr {
+		qr[i] = strings.Repeat("█", 37)
+	}
+	p := NewPhone(PhoneContext{Enabled: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Devices: []PhoneDevice{{ID: "d-1", Name: "Pixel", Paired: "2026-11-16 12:00"}}}, &fakePhoneActions{})
+	p.Now = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
+	p.Update(tea.WindowSizeMsg{Width: 74, Height: 18})
+	if screen := p.View().Content; !strings.Contains(screen, "r revoke") || !strings.Contains(screen, "esc close") {
+		t.Fatalf("the main screen at 80x24 shows:\n%s\nwant every key, including r revoke and esc close", screen)
+	}
+	p.Update(phonePaired{pairing: PhonePairing{URL: link, Expires: time.Date(2026, 11, 16, 12, 5, 0, 0, time.UTC), QR: qr}})
+	if screen := p.View().Content; !strings.Contains(screen, link) || !strings.Contains(screen, "esc back") {
+		t.Fatalf("pairing at 80x24 shows:\n%s\nwant the whole link and the way back when the QR does not fit", screen)
+	}
+}
+
 func TestRemotesListShowsLinkDefaultAndPush(t *testing.T) {
 	r := remotesPopup(RemotesContext{
 		Remotes: []RemoteRow{

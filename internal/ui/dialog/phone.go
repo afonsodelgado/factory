@@ -342,10 +342,13 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 	case p.notice != "":
 		paragraph(c, y, "✓ "+p.notice, theme.FgInk(theme.Green))
 	}
-	c.PutMax(1, c.H-1, p.mainHints(), theme.Text, c.W-2)
+	hints := packHints(p.mainHints(), c.W-2)
+	for i, line := range hints {
+		c.Put(1, c.H-len(hints)+i, line, theme.Text)
+	}
 }
 
-func (p *Phone) mainHints() string {
+func (p *Phone) mainHints() []string {
 	toggle, serve := "e turn on", "s start"
 	if p.Context.Enabled {
 		toggle = "e turn off"
@@ -357,7 +360,33 @@ func (p *Phone) mainHints() string {
 	if len(p.Context.Devices) > 0 {
 		hints = append(hints, "r revoke")
 	}
-	return strings.Join(append(hints, "esc close"), "   ")
+	return append(hints, "esc close")
+}
+
+func packHints(hints []string, width int) []string {
+	var rows []string
+	for _, hint := range hints {
+		last := len(rows) - 1
+		if last >= 0 && theme.Width(rows[last]+"   "+hint) <= width {
+			rows[last] += "   " + hint
+			continue
+		}
+		rows = append(rows, hint)
+	}
+	return rows
+}
+
+func breakAt(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, r := range text {
+		if line != "" && theme.Width(line+string(r)) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		line += string(r)
+	}
+	return append(lines, line)
 }
 
 func (p *Phone) drawConfigure(c *theme.Canvas) {
@@ -386,17 +415,28 @@ func (p *Phone) drawPairing(c *theme.Canvas) {
 	} else {
 		c.Right(c.W-2, 0, fmt.Sprintf("expires in %d:%02d", int(left.Minutes()), int(left.Seconds())%60), theme.Muted)
 	}
+	y := paragraph(c, 2, "Scan with the phone's camera, or open this link on it. The code works once.", theme.Text)
+	for _, line := range breakAt(p.pairing.URL, c.W-2) {
+		c.Put(1, y, line, theme.Bright)
+		y++
+	}
+	if qrFits := y+1+len(p.pairing.QR) < c.H-1; qrFits {
+		drawQR(c, y+1, p.pairing.QR)
+	} else {
+		paragraph(c, y+1, "Make this window taller to see the QR code.", theme.Muted)
+	}
+	c.Put(1, c.H-1, "esc back", theme.Text)
+}
+
+func drawQR(c *theme.Canvas, y int, qr []string) {
 	width := 0
-	for _, line := range p.pairing.QR {
+	for _, line := range qr {
 		width = max(width, lipgloss.Width(line))
 	}
 	x := max((c.W-width)/2, 1)
-	for i, line := range p.pairing.QR {
-		c.Put(x, 2+i, line, theme.Bright)
+	for i, line := range qr {
+		c.Put(x, y+i, line, theme.Bright)
 	}
-	y := paragraph(c, 3+len(p.pairing.QR), "Scan with the phone's camera, or open this link on it. The code works once.", theme.Text)
-	c.PutMax(1, y, p.pairing.URL, theme.Bright, c.W-2)
-	c.Put(1, c.H-1, "esc back", theme.Text)
 }
 
 func (p *Phone) drawChecks(c *theme.Canvas) {
