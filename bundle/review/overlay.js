@@ -44,11 +44,24 @@ function start(config) {
   };
 
   function remember(name, value) {
+    const key = sessionKey(name);
     try {
-      if (value === undefined) return sessionStorage.getItem(sessionKey(name));
-      if (value === null) sessionStorage.removeItem(sessionKey(name));
-      else sessionStorage.setItem(sessionKey(name), value);
+      if (value === undefined) return sessionStorage.getItem(key);
+      if (value === null) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, value);
+      return null;
     } catch {}
+    let kept;
+    try {
+      kept = JSON.parse(window.name || "{}");
+    } catch {
+      return null;
+    }
+    if (kept === null || typeof kept !== "object" || Array.isArray(kept)) return null;
+    if (value === undefined) return kept[key] ?? null;
+    if (value === null) delete kept[key];
+    else kept[key] = value;
+    window.name = JSON.stringify(kept);
     return null;
   }
 
