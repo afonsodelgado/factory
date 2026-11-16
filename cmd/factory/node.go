@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -228,12 +227,12 @@ func nodeRoster(ctx context.Context, cfg *state.Config, id, owner string, ts nod
 	return &node.Nodes{Self: self, Version: version, Dir: dir, Tailscale: ts, HTTP: node.PeerHTTP(), Ready: node.Readiness{Probes: readinessProbes}, Repos: repoOrigins}, nil
 }
 
-func repoOrigins() []string {
+func repoOrigins() map[string]string {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return nil
 	}
-	return slices.Collect(maps.Keys(originsOf(cfg.Repos)))
+	return originsOf(cfg.Repos)
 }
 
 func originsOf(repos []string) map[string]string {

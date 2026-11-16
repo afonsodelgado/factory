@@ -81,6 +81,12 @@ func (i AttentionItem) AsksQuestions() bool {
 
 type ThreadCounter func(url string) (int, bool)
 
+const (
+	PermissionBody  = "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot."
+	AnswerInSession = "⏎ answer in the session"
+	WakeKey         = "w wake"
+)
+
 func PermissionID(role string) string {
 	if role == "" {
 		return "permission"
@@ -127,9 +133,9 @@ func permissionItem(prompt *state.PendingPrompt, role string, pane *tmux.Pane) A
 	return AttentionItem{
 		Kind:   "permission",
 		Title:  title,
-		Body:   "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot.",
+		Body:   PermissionBody,
 		Since:  prompt.At,
-		Action: "⏎ answer in the session",
+		Action: AnswerInSession,
 		Role:   role,
 		Pane:   pane,
 		Prompt: prompt,
@@ -186,7 +192,7 @@ func unreadableItem(f factory.Factory) AttentionItem {
 
 func asleepItem(it Item, now time.Time) AttentionItem {
 	f := it.Factory
-	item := AttentionItem{Kind: "asleep", Status: it.Status, Since: LastSign(it), Action: "w wake"}
+	item := AttentionItem{Kind: "asleep", Status: it.Status, Since: LastSign(it), Action: WakeKey}
 	switch it.Status {
 	case factory.Gone:
 		item.Title = "gone · no tmux pane"

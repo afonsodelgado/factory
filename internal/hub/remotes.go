@@ -289,7 +289,7 @@ func (m *Model) noteLink(name, text string) {
 func (m *Model) settleRemoteClaims() {
 	open := map[string]bool{}
 	for _, it := range m.remoteItems() {
-		for _, item := range attentionItems(it, m.snap.At, nil) {
+		for _, item := range m.attentionItems(it, nil) {
 			open[draftKey(it.Factory, item.ID)] = true
 		}
 	}

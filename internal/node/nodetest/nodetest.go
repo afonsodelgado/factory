@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -239,6 +240,13 @@ type Runtime struct {
 	mu        sync.Mutex
 	factories []host.LocalFactory
 	calls     []string
+	behind    node.Caller
+}
+
+func (r *Runtime) Behind(c node.Caller) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.behind = c
 }
 
 func (r *Runtime) SetFactories(f ...host.LocalFactory) {
@@ -253,8 +261,12 @@ func (r *Runtime) Calls() []string {
 	return slices.Clone(r.calls)
 }
 
-func (r *Runtime) Call(_ context.Context, m host.Message) (host.Message, error) {
+func (r *Runtime) Call(ctx context.Context, m host.Message) (host.Message, error) {
 	r.mu.Lock()
+	if behind := r.behind; behind != nil {
+		r.mu.Unlock()
+		return behind.Call(ctx, m)
+	}
 	defer r.mu.Unlock()
 	var value any
 	switch m.T {
@@ -288,6 +300,19 @@ type Node struct {
 	mu     sync.Mutex
 	probes []node.Probe
 	clones []string
+	repos  map[string]string
+}
+
+func (n *Node) SetRepos(repos map[string]string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.repos = repos
+}
+
+func (n *Node) currentRepos() map[string]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return maps.Clone(n.repos)
 }
 
 func (n *Node) Clones() []string {
@@ -348,7 +373,7 @@ func (m *Machine) Start() *Node {
 	n.Nodes = &node.Nodes{
 		Self: self, Version: Version, Dir: directory, Tailscale: ts, HTTP: tn.Client(m),
 		Ready:     node.Readiness{Probes: n.currentProbes, Wait: tn.ReadyWait, Now: tn.Now},
-		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone,
+		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
 	}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}
 	n.API.Nodes = n.Nodes

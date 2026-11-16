@@ -94,6 +94,7 @@ type Model struct {
 	nodes         map[string]*nodeLink
 	nodeFeed      chan nodeMsg
 	nodeFactories map[string]host.LocalFactory
+	nodeSends     map[string]nodeSend
 }
 
 type pollMsg struct{}
@@ -133,6 +134,7 @@ func NewModel(m Model) *Model {
 	model.dialogs = map[string]json.RawMessage{}
 	model.nodes = map[string]*nodeLink{}
 	model.nodeFeed = make(chan nodeMsg, 64)
+	model.nodeSends = map[string]nodeSend{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -248,6 +250,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nodeMsg:
 		m.nodeArrived(msg)
 		cmd = m.waitNodes()
+	case nodeAnsweredMsg:
+		m.nodeAnswered(msg)
 	case nodeRemovalMsg:
 		cmd = m.nodeRemovalArrived(msg)
 	case remoteMsg:
@@ -313,6 +317,7 @@ func (m *Model) refresh() {
 	}
 	m.clearRefusals()
 	m.settleRemoteClaims()
+	m.settleNodeSends()
 	m.settle()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
@@ -918,7 +923,8 @@ func (m *Model) row(it Item) selector.Row {
 		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
 	}
 	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
-		row.Stage, row.Items = lf.Stage, len(lf.Items)
+		_, settled := m.shownItems(it)
+		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
 	}
 	return row
 }

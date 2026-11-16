@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -36,7 +37,7 @@ type Nodes struct {
 	HTTP        *http.Client
 	Ready       Readiness
 	Factories   func() int
-	Repos       func() []string
+	Repos       func() map[string]string
 	Clone       func(ctx context.Context, url string) (string, error)
 	ProbeWait   time.Duration
 	Now         func() time.Time
@@ -95,11 +96,19 @@ var ErrRemoved = errors.New("this node was removed from its node list, so it cha
 
 func (n *Nodes) removed() bool { return n.Dir.Roster().Removed }
 
-func (n *Nodes) repoQuery() string {
+func (n *Nodes) repos() map[string]string {
 	if n.Repos == nil {
+		return nil
+	}
+	return n.Repos()
+}
+
+func (n *Nodes) repoQuery() string {
+	origins := slices.Sorted(maps.Keys(n.repos()))
+	if len(origins) == 0 {
 		return ""
 	}
-	query := url.Values{"repo": n.Repos()}
+	query := url.Values{"repo": origins}
 	return "?" + query.Encode()
 }
 
@@ -607,6 +616,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/nodes/{id}/remove", n.homeOnly(n.removeRoute))
 	route("POST /api/nodes/join", socketOnly(n.joinRoute))
 	route("GET /api/readiness", n.readinessRoute)
+	route("GET /api/repos", func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.repos()) })
 	route("POST /api/clone", n.homeOrNative(n.cloneRoute))
 	route("GET /api/node/hello", nativeOnly(func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.hello()) }))
 	route("GET /api/node/readiness", nativeOnly(n.readinessRoute))

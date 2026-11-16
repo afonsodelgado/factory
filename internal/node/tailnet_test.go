@@ -316,7 +316,7 @@ func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOn
 	macbook := tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
 	cowork := "git@github.com:alice/cowork.git"
-	macbook.Nodes.Repos = func() []string { return []string{cowork} }
+	macbook.SetRepos(map[string]string{cowork: "/r/cowork"})
 	before := rosterFiles(t, macbook, homelab)
 	if _, err := macbook.Nodes.Check(context.Background(), "homelab"); err != nil {
 		t.Fatal(err)
