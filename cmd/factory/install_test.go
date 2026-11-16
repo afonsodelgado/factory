@@ -96,6 +96,7 @@ func (f *fakeMachine) run(_ context.Context, name string, args ...string) ([]byt
 		return []byte("LoadState=loaded\nActiveState=active\nMainPID=4242\n"), nil
 	case "launchctl bootstrap gui/" + strconv.Itoa(os.Getuid()) + " " + filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", node.ServiceLabel+".plist"), "systemctl --user restart " + node.ServiceLabel:
 		f.loaded = true
+		f.stopNode()
 		f.startNode()
 	case "launchctl bootout gui/" + strconv.Itoa(os.Getuid()) + "/" + node.ServiceLabel, "systemctl --user disable --now " + node.ServiceLabel:
 		f.loaded = false
