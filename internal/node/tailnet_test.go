@@ -208,6 +208,49 @@ func TestExplicitReenrollmentAfterMutualRemovalPreservesTheAppHome(t *testing.T)
 	}
 }
 
+func TestReenrollmentNamesEveryMemberRestoredFromTheReturningHistory(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	studio := tn.Machine("studio").Start()
+	for _, name := range []string{"homelab", "studio"} {
+		if _, err := macbook.Add(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tn.Settle(macbook, homelab, studio)
+	homelab.SetOnline(false)
+	if err := macbook.Remove(homelab.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := homelab.Remove(studio.ID); err != nil {
+		t.Fatal(err)
+	}
+	tn.Settle(macbook, studio)
+	homelab.SetOnline(true)
+	var preview node.CheckReport
+	if err := macbook.Local.Do(context.Background(), http.MethodPost, "/api/nodes/check", map[string]string{"name": "homelab"}, &preview); err != nil {
+		t.Fatal(err)
+	}
+	result, err := macbook.Add("homelab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range []node.CheckReport{preview, result.Report} {
+		if !slices.ContainsFunc(report.Checks, func(c node.Check) bool {
+			return c.Name == "re-enroll" && strings.Contains(c.Detail, "studio") && strings.Contains(c.Detail, "homelab") && strings.Contains(c.Detail, "remove it again")
+		}) {
+			t.Errorf("re-enrollment did not explain studio's restoration: %+v", report.Checks)
+		}
+	}
+	tn.Settle(macbook, homelab, studio)
+	for _, n := range []*nodetest.Node{macbook, homelab, studio} {
+		if !slices.Equal(n.Names(), names("homelab", "macbook", "studio")) || n.Roster().Removed {
+			t.Errorf("%s lost a member after re-enrollment: %+v", n.Short(), n.Roster())
+		}
+	}
+}
+
 func TestRemovingANodeLeavesItsFactoriesRefusesThisMachineAndStopsTheRemovedNodeChangingLists(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()

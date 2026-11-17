@@ -207,6 +207,16 @@ func (n *Nodes) check(ctx context.Context, typed string, d direction) (checked, 
 	if len(n.Dir.Ledger().removals(c.hello.ID)) > 0 {
 		c.report.Checks = append(c.report.Checks, Check{Name: "re-enroll", Mark: MarkWarn, Detail: "Adding this node again observes its removal and restores it while keeping the current members and app home."})
 	}
+	if d != joining && c.hello.Roster == n.Dir.Ledger().Roster {
+		probe, cancel := context.WithTimeout(ctx, n.probeWait())
+		defer cancel()
+		var theirs Ledger
+		if err := Remote(c.peer.Name, n.HTTP).Do(probe, http.MethodPost, "/api/node/pull", Pull{From: n.Self.ID}, &theirs); err != nil {
+			return c, fmt.Errorf("%s's removal history could not be checked; try again: %w", c.peer.Short(), err)
+		}
+		_, restored := n.Dir.draft(n.memberOf(c), uuid.NewString(), theirs)
+		c.restoring(restored)
+	}
 	switch d {
 	case joining:
 		return c, nil
@@ -218,6 +228,18 @@ func (n *Nodes) check(ctx context.Context, typed string, d direction) (checked, 
 		return c, err
 	}
 	return n.pushCheck(c), err
+}
+
+func (c *checked) restoring(members []Member) {
+	if len(members) == 0 {
+		return
+	}
+	var details []string
+	for _, m := range members {
+		details = append(details, fmt.Sprintf("Also keeps %s, which %s removed while apart; remove it again if you meant to.", m.Name, c.peer.Short()))
+	}
+	c.report.Checks = slices.DeleteFunc(c.report.Checks, func(check Check) bool { return check.Name == "re-enroll" })
+	c.report.Checks = append(c.report.Checks, Check{Name: "re-enroll", Mark: MarkWarn, Detail: strings.Join(details, " ")})
 }
 
 func refusalCheck(state string) string {
@@ -286,7 +308,7 @@ func (n *Nodes) Add(ctx context.Context, op, typed string, replaceKey bool) (Add
 	if c.report.refused() {
 		return AddResult{Report: c.report}, RefusedError{Report: c.report}
 	}
-	m, push, err := n.enroll(ctx, op, c, "", replaceKey)
+	m, push, err := n.enroll(ctx, op, &c, "", replaceKey)
 	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster(), Push: push}, err
 }
 
@@ -295,7 +317,7 @@ func (n *Nodes) memberOf(c checked) Member {
 	return Member{ID: c.hello.ID, Peer: c.peer.ID, Name: c.peer.Name, Owner: c.peer.Login, Tailnet: tailnet, OS: c.peer.OS}
 }
 
-func (n *Nodes) enroll(ctx context.Context, op string, c checked, intent string, replaceKey bool) (Member, PushOutcome, error) {
+func (n *Nodes) enroll(ctx context.Context, op string, c *checked, intent string, replaceKey bool) (Member, PushOutcome, error) {
 	id := uuid.NewString()
 	n.mu.Lock()
 	if n.joins == nil {
@@ -326,8 +348,9 @@ func (n *Nodes) enroll(ctx context.Context, op string, c checked, intent string,
 	if challenge == "" || called != prepared.Node || prepared.Node != c.hello.ID {
 		return Member{}, PushOutcome{}, fmt.Errorf("%s did not prove it is the node that answered the check; nothing was written", c.peer.Short())
 	}
-	m := n.memberOf(c)
-	ledger := n.Dir.Draft(m, op, theirs)
+	m := n.memberOf(*c)
+	ledger, restored := n.Dir.draft(m, op, theirs)
+	c.restoring(restored)
 	if _, stillListed := ledger.present()[n.Self.ID]; !stillListed {
 		return Member{}, PushOutcome{}, fmt.Errorf("%s's history removes this node, so this node cannot add it; nothing was written", c.peer.Short())
 	}
@@ -387,6 +410,12 @@ func (n *Nodes) Join(ctx context.Context, op, typed string) (AddResult, error) {
 	err = Remote(c.peer.Name, n.HTTP).Do(ctx, http.MethodPost, "/api/node/join/request", JoinRequest{Operation: op, Name: n.Self.Name}, &result)
 	if err != nil {
 		return AddResult{Report: c.report}, fmt.Errorf("%s did not add this node: %w", c.peer.Short(), err)
+	}
+	for _, check := range result.Report.Checks {
+		if check.Name == "re-enroll" {
+			c.report.Checks = slices.DeleteFunc(c.report.Checks, func(row Check) bool { return row.Name == "re-enroll" })
+			c.report.Checks = append(c.report.Checks, check)
+		}
 	}
 	result.Report = c.report
 	result.Roster = n.Dir.Roster()
@@ -618,7 +647,7 @@ func (n *Nodes) requested(ctx context.Context, r JoinRequest) (AddResult, error)
 	if done, ok := n.Dir.Op(r.Operation); ok {
 		return AddResult{Member: done.Member, Roster: n.Dir.Roster(), Push: n.helloPush(ctx, done.Member)}, nil
 	}
-	m, push, err := n.enroll(ctx, r.Operation, c, r.Operation, false)
+	m, push, err := n.enroll(ctx, r.Operation, &c, r.Operation, false)
 	return AddResult{Member: m, Report: c.report, Roster: n.Dir.Roster(), Push: push}, err
 }
 

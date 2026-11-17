@@ -328,19 +328,26 @@ func (d *Directory) Removed() []Member {
 }
 
 func (d *Directory) Draft(m Member, op string, theirs Ledger) Ledger {
+	l, _ := d.draft(m, op, theirs)
+	return l
+}
+
+func (d *Directory) draft(m Member, op string, theirs Ledger) (Ledger, []Member) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	l := d.book.Ledger
 	if theirs.Roster == l.Roster {
 		l = l.with(theirs.Ops...)
 	}
+	var restored []Member
 	present, current := l.present(), d.book.present()
 	for _, id := range slices.Sorted(maps.Keys(current)) {
 		if _, kept := present[id]; !kept && id != m.ID {
 			l = l.with(l.author(d.self, opAdd, uuid.NewString(), current[id], d.now()))
+			restored = append(restored, current[id])
 		}
 	}
-	return l.with(l.author(d.self, opAdd, op, m, d.now()))
+	return l.with(l.author(d.self, opAdd, op, m, d.now())), restored
 }
 
 func (d *Directory) Merge(l Ledger) error {
