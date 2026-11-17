@@ -56,6 +56,8 @@ func run(args []string) int {
 		return runBootstrap(args[1:])
 	case "install-hooks":
 		return runInstallHooks(args[1:])
+	case "workflow":
+		return runWorkflow(args[1:])
 	case "stage":
 		return runStage(args[1:])
 	case "review":

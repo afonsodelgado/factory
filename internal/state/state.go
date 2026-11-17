@@ -3,38 +3,52 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"time"
 )
 
-var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "walkthrough", "handoff"}
+var StageKeys = []string{"requirements", "design", "plan", "implement", "review", "qa", "pr", "handoff"}
 
 type State struct {
-	ID             string                  `json:"id"`
-	Title          string                  `json:"title"`
-	Repo           string                  `json:"repo"`
-	SessionID      string                  `json:"session_id"`
-	NeedsDesign    bool                    `json:"needs_design"`
-	Pipeline       string                  `json:"pipeline"`
-	PipelineStages []string                `json:"pipeline_stages"`
-	Agents         map[string]AgentSetting `json:"agents"`
-	Supervisor     AgentSetting            `json:"supervisor,omitzero"`
-	Worktree       string                  `json:"worktree"`
-	Branch         string                  `json:"branch"`
-	Stage          string                  `json:"stage"`
-	WaitingOn      string                  `json:"waiting_on"`
-	WaitingReason  string                  `json:"waiting_reason"`
-	UpdatedAt      Time                    `json:"updated_at"`
-	Limits         Limits                  `json:"limits"`
-	Stages         map[string]Stage        `json:"stages"`
-	Attention      []Attention             `json:"attention"`
-	PRs            []PR                    `json:"prs"`
-	History        []HistoryEntry          `json:"history"`
-	Checkpoint     *Checkpoint             `json:"checkpoint,omitempty"`
+	SchemaVersion    int                     `json:"schema_version"`
+	Revision         uint64                  `json:"revision"`
+	Incarnation      string                  `json:"incarnation"`
+	HolderGeneration uint64                  `json:"holder_generation"`
+	Authorized       bool                    `json:"authorized"`
+	StartCommit      string                  `json:"start_commit"`
+	ProcessedEvents  []string                `json:"processed_events"`
+	Workflow         Workflow                `json:"workflow"`
+	Stack            []StackBranch           `json:"stack"`
+	Loops            Loops                   `json:"loops"`
+	WatchComments    bool                    `json:"watch_comments"`
+	Recipe           Recipe                  `json:"recipe"`
+	Findings         []Finding               `json:"findings"`
+	Evidence         Evidence                `json:"evidence"`
+	Confirmation     *Confirmation           `json:"confirmation,omitempty"`
+	ID               string                  `json:"id"`
+	Title            string                  `json:"title"`
+	Repo             string                  `json:"repo"`
+	SessionID        string                  `json:"session_id"`
+	NeedsDesign      bool                    `json:"needs_design"`
+	Pipeline         string                  `json:"pipeline"`
+	PipelineStages   []string                `json:"pipeline_stages"`
+	Agents           map[string]AgentSetting `json:"agents"`
+	Supervisor       AgentSetting            `json:"supervisor,omitzero"`
+	Worktree         string                  `json:"worktree"`
+	Branch           string                  `json:"branch"`
+	Stage            string                  `json:"stage"`
+	WaitingOn        string                  `json:"waiting_on"`
+	WaitingReason    string                  `json:"waiting_reason"`
+	UpdatedAt        Time                    `json:"updated_at"`
+	Limits           Limits                  `json:"limits"`
+	Stages           map[string]Stage        `json:"stages"`
+	Attention        []Attention             `json:"attention"`
+	PRs              []PR                    `json:"prs"`
+	History          []HistoryEntry          `json:"history"`
+	Checkpoint       *Checkpoint             `json:"checkpoint,omitempty"`
 }
 
 const (
@@ -50,10 +64,14 @@ type Checkpoint struct {
 }
 
 type Limits struct {
-	CodeRabbitRounds int `json:"coderabbit_rounds"`
-	QARounds         int `json:"qa_rounds"`
+	DesignPlanRounds int `json:"design_plan_rounds"`
+	ReviewFixRounds  int `json:"review_fix_rounds"`
+	QAFixRounds      int `json:"qa_fix_rounds"`
+	CIFixRounds      int `json:"ci_fix_rounds"`
 	StageRetries     int `json:"stage_retries"`
 }
+
+func DefaultLimits() Limits { return Limits{3, 5, 3, 3, 1} }
 
 type Stage struct {
 	Status    string     `json:"status"`
@@ -85,7 +103,10 @@ type PR struct {
 	Number  int    `json:"number"`
 	Branch  string `json:"branch"`
 	Title   string `json:"title"`
-	QAFixes bool   `json:"qa_fixes"`
+	URL     string `json:"url"`
+	Base    string `json:"base"`
+	HeadSHA string `json:"head_sha"`
+	BaseSHA string `json:"base_sha"`
 }
 
 type HistoryEntry struct {
@@ -93,10 +114,21 @@ type HistoryEntry struct {
 	Stage  string `json:"stage"`
 	Event  string `json:"event"`
 	Detail string `json:"detail"`
+	RunID  string `json:"run_id,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Round  int    `json:"round,omitempty"`
+	Loop   string `json:"loop,omitempty"`
 }
 
 type Attention struct {
 	ID          string      `json:"id"`
+	Revision    uint64      `json:"revision"`
+	Loop        string      `json:"loop,omitempty"`
+	LimitKey    string      `json:"limit_key,omitempty"`
+	Used        int         `json:"used,omitempty"`
+	Allowed     int         `json:"allowed,omitempty"`
+	Answer      string      `json:"answer,omitempty"`
+	Receipt     string      `json:"receipt,omitempty"`
 	Kind        string      `json:"kind"`
 	Title       string      `json:"title"`
 	Body        string      `json:"body"`
@@ -114,28 +146,9 @@ func (a Attention) Open() bool {
 	return a.ResolvedAt.IsZero()
 }
 
-func (a Attention) Stage() string {
-	namesItsStage := strings.HasPrefix(a.ID, "gate-") || strings.HasPrefix(a.ID, "cap-") || strings.HasPrefix(a.ID, "fail-")
-	i := strings.LastIndex(a.ID, "-")
-	if !namesItsStage || i < 0 {
-		return a.StageKey
-	}
-	return a.ID[i+1:]
-}
+func (a Attention) Stage() string { return a.StageKey }
 
-func (s *State) Moot(a Attention) bool {
-	if s.Done() {
-		return a.Kind != "handoff"
-	}
-	stage := a.Stage()
-	if stage == "" {
-		return false
-	}
-	status := s.Stages[stage].Status
-	finished := status == "done" || status == "skipped"
-	movedOn := slices.Index(StageKeys, s.Stage) > slices.Index(StageKeys, stage)
-	return finished && movedOn
-}
+func (s *State) Moot(a Attention) bool { return false }
 
 func (s *State) HasAttentionField() bool {
 	return s.Attention != nil
@@ -189,17 +202,47 @@ func ReadState(path string) (*State, error) {
 }
 
 func ParseState(data []byte) (*State, error) {
-	var s struct {
-		State
-		LegacyTicket string `json:"ticket"`
-	}
+	var s State
 	if err := json.Unmarshal(bytes.TrimSpace(data), &s); err != nil {
 		return nil, err
 	}
-	if s.ID == "" {
-		s.ID = s.LegacyTicket
+	if err := ValidateState(s); err != nil {
+		return nil, err
 	}
-	return &s.State, nil
+	return &s, nil
+}
+
+func ValidateState(s State) error {
+	stages := append([]string{}, s.PipelineStages...)
+	if s.Stage != "" {
+		stages = append(stages, s.Stage)
+	}
+	for key := range s.Stages {
+		stages = append(stages, key)
+	}
+	for _, entry := range s.History {
+		if entry.Stage != "" {
+			stages = append(stages, entry.Stage)
+		}
+	}
+	for _, item := range s.Attention {
+		if item.StageKey != "" {
+			stages = append(stages, item.StageKey)
+		}
+	}
+	for _, run := range s.Workflow.Runs {
+		stages = append(stages, run.Stage)
+	}
+	if err := checkStages("state.json", stages); err != nil {
+		return err
+	}
+	if err := ValidateAgents("state.json", s.Agents); err != nil {
+		return err
+	}
+	if s.SchemaVersion != 2 {
+		return fmt.Errorf("unsupported state schema %d; finish or restart the factory with schema 2", s.SchemaVersion)
+	}
+	return nil
 }
 
 type Strings []string

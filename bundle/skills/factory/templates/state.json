@@ -15,21 +15,96 @@
   "waiting_on": null,
   "waiting_reason": null,
   "updated_at": "",
-  "limits": { "coderabbit_rounds": 2, "qa_rounds": 3, "stage_retries": 1 },
+  "limits": {
+    "design_plan_rounds": 3,
+    "review_fix_rounds": 5,
+    "qa_fix_rounds": 3,
+    "ci_fix_rounds": 3,
+    "stage_retries": 1
+  },
   "stages": {
-    "requirements": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "design": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "plan": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "implement": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "review": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "coderabbit": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "qa": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "qa_fixes": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "test_gaps": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "walkthrough": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" },
-    "handoff": { "status": "pending", "agent_id": null, "rounds": 0, "outputs": [], "artifacts": [], "notes": "" }
+    "requirements": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "design": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "plan": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "implement": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "review": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "qa": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "pr": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    },
+    "handoff": {
+      "status": "pending",
+      "agent_id": null,
+      "rounds": 0,
+      "outputs": [],
+      "artifacts": [],
+      "notes": ""
+    }
   },
   "attention": [],
   "prs": [],
-  "history": []
+  "history": [],
+  "schema_version": 2,
+  "revision": 0,
+  "incarnation": "",
+  "holder_generation": 0,
+  "processed_events": [],
+  "workflow": {
+    "runs": []
+  },
+  "stack": [],
+  "loops": {
+    "used": {}
+  },
+  "watch_comments": false,
+  "recipe": {},
+  "findings": [],
+  "evidence": {}
 }
