@@ -1147,8 +1147,8 @@ func (m *Model) panelHints() []footer.Hint {
 	if editing {
 		back = "stop typing"
 	}
-	if item.Kind == "question" && len(item.Questions) == 0 {
-		return hints("type", "your answer", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
+	if panel.TextAnswered(item) {
+		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
 	}
 	d := &panel.Draft{}
 	if item.Answerable() {

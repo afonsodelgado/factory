@@ -290,10 +290,10 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 	top := []line{header(it, ic, v)}
 	top = append(top, wrapped(it.Body, w, theme.Text)...)
 	switch {
-	case it.Kind == "question" && len(it.Questions) == 0:
+	case TextAnswered(it):
 		middle := freeText(v, w)
 		if middle == nil {
-			middle = []line{blank(), hints("type", "your answer, then ctrl+s sends it")}
+			middle = []line{blank(), hints("type", TextPrompt(it.Kind)+", then ctrl+s sends it")}
 		}
 		return top, middle, questionFooter(v, w), 0
 	case it.Kind == "question":

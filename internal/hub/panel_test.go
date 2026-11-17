@@ -123,6 +123,28 @@ func TestQuestionWithoutAQuestionListIsAnsweredAsText(t *testing.T) {
 	}
 }
 
+func TestDesignReturnAndCommandsItemsAreAnsweredInThePanel(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	for _, kind := range []string{"design_return", "commands"} {
+		t.Run(kind, func(t *testing.T) {
+			snap := questionFactory("Stop", now)
+			snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "item-1", Kind: kind, Title: "Needs an answer", Body: "nav: navigation hides the export", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+			model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
+			node.show(model, snap)
+			tm := drive(model, 160, 45)
+			panelKeys(tm, "right", "left")
+			typeText(tm, "accept")
+			view := escapes.ReplaceAllString(model.PanelView(120, 20), "")
+			if !strings.Contains(view, "accept") {
+				t.Errorf("panel after typing:\n%s\nwant the typed answer shown", view)
+			}
+			if hints := escapes.ReplaceAllString(model.FooterView(160, 1), ""); !strings.Contains(hints, "ctrl+s") {
+				t.Errorf("footer reads %q, want ctrl+s offered to send the answer", hints)
+			}
+		})
+	}
+}
+
 func TestQQuitsFromThePanelUnlessItIsTypedIntoAnAnswer(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	idle, node := withNode(Model{Config: &state.Config{StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})

@@ -84,6 +84,20 @@ func (d Draft) Answer(q Question, i int) string {
 	return q.Options[d.Choice[i]]
 }
 
+func TextAnswered(it Item) bool {
+	return it.Kind == "question" && len(it.Questions) == 0 || it.Kind == "commands" || it.Kind == "design_return"
+}
+
+func TextPrompt(kind string) string {
+	switch kind {
+	case "design_return":
+		return "accept or decline"
+	case "commands":
+		return "the missing commands"
+	}
+	return "your answer"
+}
+
 type PR = host.PR
 
 type ArtifactRow = host.ArtifactRow

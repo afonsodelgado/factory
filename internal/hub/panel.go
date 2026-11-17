@@ -685,6 +685,8 @@ func nothingTyped(kind string) string {
 		return "Type an instruction first, or ctrl+r to retry"
 	case "handoff":
 		return "Type what to do next first, or ctrl+k to mark it done"
+	case "design_return":
+		return "Type accept or decline first: ctrl+s sends it"
 	}
 	return "Type an answer first: ctrl+s sends it"
 }
