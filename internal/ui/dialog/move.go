@@ -66,7 +66,6 @@ type moveProgressed struct {
 
 type moveWarned struct {
 	warning node.Unconfirmed
-	err     error
 }
 
 type moveTick struct{}
