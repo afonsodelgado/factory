@@ -324,11 +324,15 @@ func TestASmallPanelKeepsTheItemAndItsApproveRow(t *testing.T) {
 	snap := questionFactory("Stop", now)
 	snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "gate-7452-plan", Kind: "gate", StageKey: "plan", Title: "plan approval", Body: "The architect wrote plan.html.", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 	snap.Items[0].Factory.State.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "plan.html", Title: "Implementation plan"}}}}
+	snap.Items[0].Factory.State.Loops = state.Loops{Active: "review_fix", Used: map[string]int{"review_fix": 2}}
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
 	node.show(model, snap)
 	view := escapes.ReplaceAllString(model.PanelView(84, 10), "")
 	if !strings.Contains(view, "gate-7452-plan") || !strings.Contains(view, "Approve") {
 		t.Errorf("panel at laptop size:\n%s\nwant the item and its Approve row, not only the notes box and its status", view)
+	}
+	if title := strings.Split(view, "\n")[0]; !strings.Contains(title, "Activity") || !strings.Contains(title, "round 2") {
+		t.Errorf("panel title at laptop size:\n%s\nwant every tab and the loop round, with the label trimmed to fit", title)
 	}
 }
 

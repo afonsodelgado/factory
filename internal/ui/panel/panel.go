@@ -61,7 +61,7 @@ func Render(v View, ic theme.Icons, w, h int) string {
 		border = theme.Focused
 	}
 	title := append(line{{Text: "─", Ink: border}}, tabs(v, ic)...)
-	c.Box(0, 0, w, h, theme.Box{Ink: border, Title: title, TitleRight: line{{Text: " " + v.Label + " ", Ink: theme.Muted}}})
+	c.Box(0, 0, w, h, theme.Box{Ink: border, Title: title, TitleRight: label(v.Label, w-2-theme.SpansWidth(title)-1)})
 	x, y, iw, ih := 2, 1, w-4, h-2
 	switch v.Tab {
 	case Attention:
@@ -108,9 +108,19 @@ func tabs(v View, ic theme.Icons) line {
 
 func renderFolded(c *theme.Canvas, v View, ic theme.Icons) {
 	c.HLine(0, 0, c.W, theme.Line)
-	c.Spans(2, 0, tabs(v, ic))
-	right := line{{Text: " " + v.Label + " ", Ink: theme.Muted}, {Text: "─", Ink: theme.Line}, {Text: " z", Ink: theme.FgInk(theme.Cyan)}, {Text: " expand ", Ink: theme.Muted}}
+	left := tabs(v, ic)
+	c.Spans(2, 0, left)
+	expand := line{{Text: "─", Ink: theme.Line}, {Text: " z", Ink: theme.FgInk(theme.Cyan)}, {Text: " expand ", Ink: theme.Muted}}
+	right := append(label(v.Label, c.W-4-theme.SpansWidth(left)-theme.SpansWidth(expand)-1), expand...)
 	c.Spans(c.W-2-theme.SpansWidth(right), 0, right)
+}
+
+func label(text string, room int) line {
+	fitted := theme.KeepTail(text, room-2)
+	if fitted == "" {
+		return nil
+	}
+	return line{{Text: " " + fitted + " ", Ink: theme.Muted}}
 }
 
 func place(c *theme.Canvas, x, y, w int, l line) {
