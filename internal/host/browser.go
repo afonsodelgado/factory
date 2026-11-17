@@ -216,7 +216,7 @@ func (m *Runtime) recoverBrowsers() {
 		return
 	}
 	for _, lease := range m.Browsers.Recover() {
-		f := factory.Factory{Repo: lease.Repo, Slug: lease.Slug, Worktree: lease.Worktree}
+		f := m.recoveredFactory(lease)
 		if run, current := m.currentQARun(f, lease.Token); current && !run.Finished() {
 			m.closeQA(f, run, FailRestart, "the node stopped while this QA ran; its browser, stack and profile were removed", lease.Evidence)
 		}
@@ -227,18 +227,30 @@ func stagesEnded(it Item) bool {
 	return it.Status == factory.Done || it.Status == factory.Gone || it.Factory.Archived()
 }
 
+func (m *Runtime) recoveredFactory(lease BrowserLease) factory.Factory {
+	if m.Loader != nil {
+		if f, ok := m.Loader.Lookup(lease.Repo, lease.Slug); ok {
+			return f
+		}
+	}
+	return factory.Factory{Repo: lease.Repo, Slug: lease.Slug, Worktree: lease.Worktree}
+}
+
 func failedResult(snapshot *state.State, run state.StageRun, failure, reason, evidence string) string {
-	var heads []state.StackBranch
-	for _, active := range snapshot.Workflow.Runs {
-		if active.ID == run.ID {
-			heads = active.InputHeads
+	var heads, stack []state.StackBranch
+	if snapshot != nil {
+		stack = snapshot.Stack
+		for _, active := range snapshot.Workflow.Runs {
+			if active.ID == run.ID {
+				heads = active.InputHeads
+			}
 		}
 	}
 	data, _ := json.Marshal(map[string]any{
 		"schema_version": 2,
 		"run_id":         run.ID,
 		"input_heads":    heads,
-		"output_heads":   snapshot.Stack,
+		"output_heads":   stack,
 		"status":         "failed",
 		"summary":        "browser QA failed at " + failure + ": " + reason,
 		"outputs":        []string{},

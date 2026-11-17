@@ -63,6 +63,6 @@ End every turn with:
 {"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
 ```
 
-Return design-affecting findings explicitly. Never silently change approved design. The supervisor asks whether to return to design; refusal must record the exact finding as an accepted risk in plan.md.
+Return design-affecting findings explicitly, with severity `design`. Never silently change approved design. The supervisor asks whether to return to design; refusal must record the exact finding as an accepted risk in plan.md.
 
 Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.

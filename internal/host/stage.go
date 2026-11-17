@@ -511,8 +511,10 @@ func KickoffFor(run state.StageRun) string {
 	return "Read " + run.Prompt + " and follow it."
 }
 
+const findingContract = `Each entry in "findings" is {"id":"<stable id, reused when you report the same finding again>","stage":"<the stage this run belongs to>","severity":"minor|major|blocker|regression|design","layer":"<owning stack branch>","disposition":"open|closed","description":"<the defect and its mechanism>","evidence":"<file, command or repro>"}. Any other severity or disposition rejects the whole result. major, blocker, regression and design gate the loop; minor is listed and never loops. Use design only for a finding that should send the work back to the designer. Close a finding only once it is fixed and verified.`
+
 func ResultContract(path string) string {
-	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file."
+	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file.\n\n" + findingContract
 }
 
 const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have; for HTML without the factory-artifact skill, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the factory app serves the files you write."

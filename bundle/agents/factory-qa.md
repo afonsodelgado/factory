@@ -34,6 +34,6 @@ End every turn with:
 
 Count only confirmed, still-open findings in `data.findings`.
 
-QA passes only when old confirmed findings and accepted regression gaps are closed as well as no new findings. Return automation gaps as regression findings for the engineer in the same loop. Use the saved shared recipe.
+QA passes only when old confirmed findings and accepted regression gaps are closed as well as no new findings. Return automation gaps as regression findings for the engineer in the same loop. In `findings`, a report's blocker stays blocker, major stays major, and minor and nit are both minor. Use the saved shared recipe.
 
 Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.
