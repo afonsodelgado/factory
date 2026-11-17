@@ -877,3 +877,22 @@ func TestAGateWhoseCommentsTheDesignerIsWorkingOnDoesNotNeedYou(t *testing.T) {
 		})
 	}
 }
+
+func TestOnlyACodexStageIsToldItsSandboxCannotStartChrome(t *testing.T) {
+	for _, c := range []struct {
+		setting state.AgentSetting
+		told    bool
+	}{
+		{state.AgentSetting{Tool: state.ToolCodex, Model: "gpt-6-astra"}, true},
+		{state.AgentSetting{Model: "opus"}, false},
+		{state.AgentSetting{Tool: state.ToolOpenCode}, false},
+	} {
+		prompt, err := StagePrompt("engineer", "Implement layer 1.", "/r/engineer-1.result.json", "", c.setting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if told := strings.Contains(prompt, codexSandboxNote); told != c.told {
+			t.Errorf("the %s engineer told it cannot start Chrome: %v; want %v, so Codex stops crashing Chrome in front of the developer and other tools keep running browser tests", c.setting.ToolName(), told, c.told)
+		}
+	}
+}

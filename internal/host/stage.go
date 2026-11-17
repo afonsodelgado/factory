@@ -169,7 +169,7 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	if browses {
 		task += "\n\n" + evidenceNote(EvidenceDir(it.Factory, run))
 	}
-	prompt, err := StagePrompt(r.Role, task, run.Result, m.Rules(), setting.OnClaude())
+	prompt, err := StagePrompt(r.Role, task, run.Result, m.Rules(), setting)
 	if err != nil {
 		return StageReply{}, err
 	}
@@ -467,7 +467,9 @@ func ResultContract(path string) string {
 
 const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have; for HTML without the factory-artifact skill, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the factory app serves the files you write."
 
-func StagePrompt(role, task, result, rules string, onClaude bool) (string, error) {
+const codexSandboxNote = "Your commands run in Codex's sandbox, where Chrome cannot start: every launch crashes and puts a crash dialog in front of the developer. Never run anything that starts a browser, such as Playwright tests or Go tests that launch Chrome. Run the other builds, linters and tests, and name the browser tests you left out in your result: QA and CI run them."
+
+func StagePrompt(role, task, result, rules string, setting state.AgentSetting) (string, error) {
 	data, err := fs.ReadFile(bundle.Files, "agents/factory-"+role+".md")
 	if err != nil {
 		return "", err
@@ -484,8 +486,11 @@ func StagePrompt(role, task, result, rules string, onClaude bool) (string, error
 		b.WriteString("## The developer's rules\n\nThese rules apply to every line of code you write or review.\n\n" + rules + "\n\n")
 	}
 	b.WriteString(strings.TrimSpace(string(body)) + "\n")
-	if !onClaude {
+	if !setting.OnClaude() {
 		b.WriteString("\n" + elsewhereNote + "\n")
+	}
+	if setting.ToolName() == state.ToolCodex {
+		b.WriteString("\n" + codexSandboxNote + "\n")
 	}
 	if len(meta.Skills) > 0 {
 		b.WriteString("\nLoad these skills before you start: " + strings.Join(meta.Skills, ", ") + ".\n")
