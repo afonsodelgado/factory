@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -18,8 +19,11 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
+
+const smokeWait = 20 * time.Second
 
 type Mark string
 
@@ -125,7 +129,7 @@ func nerdFontInstallCommand() string {
 }
 
 func Doctor(o Options) []Check {
-	return doctor(o, append([]Check{browserQA(o), nerdFont(o)}, NodeChecks(o)...)...)
+	return doctor(o, append([]Check{browserQA(o, true), nerdFont(o)}, NodeChecks(o)...)...)
 }
 
 func ServerDoctor(o Options, gitURLs []string) []Check {
@@ -277,7 +281,7 @@ func revmux(o Options) Check {
 	return Check{Name: "revmux", Mark: Pass, Detail: strings.TrimSpace(version(out) + " · plugin revmux@revmux")}
 }
 
-func browserQA(o Options) Check {
+func browserQA(o Options, smoke bool) Check {
 	const name = "browser QA"
 	if len(o.Browser) == 0 {
 		return Check{Name: name, Mark: Skip, Detail: "no repo uses browser QA"}
@@ -290,29 +294,61 @@ func browserQA(o Options) Check {
 	if o.Config != nil {
 		configured = o.Config.Review.Chrome
 	}
-	chrome, found := chromeBinary(configured)
+	chrome, found := review.ChromeBinary(configured)
 	if !found {
 		return Check{Name: name, Mark: Fail, Detail: "no Chrome or Chromium found" + repos, Fix: "install Google Chrome, or set review.chrome in config.yml to its binary"}
 	}
-	return Check{Name: name, Mark: Pass, Detail: node.DevToolsMCP + " through npx on headless " + tilde(chrome)}
+	if pinned := mcpPackage(node.MCPConfig("http://127.0.0.1:0")); pinned != node.DevToolsMCP {
+		return Check{Name: name, Mark: Fail, Detail: "the node's MCP config runs " + pinned + ", not the pinned " + node.DevToolsMCP, Fix: "update factory"}
+	}
+	detail := node.DevToolsMCP + " through npx on headless " + tilde(chrome)
+	if !smoke {
+		return Check{Name: name, Mark: Pass, Detail: detail}
+	}
+	if err := renderLocalPage(chrome); err != nil {
+		return Check{Name: name, Mark: Fail, Detail: "headless " + tilde(chrome) + " did not render a local page: " + strings.Join(strings.Fields(err.Error()), " "), Fix: "install or update Google Chrome, or set review.chrome in config.yml to a Chrome that starts headless"}
+	}
+	return Check{Name: name, Mark: Pass, Detail: detail + ", which rendered a local page"}
 }
 
-func chromeBinary(configured string) (string, bool) {
-	if configured != "" {
-		_, err := os.Stat(configured)
-		return configured, err == nil
+func mcpPackage(config []byte) string {
+	var c struct {
+		Servers map[string]struct{ Args []string } `json:"mcpServers"`
 	}
-	for _, app := range []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"} {
-		if _, err := os.Stat(app); err == nil && runtime.GOOS == "darwin" {
-			return app, true
+	json.Unmarshal(config, &c)
+	for _, arg := range c.Servers["chrome-devtools"].Args {
+		if strings.HasPrefix(arg, "chrome-devtools-mcp@") {
+			return arg
 		}
 	}
-	for _, binary := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "headless_shell"} {
-		if path, err := exec.LookPath(binary); err == nil {
-			return path, true
-		}
+	return "no chrome-devtools-mcp"
+}
+
+func renderLocalPage(chrome string) error {
+	dir, err := os.MkdirTemp("", "factory-doctor-")
+	if err != nil {
+		return err
 	}
-	return "", false
+	defer os.RemoveAll(dir)
+	page := filepath.Join(dir, "page.html")
+	if err := os.WriteFile(page, []byte(`<!doctype html><title>factory doctor</title><h1>Headless Chrome renders this page.</h1>`), 0o600); err != nil {
+		return err
+	}
+	h, err := review.LaunchHeadless(filepath.Join(dir, "profile"), chrome, false)
+	if err != nil {
+		return err
+	}
+	defer h.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), smokeWait)
+	defer cancel()
+	if err := h.Navigate(ctx, "file://"+page); err != nil {
+		return err
+	}
+	png, err := h.Screenshot(ctx)
+	if err == nil && !bytes.HasPrefix(png, []byte("\x89PNG")) {
+		err = errors.New("its screenshot is not a PNG")
+	}
+	return err
 }
 
 func claudeLogin(o Options) Check {

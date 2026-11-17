@@ -7,15 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -51,8 +56,13 @@ type Tab struct {
 	cancel  context.CancelFunc
 	factory Factory
 
+	log     pageLog
+	mu      sync.Mutex
+	console []string
+}
+
+type pageLog struct {
 	mu       sync.Mutex
-	console  []string
 	requests map[network.RequestID]string
 }
 
@@ -103,7 +113,7 @@ func (b *Browser) start() (context.Context, error) {
 	}
 	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	root, cancelRoot := chromedp.NewContext(alloc)
-	if err := chromedp.Do(root); err != nil {
+	if err := startLocked(root); err != nil {
 		cancelRoot()
 		cancelAlloc()
 		return nil, fmt.Errorf("starting Chrome: %w", err)
@@ -117,38 +127,119 @@ func (b *Browser) start() (context.Context, error) {
 	return root, nil
 }
 
+const (
+	launchAttempts = 2
+	evidenceWait   = 5 * time.Second
+	ConsoleLog     = "console.log"
+	FinalShot      = "screenshot.png"
+)
+
 type Headless struct {
 	Profile string
 	URL     string
 	PID     int
+	Exec    string
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	closed   atomic.Bool
+	log      pageLog
+	evidence string
 }
 
-func LaunchHeadless(profile, exec string, noSandbox bool) (*Headless, error) {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.UserDataDir(profile), remote.WebSocket)
+func ChromeBinary(configured string) (string, bool) {
+	if configured != "" {
+		_, err := os.Stat(configured)
+		return configured, err == nil
+	}
+	for _, app := range []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"} {
+		if _, err := os.Stat(app); err == nil && goruntime.GOOS == "darwin" {
+			return app, true
+		}
+	}
+	for _, binary := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "headless_shell"} {
+		if path, err := exec.LookPath(binary); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func headlessFlags(goos string, noSandbox bool) map[string]any {
+	flags := map[string]any{
+		"headless": true, "hide-scrollbars": true, "mute-audio": true, "no-first-run": true, "no-default-browser-check": true,
+		"disable-background-networking": true, "disable-background-timer-throttling": true, "disable-backgrounding-occluded-windows": true,
+		"disable-renderer-backgrounding": true, "disable-breakpad": true, "disable-client-side-phishing-detection": true,
+		"disable-component-update": true, "disable-default-apps": true, "disable-extensions": true, "disable-sync": true,
+		"disable-features": "Translate", "disable-hang-monitor": true, "disable-popup-blocking": true, "disable-prompt-on-repost": true,
+		"metrics-recording-only": true, "force-color-profile": "srgb", "enable-automation": true,
+	}
+	switch goos {
+	case "darwin":
+		flags["use-mock-keychain"] = true
+	case "linux":
+		flags["password-store"] = "basic"
+		flags["disable-dev-shm-usage"] = true
+	}
+	if noSandbox {
+		flags["no-sandbox"] = true
+	}
+	return flags
+}
+
+func launchOptions(goos, profile, exec string, noSandbox bool) []chromedp.ExecAllocatorOption {
+	opts := []chromedp.ExecAllocatorOption{chromedp.UserDataDir(profile), remote.WebSocket}
 	if exec != "" {
 		opts = append(opts, chromedp.ExecPath(exec))
 	}
-	if noSandbox {
-		opts = append(opts, chromedp.NoSandbox)
+	flags := headlessFlags(goos, noSandbox)
+	for _, name := range slices.Sorted(maps.Keys(flags)) {
+		opts = append(opts, chromedp.Flag(name, flags[name]))
 	}
-	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
+	return opts
+}
+
+func LaunchHeadless(profile, exec string, noSandbox bool) (*Headless, error) {
+	if exec == "" {
+		exec, _ = ChromeBinary("")
+	}
+	var errs []error
+	for range launchAttempts {
+		h, err := launchHeadless(profile, exec, noSandbox)
+		if err == nil {
+			return h, nil
+		}
+		errs = append(errs, err)
+		os.RemoveAll(profile)
+	}
+	return nil, fmt.Errorf("headless Chrome %s did not start in %d tries: %w", exec, launchAttempts, errors.Join(errs...))
+}
+
+func launchHeadless(profile, exec string, noSandbox bool) (*Headless, error) {
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), launchOptions(goruntime.GOOS, profile, exec, noSandbox)...)
 	ctx, cancelCtx := chromedp.NewContext(alloc)
-	h := &Headless{Profile: profile, ctx: ctx, cancel: func() { cancelCtx(); cancelAlloc() }}
-	if err := chromedp.Do(ctx); err != nil {
-		h.Close()
-		return nil, fmt.Errorf("headless Chrome did not start: %w", err)
+	h := &Headless{Profile: profile, Exec: exec, ctx: ctx, cancel: func() { cancelCtx(); cancelAlloc() }}
+	if err := startLocked(ctx); err != nil {
+		h.cancel()
+		_, portErr := devToolsPort(profile)
+		return nil, errors.Join(err, portErr)
 	}
 	h.PID = chromedp.FromContext(ctx).Browser.Process().Pid
 	port, err := devToolsPort(profile)
 	if err != nil {
-		h.Close()
+		h.cancel()
 		return nil, err
 	}
 	h.URL = "http://127.0.0.1:" + port
 	return h, nil
+}
+
+func startLocked(ctx context.Context) error {
+	if lock, err := os.OpenFile(filepath.Join(os.TempDir(), "factory-chrome-launch.lock"), os.O_CREATE|os.O_RDWR, 0o600); err == nil {
+		defer lock.Close()
+		syscall.Flock(int(lock.Fd()), syscall.LOCK_EX)
+	}
+	return chromedp.Do(ctx)
 }
 
 func devToolsPort(profile string) (string, error) {
@@ -163,11 +254,46 @@ func devToolsPort(profile string) (string, error) {
 	return port, nil
 }
 
+func (h *Headless) Watch(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	h.evidence = dir
+	if err := chromedp.Listen(h.ctx, h.record); err != nil {
+		return err
+	}
+	return chromedp.Do(h.ctx, call(runtime.Enable, cdp.Empty{}), call(network.Enable, network.EnableParams{}))
+}
+
+func (h *Headless) record(ev any) {
+	line, ok := h.log.line(ev)
+	if !ok {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(h.evidence, ConsoleLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(time.Now().Format(time.RFC3339) + " " + line + "\n")
+}
+
 func (h *Headless) Navigate(ctx context.Context, url string) error {
 	run, cancel := context.WithCancel(h.ctx)
 	defer cancel()
 	defer context.AfterFunc(ctx, cancel)()
 	return chromedp.Do(run, chromedp.Navigate(url))
+}
+
+func (h *Headless) Screenshot(ctx context.Context) ([]byte, error) {
+	run, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	defer context.AfterFunc(ctx, cancel)()
+	shot, err := chromedp.Call(run, page.CaptureScreenshot, page.CaptureScreenshotParams{Format: page.CaptureScreenshotFormatPng})
+	if err != nil {
+		return nil, err
+	}
+	return shot.Data, nil
 }
 
 func (h *Headless) SetCookies(url string, cookies []Cookie) error {
@@ -178,7 +304,15 @@ func (h *Headless) SetCookies(url string, cookies []Cookie) error {
 	return chromedp.Do(h.ctx, steps...)
 }
 
+func (h *Headless) Lost() bool {
+	return !h.closed.Load() && h.ctx.Err() != nil
+}
+
 func (h *Headless) Close() error {
+	if h.evidence != "" && !h.Lost() {
+		h.keepFinalScreenshot()
+	}
+	h.closed.Store(true)
 	h.cancel()
 	var err error
 	for range 50 {
@@ -188,6 +322,14 @@ func (h *Headless) Close() error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return err
+}
+
+func (h *Headless) keepFinalScreenshot() {
+	ctx, cancel := context.WithTimeout(context.Background(), evidenceWait)
+	defer cancel()
+	if png, err := h.Screenshot(ctx); err == nil {
+		os.WriteFile(filepath.Join(h.evidence, FinalShot), png, 0o644)
+	}
 }
 
 func (b *Browser) OpenApp(url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
@@ -218,7 +360,7 @@ func (b *Browser) open(url string, f Factory, livePage string, cookies []Cookie)
 		return nil, err
 	}
 	ctx, cancel := chromedp.NewContext(root, chromedp.WithNewWindow(false))
-	tab := &Tab{ctx: ctx, cancel: cancel, factory: f, requests: map[network.RequestID]string{}}
+	tab := &Tab{ctx: ctx, cancel: cancel, factory: f}
 	if err := chromedp.Listen(ctx, tab.listener(b)); err != nil {
 		cancel()
 		return nil, err
@@ -264,37 +406,53 @@ func appPrelude(token string, f Factory, page string) string {
 
 func (t *Tab) listener(b *Browser) func(ev any) {
 	return func(ev any) {
-		switch e := ev.(type) {
-		case *runtime.EventBindingCalled:
-			if e.Name == bindingName {
-				go b.handleCall(t, e.Payload)
-			}
-		case *runtime.EventConsoleAPICalled:
-			if e.Type == runtime.ConsoleAPICalledTypeError {
-				t.note("console.error: " + consoleText(e.Args))
-			}
-		case *runtime.EventExceptionThrown:
-			if d := e.ExceptionDetails; d != nil {
-				text := d.Text
-				if d.Exception != nil && d.Exception.Description != "" {
-					text = firstLine(d.Exception.Description)
-				}
-				t.note("uncaught: " + text)
-			}
-		case *network.EventRequestWillBeSent:
-			if e.Request != nil {
-				t.remember(e.RequestID, e.Request.Method+" "+e.Request.URL)
-			}
-		case *network.EventResponseReceived:
-			if e.Response != nil && e.Response.Status >= 400 {
-				t.note(fmt.Sprintf("%s → %d", t.request(e.RequestID, e.Response.URL), e.Response.Status))
-			}
-		case *network.EventLoadingFailed:
-			if !e.Canceled {
-				t.note(fmt.Sprintf("%s failed: %s", t.request(e.RequestID, ""), e.ErrorText))
-			}
+		if e, ok := ev.(*runtime.EventBindingCalled); ok && e.Name == bindingName {
+			go b.handleCall(t, e.Payload)
+			return
+		}
+		if line, ok := t.log.line(ev); ok {
+			t.note(line)
 		}
 	}
+}
+
+func (l *pageLog) line(ev any) (string, bool) {
+	switch e := ev.(type) {
+	case *runtime.EventConsoleAPICalled:
+		if e.Type == runtime.ConsoleAPICalledTypeError {
+			return "console.error: " + consoleText(e.Args), true
+		}
+	case *runtime.EventExceptionThrown:
+		if d := e.ExceptionDetails; d != nil {
+			text := d.Text
+			if d.Exception != nil && d.Exception.Description != "" {
+				text = firstLine(d.Exception.Description)
+			}
+			return "uncaught: " + text, true
+		}
+	case *network.EventRequestWillBeSent:
+		if e.Request != nil {
+			l.remember(e.RequestID, e.Request.Method+" "+withoutQuery(e.Request.URL))
+		}
+	case *network.EventResponseReceived:
+		if e.Response != nil && e.Response.Status >= 400 {
+			return fmt.Sprintf("%s → %d", l.request(e.RequestID, withoutQuery(e.Response.URL)), e.Response.Status), true
+		}
+	case *network.EventLoadingFailed:
+		if !e.Canceled {
+			return fmt.Sprintf("%s failed: %s", l.request(e.RequestID, ""), e.ErrorText), true
+		}
+	}
+	return "", false
+}
+
+func withoutQuery(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.RawQuery, u.Fragment = "", ""
+	return u.String()
 }
 
 func consoleText(args []*runtime.RemoteObject) string {
@@ -329,19 +487,19 @@ func (t *Tab) note(line string) {
 	}
 }
 
-func (t *Tab) remember(id network.RequestID, what string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.requests) > 500 {
-		t.requests = map[network.RequestID]string{}
+func (l *pageLog) remember(id network.RequestID, what string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.requests == nil || len(l.requests) > 500 {
+		l.requests = map[network.RequestID]string{}
 	}
-	t.requests[id] = what
+	l.requests[id] = what
 }
 
-func (t *Tab) request(id network.RequestID, fallback string) string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if what, ok := t.requests[id]; ok {
+func (l *pageLog) request(id network.RequestID, fallback string) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if what, ok := l.requests[id]; ok {
 		return what
 	}
 	return fallback

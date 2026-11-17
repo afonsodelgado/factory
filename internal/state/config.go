@@ -53,7 +53,8 @@ type Codex struct {
 }
 
 type Review struct {
-	Chrome string `yaml:"chrome"`
+	Chrome   string `yaml:"chrome"`
+	Browsers int    `yaml:"browsers"`
 }
 
 type Tmux struct {
@@ -119,6 +120,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Icons == "" {
 		c.Icons = "nerd"
+	}
+	if c.Review.Browsers <= 0 {
+		c.Review.Browsers = 2
 	}
 	if socket := os.Getenv("FACTORY_TMUX_SOCKET"); socket != "" {
 		c.Tmux.Socket = socket

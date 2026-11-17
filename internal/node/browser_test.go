@@ -1,10 +1,12 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -46,7 +49,7 @@ func TestABrowserJobRunsItsRecipeInOrderAndNamesWhatIsMissing(t *testing.T) {
 	t.Run("a node without npx stops the job by name before anything is seeded", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("PATH", t.TempDir())
-		job, err := StartBrowserJob(context.Background(), recipe(dir), "", false)
+		job, err := (&Browsers{}).StartJob(context.Background(), recipe(dir), "", nil)
 		if _, seeded := os.Stat(filepath.Join(dir, "steps")); job != nil || err == nil || !strings.Contains(err.Error(), "npx") || seeded == nil {
 			t.Fatalf("the job gave %v; want a failure naming npx with nothing seeded", err)
 		}
@@ -58,7 +61,7 @@ func TestABrowserJobRunsItsRecipeInOrderAndNamesWhatIsMissing(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("PATH", bin)
-		job, err := StartBrowserJob(context.Background(), recipe(dir), "", false)
+		job, err := (&Browsers{}).StartJob(context.Background(), recipe(dir), "", nil)
 		steps, _ := os.ReadFile(filepath.Join(dir, "steps"))
 		if job != nil || err == nil || !strings.Contains(err.Error(), "qa.sign_in") || string(steps) != "seed\nsign_in\n" {
 			t.Fatalf("the job gave %v after %q; want seed, then sign-in, then a failure naming qa.sign_in", err, steps)
@@ -89,7 +92,7 @@ func TestABrowserJobDrivesHeadlessChromeWithoutADisplayAndLeavesNothingBehind(t 
 	t.Setenv("WAYLAND_DISPLAY", "")
 
 	r := Recipe{Dir: t.TempDir(), URL: app.URL, Health: app.URL + "/health", HealthStatus: http.StatusNoContent, Startup: 30 * time.Second, Seed: state.NotNeeded, SignIn: `echo '[{"name":"session","value":"s3cret"}]'`}
-	job, err := StartBrowserJob(context.Background(), r, "", goruntime.GOOS == "linux")
+	job, err := (&Browsers{NoSandbox: goruntime.GOOS == "linux"}).StartJob(context.Background(), r, "", nil)
 	if err != nil {
 		if os.Getenv("CI") == "" {
 			t.Skip("no Chrome here: ", err)
@@ -139,6 +142,141 @@ func TestABrowserJobDrivesHeadlessChromeWithoutADisplayAndLeavesNothingBehind(t 
 	}
 }
 
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestThePinnedChromeDevToolsMCPNavigatesAndScreenshotsAJobsBrowserOverStdio(t *testing.T) {
+	if os.Getenv("CI") == "" {
+		t.Skip("downloads " + DevToolsMCP + " from the npm registry, so it runs only on CI")
+	}
+	var mu sync.Mutex
+	var paths []string
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.Write([]byte(`<!doctype html><html><body><h1>Contacts</h1></body></html>`))
+	}))
+	t.Cleanup(app.Close)
+	r := Recipe{Dir: t.TempDir(), URL: app.URL, Health: app.URL, HealthStatus: http.StatusOK, Startup: 30 * time.Second, Seed: state.NotNeeded, SignIn: state.NotNeeded}
+	job, err := (&Browsers{NoSandbox: goruntime.GOOS == "linux"}).StartJob(context.Background(), r, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { job.Close() })
+	var config struct {
+		Servers map[string]struct {
+			Command string
+			Args    []string
+		} `json:"mcpServers"`
+	}
+	data, _ := os.ReadFile(job.MCPConfig)
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	server := config.Servers["chrome-devtools"]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	cmd := exec.CommandContext(ctx, server.Command, server.Args...)
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
+	cmd.WaitDelay = 5 * time.Second
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); cancel(); cmd.Wait() })
+	lines := bufio.NewReader(stdout)
+	send := func(message map[string]any) {
+		message["jsonrpc"] = "2.0"
+		line, _ := json.Marshal(message)
+		if _, err := stdin.Write(append(line, '\n')); err != nil {
+			t.Fatalf("writing to the MCP server: %v\n%s", err, stderr)
+		}
+	}
+	id := 0
+	call := func(method string, params any) json.RawMessage {
+		t.Helper()
+		id++
+		send(map[string]any{"id": id, "method": method, "params": params})
+		for {
+			line, err := lines.ReadBytes('\n')
+			if err != nil {
+				t.Fatalf("%s got no answer: %v\n%s", method, err, stderr)
+			}
+			var answer struct {
+				ID     *int
+				Result json.RawMessage
+				Error  *struct{ Message string }
+			}
+			if json.Unmarshal(line, &answer) != nil || answer.ID == nil || *answer.ID != id {
+				continue
+			}
+			if answer.Error != nil {
+				t.Fatalf("%s failed: %s", method, answer.Error.Message)
+			}
+			return answer.Result
+		}
+	}
+	call("initialize", map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "factory-test", "version": "0"}})
+	send(map[string]any{"method": "notifications/initialized"})
+
+	var listed struct {
+		Tools []struct {
+			Name        string
+			InputSchema struct{ Properties map[string]any }
+		}
+	}
+	json.Unmarshal(call("tools/list", map[string]any{}), &listed)
+	schemas := map[string]map[string]any{}
+	for _, tool := range listed.Tools {
+		schemas[tool.Name] = tool.InputSchema.Properties
+	}
+	navigate, hasNavigate := schemas["navigate_page"]
+	if _, hasShot := schemas["take_screenshot"]; !hasNavigate || !hasShot {
+		t.Fatalf("%s lists no navigate_page or take_screenshot: %v", DevToolsMCP, slices.Collect(maps.Keys(schemas)))
+	}
+	type content struct {
+		Type, Text, Data string
+	}
+	var result struct {
+		Content []content
+		IsError bool
+	}
+	args := map[string]any{"url": app.URL + "/export"}
+	if _, typed := navigate["type"]; typed {
+		args["type"] = "url"
+	}
+	json.Unmarshal(call("tools/call", map[string]any{"name": "navigate_page", "arguments": args}), &result)
+	mu.Lock()
+	navigated := slices.Contains(paths, "/export")
+	mu.Unlock()
+	if result.IsError || !navigated {
+		t.Fatalf("navigate_page did not reach the app through the job's browser: %+v", result)
+	}
+	result.Content = nil
+	json.Unmarshal(call("tools/call", map[string]any{"name": "take_screenshot", "arguments": map[string]any{}}), &result)
+	shot := slices.IndexFunc(result.Content, func(c content) bool { return c.Type == "image" && strings.HasPrefix(c.Data, "iVBOR") })
+	if result.IsError || shot < 0 {
+		t.Fatalf("take_screenshot returned no PNG from the job's browser: %+v", result)
+	}
+}
+
 type stageEngine struct{ typed []string }
 
 func (e *stageEngine) NewFactoryPane(host.NewPane) (string, error) { return "%1", nil }
@@ -153,11 +291,7 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 	}))
 	t.Cleanup(app.Close)
 	_, port, _ := net.SplitHostPort(app.Listener.Addr().String())
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeNPX(t)
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
 	repo, stateDir := t.TempDir(), t.TempDir()
@@ -191,6 +325,9 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 	}
 
 	configure("  seed: none\n  sign_in: none\n")
+	if _, err := startQA(); err != nil {
+		t.Fatal(err)
+	}
 	reply, err := startQA()
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +352,7 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 	}
 	launch, _ := os.ReadFile(state.LaunchScriptPath(stateDir, repo, "csv", "qa"))
 	config, _ := os.ReadFile(b.MCPConfig)
-	job := browsers.leased[f.Key()]
+	job := browsers.leased[f.Key()].job
 	switch {
 	case !bytes.Contains(launch, []byte("--mcp-config "+factory.ShellQuote(b.MCPConfig))) || bytes.Contains(launch, []byte("--chrome")):
 		t.Fatalf("QA launched with\n%s\nwant this stage's MCP config and no --chrome", launch)
@@ -225,9 +362,112 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 		t.Fatalf("Chrome runs on the profile %s; want a temporary one", job.Chrome.Profile)
 	}
 
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	superseded, _ := json.Marshal(host.BrowserReady{Factory: f.Key(), Token: runs.Runs[0].Token, Error: "headless Chrome did not start", Failure: host.FailBrowser})
+	r.Handle(host.Message{T: "browser", Data: superseded})
+	if _, err := os.Stat(job.Dir); err != nil || browsers.leased[f.Key()] == nil {
+		t.Fatalf("the superseded QA run's late failure closed the newer run's browser: %v", err)
+	}
+	if _, err := os.Stat(reply.Result); err == nil {
+		t.Fatal("the superseded QA run's late failure wrote the newer run's result")
+	}
+
 	host.WriteFile(reply.Result, `{"status":"done"}`)
 	r.ReleaseFinishedBrowsers()
 	if _, err := os.Stat(job.Dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the finished QA stage left its browser profile %s behind: %v", job.Dir, err)
+	}
+}
+
+func fakeNPX(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestABrowserJobOverTheNodeCapWaitsVisiblyAndStartsWhenTheBusyOneEnds(t *testing.T) {
+	fakeNPX(t)
+	busyAsked := make(chan struct{}, 1)
+	busy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case busyAsked <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(busy.Close)
+	healthy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(healthy.Close)
+	profile := func(health string) state.Profile {
+		var p state.Profile
+		p.QA.Health, p.QA.WebPort, p.QA.StartupTimeout = health, 3001, "1m"
+		p.QA.Seed, p.QA.SignIn = "echo seeded > seeded", "echo not-cookies"
+		return p
+	}
+	nodeCtx, stopNode := context.WithCancel(context.Background())
+	defer stopNode()
+	browsers := &Browsers{Max: 1, StateDir: t.TempDir(), Ctx: nodeCtx}
+
+	first, cancelFirst := context.WithCancel(nodeCtx)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := browsers.Prepare(first, host.BrowserLease{Factory: "a", Token: "t1", Worktree: t.TempDir()}, profile(busy.URL), func(string) {})
+		firstDone <- err
+	}()
+	<-busyAsked
+
+	second := t.TempDir()
+	waiting := make(chan string, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := browsers.Prepare(context.Background(), host.BrowserLease{Factory: "b", Token: "t2", Worktree: second}, profile(healthy.URL), func(reason string) { waiting <- reason })
+		secondDone <- err
+	}()
+	select {
+	case reason := <-waiting:
+		if !strings.Contains(reason, "all 1") {
+			t.Fatalf("the waiting job said %q; want it to name the node's cap", reason)
+		}
+	case err := <-secondDone:
+		t.Fatalf("a second job ran past a cap of 1 while the first held the slot: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second job neither waited visibly nor ran")
+	}
+	if _, err := os.Stat(filepath.Join(second, "seeded")); err == nil {
+		t.Fatal("the waiting job seeded its stack before it had a browser slot")
+	}
+
+	cancelFirst()
+	<-firstDone
+	select {
+	case err := <-secondDone:
+		if err == nil || !strings.Contains(err.Error(), "qa.sign_in") {
+			t.Fatalf("the second job gave %v; want it to run up to its sign-in once the slot freed", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the waiting job never started after the busy one ended")
+	}
+	if _, err := os.Stat(filepath.Join(second, "seeded")); err != nil {
+		t.Fatalf("the second job did not run its recipe after the slot freed: %v", err)
+	}
+
+	select {
+	case <-busyAsked:
+	default:
+	}
+	thirdDone := make(chan error, 1)
+	go func() {
+		_, err := browsers.Prepare(nodeCtx, host.BrowserLease{Factory: "c", Token: "t3", Worktree: t.TempDir()}, profile(busy.URL), func(string) {})
+		thirdDone <- err
+	}()
+	<-busyAsked
+	stopNode()
+	<-thirdDone
+	recovered := browsers.Recover()
+	if len(recovered) != 1 || recovered[0].Token != "t3" {
+		t.Fatalf("after the node stopped mid-startup its next start recovered %+v; want only the interrupted job, so its QA run fails instead of waiting forever", recovered)
 	}
 }

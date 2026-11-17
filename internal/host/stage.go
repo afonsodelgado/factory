@@ -162,7 +162,11 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 		}
 	}
 	run := m.NewRun(it, runs, r.Role, setting, uuid.NewString())
-	prompt, err := StagePrompt(r.Role, r.Text, run.Result, m.Rules(), setting.OnClaude())
+	task := r.Text
+	if browses {
+		task += "\n\n" + evidenceNote(EvidenceDir(it.Factory, run))
+	}
+	prompt, err := StagePrompt(r.Role, task, run.Result, m.Rules(), setting.OnClaude())
 	if err != nil {
 		return StageReply{}, err
 	}

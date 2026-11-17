@@ -17,6 +17,7 @@ func (m *Runtime) Archive(r ArchiveRequest) error {
 	if !ok || m.Loader == nil {
 		return fmt.Errorf("no factory %s", r.Key)
 	}
+	m.stopBrowser(it.Factory.Key())
 	movedTo := ""
 	if r.Remove {
 		var err error
@@ -68,6 +69,7 @@ func (m *Runtime) Delete(r DeleteRequest) ([]factory.RemovalStep, error) {
 }
 
 func (m *Runtime) DeleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
+	m.stopBrowser(f.Key())
 	var closeErr error
 	if m.Engine != nil {
 		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)

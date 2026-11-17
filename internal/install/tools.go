@@ -365,7 +365,7 @@ func Readiness(o Options, origins map[string]string, scope node.Scope) []node.Pr
 	}
 	probes := []node.Probe{
 		probe("tools", func(context.Context) []Check {
-			return []Check{tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")), tool("git", "2.31", "git", []string{"--version"}, installCommand("git")), ghCheck(), ghStack(), browserQA(o)}
+			return []Check{tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")), tool("git", "2.31", "git", []string{"--version"}, installCommand("git")), ghCheck(), ghStack(), browserQA(o, false)}
 		}),
 		probe("claude", func(context.Context) []Check {
 			return []Check{tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"), claudeLogin(o)}
