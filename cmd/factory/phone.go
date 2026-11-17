@@ -80,6 +80,7 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	}
 	if snap.Roster != nil {
 		c.Home, c.Others = snap.Roster.Home, rosterRows(*snap.Roster, known.Others)
+		c.Leaving = snap.Roster.Leaving
 	}
 	return c
 }
@@ -246,10 +247,12 @@ func (a nodeActions) Add(ctx context.Context, op, name string, replaceKey bool) 
 	return result, err
 }
 
-func (a nodeActions) Remove(op, id string) error {
+func (a nodeActions) Remove(op, id string) (node.Roster, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
 	defer cancel()
-	return a.local.Do(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(id)+"/remove", node.RemoveRequest{Operation: op}, nil)
+	var roster node.Roster
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(id)+"/remove", node.RemoveRequest{Operation: op}, &roster)
+	return roster, err
 }
 
 func (a nodeActions) SetTarget(name string) error {

@@ -61,6 +61,7 @@ type NodesContext struct {
 	Home      string
 	Owner     string
 	Target    string
+	Leaving   []node.RosterMember
 	Others    []NodeRow
 	Repos     []RepoURL
 }
@@ -78,7 +79,7 @@ type NodeActions interface {
 	Candidates(ctx context.Context) ([]node.Candidate, error)
 	Inspect(ctx context.Context, name string) (node.CheckReport, error)
 	Add(ctx context.Context, op, name string, replaceKey bool) (node.AddResult, error)
-	Remove(op, id string) error
+	Remove(op, id string) (node.Roster, error)
 	SetTarget(name string) error
 	Clone(ctx context.Context, name, op, url string) error
 	MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error)
@@ -405,10 +406,12 @@ func (n *Nodes) askRemoval(onPeer bool) {
 
 func (n *Nodes) remove() {
 	row, _ := n.selected()
-	if err := n.actions.Remove(uuid.NewString(), row.ID); err != nil {
+	roster, err := n.actions.Remove(uuid.NewString(), row.ID)
+	if err != nil {
 		n.problem = err.Error()
 		return
 	}
+	n.Context.Leaving = roster.Leaving
 	n.Context.Others = slices.Delete(n.Context.Others, n.cursor-1, n.cursor)
 	if n.Context.Target == row.Name {
 		n.Context.Target = ""
@@ -878,6 +881,13 @@ func (n *Nodes) drawPeerRow(c *theme.Canvas, y, i int, row NodeRow, newOnesX int
 func clock(t time.Time) string { return t.Local().Format("15:04") }
 
 func (n *Nodes) drawAlone(c *theme.Canvas) {
+	if len(n.Context.Leaving) > 0 {
+		y := n.drawLeaving(c, 5)
+		y = n.drawPhoneApp(c, y+1, false)
+		n.drawProblem(c, y+1)
+		n.hint(c, "⏎ details   a add a node   esc close")
+		return
+	}
 	c.Put(1, 5, "No other nodes yet. Every factory runs on this machine.", theme.Text)
 	y := paragraph(c, 7, "A node is any machine of yours that ran factory node install, such as a home server that stays on. Its factories keep running while this laptop sleeps or travels, and this hub and your phone list them next to these.", theme.Text)
 	c.Spans(1, y+1, []theme.Span{{Text: "a", Ink: theme.Key}, {Text: "  add one from the machines on your tailnet", Ink: theme.Text}})
@@ -894,7 +904,15 @@ func (n *Nodes) targetName() string {
 	return n.Context.Machine
 }
 
+func (n *Nodes) drawLeaving(c *theme.Canvas, y int) int {
+	for _, m := range n.Context.Leaving {
+		y = paragraph(c, y, shortName(m.Name)+": removal pending; it learns it was removed when it next answers.", theme.FgInk(theme.Yellow)) + 1
+	}
+	return y
+}
+
 func (n *Nodes) drawMany(c *theme.Canvas, y int) {
+	y = n.drawLeaving(c, y)
 	y = paragraph(c, y, "New factories run on "+n.targetName()+". Pick another node in New factory for a one-off.", theme.Text) + 1
 	if n.added != nil {
 		y = n.drawAdded(c, y)
@@ -1677,8 +1695,10 @@ func drawChecks(c *theme.Canvas, y int, rows []CheckRow) int {
 		}
 		c.Put(3, y, mark.glyph, mark.ink)
 		c.PutMax(checkNameX, y, row.Name, nameInk, checkDetailX-checkNameX-1)
-		c.PutMax(checkDetailX, y, row.Detail, detailInk, c.W-checkDetailX-1)
-		y++
+		for _, line := range theme.Wrap(row.Detail, c.W-checkDetailX-1) {
+			c.Put(checkDetailX, y, line, detailInk)
+			y++
+		}
 		for _, line := range row.Lines {
 			c.PutMax(checkDetailX, y, line, theme.Text, c.W-checkDetailX-1)
 			y++

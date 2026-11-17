@@ -11,7 +11,8 @@ import { factoryCount } from "./Nodes.tsx";
 import { Check } from "./Setup.tsx";
 
 export function ThisPhone() {
-  const { me, installation, reach, retry, nodes, multi, navigate } = useApp();
+  const { me, installation, reach, retry, nodes, roster, multi, navigate } =
+    useApp();
   const { health, push, setPush, recheck, round } = usePushHealth();
   const states = useNodePush(round);
   const [busy, setBusy] = useState(false);
@@ -127,6 +128,12 @@ export function ThisPhone() {
               </li>
             ))}
           </ul>
+          {roster?.leaving?.map((member) => (
+            <p key={member.id} className="stat warn" role="status">
+              {member.name.split(".")[0]}: removal pending; it learns it was
+              removed when it next answers.
+            </p>
+          ))}
         </section>
         <footer className="ab">
           <button

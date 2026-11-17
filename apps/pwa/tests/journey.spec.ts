@@ -619,3 +619,24 @@ async function fitsWidth(page: Page, width: number) {
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(width);
 }
+
+test("pending removal stays visible until the offline node acknowledges it", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  const members = roster("homelab");
+  const leaving = members.members[1];
+  await server.set({ roster: { ...roster(), leaving: [leaving] } });
+  await page.goto("/phone");
+  await expect(
+    page.getByText("homelab: removal pending", { exact: false }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText("homelab: removal pending", { exact: false }),
+  ).toBeVisible();
+  await server.set({ roster: roster() });
+  await expect(
+    page.getByText("homelab: removal pending", { exact: false }),
+  ).toHaveCount(0);
+});
