@@ -75,6 +75,9 @@ func (m *Runtime) startStack(it Item, page string) (ReviewReply, error) {
 		return ReviewReply{}, err
 	}
 	profile := resolved.Profile
+	if profile.QA.Mode == "" {
+		_, profile = m.repoConfig(f.Repo)
+	}
 	os.Remove(LegacyStackPath(f.Dir))
 	m.stopStack(f.Key())
 	lease := StackLease{Factory: f.Key(), Route: ReviewKey(f), Label: f.Label(), Repo: f.Repo, Slug: f.Slug, Worktree: f.Worktree, Page: page}

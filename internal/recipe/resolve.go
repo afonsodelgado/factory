@@ -157,6 +157,23 @@ func Resolve(root string) (Resolution, error) {
 			put(r.Recipe.QA, "start", manager+" run "+key, "package.json:scripts."+key, root)
 		}
 	}
+	for _, name := range []string{"playwright.config.ts", "playwright.config.js", "playwright.config.mjs"} {
+		data, err := read(filepath.Join(root, name))
+		if err != nil {
+			return r, err
+		}
+		for key, pattern := range map[string]string{"url": `baseURL\s*:\s*["'](http://(?:localhost|127\.0\.0\.1):[0-9]+[^"']*)["']`, "health": `webServer\s*:\s*\{[^}]*?url\s*:\s*["'](http://(?:localhost|127\.0\.0\.1):[0-9]+[^"']*)["']`} {
+			if _, ok := r.Recipe.QA[key]; ok {
+				continue
+			}
+			matches := regexp.MustCompile(pattern).FindAllSubmatch(data, -1)
+			if len(matches) == 1 {
+				put(r.Recipe.QA, key, string(matches[0][1]), name+":"+key, root)
+			}
+		}
+	}
+	r.Profile.QA.URL = r.Recipe.QA["url"].Command
+	r.Profile.QA.Health = r.Recipe.QA["health"].Command
 	if r.Profile.QA.Mode == "browser" {
 		for _, key := range []string{"start", "url", "health", "seed", "sign_in"} {
 			if _, ok := r.Recipe.QA[key]; !ok {

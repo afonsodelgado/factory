@@ -92,7 +92,7 @@ func browserJob(key string) string { return "browser " + key }
 
 func (m *Runtime) browsesForQA(it Item, role string) (state.Profile, bool) {
 	_, profile := m.repoConfig(it.Factory.Repo)
-	if resolved, err := recipe.Resolve(it.Factory.Worktree); err == nil {
+	if resolved, err := recipe.Resolve(it.Factory.Worktree); err == nil && resolved.Profile.QA.Mode != "" {
 		profile = resolved.Profile
 	}
 	return profile, role == "qa" && profile.BrowserQA()
