@@ -8,7 +8,7 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `repo` | the main checkout's absolute path |
 | `session_id` | the supervisor's Claude Code session id, from `$CLAUDE_CODE_SESSION_ID`, refreshed on every write because it can change mid-session |
 | `authorized` | `true` once `/factory` started; the per-factory commit/push/PR authorisation |
-| `needs_design` | whether stage 2 runs |
+| `needs_design` | whether stage 2 runs: true exactly when `design` is in `pipeline_stages` |
 | `pipeline` | the name of the pipeline this factory runs, such as `full` or `quick`, or `custom` when it was started with `--stages` |
 | `pipeline_stages` | the resolved stage keys of that pipeline, in stage order; every other stage is `skipped` with the note "not in the <name> pipeline" |
 | `agents` | the effective tool, model and effort of every agent role, such as `{"engineer": {"tool": "claude", "model": "sonnet", "effort": "medium"}, …}`, one entry per role; passed to the Agent tool on every spawn of a claude role, and read by the factory app to start a role on another tool |

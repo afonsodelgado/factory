@@ -812,7 +812,7 @@ func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheck
 	}
 }
 
-func TestANewFactoryTellsItsSupervisorEveryRoleAsTheAppResolvedIt(t *testing.T) {
+func TestANewFactoryTellsItsSupervisorEveryStageAndRoleAsTheAppResolvedThem(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	repo := t.TempDir()
 	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}, Agents: map[string]state.AgentSetting{
@@ -826,7 +826,7 @@ func TestANewFactoryTellsItsSupervisorEveryRoleAsTheAppResolvedIt(t *testing.T) 
 		t.Fatal(err)
 	}
 	launched := strings.Join(engine.typed, "\n")
-	for _, flag := range []string{"--agent reviewer=claude/sonnet:high", "--agent fixer=codex/gpt-6-astra:medium", "--agent engineer=claude/opus:max", "--agent analyst=claude/opus:high"} {
+	for _, flag := range []string{"--pipeline full --stages requirements,design,plan,implement,", "--agent reviewer=claude/sonnet:high", "--agent fixer=codex/gpt-6-astra:medium", "--agent engineer=claude/opus:max", "--agent analyst=claude/opus:high"} {
 		if !strings.Contains(launched, flag) {
 			t.Errorf("the supervisor was started with %q; want %s, so it never has to resolve the config itself", launched, flag)
 		}

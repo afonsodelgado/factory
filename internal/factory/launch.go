@@ -84,11 +84,11 @@ func ForSupervisor(tool, message string) string {
 
 func (l Launch) Message() string {
 	message := SkillCommand(l.Supervisor.ToolName()) + " " + l.Slug
-	switch {
-	case len(l.Stages) > 0:
-		message += " --stages " + strings.Join(l.Stages, ",")
-	case l.Pipeline != "":
+	if l.Pipeline != "" && l.Pipeline != state.CustomPipeline {
 		message += " --pipeline " + l.Pipeline
+	}
+	if len(l.Stages) > 0 {
+		message += " --stages " + strings.Join(l.Stages, ",")
 	}
 	for _, role := range state.AgentRoles {
 		if setting, ok := l.Agents[role]; ok {
