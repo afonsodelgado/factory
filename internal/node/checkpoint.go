@@ -225,6 +225,10 @@ func (cp Checkpoint) Validate(limits Limits) error {
 	if factory.Slugify(m.Factory) != strings.ToLower(m.Factory) || m.Factory == "" {
 		return fmt.Errorf("checkpoint factory %q is not a factory id", m.Factory)
 	}
+	invalidSlug := m.Slug == "" || m.Slug == "." || m.Slug == ".." || strings.ContainsAny(m.Slug, "/\\\x00")
+	if invalidSlug {
+		return fmt.Errorf("checkpoint slug %q is not a factory folder", m.Slug)
+	}
 	if err := gitclone.CheckURL(m.GitURL); err != nil {
 		return err
 	}

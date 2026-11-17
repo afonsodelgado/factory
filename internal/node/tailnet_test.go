@@ -1764,7 +1764,7 @@ func TestACheckpointRefusesSecretBearingFilesAndLeavesGeneratedCookiesBehind(t *
 
 func forgedCheckpoint(source string, files map[string]string) node.Checkpoint {
 	op := uuid.NewString()
-	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Source: source, GitURL: appRemote}}
+	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", Source: source, GitURL: appRemote}}
 	cp = withFile(cp, "factory/state.json", fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op))
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		cp = withFile(cp, name, files[name])
@@ -1805,6 +1805,15 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 		{"duplicate", duplicate, "twice"},
 		{"conflicting identity", otherFactory, "its state.json is csv"},
 		{"unknown schema", unknownSchema, "schema"},
+	}
+	for _, slug := range []string{"", ".", "..", "../../escaped", "a/b", `a\b`, "/tmp/escaped"} {
+		cp := forgedCheckpoint(macbook.ID, nil)
+		cp.Manifest.Slug = slug
+		cases = append(cases, struct {
+			name   string
+			cp     node.Checkpoint
+			reason string
+		}{"slug " + slug, cp, "factory folder"})
 	}
 	for _, c := range cases {
 		status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", c.cp)
