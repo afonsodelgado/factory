@@ -2199,7 +2199,7 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 	f.mac.set(func(h *moveHost) { h.onRelease = func() { f.homelab.SetOnline(false) } })
 	f.macbook.Transfers.Move(background, stranded, f.csv.Key, "homelab")
 	if p := progressOf(t, f.macbook.Transfers, stranded); p.State != node.StateRecoveryNeeded {
-		t.Fatalf("the stranded move reports %s", p.State)
+		t.Fatalf("the stranded move reports %s: %s%s", p.State, p.Refusal, p.Failure)
 	}
 	if taken, err := f.macbook.Transfers.Takeover(background, node.TakeoverRequest{Operation: uuid.NewString(), Factory: "csv", Confirm: true}); err != nil || taken.Phase != node.PhaseActive {
 		t.Fatalf("taking csv back on macbook answered %+v, %v", taken, err)

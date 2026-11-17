@@ -186,6 +186,7 @@ func (a *API) Holds(repo, slug string) bool {
 }
 
 func (a *API) HoldsIncarnation(incarnation string) bool {
+	a.refresh(context.Background())
 	_, factories, _ := a.Factories()
 	return slices.ContainsFunc(factories, func(f host.LocalFactory) bool { return f.Incarnation == incarnation })
 }
