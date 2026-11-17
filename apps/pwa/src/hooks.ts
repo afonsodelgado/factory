@@ -79,6 +79,7 @@ export function useNodePush(round: number): Record<string, PushState> {
 
 export function useBlocked(factory: LocalFactory): string | undefined {
   const { live, reach, short: host } = useNode(factory);
+  if (factory.unverified) return factory.unverified;
   if (live) return undefined;
   switch (reach) {
     case "offline":

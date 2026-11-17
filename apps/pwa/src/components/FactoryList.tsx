@@ -7,12 +7,14 @@ import { paths } from "../route.ts";
 import { useApp, type NodeView } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
 import { Link } from "./Link.tsx";
+import { Moving } from "./Move.tsx";
 
 export function FactoryList({ selected }: { selected?: string }) {
   const { reach, snapshot } = useApp();
   return (
     <AppShell>
       <Joined />
+      <Moving />
       {snapshot ? (
         <Populated factories={snapshot.factories} selected={selected} />
       ) : reach === "loading" || reach === "online" ? (

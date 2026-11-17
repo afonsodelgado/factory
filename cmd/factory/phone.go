@@ -276,3 +276,75 @@ func probeNode(name string) (string, error) {
 func (a nodeActions) Clone(ctx context.Context, name, op, repo string) error {
 	return node.Remote(name, a.peers).Do(ctx, http.MethodPost, "/api/clone", node.CloneRequest{Operation: op, URL: repo}, nil)
 }
+
+func (a nodeActions) on(name string) *node.Client {
+	if name == "" {
+		return a.local
+	}
+	return node.Remote(name, a.peers)
+}
+
+func plainRefusal(err error) error {
+	var refusal node.StatusError
+	if errors.As(err, &refusal) {
+		return errors.New(refusal.Message)
+	}
+	return err
+}
+
+func (a nodeActions) transfer(ctx context.Context, on, method, path string, body any) (node.Progress, error) {
+	var p node.Progress
+	return p, plainRefusal(a.on(on).Do(ctx, method, path, body, &p))
+}
+
+func (a nodeActions) Ready(ctx context.Context, on string) (node.Report, error) {
+	var report node.Report
+	return report, plainRefusal(a.on(on).Do(ctx, http.MethodGet, "/api/readiness", nil, &report))
+}
+
+func (a nodeActions) Start(ctx context.Context, on string, r node.MoveRequest) (node.Progress, error) {
+	return a.transfer(ctx, on, http.MethodPost, "/api/transfers", r)
+}
+
+func (a nodeActions) Progress(ctx context.Context, on, operation string) (node.Progress, error) {
+	return a.transfer(ctx, on, http.MethodGet, "/api/transfers/"+url.PathEscape(operation), nil)
+}
+
+func (a nodeActions) Cancel(ctx context.Context, on, operation string) (node.Progress, error) {
+	return a.transfer(ctx, on, http.MethodPost, "/api/transfers/"+url.PathEscape(operation)+"/cancel", struct{}{})
+}
+
+func (a nodeActions) Takeover(ctx context.Context, on string, r node.TakeoverRequest) (node.Progress, error) {
+	var answer struct {
+		node.Progress
+		Warning *node.Unconfirmed `json:"warning"`
+	}
+	err := a.on(on).Do(ctx, http.MethodPost, "/api/transfers/takeover", r, &answer)
+	var refusal node.StatusError
+	if errors.As(err, &refusal) && refusal.Status == http.StatusPreconditionRequired && answer.Warning != nil {
+		return node.Progress{}, *answer.Warning
+	}
+	return answer.Progress, plainRefusal(err)
+}
+
+func (a nodeActions) Moves(ctx context.Context, on string) ([]node.Progress, error) {
+	var moves []node.Progress
+	return moves, plainRefusal(a.on(on).Do(ctx, http.MethodGet, "/api/transfers", nil, &moves))
+}
+
+func (a nodeActions) batch(ctx context.Context, method, path string, body any) (node.BatchProgress, error) {
+	var b node.BatchProgress
+	return b, plainRefusal(a.local.Do(ctx, method, path, body, &b))
+}
+
+func (a nodeActions) MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error) {
+	return a.batch(ctx, http.MethodPost, "/api/transfers/all", node.MoveAllRequest{Operation: op, Target: target})
+}
+
+func (a nodeActions) Batch(ctx context.Context, op string) (node.BatchProgress, error) {
+	return a.batch(ctx, http.MethodGet, "/api/transfers/all/"+url.PathEscape(op), nil)
+}
+
+func (a nodeActions) CancelAll(ctx context.Context, op string) (node.BatchProgress, error) {
+	return a.batch(ctx, http.MethodPost, "/api/transfers/all/"+url.PathEscape(op)+"/cancel", struct{}{})
+}

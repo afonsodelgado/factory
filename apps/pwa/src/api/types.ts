@@ -103,6 +103,8 @@ export type LocalFactory = {
   can_pause: boolean;
   can_wake: boolean;
   node?: string;
+  generation?: number;
+  unverified?: string;
 };
 
 export type Snapshot = {
@@ -237,6 +239,66 @@ export type ActionBody = {
   text?: string;
   option?: string;
   fingerprint?: string;
+  generation?: number;
+};
+
+export type MoveState =
+  | "moving"
+  | "checkpoint_waiting"
+  | "preflight_failed"
+  | "refused"
+  | "cancelled"
+  | "staged"
+  | "released"
+  | "recovery_needed"
+  | "interrupted"
+  | "active";
+
+export type Progress = {
+  operation: string;
+  state: MoveState;
+  running: boolean;
+  incarnation?: string;
+  factory?: string;
+  key?: string;
+  source?: string;
+  source_name?: string;
+  target?: string;
+  target_name?: string;
+  phase?: string;
+  waiting?: string;
+  checks?: Check[];
+  forced?: boolean;
+  refusal?: string;
+  failure?: string;
+  recovery?: string[];
+};
+
+export type ItemOutcome = {
+  key: string;
+  factory: string;
+  operation?: string;
+  state: MoveState | "queued";
+  reason?: string;
+  progress?: Progress;
+};
+
+export type BatchProgress = {
+  operation: string;
+  target: string;
+  target_name: string;
+  running: boolean;
+  cancelled?: boolean;
+  items: ItemOutcome[];
+};
+
+export type Unconfirmed = {
+  warning: string;
+  factory: string;
+  incarnation: string;
+  checkpoint: string;
+  from: string;
+  at: string;
 };
 
 export const MAX_MESSAGE = 4000;

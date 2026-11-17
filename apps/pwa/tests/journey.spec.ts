@@ -482,6 +482,138 @@ test("a done factory's handoff on another node waits in Needs you, and its notif
   ]);
 });
 
+test("a factory moves to another node through its checkpoint and release, can't be cancelled once released, and its row moves under that node", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  await server.set({ roster: roster("homelab") });
+  await server.factories([factory("csv-export", [])]);
+  await server.node(peer("homelab"), { factories: [] });
+  await page.goto("/f/shop-1a2b-csv-export");
+  await page.getByRole("button", { name: "Move to…" }).click();
+  const sheet = page.getByRole("dialog", { name: "Move csv-export" });
+  await sheet.getByRole("button", { name: /homelab\s*ready/ }).click();
+  await sheet.getByRole("button", { name: "Move to homelab" }).click();
+
+  const move = page.getByRole("region", { name: "Moving csv-export" });
+  await expect(
+    move.getByText("Waiting for csv-export to reach a checkpoint"),
+  ).toBeVisible();
+  await expect(
+    move.getByText("Waiting for the supervisor to finish its stage"),
+  ).toBeVisible();
+  await expect(
+    move.getByRole("button", { name: "Cancel the move" }),
+  ).toBeVisible();
+  await expect(move.getByText("csv-export is stopped on 127")).toBeVisible();
+  await expect(
+    move.getByRole("button", { name: "Cancel the move" }),
+  ).toHaveCount(0);
+  await expect(move.getByText("csv-export runs on homelab now")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(
+    move.getByRole("link", { name: /Open csv-export on homelab/ }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Back" }).click();
+  const list = page.getByRole("navigation", { name: "Factories" });
+  const homelab = list
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: /shop ↔ homelab/ }) });
+  await expect(homelab.getByRole("link", { name: /csv-export/ })).toBeVisible();
+  await expect(list.getByRole("link", { name: /csv-export/ })).toHaveCount(1);
+});
+
+test("taking over a lost node's factory shows the server's warning and confirms only after the explicit tap", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  const homelab = peer("homelab");
+  await server.set({ roster: roster("homelab", "build-box") });
+  await server.node(homelab, { factories: [] });
+  await server.node(peer("build-box"), {
+    factories: [factory("perf-budget", [gate()])],
+  });
+  await page.goto("/");
+  const list = page.getByRole("navigation", { name: "Factories" });
+  const row = list.getByRole("link").filter({ hasText: "perf-budget" });
+  await expect(row).toBeVisible();
+  await controlled(page);
+  await server.node(peer("build-box"), { mode: "offline" });
+  await expect(row).toContainText("unreachable", { timeout: 10_000 });
+  await row.click();
+
+  await page.getByRole("button", { name: "Take over…" }).click();
+  const sheet = page.getByRole("dialog", { name: "Take perf-budget over" });
+  await expect(sheet.getByRole("button", { name: /build-box/ })).toHaveCount(0);
+  await sheet.getByRole("button", { name: /homelab\s*ready/ }).click();
+  await sheet.getByRole("button", { name: "Take over on homelab" }).click();
+  const warning = page.getByRole("dialog", {
+    name: "Take perf-budget over on homelab?",
+  });
+  await expect(
+    warning.getByText(
+      "build-box may keep running perf-budget until it reconnects, and work done after that checkpoint may be lost or diverge.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  const asked = (await server.state()).peers[homelab].takeovers;
+  expect(asked.map((t) => t.confirm ?? false)).toEqual([false]);
+
+  await warning.getByRole("button", { name: "Take over anyway" }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Moving perf-budget" })
+      .getByText("perf-budget runs on homelab now"),
+  ).toBeVisible({ timeout: 10_000 });
+  const confirmed = (await server.state()).peers[homelab].takeovers;
+  expect(confirmed.map((t) => [t.operation, t.confirm ?? false])).toEqual([
+    [asked[0].operation, false],
+    [asked[0].operation, true],
+  ]);
+});
+
+test("move all reports which factories moved and which stayed, and why", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  await server.set({ roster: roster("homelab") });
+  await server.factories([
+    factory("csv-export", []),
+    factory("invoice-pdf", [], {
+      unmovable: "the answer to gate-plan is unknown and must settle first",
+    }),
+  ]);
+  await server.node(peer("homelab"), { factories: [] });
+  await page.goto("/phone/nodes/node-2");
+  await page
+    .getByRole("button", { name: "Move all from 127 to homelab…" })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Move all to homelab?" })
+    .getByRole("button", { name: "Move all" })
+    .click();
+  const outcomes = page.getByRole("list", { name: "Moving to homelab" });
+  await expect(
+    outcomes
+      .getByRole("listitem")
+      .filter({ hasText: "invoice-pdf" })
+      .getByText(
+        "not moved: the answer to gate-plan is unknown and must settle first",
+      ),
+  ).toBeVisible();
+  await expect(
+    outcomes
+      .getByRole("listitem")
+      .filter({ hasText: "csv-export" })
+      .getByText("moved to homelab", { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByRole("button", { name: /Move all from 127 to homelab/ }),
+  ).toBeVisible();
+});
+
 async function fitsWidth(page: Page, width: number) {
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),

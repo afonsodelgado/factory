@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -25,12 +26,14 @@ type Presentation struct {
 	PRs        map[string][]PR
 	Checked    time.Time
 	FirstStart string
+	Holdings   map[string]Holding
 }
 
 func (m *Runtime) Presentation() Presentation {
 	return Presentation{
 		Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
 		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(), FirstStart: m.takeFirstStart(),
+		Holdings: maps.Clone(m.holdings),
 	}
 }
 

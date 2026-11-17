@@ -18,7 +18,7 @@ import (
 
 func runDialog(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys|remotes|phone|nodes> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys|remotes|phone|nodes|move> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)
@@ -84,6 +84,17 @@ func dialogMain(kind, socket string) error {
 }
 
 func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
+	if kind == "move" {
+		cfg, err := state.LoadConfig()
+		if err != nil {
+			return nil, err
+		}
+		var c dialog.MoveContext
+		if err := json.Unmarshal(context, &c); err != nil {
+			return nil, err
+		}
+		return dialog.NewMove(c, newNodeActions(cfg)), nil
+	}
 	if kind == "phone" || kind == "nodes" {
 		cfg, err := state.LoadConfig()
 		if err != nil {

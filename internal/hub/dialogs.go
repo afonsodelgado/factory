@@ -35,6 +35,7 @@ var popupSizes = map[string][2]int{
 	"remotes":  {90, 26},
 	"phone":    {90, 32},
 	"nodes":    {90, 30},
+	"move":     {90, 24},
 }
 
 var popupTitles = map[string]string{
@@ -48,6 +49,7 @@ var popupTitles = map[string]string{
 	"remotes":  " ↔ Remotes ",
 	"phone":    " Phone ",
 	"nodes":    " ↔ Nodes ",
+	"move":     " ⇄ Move ",
 }
 
 type dialogClosedMsg struct {
@@ -69,10 +71,11 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 	size := popupSizes[kind]
 	width, height := min(size[0], max(m.window[0]-4, 20)), min(size[1], max(m.window[1]-4, 6))
 	title := popupTitles[kind]
-	if kind == "pause" || kind == "archive" || kind == "delete" {
-		if it, ok := m.selectedItem(); ok {
-			title = strings.TrimRight(title, " ") + " " + it.Factory.Label() + "? "
-		}
+	if it, ok := m.selectedItem(); ok && (kind == "pause" || kind == "archive" || kind == "delete") {
+		title = strings.TrimRight(title, " ") + " " + it.Factory.Label() + "? "
+	}
+	if it, ok := m.selectedItem(); ok && kind == "move" {
+		title += it.Factory.Label() + " "
 	}
 	tm := m.Engine.TM
 	window := m.Layout.Window
@@ -377,8 +380,13 @@ func (m *Model) wake(key string) error {
 }
 
 func (m *Model) wakeSelected() {
-	if it, ok := m.selectedItem(); ok && it.Status == factory.Done {
+	it, ok := m.selectedItem()
+	switch {
+	case ok && it.Status == factory.Done:
 		m.notice = problem(it.Factory.Label() + " is done, so there is nothing to wake.")
+		return
+	case ok && m.unverified(it) != "":
+		m.notice = problem(heldUnchecked(it, m.unverified(it)))
 		return
 	}
 	m.report(m.wake(m.selected))

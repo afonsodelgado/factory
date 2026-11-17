@@ -37,6 +37,9 @@ function node(id) {
     actions: [],
     previews: [],
     readiness: [],
+    transfers: {},
+    batches: {},
+    takeovers: [],
     streams: new Set(),
   };
 }
@@ -69,6 +72,218 @@ function nodeAt(host) {
   if (!member) return undefined;
   state.peers[host] ??= node(member.id);
   return state.peers[host];
+}
+
+function nodeById(id) {
+  const member = state.roster?.members.find((m) => m.id === id);
+  return member && nodeAt(member.name);
+}
+
+const shortOf = (id) =>
+  state.roster?.members.find((m) => m.id === id)?.name.split(".")[0] ?? id;
+
+const moveScript = [
+  { state: "moving", phase: "preflight" },
+  {
+    state: "checkpoint_waiting",
+    phase: "checkpoint",
+    waiting: "Waiting for the supervisor to finish its stage",
+  },
+  { state: "moving", phase: "checkpoint" },
+  { state: "released", phase: "released" },
+  { state: "active", phase: "active" },
+];
+
+const takeoverScript = [
+  { state: "moving", phase: "requested" },
+  { state: "staged", phase: "staged" },
+  { state: "active", phase: "active" },
+];
+
+function startTransfer(f, operation, source, target, script, forced = false) {
+  return {
+    operation,
+    incarnation: f.incarnation,
+    factory: f.id,
+    key: f.key,
+    source,
+    source_name: shortOf(source),
+    target,
+    target_name: shortOf(target),
+    forced,
+    script,
+    step: 0,
+    polls: 0,
+  };
+}
+
+function progressOf(t) {
+  const { script, step, polls, ...fields } = t;
+  const at = script[step];
+  return { ...fields, ...at, running: at.state !== "active" && !t.cancelled };
+}
+
+function relocate(t) {
+  const from = nodeById(t.source);
+  const to = nodeById(t.target);
+  const f = from.snapshot.factories.find(
+    (x) => x.incarnation === t.incarnation,
+  );
+  from.snapshot.factories = from.snapshot.factories.filter((x) => x !== f);
+  to.snapshot.factories = [
+    ...to.snapshot.factories,
+    { ...f, generation: (f.generation ?? 0) + 1 },
+  ];
+  publish(from);
+  publish(to);
+}
+
+function advance(t) {
+  if (t.cancelled || t.step === t.script.length - 1) return;
+  t.polls++;
+  if (t.polls % 2) return;
+  t.step++;
+  if (t.script[t.step].state === "active") relocate(t);
+}
+
+function holderOf(incarnation) {
+  return [state, ...Object.values(state.peers)].find((n) =>
+    n.snapshot.factories.some((f) => f.incarnation === incarnation),
+  );
+}
+
+async function transfers(req, res, route, n) {
+  if (route === "/api/transfers/takeover") {
+    const request = await body(req);
+    n.takeovers.push(request);
+    const old = holderOf(request.factory);
+    const f = old?.snapshot.factories.find(
+      (x) => x.incarnation === request.factory,
+    );
+    if (!f)
+      return send(res, 409, {
+        error: "this node has no checkpoint of it, so it cannot take it over",
+      });
+    if (!request.confirm) {
+      const warning = `Forcing a takeover starts ${f.id} on ${shortOf(n.id)} from the checkpoint ${shortOf(old.id)} took. ${shortOf(old.id)} may keep running ${f.id} until it reconnects, and work done after that checkpoint may be lost or diverge.`;
+      return send(res, 428, {
+        error: warning,
+        warning: {
+          warning,
+          factory: f.id,
+          incarnation: f.incarnation,
+          checkpoint: "sha256:1",
+          from: shortOf(old.id),
+          at: now(),
+        },
+      });
+    }
+    const t = startTransfer(
+      f,
+      request.operation,
+      old.id,
+      n.id,
+      takeoverScript,
+      true,
+    );
+    n.transfers[t.operation] = t;
+    return send(res, 202, progressOf(t));
+  }
+  if (route === "/api/transfers/all") {
+    const request = await body(req);
+    const items = n.snapshot.factories.map((f) => ({
+      key: f.key,
+      factory: f.id,
+      refusal: f.unmovable,
+      transfer: f.unmovable
+        ? undefined
+        : startTransfer(f, randomUUID(), n.id, request.target, [
+            { state: "moving", phase: "preflight" },
+            moveScript.at(-1),
+          ]),
+    }));
+    n.batches[request.operation] = {
+      operation: request.operation,
+      target: request.target,
+      items,
+    };
+    return send(res, 202, batchOf(n.batches[request.operation]));
+  }
+  let match = /^\/api\/transfers\/all\/([^/]+)(\/cancel)?$/.exec(route);
+  if (match) {
+    const b = n.batches[match[1]];
+    if (match[2]) b.cancelled = true;
+    const next = b.items.find(
+      (i) => i.transfer && progressOf(i.transfer).state !== "active",
+    );
+    if (next && !b.cancelled) advance(next.transfer);
+    return send(res, 200, batchOf(b));
+  }
+  match = /^\/api\/transfers\/([^/]+)(\/cancel)?$/.exec(route);
+  if (match) {
+    const t = n.transfers[match[1]];
+    if (!t) return send(res, 404, { error: "no such move on this node" });
+    if (!match[2]) {
+      advance(t);
+      return send(res, 200, progressOf(t));
+    }
+    if (["released", "active"].includes(t.script[t.step].phase))
+      return send(res, 409, {
+        error: `${t.factory} is already released`,
+        progress: progressOf(t),
+      });
+    t.cancelled = true;
+    t.script = [
+      ...t.script,
+      { state: "cancelled", phase: t.script[t.step].phase },
+    ];
+    t.step = t.script.length - 1;
+    return send(res, 200, progressOf(t));
+  }
+  const request = await body(req);
+  const f = n.snapshot.factories.find(
+    (x) => x.key === request.factory || x.id === request.factory,
+  );
+  const t = startTransfer(
+    f,
+    request.operation,
+    n.id,
+    request.target,
+    moveScript,
+  );
+  n.transfers[t.operation] = t;
+  send(res, 202, progressOf(t));
+}
+
+function batchOf(b) {
+  const started = !b.cancelled;
+  const items = b.items.map((i) => {
+    if (i.refusal)
+      return {
+        key: i.key,
+        factory: i.factory,
+        state: "refused",
+        reason: i.refusal,
+      };
+    const p = progressOf(i.transfer);
+    const state = p.state === "active" || started ? p.state : "cancelled";
+    return {
+      key: i.key,
+      factory: i.factory,
+      operation: p.operation,
+      state,
+      progress: p,
+    };
+  });
+  return {
+    operation: b.operation,
+    target: b.target,
+    target_name: shortOf(b.target),
+    running:
+      started && items.some((i) => !["active", "refused"].includes(i.state)),
+    cancelled: b.cancelled,
+    items,
+  };
 }
 
 function snapshotOf(n) {
@@ -355,6 +570,7 @@ async function api(req, res, url, n) {
     return send(res, 200, { candidates: state.candidates, at: now() });
   if (home && route === "/api/repos") return send(res, 200, state.repos ?? {});
   if (home && route.startsWith("/api/nodes")) return enroll(req, res, route);
+  if (route.startsWith("/api/transfers")) return transfers(req, res, route, n);
   if (route === "/api/push/subscription") {
     if (req.method === "POST") state.subscription = await body(req);
     if (req.method === "DELETE") state.subscription = null;

@@ -1,0 +1,22 @@
+ [1;38;2;192;202;245mTake csv over on macbook?[m                                                              
+                                                                                        
+ [38;2;224;175;104m! Forcing a takeover starts csv on macbook from the checkpoint homelab took at 11:40[m   
+ [38;2;224;175;104mon 16 Nov. The node that holds csv now may only be out of reach: it can keep running[m   
+ [38;2;224;175;104mcsv until it reconnects and learns it lost it, and work done after that checkpoint may[m 
+ [38;2;224;175;104mbe lost or diverge.[m                                                                    
+                                                                                        
+ [38;2;169;177;214mNothing changes until you press y.[m                                                     
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                [1;38;2;125;207;255my[m[38;2;169;177;214m  take csv over on macbook       [m[1;38;2;125;207;255mn[m[38;2;169;177;214m  cancel, the default[m                
