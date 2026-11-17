@@ -162,11 +162,19 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 		})
 	}
 	reviewing := workflowState()
+	reviewing.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
 	if err := dispatch(&reviewing, eventFor(reviewing, "result"), "review"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Next(reviewing, recipe(reviewing, "new-recipe")); err == nil {
 		t.Fatal("a changed recipe during review stranded the review result")
+	}
+	failed := eventFor(reviewing, "result")
+	failed.Stack = reviewing.Stack
+	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack}
+	retrying := step(t, reviewing, failed)
+	if _, err := Next(retrying, recipe(retrying, "new-recipe")); err == nil {
+		t.Fatal("a changed recipe under a review failure item stranded the retried review")
 	}
 }
 

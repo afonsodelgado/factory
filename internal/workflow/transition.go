@@ -96,10 +96,9 @@ func apply(s *state.State, e Event) error {
 		if e.Recipe == nil || e.Recipe.Digest == "" {
 			return errors.New("missing command recipe")
 		}
-		running := s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil
 		if s.Recipe.Digest != e.Recipe.Digest {
-			if running {
-				return errors.New("changed commands wait until the active run reports")
+			if !recipeChangeable(s) {
+				return errors.New("changed commands wait until no run or developer item is pending after implementation")
 			}
 			invalidate(s, e.At)
 		}
@@ -356,6 +355,15 @@ func designRevisable(s *state.State) bool {
 		return a.Kind == "gate" && (a.StageKey == "design" || a.StageKey == "plan")
 	})
 	return slices.Contains(s.PipelineStages, "design") && awaitingApproval
+}
+
+func recipeChangeable(s *state.State) bool {
+	if s.Stages["implement"].Rounds == 0 {
+		return true
+	}
+	running := s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil
+	resumesAStage := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind != "handoff" && a.Kind != "commands" })
+	return !running && !resumesAStage
 }
 
 func stranded(s *state.State) bool {
