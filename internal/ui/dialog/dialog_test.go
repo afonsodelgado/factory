@@ -53,7 +53,7 @@ func TestNewFactoryStartsWithThePickedPipeline(t *testing.T) {
 	tm := teatest.NewTestModel(t, NewFactory(context), teatest.WithInitialTermSize(88, 30), teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
 	tm.Type("ssrf-fix")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("2 of 3")) }, teatest.WithDuration(5*time.Second))
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("Stages & agents")) }, teatest.WithDuration(5*time.Second))
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	tm.Send(tea.PasteMsg{Content: "Block private addresses\x1b[106;5uin the webhook fetcher."})
