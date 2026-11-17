@@ -2,6 +2,7 @@ package recipe
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,31 @@ func TestResolutionPrefersExplicitFieldsThenRootOrchestrationAndNeverGuesses(t *
 	}
 	if len(r.Recipe.Unresolved) != 3 || r.Profile.Commands.Build != "" {
 		t.Fatal("ambiguous package manager guessed", r)
+	}
+}
+
+func TestALegacyWorktreeCopyNeverShadowsTheMainCheckoutConfig(t *testing.T) {
+	main := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"}, {"worktree", "add", "-q", worktree}} {
+		if out, err := exec.Command("git", append([]string{"-C", main}, args...)...).CombinedOutput(); err != nil {
+			t.Fatal(string(out), err)
+		}
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(main, ".factory", "config.yml"), "commands:\n  test: make main-test\n")
+	write(filepath.Join(worktree, ".claude", "factory.yml"), "commands:\n  test: make legacy-test\n  lint: make legacy-lint\n")
+	r, err := Resolve(worktree)
+	if err != nil || r.Profile.Commands.Test != "make main-test" || r.Profile.Commands.Lint != "make legacy-lint" {
+		t.Fatal("a stale legacy copy in the worktree overrode the main checkout's config", r.Profile.Commands, err)
 	}
 }
 

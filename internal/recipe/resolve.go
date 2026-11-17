@@ -39,14 +39,19 @@ func Resolve(root string) (Resolution, error) {
 		}
 		return data, err
 	}
-	paths := []string{}
+	checkouts := []string{root}
 	if out, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
-		main := filepath.Dir(strings.TrimSpace(string(out)))
-		if main != root {
-			paths = append(paths, state.LegacyProfilePath(main), state.RepoConfigPath(main))
+		if main := filepath.Dir(strings.TrimSpace(string(out))); main != root {
+			checkouts = []string{main, root}
 		}
 	}
-	paths = append(paths, state.LegacyProfilePath(root), state.RepoConfigPath(root))
+	paths := []string{}
+	for _, dir := range checkouts {
+		paths = append(paths, state.LegacyProfilePath(dir))
+	}
+	for _, dir := range checkouts {
+		paths = append(paths, state.RepoConfigPath(dir))
+	}
 	merged := map[string]any{}
 	sources := map[string]string{}
 	for _, path := range paths {
