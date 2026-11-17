@@ -20,7 +20,7 @@ func TestResolutionPrefersExplicitFieldsThenRootOrchestrationAndNeverGuesses(t *
 		}
 	}
 	write(".factory/config.yml", "commands:\n  lint: custom-lint\n")
-	write("Makefile", "build:\n\techo build\ntest:\n\techo test\n")
+	write("Makefile", "build lint test:\n\techo passed\n")
 	write("go.mod", "module example\n")
 	write("package.json", `{"scripts":{"build":"vite build","test":"vitest"},"packageManager":"pnpm@10.33.0"}`)
 	r, err := Resolve(root)
@@ -65,5 +65,20 @@ func TestCIWorkingDirectoryAndIncompleteBrowserRecipeAreExplicit(t *testing.T) {
 	}
 	if r.Recipe.Commands["test"].Directory != filepath.Join(root, "server") || r.Profile.Commands.Lint != "" || len(r.Recipe.Unresolved) != 6 {
 		t.Fatal(r)
+	}
+}
+
+func TestConflictingBrowserEndpointsRemainQuestions(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".factory"), 0755)
+	os.WriteFile(filepath.Join(root, ".factory/config.yml"), []byte("qa: {mode: browser, start: serve, seed: 'true', sign_in: 'true'}\n"), 0644)
+	os.WriteFile(filepath.Join(root, "playwright.config.ts"), []byte("baseURL: 'http://localhost:3000', webServer: {url: 'http://localhost:3000/health'}"), 0644)
+	os.WriteFile(filepath.Join(root, "playwright.config.js"), []byte("baseURL: 'http://localhost:4000', webServer: {url: 'http://localhost:4000/health'}"), 0644)
+	r, err := Resolve(root)
+	if err != nil || r.Profile.QA.URL != "" || r.Profile.QA.Health != "" {
+		t.Fatal(r, err)
+	}
+	if !strings.Contains(strings.Join(r.Recipe.Unresolved, " "), "qa.url:") {
+		t.Fatal(r.Recipe)
 	}
 }

@@ -157,6 +157,7 @@ func Resolve(root string) (Resolution, error) {
 			put(r.Recipe.QA, "start", manager+" run "+key, "package.json:scripts."+key, root)
 		}
 	}
+	endpoints := map[string][]state.Command{}
 	for _, name := range []string{"playwright.config.ts", "playwright.config.js", "playwright.config.mjs"} {
 		data, err := read(filepath.Join(root, name))
 		if err != nil {
@@ -167,9 +168,17 @@ func Resolve(root string) (Resolution, error) {
 				continue
 			}
 			matches := regexp.MustCompile(pattern).FindAllSubmatch(data, -1)
-			if len(matches) == 1 {
-				put(r.Recipe.QA, key, string(matches[0][1]), name+":"+key, root)
+			for _, match := range matches {
+				command := string(match[1])
+				if !slices.ContainsFunc(endpoints[key], func(c state.Command) bool { return c.Command == command }) {
+					endpoints[key] = append(endpoints[key], state.Command{Command: command, Source: name + ":" + key, Directory: root})
+				}
 			}
+		}
+	}
+	for key, candidates := range endpoints {
+		if len(candidates) == 1 {
+			r.Recipe.QA[key] = candidates[0]
 		}
 	}
 	r.Profile.QA.URL = r.Recipe.QA["url"].Command
@@ -209,7 +218,7 @@ func merge(dst, src map[string]any, prefix, path string, sources map[string]stri
 }
 
 func target(data []byte, name string) bool {
-	return regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(name) + `\s*:(?:[^=]|$)`).Match(data)
+	return regexp.MustCompile(`(?m)^(?:[A-Za-z0-9_.-]+[ \t]+)*` + regexp.QuoteMeta(name) + `(?:[ \t]+[A-Za-z0-9_.-]+)*[ \t]*:(?:[^=]|$)`).Match(data)
 }
 
 func ciCommands(root string, read func(string) ([]byte, error)) (map[string][]state.Command, error) {
@@ -224,12 +233,14 @@ func ciCommands(root string, read func(string) ([]byte, error)) (map[string][]st
 			return nil, err
 		}
 		var config struct {
+			Env      map[string]any `yaml:"env"`
 			Defaults struct {
 				Run struct {
 					Directory string `yaml:"working-directory"`
 				}
 			} `yaml:"defaults"`
 			Jobs map[string]struct {
+				Env      map[string]any `yaml:"env"`
 				Defaults struct {
 					Run struct {
 						Directory string `yaml:"working-directory"`
@@ -248,7 +259,7 @@ func ciCommands(root string, read func(string) ([]byte, error)) (map[string][]st
 		for jobName, job := range config.Jobs {
 			for _, step := range job.Steps {
 				command := strings.TrimSpace(step.Run)
-				if command == "" || len(step.Env) > 0 || strings.ContainsAny(command, "\n\r$;&|`<>") {
+				if command == "" || len(step.Env) > 0 || len(job.Env) > 0 || len(config.Env) > 0 || strings.ContainsAny(command, "\n\r$;&|`<>") {
 					continue
 				}
 				key := ""
