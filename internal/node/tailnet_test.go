@@ -2572,3 +2572,57 @@ func TestAMoveRefusesFilesystemAliasesOfAnotherFactoryBeforeRelease(t *testing.T
 func TestAMoveRefusesAnOccupiedSlugBeforeReleasingTheSource(t *testing.T) {
 	assertOccupiedMovePreserved(t, "csv", "csv", false)
 }
+
+func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *testing.T) {
+	f := newMoveFixture(t)
+	worktree := filepath.Join(factory.WorktreesDir(f.g.repo), "zeta")
+	f.g.run(f.g.repo, "worktree", "move", f.g.worktree, worktree)
+	f.csv.Key, f.csv.Slug, f.csv.Worktree = state.Key(f.g.repo, "zeta"), "zeta", worktree
+	f.csv.Dir = filepath.Join(worktree, ".claude", "factory", "csv")
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"before the move"}`})
+	writeFiles(t, filepath.Join(f.g.repo, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	f.mac = newMoveHost("macbook", f.log, f.csv)
+	f.macbook.Runtime.Behind(f.mac)
+	f.moveToHomelab(t)
+	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	writeFiles(t, filepath.Join(clone, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	found := factory.Discover([]string{clone}, &state.Registry{})
+	if len(found) != 1 || found[0].State == nil {
+		t.Fatalf("target discovery: %+v", found)
+	}
+	current := found[0]
+	if current.ID != "csv" {
+		t.Errorf("the factory id became its folder name: %s", current.ID)
+	}
+	writeFiles(t, current.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"after work on homelab"}`})
+	f.lab.set(func(h *moveHost) {
+		m := h.factories[current.Key()]
+		m.ID, m.Dir, m.Branch = "csv", current.Dir, "worktree-csv"
+		h.factories[current.Key()] = m
+	})
+	f.homelab.SetRepos(map[string]string{appRemote: clone})
+	moved, err := f.homelab.Transfers.Move(context.Background(), uuid.NewString(), current.Key(), "macbook")
+	if err != nil || moved.Phase != node.PhaseActive {
+		t.Fatalf("return move: %+v, %v", moved, err)
+	}
+	found = factory.Discover([]string{f.g.repo}, &state.Registry{})
+	if len(found) != 1 || found[0].State == nil || found[0].State.WaitingOn != "after work on homelab" || found[0].Dir != f.csv.Dir {
+		t.Fatalf("returned checkpoint was shadowed by stale state: %+v", found)
+	}
+}
+
+func TestAMovedLegacyFactoryUsesTheTargetsWorktree(t *testing.T) {
+	f := newMoveFixture(t)
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": fmt.Sprintf(`{"id":"csv","branch":"worktree-csv","worktree":%q,"unknown_future_field":{"keep":true}}`, f.csv.Worktree)})
+	f.moveToHomelab(t)
+	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	found := factory.Discover([]string{clone}, &state.Registry{})
+	want := filepath.Join(factory.WorktreesDir(clone), "csv")
+	if len(found) != 1 || found[0].Worktree != want || found[0].State.Worktree != want {
+		t.Fatalf("legacy state points outside target worktree: %+v; want %s", found, want)
+	}
+	data, err := os.ReadFile(filepath.Join(found[0].Dir, "state.json"))
+	if err != nil || !strings.Contains(string(data), "unknown_future_field") {
+		t.Fatalf("rewriting the path lost state: %s, %v", data, err)
+	}
+}

@@ -306,7 +306,7 @@ func (ts *Transfers) materialize(ctx context.Context, m Manifest, repo, worktree
 	if err := ts.host(ctx, "adopt", host.AdoptRequest{Repo: repo, Slug: m.Slug, Incarnation: m.Incarnation}, &key); err != nil {
 		return "", err
 	}
-	if err := unpack(StagedDir(ts.StateDir, m.Incarnation), worktree, repo, m.Slug); err != nil {
+	if err := unpack(StagedDir(ts.StateDir, m.Incarnation), worktree, repo, m); err != nil {
 		return "", err
 	}
 	return key, ts.host(ctx, "launch-moved", map[string]string{"Key": key}, nil)
@@ -332,14 +332,17 @@ func checkout(ctx context.Context, repo, worktree string, m Manifest) error {
 	return err
 }
 
-func unpack(staged, worktree, repo, slug string) error {
-	if filepath.Base(slug) != slug || slug == "." || slug == ".." {
-		return fmt.Errorf("the checkpoint names %q, which is not a factory folder", slug)
+func unpack(staged, worktree, repo string, m Manifest) error {
+	if err := validateSlug(m.Slug); err != nil {
+		return err
+	}
+	if m.Factory == "" || factory.Slugify(m.Factory) != strings.ToLower(m.Factory) {
+		return fmt.Errorf("checkpoint factory %q is not a factory id", m.Factory)
 	}
 	files := filepath.Join(staged, "files")
 	places := map[string]string{
-		RootFactory:  filepath.Join(worktree, ".claude", "factory", slug),
-		RootEvidence: filepath.Join(worktree, ".claude", "qa", slug),
+		RootFactory:  filepath.Join(worktree, ".claude", "factory", m.Factory),
+		RootEvidence: filepath.Join(worktree, ".claude", "qa", m.Slug),
 	}
 	written := map[string]bool{}
 	err := filepath.WalkDir(files, func(full string, d fs.DirEntry, err error) error {
@@ -355,6 +358,22 @@ func unpack(staged, worktree, repo, slug string) error {
 		data, err := os.ReadFile(full)
 		if err != nil {
 			return err
+		}
+		if filepath.ToSlash(rel) == RootFactory+"/state.json" {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				return err
+			}
+			if _, legacy := fields["worktree"]; legacy {
+				fields["worktree"], err = json.Marshal(worktree)
+				if err != nil {
+					return err
+				}
+				data, err = json.MarshalIndent(fields, "", "  ")
+				if err != nil {
+					return err
+				}
+			}
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
