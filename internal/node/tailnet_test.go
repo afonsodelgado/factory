@@ -1869,6 +1869,7 @@ type moveHost struct {
 	waiting      string
 	onCheckpoint func()
 	onRelease    func()
+	onAdopt      func()
 }
 
 func newMoveHost(name string, log *hostLog, factories ...host.Movable) *moveHost {
@@ -1946,6 +1947,8 @@ func (h *moveHost) handle(m host.Message) (any, func(), error) {
 		delete(h.factories, key)
 		h.log.add(h.name + " release " + r.Slug)
 		return nil, h.onRelease, nil
+	case "can-adopt":
+		return nil, h.onAdopt, nil
 	case "adopt":
 		var adopt host.AdoptRequest
 		json.Unmarshal(m.Data, &adopt)
@@ -2091,6 +2094,26 @@ func TestAMoveInterruptedAtEachStepResumesAndNeverRunsTheFactoryInTwoPlaces(t *t
 	moved := filepath.Join(factory.WorktreesDir(gitclone.Dir(f.homelab.Dir, appRemote)), "csv", ".claude", "factory", "csv", "brief.md")
 	if brief, err := os.ReadFile(moved); err != nil || string(brief) != "Export contacts as CSV." {
 		t.Errorf("homelab's worktree holds %q, %v; want the checkpointed factory folder", brief, err)
+	}
+}
+
+func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *testing.T) {
+	f := newMoveFixture(t)
+	bare := f.g.run(f.g.repo, "ls-remote", "--get-url", "origin")
+	away := bare + ".away"
+	f.lab.set(func(h *moveHost) {
+		h.onAdopt = func() { os.Rename(bare, away) }
+	})
+	op, key, background := uuid.NewString(), f.csv.Key, context.Background()
+	if _, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err == nil {
+		t.Fatal("a move whose target lost its git remote mid-takeover reported success")
+	}
+	if err := os.Rename(away, bare); err != nil {
+		t.Fatal(err)
+	}
+	f.lab.set(func(h *moveHost) { h.onAdopt = nil })
+	if moved, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
+		t.Fatalf("retrying once git was back answered %+v, %v; want the move finished", moved, err)
 	}
 }
 

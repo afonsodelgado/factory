@@ -192,6 +192,9 @@ func (hs *Holders) git(ctx context.Context, stdin string, args ...string) (strin
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=factory", "GIT_AUTHOR_EMAIL=factory@localhost", "GIT_COMMITTER_NAME=factory", "GIT_COMMITTER_EMAIL=factory@localhost")
 	out, err := cmd.Output()
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return "", fmt.Errorf("git %s: %w", args[0], ctxErr)
+	}
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w", args[0], err)
 	}

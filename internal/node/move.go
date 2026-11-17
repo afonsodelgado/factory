@@ -97,9 +97,28 @@ func (ts *Transfers) acknowledged(t Transfer) (Transfer, error) {
 func (ts *Transfers) host(ctx context.Context, kind string, payload, into any) error {
 	answer, err := ts.call(ctx, kind, "", payload, into)
 	if err == nil && answer.T != "done" {
-		err = errors.New(answer.Error)
+		err = declined{errors.New(answer.Error)}
 	}
 	return err
+}
+
+type declined struct{ error }
+
+func (d declined) Unwrap() error { return d.error }
+
+func declinedf(format string, args ...any) error {
+	return declined{fmt.Errorf(format, args...)}
+}
+
+func (ts *Transfers) settle(t Transfer, err error) (Transfer, error) {
+	var changed HolderChanged
+	switch {
+	case interrupted(err):
+		return t, err
+	case errors.As(err, &declined{}), errors.As(err, &changed):
+		return ts.refused(t, err)
+	}
+	return ts.failed(t, err)
 }
 
 func (ts *Transfers) Activate(ctx context.Context, a HandOver) (Transfer, error) {
@@ -150,10 +169,10 @@ func (ts *Transfers) takeOver(ctx context.Context, t Transfer, m Manifest) (Tran
 			return ts.failed(t, err)
 		}
 		if err := ts.ready(ctx, repo, worktree, m); err != nil {
-			return ts.refused(t, err)
+			return ts.settle(t, err)
 		}
 		if t.Generation, err = ts.claim(ctx, t, m); err != nil {
-			return ts.refused(t, ts.named(err))
+			return ts.settle(t, ts.named(err))
 		}
 		if t, err = ts.record(t, PhaseReleased); err != nil {
 			return t, err
@@ -184,14 +203,14 @@ func (ts *Transfers) supersede(t Transfer) {
 func (ts *Transfers) ready(ctx context.Context, repo, worktree string, m Manifest) error {
 	branch, head, err := checkedOut(m)
 	if err != nil {
-		return err
+		return declined{err}
 	}
 	for _, b := range m.Stack {
 		if _, err := gitclone.Git(ctx, repo, "cat-file", "-e", b.SHA+"^{commit}"); err != nil {
-			return fmt.Errorf("%s at %s is not on the git remote; a node takes over only pushed branches", b.Branch, b.SHA)
+			return declinedf("%s at %s is not on the git remote; a node takes over only pushed branches", b.Branch, b.SHA)
 		}
 		if local, err := gitclone.Git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+b.Branch); err == nil && !replaceable(ctx, repo, local, b.SHA) {
-			return fmt.Errorf("branch %s here has commits the checkpoint does not hold and no git remote has; push or remove them first", b.Branch)
+			return declinedf("branch %s here has commits the checkpoint does not hold and no git remote has; push or remove them first", b.Branch)
 		}
 	}
 	if err := ts.host(ctx, "can-adopt", host.AdoptRequest{Repo: repo, Slug: m.Slug, Incarnation: m.Incarnation}, nil); err != nil {
@@ -201,11 +220,18 @@ func (ts *Transfers) ready(ctx context.Context, repo, worktree string, m Manifes
 		return nil
 	}
 	dirty, err := dirtyProductFiles(ctx, worktree)
-	if err != nil || len(dirty) > 0 {
-		return cmp.Or(err, fmt.Errorf("%s here has uncommitted changes in %s that the checkpoint of %s would overwrite; commit or remove them first", worktree, strings.Join(dirty, ", "), branch))
+	if err != nil {
+		return err
 	}
-	if current, err := gitclone.Git(ctx, worktree, "rev-parse", "HEAD"); err != nil || !replaceable(ctx, repo, current, head) {
-		return cmp.Or(err, fmt.Errorf("%s here has commits the checkpoint does not hold and no git remote has; push or remove them first", worktree))
+	if len(dirty) > 0 {
+		return declinedf("%s here has uncommitted changes in %s that the checkpoint of %s would overwrite; commit or remove them first", worktree, strings.Join(dirty, ", "), branch)
+	}
+	current, err := gitclone.Git(ctx, worktree, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if !replaceable(ctx, repo, current, head) {
+		return declinedf("%s here has commits the checkpoint does not hold and no git remote has; push or remove them first", worktree)
 	}
 	return nil
 }
@@ -235,7 +261,7 @@ func (ts *Transfers) named(err error) error {
 	if !errors.As(err, &changed) || changed.Now.Node == "" {
 		return err
 	}
-	return fmt.Errorf("%s claimed this factory first, at generation %d", ts.nodeName(changed.Now.Node), changed.Now.Generation)
+	return declinedf("%s claimed this factory first, at generation %d", ts.nodeName(changed.Now.Node), changed.Now.Generation)
 }
 
 func (ts *Transfers) repoFor(ctx context.Context, gitURL string) (string, error) {
