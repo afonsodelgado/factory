@@ -3,6 +3,7 @@ package hub
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,14 @@ func (n *testNode) present(s Snapshot) presentationMsg {
 	n.r.QueueInbox()
 	n.r.FlushTypeQueue()
 	n.r.CloseFinishedStages()
-	return presentationMsg(n.r.Presentation())
+	return overTheSocket(n.r.Presentation())
+}
+
+func overTheSocket(p host.Presentation) presentationMsg {
+	data, _ := json.Marshal(p)
+	var copied host.Presentation
+	json.Unmarshal(data, &copied)
+	return presentationMsg(copied)
 }
 
 func (n *testNode) show(m *Model, s Snapshot) {
