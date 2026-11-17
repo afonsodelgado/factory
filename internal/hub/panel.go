@@ -15,6 +15,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -46,7 +47,7 @@ const repeatWindow = time.Second
 func (m *Model) clearRefusals() {
 	open := map[string]bool{}
 	for _, it := range m.snap.Items {
-		for _, item := range attentionItems(it, m.snap.At, nil) {
+		for _, item := range m.attentionItems(it, nil) {
 			open[draftKey(it.Factory, item.ID)] = item.ID != ""
 		}
 	}
@@ -58,15 +59,23 @@ func (m *Model) clearRefusals() {
 }
 
 func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled) {
-	for _, item := range attentionItems(it, m.snap.At, m.threadCounter(it.Factory)) {
-		mark, sent := m.claim(draftKey(it.Factory, item.ID))
+	for _, item := range m.attentionItems(it, m.threadCounter(it.Factory)) {
+		delivery, sent := m.delivery(it, item)
 		if item.ID == "" || !sent {
 			shown = append(shown, item)
 			continue
 		}
-		settled = append(settled, panel.Settled{ID: item.ID, State: progress(mark)})
+		settled = append(settled, panel.Settled{ID: item.ID, State: delivery})
 	}
 	return shown, settled
+}
+
+func (m *Model) delivery(it Item, item panel.Item) (panel.Progress, bool) {
+	if it.Factory.OnNode() {
+		return m.sentToNode(it, item)
+	}
+	mark, sent := m.claim(draftKey(it.Factory, item.ID))
+	return progress(mark), sent
 }
 
 func progress(s sentMark) panel.Progress {
@@ -113,8 +122,11 @@ func newPanelState() panelState {
 	}
 }
 
-func attentionItems(it Item, now time.Time, counter threadCounter) []panel.Item {
-	return host.AttentionItems(it, now, counter)
+func (m *Model) attentionItems(it Item, counter threadCounter) []panel.Item {
+	if it.Factory.OnNode() {
+		return m.nodeAttention(it)
+	}
+	return host.AttentionItems(it, m.snap.At, counter)
 }
 
 type threadCounter = host.ThreadCounter
@@ -225,16 +237,20 @@ func (m *Model) target(it Item) Target {
 }
 
 func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
-	action = hostAction(item, action)
-	text := d.Text
-	if action == host.ActApprove {
-		text = m.gateNotes(item, d)
+	r := m.answerBody(item, d, action)
+	return host.ActionText(item, r.Action, r.Answers, r.Text)
+}
+
+func (m *Model) answerBody(item panel.Item, d *panel.Draft, action string) node.ActionBody {
+	r := node.ActionBody{Action: hostAction(item, action), Item: item.ID, Since: item.Since, Text: d.Text}
+	if r.Action == host.ActApprove {
+		r.Text = m.gateNotes(item, d)
 	}
-	answers := make([]string, len(item.Questions))
+	r.Answers = make([]string, len(item.Questions))
 	for i, q := range item.Questions {
-		answers[i] = d.Answer(q, i)
+		r.Answers[i] = d.Answer(q, i)
 	}
-	return host.ActionText(item, action, answers, text)
+	return r
 }
 
 func hostAction(item panel.Item, action string) string {
@@ -288,10 +304,14 @@ func (m *Model) deliver(action string) {
 	}
 	delete(m.panel.refused, key)
 	m.saveDraft()
+	m.panel.press = lastPress{key: key, at: m.Now()}
+	if it.Factory.OnNode() {
+		m.answerOnNode(it, m.answerBody(item, d, action))
+		return
+	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
 	mark := sentMark{ItemSince: item.Since, Factory: it.Factory.Key(), ItemID: item.ID, Head: state.PromptHead(text), Draft: m.draftPath(it.Factory, item.ID), Source: host.SourceHub, Action: hostAction(item, action)}
 	mark.LeavesOpen = item.Kind == "gate" && action == "changes"
-	m.panel.press = lastPress{key: key, at: m.Now()}
 	if remote {
 		m.deliverRemote(it, mark, text)
 		return
@@ -385,6 +405,11 @@ func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	}
 	t := m.target(it)
 	s.Preview = factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, "approve"))
+	if it.Factory.OnNode() {
+		e := m.nodeSendable(it, item)
+		s.Ready, s.Reason = e.Ready, e.Reason
+		return s
+	}
 	if it.Factory.Remote != nil && unqueueable(t) == "" && Refusal(t) != "" {
 		s.Reason = Refusal(t) + " Send it once it is at its prompt."
 		return s
@@ -852,10 +877,12 @@ func (m *Model) alert(previous map[string]factory.Status) {
 	for _, it := range m.snap.Items {
 		key := it.Factory.Key()
 		was, known := previous[key]
-		if !known || was == factory.NeedsYou || it.Status != factory.NeedsYou || key == m.selected || it.Factory.Remote != nil {
+		legacyRemote := it.Factory.Remote != nil && !it.Factory.OnNode()
+		backFromOutage := was == factory.Unreachable
+		if !known || was == factory.NeedsYou || backFromOutage || it.Status != factory.NeedsYou || key == m.selected || legacyRemote {
 			continue
 		}
-		label := it.Factory.Label()
+		label := it.Factory.Placed()
 		if m.Config.Alerts.Bell && m.Bell != nil {
 			m.Bell.Write([]byte("\a"))
 		}

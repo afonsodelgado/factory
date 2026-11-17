@@ -6,6 +6,10 @@ export type Look = { glyph: string; tone: Tone };
 
 export const hostName = () => location.hostname.split(".")[0] || "the computer";
 
+export const shortName = (name: string) => name.split(".")[0];
+
+export const originOf = (name: string) => `${location.protocol}//${name}`;
+
 export function clock(iso: string | undefined): string {
   if (!iso) return "";
   return new Date(iso).toLocaleTimeString([], {

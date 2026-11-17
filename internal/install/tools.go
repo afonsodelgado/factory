@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -349,4 +351,96 @@ func dialPushService(ctx context.Context, address string) error {
 		conn.Close()
 	}
 	return err
+}
+
+func Readiness(o Options, origins map[string]string, scope node.Scope) []node.Probe {
+	probe := func(name string, run func(context.Context) []Check) node.Probe {
+		return node.Probe{Name: name, Run: func(ctx context.Context) node.Check { return combined(name, run(ctx)) }}
+	}
+	remotes := slices.Sorted(maps.Keys(origins))
+	for _, url := range scope.Wanted {
+		if _, cloned := origins[url]; !cloned {
+			remotes = append(remotes, url)
+		}
+	}
+	probes := []node.Probe{
+		probe("tools", func(context.Context) []Check {
+			return []Check{tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")), tool("git", "2.31", "git", []string{"--version"}, installCommand("git")), ghCheck(), ghStack(), browserQA(o)}
+		}),
+		probe("claude", func(context.Context) []Check {
+			return []Check{tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"), claudeLogin(o)}
+		}),
+		probe("git access", func(ctx context.Context) []Check {
+			var checks []Check
+			for _, url := range remotes {
+				checks = append(checks, gitAccess(ctx, url))
+			}
+			return checks
+		}),
+	}
+	if scope.Repo == "" {
+		probes = append(probes, probe("repos", func(context.Context) []Check { return cloned(o.Repos, origins, scope.Wanted) }))
+	}
+	if o.Config == nil {
+		return probes
+	}
+	if repos, ok := toolsInUse(o)[state.ToolCodex]; ok {
+		probes = append(probes, probe("codex", func(context.Context) []Check { return codexChecks(o, repos) }))
+	}
+	return probes
+}
+
+func cloned(repos []string, origins map[string]string, wanted []string) []Check {
+	var checks []Check
+	for _, repo := range repos {
+		name := filepath.Base(repo)
+		if dirExists(repo) {
+			checks = append(checks, Check{Mark: Pass, Detail: name + " at " + tilde(repo)})
+		} else {
+			checks = append(checks, Check{Mark: Warn, Detail: name + " is missing at " + tilde(repo)})
+		}
+	}
+	for _, url := range wanted {
+		if _, ok := origins[url]; !ok {
+			name := strings.TrimSuffix(path.Base(url), ".git")
+			checks = append(checks, Check{Mark: Warn, Detail: name + " not cloned yet; c clones it with this machine's git login, or it clones when a factory first starts or moves here"})
+		}
+	}
+	return checks
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+var markRank = map[Mark]int{Skip: 0, Pass: 1, Warn: 2, Fail: 3}
+
+var nodeMarks = map[Mark]string{Pass: node.MarkOK, Warn: node.MarkWarn, Fail: node.MarkFail, Skip: node.MarkSkip}
+
+func combined(name string, checks []Check) node.Check {
+	worst := Skip
+	var details, lines []string
+	fix := ""
+	for _, c := range checks {
+		if markRank[c.Mark] > markRank[worst] {
+			worst = c.Mark
+		}
+		label := c.Name
+		if label == name {
+			label = ""
+		}
+		detail := strings.TrimSpace(label + " " + c.Detail)
+		if c.Mark != Skip && detail != "" {
+			details = append(details, detail)
+		}
+		lines = append(lines, c.Lines...)
+		if c.Mark == Fail && fix == "" {
+			fix = c.Fix
+		}
+	}
+	if len(details) == 0 {
+		details = []string{"nothing to check here yet"}
+	}
+	return node.Check{Name: name, Mark: nodeMarks[worst], Detail: strings.Join(details, " · "), Fix: fix, Lines: lines}
 }

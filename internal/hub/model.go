@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
@@ -38,6 +40,8 @@ type Model struct {
 	Watch   *Watcher
 	Open    func(url string)
 	Tunnels *remote.Tunnels
+	Roster  func(context.Context) (node.Roster, error)
+	Peers   func(name string) *node.Client
 
 	DialogCommand func(kind string) string
 	Bell          io.Writer
@@ -86,6 +90,11 @@ type Model struct {
 	parked        map[string]bool
 	confirmedWork string
 	wanted        string
+	roster        *node.Roster
+	nodes         map[string]*nodeLink
+	nodeFeed      chan nodeMsg
+	nodeFactories map[string]host.LocalFactory
+	nodeSends     map[string]nodeSend
 }
 
 type pollMsg struct{}
@@ -123,6 +132,9 @@ func NewModel(m Model) *Model {
 	model.share = PanelShare
 	model.panel = newPanelState()
 	model.dialogs = map[string]json.RawMessage{}
+	model.nodes = map[string]*nodeLink{}
+	model.nodeFeed = make(chan nodeMsg, 64)
+	model.nodeSends = map[string]nodeSend{}
 	if model.Now == nil {
 		model.Now = time.Now
 	}
@@ -137,7 +149,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.refreshCatalog(), m.pollRemotes())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.refreshCatalog(), m.pollRemotes(), m.pollRoster(), m.waitNodes())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -232,7 +244,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nodeLostMsg:
 		m.notice = problem("The factory node is not answering, so this list is not updating: " + msg.err.Error() + ". Check factory node run.")
 	case pollMsg:
-		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes())
+		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes(), m.pollRoster())
+	case rosterMsg:
+		m.rosterArrived(msg)
+	case nodeMsg:
+		m.nodeArrived(msg)
+		cmd = m.waitNodes()
+	case nodeAnsweredMsg:
+		m.nodeAnswered(msg)
+	case nodeRemovalMsg:
+		cmd = m.nodeRemovalArrived(msg)
 	case remoteMsg:
 		cmd = m.remoteArrived(msg)
 	case attachedMsg:
@@ -286,7 +307,7 @@ func (m *Model) apply(s Snapshot) {
 
 func (m *Model) refresh() {
 	s := m.local
-	s.Items = append(slices.Clone(s.Items), m.remoteItems()...)
+	s.Items = slices.Concat(s.Items, m.remoteItems(), m.nodeItems())
 	starting := m.selected == ""
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
@@ -296,6 +317,7 @@ func (m *Model) refresh() {
 	}
 	m.clearRefusals()
 	m.settleRemoteClaims()
+	m.settleNodeSends()
 	m.settle()
 	m.alert(m.statuses)
 	m.statuses = map[string]factory.Status{}
@@ -445,7 +467,10 @@ func (m *Model) showSelected() {
 		target = it.Pane.ID
 	}
 	stage := m.shownStage(it, ok && target != m.slotViewer())
-	if ok && it.Factory.Remote != nil {
+	switch {
+	case ok && it.Factory.OnNode():
+		target, stage = m.nodeTargets(it)
+	case ok && it.Factory.Remote != nil:
 		target, stage = m.remoteTargets(it)
 	}
 	if target == m.Layout.Slot && stage == m.Layout.Stage {
@@ -551,7 +576,7 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 	case "P":
 		return m.openDialog("phone", struct{}{})
 	case "N":
-		return m.openDialog("nodes", struct{}{})
+		return m.openDialog("nodes", m.nodesContext())
 	case "p":
 		return m.askPause()
 	case "a":
@@ -640,7 +665,7 @@ func (m *Model) askPause() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
-	case it.Pane == nil && m.wires[it.Factory.Key()].Pane == nil:
+	case it.Pane == nil && m.wires[it.Factory.Key()].Pane == nil && m.nodeFactories[it.Factory.Key()].Pane == "":
 		m.notice = problem(it.Factory.Label() + " has no pane to pause.")
 		return nil
 	}
@@ -652,6 +677,8 @@ func (m *Model) askDelete() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
+	case it.Factory.OnNode():
+		return m.askNodeDelete(it)
 	case it.Factory.Remote != nil:
 		return m.askRemoteDelete(it)
 	}
@@ -835,8 +862,9 @@ func (m *Model) data() selector.Data {
 	var groups []selector.Group
 	byRepo := map[string]int{}
 	for _, repo := range m.Config.Repos {
-		byRepo[filepath.Base(repo)+"||"+tilde(repo)] = len(groups)
-		groups = append(groups, selector.Group{Name: filepath.Base(repo), Path: tilde(repo)})
+		group := selector.Group{Name: filepath.Base(repo), Path: tilde(repo)}
+		byRepo[groupKey(group)] = len(groups)
+		groups = append(groups, group)
 	}
 	var archived []selector.Row
 	for _, it := range m.snap.Items {
@@ -847,9 +875,9 @@ func (m *Model) data() selector.Data {
 			continue
 		}
 		group := m.groupOf(it.Factory)
-		i, ok := byRepo[group.Name+"|"+group.Remote+"|"+group.Path]
+		i, ok := byRepo[groupKey(group)]
 		if !ok {
-			byRepo[group.Name+"|"+group.Remote+"|"+group.Path] = len(groups)
+			byRepo[groupKey(group)] = len(groups)
 			groups = append(groups, group)
 			i = len(groups) - 1
 		}
@@ -864,6 +892,10 @@ func (m *Model) data() selector.Data {
 		Icons:        m.Icons,
 		Dim:          m.focus == footer.Dialog,
 	}
+}
+
+func groupKey(g selector.Group) string {
+	return g.Name + "|" + g.Remote + "|" + g.Path + "|" + g.Node
 }
 
 func (m *Model) row(it Item) selector.Row {
@@ -889,6 +921,10 @@ func (m *Model) row(it Item) selector.Row {
 	}
 	if f.Remote != nil && !f.Remote.Creating.IsZero() {
 		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
+	}
+	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
+		_, settled := m.shownItems(it)
+		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
 	}
 	return row
 }
@@ -970,7 +1006,7 @@ func (m *Model) Header() (string, string) {
 	ic := m.Icons
 	left := appBadge(ic)
 	if len(m.snap.Items) == 0 {
-		return left + " #[fg=#737aa2]no factories yet", m.linkLabels() + m.machineLabel()
+		return left + " #[fg=#737aa2]no factories yet", m.nodeLabels() + m.linkLabels() + m.machineLabel()
 	}
 	count := func(statuses ...factory.Status) int {
 		n := 0
@@ -1005,7 +1041,7 @@ func (m *Model) Header() (string, string) {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, m.linkLabels() + m.ghLabel() + m.machineLabel()
+	return left, m.nodeLabels() + m.linkLabels() + m.ghLabel() + m.machineLabel()
 }
 
 func (m *Model) machineLabel() string {
@@ -1162,6 +1198,8 @@ func (m *Model) SlotView(width, height int) string {
 	switch {
 	case !ok:
 		m.drawIntro(c)
+	case it.Factory.OnNode():
+		m.drawNode(c, it)
 	case it.Factory.Remote != nil:
 		m.drawRemote(c, it)
 	default:

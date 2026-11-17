@@ -9,7 +9,9 @@ const dist = path.join(here, "../dist");
 const overlay = path.join(here, "../../../bundle/review/overlay.js");
 const port = Number(process.argv[2] ?? 4324);
 const shellRoute =
-  /^\/(setup|phone|n\/[^/]+|f\/[^/]+(\/(pages|message|i\/[^/]+))?)?$/;
+  /^\/(setup|phone(\/(add(\/[^/]+)?|nodes\/[^/]+))?|n\/[^/]+|f\/[^/]+(\/(pages|message|i\/[^/]+))?)?$/;
+const homeHost = `127.0.0.1:${port}`;
+const homeOrigin = `http://${homeHost}`;
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
@@ -24,22 +26,53 @@ const types = {
 
 const owner = "afonso@example.com";
 let state;
-const streams = new Set();
 const reviewStreams = new Set();
 
-function reset() {
-  state = {
+function node(id) {
+  return {
+    id,
     mode: "up",
-    snapshot: { revision: 1, server_time: now(), factories: [] },
+    snapshot: { node: id, revision: 1, server_time: now(), factories: [] },
     receipts: {},
     actions: [],
     previews: [],
+    readiness: [],
+    streams: new Set(),
+  };
+}
+
+function reset() {
+  if (state) for (const n of [state, ...Object.values(state.peers)]) hangUp(n);
+  state = {
+    ...node("node-1"),
+    peers: {},
+    roster: null,
+    candidates: [],
+    reports: {},
+    enrollments: [],
     subscription: null,
     threads: [],
     next: 1,
     gate: "",
     grants: {},
   };
+}
+
+function hangUp(n) {
+  for (const res of n.streams) res.destroy();
+  n.streams.clear();
+}
+
+function nodeAt(host) {
+  if (host === homeHost) return state;
+  const member = state.roster?.members.find((m) => m.name === host);
+  if (!member) return undefined;
+  state.peers[host] ??= node(member.id);
+  return state.peers[host];
+}
+
+function snapshotOf(n) {
+  return state.roster ? { ...n.snapshot, roster: state.roster } : n.snapshot;
 }
 
 const now = () => new Date().toISOString();
@@ -56,6 +89,7 @@ function send(res, status, body, headers = {}) {
 function refused(req, res, url) {
   const login = req.headers["tailscale-user-login"] ?? owner;
   if (login === owner) return false;
+  const machine = req.headers.host.split(".")[0];
   const page =
     req.method === "GET" &&
     !url.pathname.startsWith("/api/") &&
@@ -63,7 +97,7 @@ function refused(req, res, url) {
   if (page) {
     res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
     res.end(
-      `<!doctype html><h1>This node answers ${owner} only</h1><p>Signed in as ${login}.</p><script>indexedDB.deleteDatabase("factory-phone")</script>`,
+      `<!doctype html><h1>${machine} answers ${owner} only</h1><p>This phone is signed in to Tailscale as ${login}.</p><script>indexedDB.deleteDatabase("factory-phone")</script>`,
     );
     return true;
   }
@@ -81,14 +115,47 @@ async function body(req) {
   return text ? JSON.parse(text) : {};
 }
 
-function publish() {
-  state.snapshot = {
-    ...state.snapshot,
-    revision: state.snapshot.revision + 1,
+function publish(n = state) {
+  n.snapshot = {
+    ...n.snapshot,
+    revision: n.snapshot.revision + 1,
     server_time: now(),
   };
-  const event = `event: snapshot\ndata: ${JSON.stringify(state.snapshot)}\n\n`;
-  for (const res of streams) res.write(event);
+  const event = `event: snapshot\ndata: ${JSON.stringify(snapshotOf(n))}\n\n`;
+  for (const res of n.streams) res.write(event);
+}
+
+function publishAll() {
+  for (const n of [state, ...Object.values(state.peers)]) publish(n);
+}
+
+function cors(req, res, url) {
+  const origin = req.headers.origin;
+  if (!origin || url.pathname.startsWith("/rt/")) return false;
+  res.setHeader("Vary", "Origin");
+  const allowed =
+    origin === `http://${req.headers.host}` || origin === homeOrigin;
+  const preflight =
+    req.method === "OPTIONS" && req.headers["access-control-request-method"];
+  if (allowed) res.setHeader("Access-Control-Allow-Origin", origin);
+  if (preflight && !allowed) {
+    res.writeHead(403).end();
+    return true;
+  }
+  if (preflight) {
+    res.writeHead(204, {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    res.end();
+    return true;
+  }
+  if (allowed || !url.pathname.startsWith("/api/")) return false;
+  send(res, 403, {
+    error:
+      "this node answers browser reads only from its own origin and the phone app's home",
+  });
+  return true;
 }
 
 function stream(req, res, set, first) {
@@ -193,25 +260,91 @@ async function review(req, res, key, rest, prefix = "") {
   send(res, 404, { error: "no such route" });
 }
 
-async function api(req, res, url) {
+function reportFor(name) {
+  return (
+    state.reports[name] ?? {
+      target: { name, short: name.split(".")[0] },
+      checks: [],
+      refusal: `no machine called ${name} is on this tailnet`,
+      problems: 0,
+      at: now(),
+    }
+  );
+}
+
+async function enroll(req, res, route) {
+  state.enrollments.push({
+    route,
+    host: req.headers.host,
+    origin: req.headers.origin,
+  });
+  if (req.headers.origin !== homeOrigin)
+    return send(res, 403, {
+      error: `changing the node list from a browser works only from the phone app at ${homeOrigin}`,
+    });
+  const request = await body(req);
+  if (route === "/api/nodes/check")
+    return send(res, 200, reportFor(request.name));
+  const removing = /^\/api\/nodes\/([^/]+)\/remove$/.exec(route);
+  if (removing && removing[1] === state.id)
+    return send(res, 409, {
+      error:
+        "this is the node you are talking to; run factory node uninstall on it instead",
+    });
+  if (removing) {
+    state.roster.members = state.roster.members.filter(
+      (m) => m.id !== removing[1],
+    );
+    publishAll();
+    return send(res, 200, state.roster);
+  }
+  const report = reportFor(request.name);
+  if (report.refusal) return send(res, 409, { error: report.refusal, report });
+  const member = {
+    id: `node-${state.roster.members.length + 1}`,
+    name: report.target.name,
+    owner,
+    tailnet: "localhost",
+    pending: 0,
+  };
+  state.roster.members.push(member);
+  publishAll();
+  send(res, 200, { member, report, roster: state.roster });
+}
+
+async function api(req, res, url, n) {
   const route = url.pathname;
+  const home = n === state;
   if (route === "/api/me") {
     return send(res, 200, {
       caller: owner,
-      node: "node-1",
+      node: n.id,
       version: "test",
       server_time: now(),
     });
   }
-  if (route === "/api/snapshot") return send(res, 200, state.snapshot);
+  if (route === "/api/snapshot") return send(res, 200, snapshotOf(n));
   if (route === "/api/events") {
     return stream(
       req,
       res,
-      streams,
-      `event: snapshot\ndata: ${JSON.stringify(state.snapshot)}\n\n`,
+      n.streams,
+      `event: snapshot\ndata: ${JSON.stringify(snapshotOf(n))}\n\n`,
     );
   }
+  if (route === "/api/readiness")
+    return send(res, 200, {
+      node: n.id,
+      at: now(),
+      checks: n.readiness,
+      problems: 0,
+    });
+  if (home && route === "/api/nodes" && req.method === "GET")
+    return send(res, 200, state.roster);
+  if (home && route === "/api/nodes/candidates")
+    return send(res, 200, { candidates: state.candidates, at: now() });
+  if (home && route === "/api/repos") return send(res, 200, state.repos ?? {});
+  if (home && route.startsWith("/api/nodes")) return enroll(req, res, route);
   if (route === "/api/push/subscription") {
     if (req.method === "POST") state.subscription = await body(req);
     if (req.method === "DELETE") state.subscription = null;
@@ -229,7 +362,7 @@ async function api(req, res, url) {
   }
   let match = /^\/api\/operations\/(.+)$/.exec(route);
   if (match) {
-    const receipt = state.receipts[match[1]];
+    const receipt = n.receipts[match[1]];
     return receipt
       ? send(res, 200, receipt)
       : send(res, 404, { error: "no such operation" });
@@ -239,28 +372,28 @@ async function api(req, res, url) {
     const request = await body(req);
     const key = decodeURIComponent(match[1]);
     if (match[2] === "preview") {
-      state.previews.push(request);
+      n.previews.push(request);
       return send(res, 200, {
         text: `preview: ${request.action} ${request.text ?? (request.answers ?? []).join(" | ")}`,
       });
     }
-    state.actions.push({ ...request, factory: key });
+    n.actions.push({ ...request, factory: key });
     const receipt = {
       operation: request.operation,
       factory: key,
       item: request.item,
       action: request.action,
-      status: state.nextStatus ?? "delivered",
-      reason: state.nextReason,
+      status: n.nextStatus ?? "delivered",
+      reason: n.nextReason,
       source: "phone",
       at: now(),
     };
-    state.receipts[request.operation] = receipt;
+    n.receipts[request.operation] = receipt;
     return send(res, 200, receipt);
   }
   match = /^\/api\/links\/(.+)$/.exec(route);
   if (match) {
-    for (const f of state.snapshot.factories) {
+    for (const f of n.snapshot.factories) {
       if (f.items.some((i) => i.key === match[1]))
         return send(res, 200, {
           route: f.route,
@@ -282,7 +415,13 @@ async function control(req, res, url) {
     return send(res, 200, {});
   }
   if (route === "/__test/state") {
-    Object.assign(state, await body(req));
+    const { roster, ...rest } = await body(req);
+    Object.assign(state, rest);
+    if (state.mode !== "up") hangUp(state);
+    if (roster !== undefined) {
+      state.roster = roster;
+      publishAll();
+    }
     if (state.snapshotFactories) {
       state.snapshot.factories = state.snapshotFactories;
       delete state.snapshotFactories;
@@ -290,7 +429,28 @@ async function control(req, res, url) {
     }
     return send(res, 200, {});
   }
-  if (route === "/__test/actions") return send(res, 200, state);
+  if (route === "/__test/node") {
+    const { name, factories, ...rest } = await body(req);
+    const n = nodeAt(name);
+    Object.assign(n, rest);
+    if (n.mode !== "up") hangUp(n);
+    if (factories) {
+      n.snapshot.factories = factories;
+      publish(n);
+    }
+    return send(res, 200, {});
+  }
+  if (route === "/__test/actions")
+    return send(res, 200, {
+      ...state,
+      streams: undefined,
+      peers: Object.fromEntries(
+        Object.entries(state.peers).map(([host, n]) => [
+          host,
+          { ...n, streams: undefined },
+        ]),
+      ),
+    });
   if (route === "/__test/change") {
     const { page: changed } = await body(req);
     for (const s of reviewStreams)
@@ -332,9 +492,16 @@ http
     try {
       if (url.pathname.startsWith("/__test/"))
         return await control(req, res, url);
-      if (state.mode === "node-down")
+      const n = nodeAt(req.headers.host);
+      if (!n || n.mode === "offline") return req.socket.destroy();
+      if (n.mode === "node-down")
         return send(res, 502, { error: "bad gateway" });
       if (refused(req, res, url)) return;
+      if (cors(req, res, url)) return;
+      if (n !== state)
+        return url.pathname.startsWith("/api/")
+          ? await api(req, res, url, n)
+          : send(res, 404, { error: "no such route" });
       if (state.mode === "funnel")
         return send(res, 403, {
           error:
@@ -342,7 +509,8 @@ http
           funnel: true,
           fixes: state.fixes,
         });
-      if (url.pathname.startsWith("/api/")) return await api(req, res, url);
+      if (url.pathname.startsWith("/api/"))
+        return await api(req, res, url, state);
       const granted = /^\/rt\/([^/]+)(\/.*)$/.exec(url.pathname);
       if (granted) return await sandboxed(req, res, granted[1], granted[2]);
       const reviewPath = /^\/r\/([^/]+)\/(.+)$/.exec(url.pathname);

@@ -1,13 +1,23 @@
 import type {
   ActionBody,
+  Added,
+  Candidate,
+  CheckReport,
   LocalFactory,
   Link,
   Exposure,
   Me,
   PushState,
+  Readiness,
   Receipt,
   Refusal,
+  Roster,
+  Snapshot,
 } from "./types.ts";
+
+const DEADLINE = 10_000;
+const RETRY = 15_000;
+const RECONNECT = 3_000;
 
 export type Reach =
   "online" | "offline" | "node-down" | "restarting" | "refused" | "funnel";
@@ -53,7 +63,12 @@ export function reachOf(error: unknown): Reach {
   return "online";
 }
 
-async function call<T>(method: string, path: string, body?: unknown) {
+async function call<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  deadline?: number,
+) {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -62,6 +77,7 @@ async function call<T>(method: string, path: string, body?: unknown) {
       credentials: "same-origin",
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: deadline ? AbortSignal.timeout(deadline) : undefined,
     });
   } catch {
     throw new HttpError(0, "Can't reach the computer.");
@@ -89,17 +105,49 @@ function parse(text: string): unknown {
 const factoryPath = (factory: LocalFactory, what: string) =>
   `/api/factories/${encodeURIComponent(factory.key)}/${what}`;
 
-export const api = {
-  me: () => call<Me>("GET", "/api/me"),
+export const nodeApi = (origin: string) => ({
+  me: () => call<Me>("GET", origin + "/api/me", undefined, DEADLINE),
   preview: (factory: LocalFactory, body: ActionBody) =>
-    call<{ text: string }>("POST", factoryPath(factory, "preview"), {
+    call<{ text: string }>("POST", origin + factoryPath(factory, "preview"), {
       ...body,
       incarnation: factory.incarnation,
     }),
   receipt: (operation: string) =>
-    call<Receipt>("GET", `/api/operations/${operation}`),
+    call<Receipt>("GET", `${origin}/api/operations/${operation}`),
   link: (key: string) =>
-    call<Link>("GET", `/api/links/${encodeURIComponent(key)}`),
+    call<Link>("GET", `${origin}/api/links/${encodeURIComponent(key)}`),
+  readiness: (repos: string[]) =>
+    call<Readiness>(
+      "GET",
+      `${origin}/api/readiness?${new URLSearchParams(repos.map((r) => ["repo", r]))}`,
+    ),
+  clone: (url: string) =>
+    call<{ repo: string }>("POST", origin + "/api/clone", {
+      operation: crypto.randomUUID(),
+      url,
+    }),
+});
+
+export const api = {
+  ...nodeApi(""),
+  roster: () => call<Roster>("GET", "/api/nodes"),
+  repos: () => call<Record<string, string> | null>("GET", "/api/repos"),
+  candidates: () =>
+    call<{ candidates: Candidate[] | null; at: string }>(
+      "GET",
+      "/api/nodes/candidates",
+    ),
+  check: (name: string) =>
+    call<CheckReport>("POST", "/api/nodes/check", { name }),
+  add: (name: string) =>
+    call<Added>("POST", "/api/nodes", {
+      operation: crypto.randomUUID(),
+      name,
+    }),
+  remove: (id: string) =>
+    call<Roster>("POST", `/api/nodes/${encodeURIComponent(id)}/remove`, {
+      operation: crypto.randomUUID(),
+    }),
   push: (installation: string) =>
     call<PushState>(
       "GET",
@@ -115,16 +163,21 @@ export const api = {
 };
 
 export async function act(
+  origin: string,
   factory: LocalFactory,
   operation: string,
   body: ActionBody,
 ): Promise<Receipt> {
   try {
-    return await call<Receipt>("POST", factoryPath(factory, "actions"), {
-      ...body,
-      operation,
-      incarnation: factory.incarnation,
-    });
+    return await call<Receipt>(
+      "POST",
+      origin + factoryPath(factory, "actions"),
+      {
+        ...body,
+        operation,
+        incarnation: factory.incarnation,
+      },
+    );
   } catch (error) {
     if (
       error instanceof HttpError &&
@@ -142,4 +195,62 @@ export async function act(
 
 function isReceipt(body: unknown): body is Receipt {
   return typeof body === "object" && body !== null && "status" in body;
+}
+
+export type Follow = {
+  up: (me: Me) => Promise<string | undefined>;
+  snapshot: (next: Snapshot) => void;
+  restarting: () => void;
+  down: (error: unknown) => Promise<boolean>;
+};
+
+export function follow(origin: string, on: Follow) {
+  let stream: EventSource | undefined;
+  let timer: number | undefined;
+  let closed = false;
+  const fail = async (error: unknown) => {
+    if (closed) return;
+    if ((await on.down(error)) && !closed)
+      timer = window.setTimeout(start, RETRY);
+  };
+  const start = async () => {
+    clearTimeout(timer);
+    stream?.close();
+    if (closed) return;
+    let me: Me;
+    try {
+      me = await nodeApi(origin).me();
+    } catch (error) {
+      return fail(error);
+    }
+    const installation = closed ? undefined : await on.up(me);
+    if (installation === undefined || closed) return;
+    const events = new EventSource(
+      `${origin}/api/events?installation=${encodeURIComponent(installation)}`,
+    );
+    stream = events;
+    events.addEventListener("snapshot", (event) =>
+      on.snapshot(JSON.parse((event as MessageEvent).data) as Snapshot),
+    );
+    events.addEventListener("unavailable", on.restarting);
+    events.onerror = () => {
+      events.close();
+      nodeApi(origin)
+        .me()
+        .then(() => {
+          if (closed) return;
+          on.restarting();
+          timer = window.setTimeout(start, RECONNECT);
+        }, fail);
+    };
+  };
+  start();
+  return {
+    retry: start,
+    close: () => {
+      closed = true;
+      clearTimeout(timer);
+      stream?.close();
+    },
+  };
 }

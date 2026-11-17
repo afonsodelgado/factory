@@ -31,6 +31,7 @@ type Group struct {
 	Name   string
 	Path   string
 	Remote string
+	Node   string
 	Link   string
 	Lost   string
 	Rows   []Row

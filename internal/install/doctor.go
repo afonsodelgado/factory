@@ -131,7 +131,7 @@ func Doctor(o Options) []Check {
 func ServerDoctor(o Options, gitURLs []string) []Check {
 	checks := []Check{claudeLogin(o)}
 	for _, url := range gitURLs {
-		checks = append(checks, gitAccess(url))
+		checks = append(checks, gitAccess(context.Background(), url))
 	}
 	return slices.DeleteFunc(doctor(o, append(checks, forwarding())...), func(c Check) bool { return c.Name == "repos" })
 }
@@ -317,14 +317,24 @@ func chromeBinary(configured string) (string, bool) {
 
 func claudeLogin(o Options) Check {
 	_, err := os.Stat(filepath.Join(o.ClaudeDir, ".credentials.json"))
-	if err == nil || os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
+	switch {
+	case err == nil || os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "":
 		return Check{Name: "claude login", Mark: Pass, Detail: "logged in"}
+	case runtime.GOOS == "darwin" && inKeychain("Claude Code-credentials"):
+		return Check{Name: "claude login", Mark: Pass, Detail: "logged in, in the keychain"}
+	case runtime.GOOS == "darwin":
+		return Check{Name: "claude login", Mark: Warn, Detail: "no login found in the keychain; if agents stop at the login screen, log in", Fix: "claude  then /login, and quit"}
 	}
 	return Check{Name: "claude login", Mark: Fail, Detail: "not logged in, so every agent would stop at the login screen", Fix: "claude  then /login, and quit"}
 }
 
-func gitAccess(url string) Check {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func inKeychain(service string) bool {
+	_, err := run("security", "find-generic-password", "-s", service)
+	return err == nil
+}
+
+func gitAccess(ctx context.Context, url string) Check {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "-h", "--", url)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

@@ -93,7 +93,7 @@ type dialogTransition struct {
 }
 
 func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
-	if msg.kind == "remotes" || msg.kind == "phone" {
+	if msg.kind == "remotes" || msg.kind == "phone" || msg.kind == "nodes" {
 		m.reloadRemotes()
 	}
 	if m.dialog != msg.kind {
@@ -194,7 +194,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 }
 
 func (m *Model) newContext() dialog.NewContext {
-	c := dialog.NewContext{Tools: m.toolOptions(), StateDir: m.Config.StateDir, Remotes: m.remoteNames(), Default: m.Config.DefaultRemote, Elsewhere: m.knownElsewhere()}
+	c := dialog.NewContext{Tools: m.toolOptions(), StateDir: m.Config.StateDir, Remotes: m.remoteNames(), Default: m.Config.DefaultRemote, Elsewhere: m.knownElsewhere(), Nodes: m.nodeChoices(), Target: m.Config.Node.Target}
 	selectedRepo := m.here
 	if it, ok := m.selectedItem(); ok && !slices.Contains(m.Config.Repos, m.here) {
 		selectedRepo = it.Factory.Repo
@@ -329,6 +329,9 @@ func (m *Model) newResult(r dialog.NewResult) (tea.Cmd, error) {
 			return nil, m.wake(r.Select)
 		}
 		return nil, nil
+	}
+	if r.Node != "" {
+		return nil, m.createOnNode(r)
 	}
 	if r.Remote != "" {
 		return nil, m.createRemote(r)

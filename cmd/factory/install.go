@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"cmp"
 	"context"
 	"errors"
@@ -17,6 +18,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/install"
@@ -223,8 +227,16 @@ func runInstallHooks(args []string) int {
 }
 
 const (
-	setupUsage = "usage: factory node install | uninstall | status"
+	setupUsage = "usage: factory node install [--join | --no-join] | uninstall | status"
 	healthWait = 30 * time.Second
+)
+
+type joinChoice int
+
+const (
+	askToJoin joinChoice = iota
+	alwaysJoin
+	neverJoin
 )
 
 type nodeSetup struct {
@@ -234,6 +246,9 @@ type nodeSetup struct {
 	app       func() error
 	wait      time.Duration
 	out       io.Writer
+	in        io.Reader
+	tty       bool
+	join      joinChoice
 }
 
 func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
@@ -244,8 +259,28 @@ func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
 	}
 }
 
+func installFlags(args []string) (joinChoice, bool) {
+	flags := flag.NewFlagSet("node install", flag.ContinueOnError)
+	join := flags.Bool("join", false, "join the factory node found on the tailnet without asking")
+	noJoin := flags.Bool("no-join", false, "stay a node of its own without asking")
+	if err := flags.Parse(args); err != nil || flags.NArg() > 0 || (*join && *noJoin) {
+		return askToJoin, false
+	}
+	switch {
+	case *join:
+		return alwaysJoin, true
+	case *noJoin:
+		return neverJoin, true
+	}
+	return askToJoin, true
+}
+
 func runNodeSetup(args []string) int {
-	if len(args) != 1 {
+	join, ok := askToJoin, len(args) == 1
+	if len(args) > 0 && args[0] == "install" {
+		join, ok = installFlags(args[1:])
+	}
+	if !ok {
 		fmt.Fprintln(os.Stderr, setupUsage)
 		return 2
 	}
@@ -255,6 +290,7 @@ func runNodeSetup(args []string) int {
 		return 1
 	}
 	s, ctx := newNodeSetup(cfg, os.Stdout), context.Background()
+	s.in, s.tty, s.join = os.Stdin, term.IsTerminal(os.Stdin.Fd()), join
 	switch args[0] {
 	case "install":
 		err = s.install(ctx)
@@ -311,7 +347,93 @@ func (s nodeSetup) install(ctx context.Context) error {
 	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
 		return err
 	}
-	return s.welcome(self, firstInstall)
+	local := node.Unix(s.cfg.NodeSocket())
+	joined, found, err := s.offerJoin(ctx, local, self.Short())
+	if err != nil {
+		return err
+	}
+	if joined {
+		return s.ready(ctx, local, self.Short())
+	}
+	return s.welcome(self, firstInstall, found)
+}
+
+func (s nodeSetup) offerJoin(ctx context.Context, c *node.Client, here string) (joined, found bool, err error) {
+	var roster node.Roster
+	if err := c.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster); err != nil {
+		return false, false, err
+	}
+	if len(roster.Members) > 1 {
+		fmt.Fprintf(s.out, "\n%s already shares its node list with %s.\n", here, count(len(roster.Members)-1, "other node"))
+		return false, true, nil
+	}
+	if s.join == neverJoin {
+		return false, true, nil
+	}
+	var answer node.Candidates
+	if err := c.Do(ctx, http.MethodGet, "/api/nodes/candidates", nil, &answer); err != nil {
+		return false, false, err
+	}
+	i := slices.IndexFunc(answer.Candidates, func(c node.Candidate) bool { return c.Selectable })
+	if i < 0 {
+		return false, false, nil
+	}
+	target := answer.Candidates[i]
+	if s.join == askToJoin && !s.tty {
+		return false, true, fmt.Errorf("found your factory node on %s, and there is no terminal to ask whether %s joins it. Run factory node install --join or factory node install --no-join", target.Short, here)
+	}
+	if !s.wantsToJoin(target, here) {
+		return false, true, nil
+	}
+	var result node.AddResult
+	err = c.Do(ctx, http.MethodPost, "/api/nodes/join", node.NodeRequest{Operation: uuid.NewString(), Name: target.Name}, &result)
+	if err != nil {
+		printChecks(s.out, result.Report.Checks)
+		return false, true, fmt.Errorf("%s did not join %s: %w. factory node install tries again", here, target.Short, err)
+	}
+	fmt.Fprintln(s.out)
+	s.passed("joined", fmt.Sprintf("%s lists %s, and %s lists %s", target.Short, here, here, target.Short))
+	s.passed("phone app", "trusts "+result.Roster.Home+", where your phone app lives")
+	return true, true, nil
+}
+
+func (s nodeSetup) wantsToJoin(target node.Candidate, here string) bool {
+	factories := 0
+	if target.Hello != nil {
+		factories = target.Hello.Factories
+	}
+	question := fmt.Sprintf("\nFound your factory node on %s, with %s. Join it? The hub on %s\nand your phone then list %s. [Y/n] ", target.Short, factoryCount(factories), target.Short, here)
+	switch s.join {
+	case alwaysJoin:
+		fmt.Fprint(s.out, question+"y (--join)\n")
+		return true
+	case askToJoin:
+		fmt.Fprint(s.out, question)
+		line, _ := bufio.NewReader(s.in).ReadString('\n')
+		answer := strings.ToLower(strings.TrimSpace(line))
+		return answer == "" || answer == "y" || answer == "yes"
+	}
+	return false
+}
+
+func factoryCount(n int) string {
+	if n == 1 {
+		return "1 factory"
+	}
+	return fmt.Sprintf("%d factories", n)
+}
+
+func (s nodeSetup) ready(ctx context.Context, c *node.Client, here string) error {
+	var report node.Report
+	if err := c.Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
+		return err
+	}
+	fmt.Fprint(s.out, "\nReady for factories?\n\n")
+	printChecks(s.out, report.Checks)
+	if report.Problems > 0 {
+		fmt.Fprintf(s.out, "\n%s. %s is a node now, but factories won't start here until it passes.\nfactory doctor checks again.\n", count(report.Problems, "problem"), here)
+	}
+	return nil
 }
 
 func (s nodeSetup) passed(name, detail string) {
@@ -422,9 +544,12 @@ func listening(port int) bool {
 	return err == nil
 }
 
-func (s nodeSetup) welcome(self node.Self, firstInstall bool) error {
+func (s nodeSetup) welcome(self node.Self, firstInstall, foundNodes bool) error {
 	url := "https://" + self.DNSName
 	fmt.Fprintf(s.out, "\n%s is a factory node. It keeps running with the hub closed.\n\n", self.Short())
+	if !foundNodes {
+		fmt.Fprintf(s.out, "No other factory nodes on your tailnet yet. Run factory node install on another\nmachine, such as a home server: it finds %s and offers to join it.\n\n", self.Short())
+	}
 	fmt.Fprintf(s.out, "Next\n  hub      factory\n  phone    open %s with Tailscale on, then add it to\n           the Home Screen. Tailscale already says it's you: no code, no pairing.\n", url)
 	if !firstInstall {
 		return nil

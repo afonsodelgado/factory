@@ -52,6 +52,8 @@ Tests, manual runs and QA never touch the real machine:
 
 Integration tests that need tmux start their own scratch server and kill it in `t.Cleanup`. They skip when `tmux` is missing only if `CI` is unset.
 
+Tests with several nodes use `internal/node/nodetest`: in-process nodes with their own temporary state directories behind a fake tailnet that routes `https://<machine>.<tailnet>.ts.net` to each node's listener, sets the caller's `Tailscale-User-Login` as Serve would (none for a tagged machine), and answers each machine's own `tailscale status --json` and `serve status --json`. Two real `factory node run` processes cannot reach each other without a tailnet; never add a flag or variable that redirects node-to-node HTTPS or relaxes certificate checks to get around that.
+
 ## tmux
 
 Address panes by id (`%12`) and windows by name. Never assume a window or pane index: `base-index` differs between machines.

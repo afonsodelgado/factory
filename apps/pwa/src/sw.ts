@@ -19,7 +19,7 @@ function isShellRoute(path: string): boolean {
   return (
     path === "/" ||
     path === "/setup" ||
-    path === "/phone" ||
+    /^\/phone(\/(add(\/[^/]+)?|nodes\/[^/]+))?$/.test(path) ||
     /^\/f\/[^/]+(\/(pages|message|i\/[^/]+))?$/.test(path) ||
     /^\/n\/[^/]+$/.test(path)
   );

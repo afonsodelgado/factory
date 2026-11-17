@@ -275,11 +275,38 @@ func TestAStreamOpenedBeforeFunnelTurnsOnIsCutOff(t *testing.T) {
 	}
 }
 
+func TestOpeningTheAppWhileFunnelIsOnShowsAPageWhileTheAPIStillNamesTheFix(t *testing.T) {
+	exposure := &Exposure{Tailscale: Tailscale{Run: func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`{"AllowFunnel":{"devbox.tail1234.ts.net:443":true}}`), nil
+	}}}
+	exposure.Check(context.Background())
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{"devbox.tail1234.ts.net"}, ExposedPage: phone.ExposedPage("devbox"), Exposure: exposure}
+	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("a request reached the node while Funnel was on")
+	}))
+	open := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "https://devbox.tail1234.ts.net"+path, nil)
+		r.RemoteAddr = "127.0.0.1:50000"
+		r.Header.Set(LoginHeader, "alice@example.com")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	page := open("/")
+	if page.Code != http.StatusForbidden || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") || !strings.Contains(page.Body.String(), "Funnel is on for devbox") || !strings.Contains(page.Body.String(), "tailscale funnel") {
+		t.Fatalf("opening the app got %d %s %q; want an HTML page naming the fix", page.Code, page.Header().Get("Content-Type"), page.Body.String())
+	}
+	api := open("/api/me")
+	if api.Code != http.StatusForbidden || !strings.Contains(api.Body.String(), `"funnel":true`) {
+		t.Fatalf("the API got %d %q; want JSON with funnel true for the installed app", api.Code, api.Body.String())
+	}
+}
+
 func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.T) {
 	const host = "devbox.tail1234.ts.net"
 	api := &API{Node: "node-1", Version: "test"}
 	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key"}).Handler()
-	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage, Exposure: funnelOff(t)}
+	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage("devbox"), Exposure: funnelOff(t)}
 	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
 	cases := []struct {
 		name, method, path, login, origin, media string
@@ -292,7 +319,7 @@ func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.
 		{"the old pairing status route", "POST", "/api/pair/status", "alice@example.com", "https://" + host, "application/json", nil, 404, ""},
 		{"the old pairing exchange route", "POST", "/api/pair/exchange", "alice@example.com", "https://" + host, "application/json", nil, 404, ""},
 		{"another account's API call", "GET", "/api/snapshot", "mallory@example.com", "", "", nil, 403, `"owner":"alice@example.com"`},
-		{"another account opening the app", "GET", "/", "mallory@example.com", "", "", nil, 403, "answers alice@example.com only"},
+		{"another account opening the app", "GET", "/", "mallory@example.com", "", "", nil, 403, "devbox answers alice@example.com only"},
 		{"a text/plain approval through a review grant", "POST", "/rt/grant/r/k/_api/approve", "alice@example.com", "null", "text/plain", nil, 415, ""},
 		{"an approval from another origin through a review grant", "POST", "/rt/grant/r/k/_api/approve", "alice@example.com", "https://evil.example", "application/json", nil, 403, ""},
 	}

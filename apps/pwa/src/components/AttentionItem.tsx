@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api } from "../api/client.ts";
+import { nodeApi } from "../api/client.ts";
 import type { Draft } from "../api/cache.ts";
 import type {
   ActionBody,
@@ -8,7 +8,14 @@ import type {
   Receipt,
 } from "../api/types.ts";
 import { clock, hostName, kindLook, openThreads } from "../format.ts";
-import { settled, useBlocked, useDraft, useNow, useSend } from "../hooks.ts";
+import {
+  settled,
+  useBlocked,
+  useDraft,
+  useNode,
+  useNow,
+  useSend,
+} from "../hooks.ts";
 import { age, findItem } from "../order.ts";
 import { paths } from "../route.ts";
 import { useApp } from "../state.tsx";
@@ -82,19 +89,21 @@ function Closed(props: {
   seen?: string;
   receipt?: Receipt;
 }) {
-  const { live } = useApp();
+  const { live, origin, short } = useNode(props.factory);
   const [linked, setLinked] = useState<string>();
   useEffect(() => {
     if (props.seen !== undefined || !live) return;
     let current = true;
-    api.link(props.itemKey).then(
-      (link) => current && setLinked(link.item),
-      () => undefined,
-    );
+    nodeApi(origin)
+      .link(props.itemKey)
+      .then(
+        (link) => current && setLinked(link.item),
+        () => undefined,
+      );
     return () => {
       current = false;
     };
-  }, [props.seen, props.itemKey, live]);
+  }, [props.seen, props.itemKey, live, origin]);
   const id = props.seen ?? linked;
   const resolution =
     id === undefined
@@ -119,7 +128,7 @@ function Closed(props: {
         <p className="ink">
           {live
             ? "This item is no longer open."
-            : `The details of this notification need ${hostName()}.`}
+            : `The details of this notification need ${short}.`}
         </p>
       )}
       <p className="sm mute">
@@ -161,10 +170,13 @@ function OpenItem(props: {
 }) {
   const { factory, item, sender } = props;
   const { pending } = useApp();
-  const blocked = useBlocked();
+  const blocked = useBlocked(factory);
   const { draft, setDraft, dropDraft } = useDraft(factory, item.key);
   const waiting = pending.some(
-    (p) => p.factory === factory.key && p.item === item.id,
+    (p) =>
+      p.factory === factory.key &&
+      p.node === factory.node &&
+      p.item === item.id,
   );
   const locked = !!item.answer || settled(sender.receipt);
   const why =

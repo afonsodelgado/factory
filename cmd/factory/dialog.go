@@ -89,15 +89,17 @@ func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
 		if err != nil {
 			return nil, err
 		}
-		actions := phoneActions{cfg}
+		actions := newNodeActions(cfg)
 		status, err := actions.Status()
 		if err != nil {
 			return nil, err
 		}
 		if kind == "nodes" {
-			return dialog.NewNodes(nodesContext(cfg, status), actions), nil
+			var known dialog.NodesContext
+			json.Unmarshal(context, &known)
+			return dialog.NewNodes(nodesContext(cfg, status, known), actions), nil
 		}
-		return dialog.NewPhone(status, actions), nil
+		return dialog.NewPhone(status, actions.phoneActions), nil
 	}
 	if kind == "remotes" {
 		var c dialog.RemotesContext
@@ -113,6 +115,7 @@ func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
 		}
 		d := dialog.NewFactory(c)
 		d.Probe = probeRemote
+		d.ProbeNode = probeNode
 		return d, nil
 	}
 	d, ok := dialog.New(kind, context, 0, 0)

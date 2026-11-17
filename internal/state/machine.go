@@ -37,6 +37,7 @@ type Node struct {
 	Owner    string `yaml:"owner,omitempty"`
 	Port     int    `yaml:"port,omitempty"`
 	Hostname string `yaml:"hostname,omitempty"`
+	Target   string `yaml:"target,omitempty"`
 }
 
 func (m Machine) NodePort() int {
@@ -148,6 +149,9 @@ func (m Machine) Validate() error {
 	}
 	if m.Node.Hostname != "" && !tailnetDNS.MatchString(m.Node.Hostname) {
 		return fmt.Errorf("node.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", m.Node.Hostname)
+	}
+	if m.Node.Target != "" && !tailnetDNS.MatchString(m.Node.Target) {
+		return fmt.Errorf("node.target %q must be a node's full Tailscale name, such as homelab.tail1234.ts.net; the hub's d key sets it", m.Node.Target)
 	}
 	return m.Phone.validate()
 }

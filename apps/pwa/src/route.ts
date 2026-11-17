@@ -6,7 +6,10 @@ export type Route =
   | { screen: "item"; route: string; item: string }
   | { screen: "link"; key: string }
   | { screen: "setup" }
-  | { screen: "phone" };
+  | { screen: "phone" }
+  | { screen: "node"; id: string }
+  | { screen: "add" }
+  | { screen: "check"; name: string };
 
 export function parse(location: Pick<Location, "pathname">): Route {
   const parts = location.pathname
@@ -17,6 +20,11 @@ export function parse(location: Pick<Location, "pathname">): Route {
     case "setup":
       return { screen: "setup" };
     case "phone":
+      if (parts[1] === "nodes" && parts[2])
+        return { screen: "node", id: parts[2] };
+      if (parts[1] === "add" && parts[2])
+        return { screen: "check", name: parts[2] };
+      if (parts[1] === "add") return { screen: "add" };
       return { screen: "phone" };
     case "n":
       if (parts[1]) return { screen: "link", key: parts[1] };
@@ -40,4 +48,7 @@ export const paths = {
     `/f/${encodeURIComponent(route)}/i/${encodeURIComponent(item)}`,
   setup: () => "/setup",
   phone: () => "/phone",
+  node: (id: string) => `/phone/nodes/${encodeURIComponent(id)}`,
+  add: () => "/phone/add",
+  check: (name: string) => `/phone/add/${encodeURIComponent(name)}`,
 };

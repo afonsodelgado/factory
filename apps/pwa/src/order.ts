@@ -2,7 +2,12 @@ import type { LocalFactory, LocalItem, Snapshot } from "./api/types.ts";
 
 export type Groups = {
   needsYou: LocalFactory[];
-  repos: { repo: string; name: string; factories: LocalFactory[] }[];
+  repos: {
+    repo: string;
+    name: string;
+    node?: string;
+    factories: LocalFactory[];
+  }[];
   done: LocalFactory[];
 };
 
@@ -13,25 +18,37 @@ export function needsYou(f: LocalFactory): boolean {
   return f.status === "needs you" && f.items.length > 0;
 }
 
-export function group(factories: LocalFactory[]): Groups {
+export function group(
+  factories: LocalFactory[],
+  lost: (f: LocalFactory) => boolean = () => false,
+): Groups {
+  const waiting = (f: LocalFactory) => needsYou(f) && !lost(f);
+  const finished = (f: LocalFactory) => f.status === "done" && !waiting(f);
   const needing = factories
-    .filter(needsYou)
+    .filter(waiting)
     .sort((a, b) => waitingSince(a) - waitingSince(b));
-  const done = factories.filter((f) => f.status === "done" && !needsYou(f));
-  const rest = factories.filter((f) => !needsYou(f) && f.status !== "done");
+  const done = factories.filter(finished);
+  const rest = factories.filter((f) => !waiting(f) && !finished(f));
   const repos = new Map<string, Groups["repos"][number]>();
   for (const f of rest) {
-    const repo = repos.get(f.repo) ?? {
+    const key = `${f.repo}\n${f.node ?? ""}`;
+    const repo = repos.get(key) ?? {
       repo: f.repo,
       name: f.repo_name,
+      node: f.node,
       factories: [],
     };
     repo.factories.push(f);
-    repos.set(f.repo, repo);
+    repos.set(key, repo);
   }
   return {
     needsYou: needing,
-    repos: [...repos.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    repos: [...repos.values()].sort(
+      (a, b) =>
+        a.name.localeCompare(b.name) ||
+        Number(!!a.node) - Number(!!b.node) ||
+        (a.node ?? "").localeCompare(b.node ?? ""),
+    ),
     done,
   };
 }

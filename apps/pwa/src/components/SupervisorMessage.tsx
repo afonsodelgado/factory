@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client.ts";
+import { nodeApi } from "../api/client.ts";
 import { cache, type MessageResult } from "../api/cache.ts";
 import { MAX_MESSAGE, type LocalFactory, type Receipt } from "../api/types.ts";
 import { clock } from "../format.ts";
-import { useBlocked, useSend } from "../hooks.ts";
-import { useApp } from "../state.tsx";
+import { useBlocked, useNode, useSend } from "../hooks.ts";
 import { Blocked, SendLine } from "./Receipt.tsx";
 
 export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
-  const { account, live } = useApp();
-  const blocked = useBlocked();
+  const { scope: account, live, origin } = useNode(factory);
+  const blocked = useBlocked(factory);
   const { sending, send } = useSend(factory);
   const [text, setText] = useState("");
   const [results, setResults] = useState<MessageResult[]>([]);
@@ -21,13 +20,13 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
       if (!current) return;
       setResults(saved);
       if (!live) return;
-      const fresh = await Promise.all(saved.map(refresh));
+      const fresh = await Promise.all(saved.map(refresh(origin)));
       if (current) setResults(fresh);
     });
     return () => {
       current = false;
     };
-  }, [account, factory.incarnation, live]);
+  }, [account, factory.incarnation, live, origin]);
 
   const submit = async () => {
     const sent = text;
@@ -90,16 +89,21 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
   );
 }
 
-async function refresh(result: MessageResult): Promise<MessageResult> {
-  const pending =
-    result.receipt.status === "queued" || result.receipt.status === "unknown";
-  if (!pending || !result.receipt.operation) return result;
-  try {
-    return { ...result, receipt: await api.receipt(result.receipt.operation) };
-  } catch {
-    return result;
-  }
-}
+const refresh =
+  (origin: string) =>
+  async (result: MessageResult): Promise<MessageResult> => {
+    const pending =
+      result.receipt.status === "queued" || result.receipt.status === "unknown";
+    if (!pending || !result.receipt.operation) return result;
+    try {
+      return {
+        ...result,
+        receipt: await nodeApi(origin).receipt(result.receipt.operation),
+      };
+    } catch {
+      return result;
+    }
+  };
 
 const resultLooks: Record<Receipt["status"], [string, string, string]> = {
   delivered: ["✓", "grn", "Delivered"],

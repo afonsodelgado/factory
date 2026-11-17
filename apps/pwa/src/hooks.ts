@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "./api/client.ts";
+import { nodeApi } from "./api/client.ts";
 import { cache, type Draft } from "./api/cache.ts";
 import type {
   ActionBody,
@@ -8,13 +8,13 @@ import type {
   Receipt,
 } from "./api/types.ts";
 import { reconcile, type PushHealth } from "./push.ts";
-import { hostName } from "./format.ts";
-import { useApp } from "./state.tsx";
+import { useApp, type NodeView } from "./state.tsx";
 
 const TICK = 30_000;
 
 export function useNow(): number {
-  const { live, savedAt } = useApp();
+  const { nodes, savedAt } = useApp();
+  const live = nodes.some((n) => n.live);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!live) return;
@@ -22,7 +22,11 @@ export function useNow(): number {
     const timer = setInterval(() => setNow(Date.now()), TICK);
     return () => clearInterval(timer);
   }, [live]);
-  return savedAt ? Date.parse(savedAt) : now;
+  return !live && savedAt ? Date.parse(savedAt) : now;
+}
+
+export function useNode(factory: LocalFactory): NodeView {
+  return useApp().nodeOf(factory);
 }
 
 export function usePushHealth() {
@@ -49,10 +53,9 @@ export function usePushHealth() {
   return { health, push, setPush, recheck };
 }
 
-export function useBlocked(): string | undefined {
-  const { reach, live } = useApp();
+export function useBlocked(factory: LocalFactory): string | undefined {
+  const { live, reach, short: host } = useNode(factory);
   if (live) return undefined;
-  const host = hostName();
   switch (reach) {
     case "offline":
       return `Actions need ${host}. Nothing is saved to send later.`;
@@ -68,7 +71,7 @@ export function usePreview(
   factory: LocalFactory,
   body: ActionBody | undefined,
 ): string | undefined {
-  const { live } = useApp();
+  const { live, origin } = useNode(factory);
   const [text, setText] = useState<string>();
   const request = live && body ? JSON.stringify(body) : "";
   useEffect(() => {
@@ -76,21 +79,23 @@ export function usePreview(
     if (!request) return;
     let current = true;
     const timer = setTimeout(() => {
-      api.preview(factory, JSON.parse(request) as ActionBody).then(
-        (preview) => current && setText(preview.text),
-        () => current && setText(undefined),
-      );
+      nodeApi(origin)
+        .preview(factory, JSON.parse(request) as ActionBody)
+        .then(
+          (preview) => current && setText(preview.text),
+          () => current && setText(undefined),
+        );
     }, 300);
     return () => {
       current = false;
       clearTimeout(timer);
     };
-  }, [factory.key, factory.incarnation, request]);
+  }, [factory.key, factory.incarnation, request, origin]);
   return text;
 }
 
 export function useDraft(factory: LocalFactory, itemKey: string) {
-  const { account } = useApp();
+  const { scope: account } = useNode(factory);
   const [draft, setLocal] = useState<Draft>({});
   const touched = useRef(false);
   useEffect(() => {

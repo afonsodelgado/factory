@@ -31,6 +31,11 @@ type standIn struct {
 	env                     []string
 }
 
+const (
+	claudeVersion = "#!/bin/sh\n[ \"${1:-}\" = --version ] && { echo '2.1.400 (Claude Code)'; exit 0; }\n"
+	runnableGH    = "#!/bin/sh\ncase \"$*\" in\n--version) echo 'gh version 2.45.0' ;;\n'auth status') echo 'Logged in to github.com account stand-in' ;;\n'extension list') printf 'gh stack\\tgithub/gh-stack\\tv0.4.0\\n' ;;\n*) exit 1 ;;\nesac\n"
+)
+
 func newStandIn(t *testing.T) standIn {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -55,7 +60,10 @@ func newStandIn(t *testing.T) standIn {
 	if err := os.Symlink(standInSSH, filepath.Join(s.bin, "ssh")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(s.bin, "claude"), []byte("#!/bin/sh\nexec sleep 600\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(s.bin, "claude"), []byte(claudeVersion+"exec sleep 600\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.bin, "gh"), []byte(runnableGH), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(s.bin, "tailscale"), []byte("#!/bin/sh\necho 'stand-in tailscale: not running' >&2\nexit 1\n"), 0o755); err != nil {
@@ -96,6 +104,7 @@ func newStandIn(t *testing.T) standIn {
 
 func (s standIn) serverNode(t *testing.T, root, socket string) {
 	t.Helper()
+	writeFile(t, filepath.Join(root, "claude", ".credentials.json"), "{}")
 	process := exec.Command(filepath.Join(s.bin, "factory"), "node", "run")
 	process.Env = append(slices.Clone(s.env), "HOME="+filepath.Join(root, "home"), "FACTORY_CONFIG_DIR="+filepath.Join(root, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(root, "state"), "CLAUDE_CONFIG_DIR="+filepath.Join(root, "claude"), "FACTORY_TMUX_SOCKET="+socket)
@@ -289,6 +298,7 @@ func TestASecondNodeRefusesAndTheFirstKeepsItsSocket(t *testing.T) {
 func TestClosingTheHubLeavesTheNodeRunningStages(t *testing.T) {
 	s := newStandIn(t)
 	repo := gitRepo(t, s.root, "https://git.example/acme/app.git")
+	s.serveGit(t, "https://git.example/acme/app.git", repo)
 	serverDir := func(name string) string { return filepath.Join(s.server, name) }
 	tmuxServer := func(args ...string) string {
 		out, err := exec.Command("tmux", append([]string{"-L", s.tmux}, args...)...).CombinedOutput()
@@ -599,7 +609,7 @@ func TestServerLinksOpenOnTheLaptopThroughAStableTunnel(t *testing.T) {
 	loginProfile := "PATH=" + factory.ShellQuote(s.bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	writeFile(t, filepath.Join(s.bin, "shell"), "#!/bin/sh\n[ \"${1:-}\" = -l ] && shift\n"+loginProfile+"\nexec /bin/sh \"$@\"\n")
 	bashTool := factory.ShellQuote(`. "$CLAUDE_ENV_FILE" && xdg-open ` + factory.ShellQuote(appURL+"&from=bash"))
-	writeFile(t, filepath.Join(s.bin, "claude"), "#!/bin/sh\nxdg-open "+factory.ShellQuote(appURL)+"\n\"$SHELL\" -l -c "+bashTool+"\nexec sleep 600\n")
+	writeFile(t, filepath.Join(s.bin, "claude"), claudeVersion+"xdg-open "+factory.ShellQuote(appURL)+"\n\"$SHELL\" -l -c "+bashTool+"\nexec sleep 600\n")
 	os.Chmod(filepath.Join(s.bin, "claude"), 0o755)
 	if out, err := s.factory(t, src, nil, "open", "--remote", "homelab", "csv", "--prompt", "work"); err != nil {
 		t.Fatalf("%v\n%s", err, out)

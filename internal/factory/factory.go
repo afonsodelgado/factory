@@ -40,6 +40,7 @@ type Location struct {
 	Home        string
 	Repo        string
 	Creating    time.Time
+	Node        string
 }
 
 func (f Factory) MarshalJSON() ([]byte, error) {
@@ -71,11 +72,16 @@ func (f *Factory) UnmarshalJSON(data []byte) error {
 }
 
 func (f Factory) Key() string {
+	if f.OnNode() {
+		return "node:" + f.Remote.Node + "/" + f.Remote.Incarnation
+	}
 	if f.Remote != nil {
 		return "remote:" + f.Remote.Name + "/" + f.Remote.Server + "/" + f.Remote.Incarnation
 	}
 	return state.Key(f.Repo, f.Slug)
 }
+
+func (f Factory) OnNode() bool { return f.Remote != nil && f.Remote.Node != "" }
 
 func (f Factory) Where() string {
 	if f.Remote == nil {

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { clock, hostName } from "../format.ts";
 import { paths } from "../route.ts";
-import { useApp } from "../state.tsx";
+import { useApp, type NodeView } from "../state.tsx";
+import { Link } from "./Link.tsx";
 
 export function AppShell(props: {
   back?: string;
@@ -33,9 +34,41 @@ export function AppShell(props: {
   );
 }
 
+function nodesChip(nodes: NodeView[]): [string, string, string, string] {
+  const reachable = nodes.filter((n) => n.live).length;
+  const asking = nodes.filter((n) => n.reach === "loading").length;
+  const all = nodes.length;
+  if (reachable === all)
+    return ["●", "grn", `${all} nodes`, `Nodes: ${all} of ${all} reachable`];
+  if (asking > 0 && reachable + asking === all)
+    return ["◌", "mute", `${all} nodes`, `Nodes: asking ${asking}`];
+  return [
+    "!",
+    "yel",
+    `${reachable} of ${all}`,
+    `Nodes: ${reachable} of ${all} reachable`,
+  ];
+}
+
 function HostChip() {
-  const { reach, navigate } = useApp();
+  const { reach, navigate, nodes, multi } = useApp();
   const host = hostName();
+  if (multi) {
+    const [mark, tone, label, aria] = nodesChip(nodes);
+    return (
+      <button
+        type="button"
+        className="host"
+        aria-label={aria}
+        onClick={() => navigate(paths.phone())}
+      >
+        <span className={`dot ${tone}`} aria-hidden="true">
+          {mark}
+        </span>
+        {label}
+      </button>
+    );
+  }
   const [mark, tone, state] =
     reach === "online"
       ? ["●", "grn", `connected to ${host}`]
@@ -60,8 +93,20 @@ function HostChip() {
 }
 
 function ReachBanner() {
-  const { reach, savedAt } = useApp();
+  const { reach, savedAt, nodes, multi } = useApp();
   const host = hostName();
+  const someAnswer = nodes.some((n) => !n.lost);
+  if (multi && someAnswer)
+    return (
+      <>
+        <HomeBanner />
+        {nodes
+          .filter((n) => n.lost && !(n.home && reach === "node-down"))
+          .map((n) => (
+            <Lost key={n.id} node={n} answering={nodes} />
+          ))}
+      </>
+    );
   if (reach === "offline")
     return (
       <Banner tone="warn" glyph="!" title={`Can't reach ${host}.`}>
@@ -70,6 +115,37 @@ function ReachBanner() {
         be answered until {host} is back. Trying again every 15s.
       </Banner>
     );
+  return <HomeBanner />;
+}
+
+function Lost({ node, answering }: { node: NodeView; answering: NodeView[] }) {
+  const count = node.snapshot?.factories.length ?? 0;
+  const others = answering.filter((n) => n.live).map((n) => n.short);
+  const said = [
+    count &&
+      `Its ${count === 1 ? "factory shows its" : `${count} factories show their`} state from then`,
+    others.length &&
+      `${others.join(" and ")} ${others.length === 1 ? "works" : "work"} as usual`,
+  ].filter(Boolean);
+  return (
+    <Link className="banner warn" href={paths.node(node.id)}>
+      <span className="gl" aria-hidden="true">
+        !
+      </span>
+      <span className="bh">
+        {node.short} can't be reached
+        {node.savedAt ? ` since ${clock(node.savedAt)}` : ""}.
+      </span>
+      <span className="x">
+        {said.length ? `${said.join("; ")}. ` : ""}Trying again every 15s ›
+      </span>
+    </Link>
+  );
+}
+
+function HomeBanner() {
+  const { reach } = useApp();
+  const host = hostName();
   if (reach === "node-down")
     return (
       <Banner

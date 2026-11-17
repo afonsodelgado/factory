@@ -1,0 +1,28 @@
+ [1;38;2;192;202;245mNodes[m                                               [38;2;86;95;137mtail5e2c.ts.net · 2 of 3 reachable[m 
+                                                                                        
+   [38;2;86;95;137mnode[m          [38;2;86;95;137mstate[m              [38;2;86;95;137mversion[m  [38;2;86;95;137mfactories[m            [38;2;86;95;137mnew ones[m              
+   [38;2;192;202;245mmacbook[m       [38;2;158;206;106m● this machine[m     [38;2;169;177;214m0.9.4[m    [38;2;169;177;214m2[m[38;2;255;158;100m · 1 needs you[m      [38;2;158;206;106m● default[m             
+   [38;2;192;202;245mhomelab[m       [38;2;158;206;106m● running[m          [38;2;169;177;214m0.9.4[m    [38;2;169;177;214m2[m[38;2;255;158;100m · 1 needs you[m      [38;2;86;95;137m○[m                     
+[48;2;41;46;66m [m[1;38;2;122;162;247;48;2;41;46;66m❯[m[48;2;41;46;66m [m[38;2;192;202;245;48;2;41;46;66mbuild-box[m[48;2;41;46;66m     [m[38;2;247;118;142;48;2;41;46;66m↮ unreachable 12m[m[48;2;41;46;66m  [m[38;2;115;122;162;48;2;41;46;66m0.9.3[m[48;2;41;46;66m    [m[38;2;115;122;162;48;2;41;46;66m2[m[38;2;86;95;137;48;2;41;46;66m, as of 11:58[m[48;2;41;46;66m       [m[38;2;86;95;137;48;2;41;46;66m○[m[48;2;41;46;66m                     [m
+                                                                                        
+ [38;2;169;177;214mNew factories run on macbook. Pick another node in New factory for a one-off.[m          
+                                                                                        
+ [1;38;2;192;202;245mPhone app[m    [38;2;192;202;245mhttps://macbook.tail5e2c.ts.net[m   [38;2;86;95;137mlives on macbook, reaches every node[m    
+   [38;2;169;177;214mnotify[m     [38;2;158;206;106mon for 1 phone[m                                                            
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;224;175;104mRemove build-box? This hub, your phone and homelab stop listing it. Its 2 factories[m    
+ [38;2;224;175;104mkeep running there if it is on. When build-box is back, it learns it was removed and[m   
+ [38;2;224;175;104mstops sending notifications to your phone.[m                                             
+                                                                                        
+                                                                                        
+ [1;38;2;125;207;255my[m[38;2;169;177;214m remove   [m[1;38;2;125;207;255mn[m[38;2;169;177;214m keep[m                                                                      

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 const (
 	phoneUsage = "usage: factory phone status | test | check"
 	nodeAsk    = 2 * time.Second
+	nodeWait   = 15 * time.Second
 )
 
 func runPhone(args []string) int {
@@ -57,13 +61,14 @@ func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
 	return dialog.PhoneContext{Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
 }
 
-func nodesContext(cfg *state.Config, phone dialog.PhoneContext) dialog.NodesContext {
+func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.NodesContext) dialog.NodesContext {
 	_, tailnet, _ := strings.Cut(cfg.NodeHostname(), ".")
-	c := dialog.NodesContext{Machine: cfg.NodeName(), Tailnet: tailnet, Phone: phone}
+	c := dialog.NodesContext{Machine: cfg.NodeName(), Tailnet: tailnet, Phone: phone, Owner: cfg.Node.Owner, Target: cfg.Node.Target, Repos: repoURLs(cfg.Repos)}
 	ctx, cancel := context.WithTimeout(context.Background(), nodeAsk)
 	defer cancel()
+	local := node.Unix(cfg.NodeSocket())
 	var snap node.Snapshot
-	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) != nil {
+	if local.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) != nil {
 		return c
 	}
 	c.Version, c.Factories = snap.Version, len(snap.Factories)
@@ -72,7 +77,36 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext) dialog.NodesCont
 			c.NeedsYou++
 		}
 	}
+	if snap.Roster != nil {
+		c.Home, c.Others = snap.Roster.Home, rosterRows(*snap.Roster, known.Others)
+	}
 	return c
+}
+
+func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
+	var rows []dialog.NodeRow
+	for _, m := range roster.Members {
+		if m.Self {
+			continue
+		}
+		row := dialog.NodeRow{ID: m.ID, Name: m.Name, OS: m.OS}
+		if i := slices.IndexFunc(known, func(r dialog.NodeRow) bool { return r.ID == m.ID }); i >= 0 {
+			row = known[i]
+			row.Name, row.OS = m.Name, m.OS
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func repoURLs(repos []string) []dialog.RepoURL {
+	var urls []dialog.RepoURL
+	for _, repo := range repos {
+		if url := originOf(repo); url != "" {
+			urls = append(urls, dialog.RepoURL{Name: strings.TrimSuffix(path.Base(url), ".git"), URL: url})
+		}
+	}
+	return urls
 }
 
 func printPhoneStatus(w io.Writer, cfg *state.Config) error {
@@ -144,4 +178,96 @@ func (a phoneActions) Check() []dialog.CheckRow {
 		rows = append(rows, dialog.CheckRow{Name: c.Name, Mark: checkMarks[c.Mark], Detail: c.Detail, Fix: c.Fix})
 	}
 	return rows
+}
+
+type nodeActions struct {
+	phoneActions
+	local *node.Client
+	peers *http.Client
+	ts    node.Tailscale
+}
+
+func newNodeActions(cfg *state.Config) nodeActions {
+	return nodeActions{phoneActions: phoneActions{cfg}, local: node.Unix(cfg.NodeSocket()), peers: node.PeerHTTP(), ts: node.Tailscale{Run: node.System}}
+}
+
+func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dialog.NodeAnswer, error) {
+	peer := node.Remote(name, a.peers)
+	var answer dialog.NodeAnswer
+	snapshotCtx, cancel := context.WithTimeout(ctx, node.ProbeWait)
+	err := peer.Do(snapshotCtx, http.MethodGet, "/api/snapshot", nil, &answer.Snapshot)
+	cancel()
+	if err != nil {
+		return answer, err
+	}
+	readyCtx, cancel := context.WithTimeout(ctx, node.ReadyWait+node.ProbeWait)
+	defer cancel()
+	return answer, peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report)
+}
+
+func (a nodeActions) Seen(ctx context.Context, name string) (node.Peer, error) {
+	inv, err := a.ts.Inventory(ctx)
+	if err != nil {
+		return node.Peer{}, err
+	}
+	peer, ok := inv.Named(name)
+	if !ok {
+		return node.Peer{}, fmt.Errorf("tailscale status on this machine lists no %s", name)
+	}
+	return peer, nil
+}
+
+func (a nodeActions) Machines(ctx context.Context) (node.Inventory, error) {
+	return a.ts.Inventory(ctx)
+}
+
+func (a nodeActions) Candidates(ctx context.Context) ([]node.Candidate, error) {
+	var listed node.Candidates
+	err := a.local.Do(ctx, http.MethodGet, "/api/nodes/candidates", nil, &listed)
+	return listed.Candidates, err
+}
+
+func (a nodeActions) Inspect(ctx context.Context, name string) (node.CheckReport, error) {
+	var report node.CheckReport
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes/check", node.NodeRequest{Name: name}, &report)
+	return report, err
+}
+
+func (a nodeActions) Add(ctx context.Context, op, name string) (node.AddResult, error) {
+	var result node.AddResult
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes", node.NodeRequest{Operation: op, Name: name}, &result)
+	return result, err
+}
+
+func (a nodeActions) Remove(op, id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
+	defer cancel()
+	return a.local.Do(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(id)+"/remove", node.RemoveRequest{Operation: op}, nil)
+}
+
+func (a nodeActions) SetTarget(name string) error {
+	return state.UpdateMachine(a.cfg.ConfigDir, func(m *state.Machine) error {
+		m.Node.Target = name
+		return nil
+	})
+}
+
+func probeNode(name string) (string, error) {
+	short, _, _ := strings.Cut(name, ".")
+	ctx, cancel := context.WithTimeout(context.Background(), node.ReadyWait+node.ProbeWait)
+	defer cancel()
+	var report node.Report
+	if err := node.Remote(name, node.PeerHTTP()).Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
+		return "", fmt.Errorf("%s did not answer its readiness check: %w", short, err)
+	}
+	for _, c := range report.Checks {
+		if c.Mark == node.MarkFail {
+			return "", fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
+		}
+	}
+	return short + " is ready: every check passes", nil
+}
+
+func (a nodeActions) Clone(ctx context.Context, name, op, repo string) error {
+	return node.Remote(name, a.peers).Do(ctx, http.MethodPost, "/api/clone", node.CloneRequest{Operation: op, URL: repo}, nil)
 }

@@ -4,12 +4,37 @@ export type Fake = {
   reset: () => Promise<void>;
   set: (values: Record<string, unknown>) => Promise<void>;
   factories: (factories: unknown[]) => Promise<void>;
+  node: (name: string, values: Record<string, unknown>) => Promise<void>;
   state: () => Promise<{
     actions: Record<string, unknown>[];
     previews: Record<string, unknown>[];
     threads: { id: string; status: string; messages: { text: string }[] }[];
+    enrollments: { route: string; host: string; origin: string }[];
+    peers: Record<string, { actions: Record<string, unknown>[] }>;
   }>;
 };
+
+export const HOME = "127.0.0.1:4324";
+export const peer = (short: string) => `${short}.localhost:4324`;
+
+export function roster(...peers: string[]) {
+  const member = (id: string, name: string) => ({
+    id,
+    name,
+    owner: "afonso@example.com",
+    tailnet: "localhost",
+    pending: 0,
+  });
+  return {
+    id: "roster-1",
+    home: `http://${HOME}`,
+    self: "node-1",
+    members: [
+      { ...member("node-1", HOME), self: true },
+      ...peers.map((short, i) => member(`node-${i + 2}`, peer(short))),
+    ],
+  };
+}
 
 export function fake(request: APIRequestContext): Fake {
   const post = async (path: string, data: unknown = {}) => {
@@ -21,6 +46,8 @@ export function fake(request: APIRequestContext): Fake {
     set: async (values) => void (await post("/__test/state", values)),
     factories: async (factories) =>
       void (await post("/__test/state", { snapshotFactories: factories })),
+    node: async (name, values) =>
+      void (await post("/__test/node", { name, ...values })),
     state: async () => (await request.post("/__test/actions")).json(),
   };
 }

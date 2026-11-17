@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LocalFactory, Receipt } from "../api/types.ts";
 import { clock, hostName, kindLook, statusLook } from "../format.ts";
 import { useBlocked, useNow, useSend } from "../hooks.ts";
@@ -49,7 +49,7 @@ export function Title({ factory }: { factory: LocalFactory }) {
 function Head({ factory }: { factory: LocalFactory }) {
   const now = useNow();
   const look = statusLook(factory.status);
-  const blocked = useBlocked();
+  const blocked = useBlocked(factory);
   const { receipt, sending, send } = useSend(factory);
   const [asking, setAsking] = useState(false);
   const [wakingFrom, setWakingFrom] = useState<string>();
@@ -128,37 +128,61 @@ function PauseDialog(props: {
   onCancel: () => void;
   onPause: () => void;
 }) {
+  const { factory } = props;
+  const name = factory.title
+    ? `${factory.id} · ${factory.title.replace(/\.+$/, "")}`
+    : factory.id;
+  return (
+    <ConfirmSheet
+      id="pause-title"
+      glyph="‖"
+      title={`Pause ${factory.id}?`}
+      confirm={
+        <>
+          <span aria-hidden="true">‖ </span>Pause
+        </>
+      }
+      onCancel={props.onCancel}
+      onConfirm={props.onPause}
+      note="You get no notifications from it while it is paused."
+    >
+      Stops Claude Code and closes the pane for {name}. The worktree, its branch
+      and <code>.claude/factory/{factory.id}</code> stay. Wake brings it back.
+    </ConfirmSheet>
+  );
+}
+
+export function ConfirmSheet(props: {
+  id: string;
+  glyph: string;
+  title: string;
+  confirm: ReactNode;
+  note: ReactNode;
+  children: ReactNode;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!dialog.current?.open) dialog.current?.showModal();
     cancel.current?.focus();
   }, []);
-  const { factory } = props;
-  const name = factory.title
-    ? `${factory.id} · ${factory.title.replace(/\.+$/, "")}`
-    : factory.id;
   return (
     <dialog
       ref={dialog}
       className="sheet"
-      aria-labelledby="pause-title"
+      aria-labelledby={props.id}
       onCancel={props.onCancel}
     >
-      <h2 id="pause-title">
+      <h2 id={props.id}>
         <span className="yel" aria-hidden="true">
-          ‖{" "}
+          {props.glyph}{" "}
         </span>
-        Pause {factory.id}?
+        {props.title}
       </h2>
-      <p className="sm">
-        Stops Claude Code and closes the pane for {name}. The worktree, its
-        branch and <code>.claude/factory/{factory.id}</code> stay. Wake brings
-        it back.
-      </p>
-      <p className="sm mute">
-        You get no notifications from it while it is paused.
-      </p>
+      <p className="sm">{props.children}</p>
+      <p className="sm mute">{props.note}</p>
       <div className="row2">
         <button
           ref={cancel}
@@ -168,8 +192,8 @@ function PauseDialog(props: {
         >
           Cancel
         </button>
-        <button type="button" className="btn warn" onClick={props.onPause}>
-          <span aria-hidden="true">‖ </span>Pause
+        <button type="button" className="btn warn" onClick={props.onConfirm}>
+          {props.confirm}
         </button>
       </div>
     </dialog>
