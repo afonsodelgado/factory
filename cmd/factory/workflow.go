@@ -5,17 +5,39 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/afonsodelgado/factory/internal/host"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/workflow"
 )
 
 func runWorkflow(args []string) int {
+	if len(args) == 2 && args[0] == "comments" {
+		snapshot, err := state.ReadState(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		result, err := (&host.GitHub{Run: host.RunGH}).Comments(cwd, *snapshot, time.Now())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
 	if len(args) > 0 && args[0] == "watch" {
 		return watchWorkflow(args[1:])
 	}
