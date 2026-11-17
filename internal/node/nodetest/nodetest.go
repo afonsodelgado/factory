@@ -109,7 +109,6 @@ type Machine struct {
 	online   bool
 	funnel   bool
 	hang     bool
-	handler  http.Handler
 	addr     string
 	node     *Node
 	served   map[string]string
