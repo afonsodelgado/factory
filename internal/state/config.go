@@ -115,7 +115,7 @@ func (c *Config) applyDefaults() {
 	if c.Hub.Session == "" {
 		c.Hub.Session = "factory"
 	}
-	if c.Hub.ReturnKey == "" {
+	if c.Hub.ReturnKey == "" || c.Hub.ReturnKey == "prefix" {
 		c.Hub.ReturnKey = "M-0"
 	}
 	if c.Icons == "" {
@@ -126,6 +126,9 @@ func (c *Config) applyDefaults() {
 	}
 	if socket := os.Getenv("FACTORY_TMUX_SOCKET"); socket != "" {
 		c.Tmux.Socket = socket
+	}
+	if c.Tmux.Socket == "" {
+		c.Tmux.Socket = "factory"
 	}
 }
 
@@ -148,6 +151,7 @@ func (c *Config) DraftsDir() string    { return filepath.Join(c.StateDir, "draft
 func (c *Config) ActivityDir() string  { return filepath.Join(c.StateDir, "activity") }
 func (c *Config) SocketPath() string   { return filepath.Join(c.StateDir, "hub.sock") }
 func (c *Config) LockPath() string     { return filepath.Join(c.StateDir, "hub.lock") }
+func (c *Config) TmuxConfPath() string { return filepath.Join(c.StateDir, "tmux.conf") }
 func (c *Config) NodeSocket() string   { return filepath.Join(c.StateDir, "node.sock") }
 func (c *Config) ReviewSocket() string { return filepath.Join(c.StateDir, "review.sock") }
 func (c *Config) NodeLockPath() string { return filepath.Join(c.StateDir, "node.lock") }

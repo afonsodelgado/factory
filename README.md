@@ -114,7 +114,7 @@ It checks Tailscale, HTTPS, Funnel and that nothing else serves `https://<machin
 factory
 ```
 
-Inside tmux, the hub opens in the pane you typed it in, even when that pane is one side of a split; your session, window name and status bar stay as they were. `q` puts your shell back in that pane. Outside tmux, `factory` attaches to a `factory` session instead, and `q` detaches. Either way the factories keep running in the background `factory` session.
+The hub opens full screen in the terminal or tmux pane you typed `factory` in, and `q` puts your shell back. The factories keep running on factory's own tmux server, with its own configuration, so they never show up in your tmux sessions and your `tmux.conf` never applies to them.
 
 `bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
 
@@ -358,7 +358,7 @@ review:
   browsers: 2
 ```
 
-`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. The node serves the factories' design and plan pages to the phone app and the hub through its own listener and to local tools through the owner-only `review.sock` in the state directory; it never opens a browser window. `review.chrome` names the Chrome binary for headless browser QA when it is not in the usual place. `review.browsers` is how many headless QA browsers the node runs at once; a QA stage over that waits, says so in the factory's activity, and starts when one finishes. Older `review.port` and `review.browser` keys are ignored. Every other value above is the default.
+`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the session on factory's tmux server that holds the hub and the factories' panes. `icons: unicode` draws plain Unicode instead of Nerd Font icons. The node serves the factories' design and plan pages to the phone app and the hub through its own listener and to local tools through the owner-only `review.sock` in the state directory; it never opens a browser window. `review.chrome` names the Chrome binary for headless browser QA when it is not in the usual place. `review.browsers` is how many headless QA browsers the node runs at once; a QA stage over that waits, says so in the factory's activity, and starts when one finishes. Older `review.port` and `review.browser` keys are ignored. Every other value above is the default.
 
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`.
 

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
@@ -177,13 +178,13 @@ func openMain(r hub.OpenRequest) error {
 			return err
 		}
 	}
-	tm := tmux.Client{Socket: cfg.Tmux.Socket}
-	bin, err := os.Executable()
+	tm, err := factoryTmux(cfg)
 	if err != nil {
 		return err
 	}
-	if !hubOpen(cfg) && sharesServer(tm) {
-		return hubMain(startupEvents(show), false)
+	bin, err := os.Executable()
+	if err != nil {
+		return err
 	}
 	if err := ensureHub(cfg, tm, bin); err != nil {
 		return err
@@ -201,17 +202,20 @@ func openMain(r hub.OpenRequest) error {
 	return attach(cfg, tm)
 }
 
-func startupEvents(show hub.ShowRequest) []hub.Event {
-	data, err := json.Marshal(show)
+func factoryTmux(cfg *state.Config) (tmux.Client, error) {
+	conf, err := bundle.Files.ReadFile("tmux.conf")
 	if err != nil {
-		return nil
+		return tmux.Client{}, err
 	}
-	return []hub.Event{{Message: hub.Message{T: "show", Pane: "cli", Data: data}}}
+	if err := state.WriteFileAtomic(cfg.TmuxConfPath(), conf); err != nil {
+		return tmux.Client{}, err
+	}
+	return tmux.Client{Socket: cfg.Tmux.Socket, ConfigFile: cfg.TmuxConfPath()}, nil
 }
 
-func sharesServer(tm tmux.Client) bool {
+func insideFactoryServer(tm tmux.Client) bool {
 	client, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
-	if client == "" || os.Getenv("TMUX_PANE") == "" {
+	if client == "" {
 		return false
 	}
 	socket, err := tm.Run("display-message", "-p", "#{socket_path}")
@@ -361,7 +365,7 @@ func send(socket string, m hub.Message) (hub.Message, error) {
 
 func attach(cfg *state.Config, tm tmux.Client) error {
 	target := hubPane(cfg, tm)
-	if os.Getenv("TMUX") != "" {
+	if insideFactoryServer(tm) {
 		if _, err := tm.Run("switch-client", "-t", target); err == nil {
 			return nil
 		}

@@ -283,3 +283,42 @@ func TestAttachingFromAnotherNodeShowsThePreparedPaneAndClosingItLeavesTheAgentR
 		t.Fatalf("closing the proxy left csv's pane %q; want the agent still running", alive)
 	}
 }
+
+func TestTheNodeStartsFactorysTmuxServerWithItsOwnConfig(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		if os.Getenv("CI") == "" {
+			t.Skip("tmux not installed")
+		}
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", "/bin/sh")
+	t.Setenv("TMUX", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	config := t.TempDir()
+	t.Setenv("FACTORY_CONFIG_DIR", config)
+	shortStateDir(t)
+	socket := "fown-" + uuid.NewString()
+	t.Setenv("FACTORY_TMUX_SOCKET", socket)
+	t.Cleanup(func() { exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	writeFile(t, filepath.Join(config, "config.yml"), fmt.Sprintf("node:\n  port: %d\n  keep_awake: false\n", freePort(t)))
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	n, err := startNode(ctx, cfg, "owner@example.com", node.Tailscale{Run: noTailscale})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		n.close()
+	})
+	for option, want := range map[string]string{"prefix": "None", "mouse": "on"} {
+		out, err := exec.Command("tmux", "-L", socket, "show-options", "-gv", option).Output()
+		if got := strings.TrimSpace(string(out)); err != nil || got != want {
+			t.Errorf("factory's tmux server has %s %q (%v); want %q from factory's own tmux.conf", option, got, err, want)
+		}
+	}
+}
