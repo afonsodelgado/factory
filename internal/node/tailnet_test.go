@@ -1849,7 +1849,7 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 		{"conflicting identity", otherFactory, "its state.json is csv"},
 		{"unknown schema", unknownSchema, "schema"},
 	}
-	for _, slug := range []string{"", ".", "..", "../../escaped", "a/b", `a\b`, "/tmp/escaped"} {
+	for _, slug := range []string{"", ".", "..", "../../escaped", "a/b", `a\b`, "/tmp/escaped", strings.Repeat("a", 256), ".git", "-rf", " ", "csv\n", "CSV"} {
 		cp := forgedCheckpoint(macbook.ID, nil)
 		cp.Manifest.Slug = slug
 		cases = append(cases, struct {
@@ -1875,6 +1875,23 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 	if status, _, _ := tn.Request(stranger.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", forgedCheckpoint(stranger.ID, nil)); status == http.StatusOK {
 		t.Error("homelab staged a checkpoint from a node outside its node list")
 	}
+	for _, length := range []int{200, 250, 256} {
+		t.Run(fmt.Sprintf("slug length %d preserves the source until safe", length), func(t *testing.T) {
+			f := newMoveFixture(t)
+			f.csv.Slug = strings.Repeat("a", length)
+			f.mac = newMoveHost("macbook", f.log, f.csv)
+			f.macbook.Runtime.Behind(f.mac)
+			moved, err := f.macbook.Transfers.Move(context.Background(), uuid.NewString(), f.csv.Key, "homelab")
+			if length <= 255 {
+				if err != nil || moved.Phase != node.PhaseActive {
+					t.Fatalf("valid long slug failed to move: %+v, %v", moved, err)
+				}
+			} else if err == nil || moved.Phase != node.PhasePreflight || !f.mac.runs(f.csv.Key) || len(f.log.all()) != 0 || len(f.lab.adopted) != 0 {
+				t.Fatalf("unsafe slug changed execution: %+v, %v, log=%v", moved, err, f.log.all())
+			}
+		})
+	}
+
 }
 
 func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
