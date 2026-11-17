@@ -176,6 +176,14 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	if _, err := Next(retrying, recipe(retrying, "new-recipe")); err == nil {
 		t.Fatal("a changed recipe under a review failure item stranded the retried review")
 	}
+	layered := offeredHandoff(t)
+	layered.Stack = append(layered.Stack, state.StackBranch{Branch: "feature-2", Parent: "feature", Head: "c", Base: "a"})
+	layered.PRs = append(layered.PRs, state.PR{Number: 2, Branch: "feature-2", Base: "feature", HeadSHA: "c", BaseSHA: "a", URL: "https://example.test/2"})
+	someOf := eventFor(layered, "observe")
+	someOf.Stack, someOf.PRs, someOf.Observations = layered.Stack, layered.PRs[:1], layered.Evidence.PRs
+	if _, err := Next(layered, someOf); err == nil {
+		t.Fatal("an observation with only some published PRs dropped the others")
+	}
 	implementing := workflowState()
 	if err := dispatch(&implementing, eventFor(implementing, "result"), "implement"); err != nil {
 		t.Fatal(err)

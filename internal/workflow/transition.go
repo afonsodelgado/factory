@@ -128,8 +128,8 @@ func apply(s *state.State, e Event) error {
 		wasDone := s.Done()
 		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
 		changed := !SameHeads(s.Stack, e.Stack)
-		if len(e.Stack) == 0 || len(s.PRs) > 0 && len(e.PRs) == 0 {
-			return errors.New("observation must carry the stack and its published PRs")
+		if len(e.Stack) == 0 || len(s.PRs) > 0 && len(e.PRs) == 0 || dropsPublishedPR(s.PRs, e) {
+			return errors.New("observation must carry the stack and every published PR still in it")
 		}
 		if s.Workflow.ActiveRun != "" && !SameHeads(s.Stack, e.Stack) {
 			return errors.New("cannot replace heads while a run is active")
@@ -379,6 +379,14 @@ func stranded(s *state.State) bool {
 	implemented := s.Stages["implement"].Rounds > 0
 	idle := s.Workflow.ActiveRun == "" && s.Workflow.Pending == nil && len(s.OpenAttention()) == 0
 	return implemented && idle && !LocalChecks(*s, s.Evidence.Local)
+}
+
+func dropsPublishedPR(published []state.PR, e Event) bool {
+	return slices.ContainsFunc(published, func(p state.PR) bool {
+		stillStacked := slices.ContainsFunc(e.Stack, func(b state.StackBranch) bool { return b.Branch == p.Branch })
+		observed := slices.ContainsFunc(e.PRs, func(o state.PR) bool { return o.Branch == p.Branch })
+		return stillStacked && !observed
+	})
 }
 
 func gatingDesign(f state.Finding) bool {
