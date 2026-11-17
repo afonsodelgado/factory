@@ -70,14 +70,7 @@ func (m *Runtime) Delete(r DeleteRequest) ([]factory.RemovalStep, error) {
 }
 
 func (m *Runtime) DeleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
-	m.stopBrowser(f.Key())
-	m.stopStack(f.Key())
-	var closeErr error
-	if m.Engine != nil {
-		strays := FactoryProcesses(m.currentPanes(), f.Repo, f.Slug)
-		closeErr = m.Engine.Pause(f.Repo, f.Slug)
-		Terminate(strays)
-	}
+	closeErr := m.stopProcesses(f)
 	steps := factory.Run(factory.PanesClosed(f.Label(), closeErr), factory.PlanRemoval(f, m.Config), m.Loader.UpdateRegistry)
 	m.Loader.Forget(f.Key())
 	if failed, stopped := factory.FirstFailure(steps); stopped {

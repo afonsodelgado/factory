@@ -64,6 +64,8 @@ func run(args []string) int {
 		return runRemote(args[1:])
 	case "node":
 		return runNode(args[1:])
+	case "move":
+		return runMove(args[1:])
 	case "phone":
 		return runPhone(args[1:])
 	case "--remote", "--local":
@@ -177,6 +179,17 @@ commands:
   node push-key export --file <path> | import [--file <path>] [--replace]
               copy the phone notification key to or from another node, so
               every node notifies the same phone subscription
+  move <id> --to <node>
+              move a factory to another node: it stops at a checkpoint,
+              pushes its branches, and the node there resumes it with a fresh
+              supervisor; Ctrl-C cancels it until it is released
+  move --all --to <node>
+              move every movable factory of this node, one at a time, and
+              report which moved and why the others did not
+  move <id> --to <node> --force [--yes]
+              take a factory over from the last checkpoint on that node when
+              its holder cannot be reached; prints the warning and asks first
+              (--yes answers it for scripts)
   hub         show the node's factories in the factory tmux session
   host request
               answer one JSON request from another machine on stdin through

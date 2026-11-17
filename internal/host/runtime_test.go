@@ -877,3 +877,48 @@ func TestACheckpointIsAskedOfTheSupervisorOnceAndWaitsForUnsettledAnswers(t *tes
 		t.Errorf("a ready checkpoint answered %+v, %v", movable, err)
 	}
 }
+
+func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheckedAnswers(t *testing.T) {
+	repo := t.TempDir()
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}
+	registry, _ := state.LoadRegistry(cfg.RegistryPath())
+	engine := &wakingEngine{}
+	r := New(Runtime{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}, Engine: engine, Now: time.Now})
+	incarnation, key := uuid.NewString(), state.Key(repo, "csv")
+	if _, err := r.Adopt(AdoptRequest{Repo: repo, Slug: "csv", Incarnation: incarnation}); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv", "state.json")
+	if err := WriteFile(stateFile, `{"id":"csv","session_id":"old-session"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.LaunchMoved(key); err != nil {
+		t.Fatal(err)
+	}
+	launched := strings.Join(engine.typed, "\n")
+	if !strings.Contains(launched, "--session-id") || !strings.HasSuffix(launched, "'/factory resume'") || strings.Contains(launched, "--resume") || strings.Contains(launched, "--continue") || strings.Contains(launched, "old-session") {
+		t.Fatalf("a moved factory started with %q; want a fresh session typed /factory resume, never the old conversation", launched)
+	}
+	if local := r.Local().Factories; len(local) != 1 || local[0].Incarnation != incarnation {
+		t.Fatalf("the moved factory lists as %+v; want its incarnation kept across the move", local)
+	}
+	answer := ActionRequest{Operation: uuid.NewString(), Factory: key, Incarnation: incarnation, Action: ActMessage, Text: "status?", Generation: 1}
+	r.SetHolding(HoldingRequest{Key: key, Holding: Holding{Generation: 2}})
+	if receipt, _ := r.Act(answer); receipt.Status != StatusStale {
+		t.Errorf("an answer loaded at generation 1 after the holder moved to generation 2 gave %+v; want it refused as stale", receipt)
+	}
+	r.SetHolding(HoldingRequest{Key: key, Holding: Holding{Unverified: "cannot check the holder"}})
+	answer.Operation, answer.Generation = uuid.NewString(), 0
+	if receipt, _ := r.Act(answer); receipt.Status != StatusRefused || len(engine.typed) != 1 {
+		t.Errorf("an answer while the holder is unchecked gave %+v and typed %q; want it refused", receipt, engine.typed)
+	}
+	if err := r.Release(ReleaseRequest{Repo: repo, Slug: "csv", To: "homelab"}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _ := state.LoadRegistry(cfg.RegistryPath())
+	restarted := New(Runtime{Config: cfg, Loader: &Loader{Config: cfg, Registry: reloaded, Now: time.Now}, Engine: engine, Now: time.Now})
+	restarted.Tick()
+	if local := restarted.Local().Factories; len(local) != 0 || restarted.Wake(key) != nil || len(engine.created) != 1 {
+		t.Errorf("after a restart the released factory lists as %+v and woke %v; want this node to stop offering it", local, engine.created)
+	}
+}

@@ -65,11 +65,15 @@ func runDoctor(args []string) int {
 		return 2
 	}
 	problems := 0
+	cfg, err := state.LoadConfig()
 	if *only == "" {
 		header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
-		problems += summarize(header, install.Doctor(doctorOptions()))
+		checks := install.Doctor(doctorOptions())
+		if err == nil {
+			checks = append(checks, moveChecks(cfg)...)
+		}
+		problems += summarize(header, checks)
 	}
-	cfg, err := state.LoadConfig()
 	if err != nil && *only != "" {
 		fmt.Fprintln(os.Stderr, "factory doctor:", err)
 		return 1

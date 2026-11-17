@@ -69,6 +69,9 @@ func (m *Runtime) QueueAnswerFor(q QueuedAnswer) (Answer, error) {
 	if !ok {
 		return Answer{}, fmt.Errorf("no factory %s", q.Answer.Factory)
 	}
+	if err := m.unverified(q.Answer.Factory); err != nil {
+		return Answer{}, err
+	}
 	if claimed, ok := m.Claim(q.Answer.Key()); ok && claimed.ItemSince.Equal(q.Answer.ItemSince) {
 		return claimed, nil
 	}

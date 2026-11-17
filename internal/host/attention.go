@@ -297,6 +297,8 @@ type LocalFactory struct {
 	Pane        string       `json:"pane,omitempty"`
 	StageRole   string       `json:"stage_role,omitempty"`
 	StagePane   string       `json:"stage_pane,omitempty"`
+	Generation  int64        `json:"generation,omitempty"`
+	Unverified  string       `json:"unverified,omitempty"`
 }
 
 type LocalPage struct {
@@ -373,6 +375,7 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 		Key: f.Key(), Route: ReviewKey(f), Incarnation: Incarnation(f), ID: f.Label(), Title: f.Title(), Repo: f.Repo, RepoName: m.repoName(f.Repo),
 		Status: it.Status.String(), Paused: Paused(f), Items: []LocalItem{}, Pages: []LocalPage{}, Message: Eligible(target, "the message"),
 		CanPause: it.Pane != nil && !it.Pane.Dead, CanWake: it.Status.Asleep() && it.Status != factory.Done,
+		Generation: m.holdings[f.Key()].Generation, Unverified: m.holdings[f.Key()].Unverified,
 	}
 	if f.State != nil {
 		lf.Stage = f.State.Stage

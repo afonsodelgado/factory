@@ -68,6 +68,7 @@ type Runtime struct {
 	preparing   map[string]string
 	prs         map[string][]PR
 	prsPolled   time.Time
+	holdings    map[string]Holding
 }
 
 func New(r Runtime) *Runtime {
@@ -80,6 +81,7 @@ func New(r Runtime) *Runtime {
 	r.repoNames = map[string]string{}
 	r.leases = map[string]browserLease{}
 	r.preparing = map[string]string{}
+	r.holdings = map[string]Holding{}
 	return &r
 }
 
@@ -196,6 +198,9 @@ func factoryBin() string {
 func (m *Runtime) ClearTyped(pane string) { delete(m.typedAt, pane) }
 
 func (m *Runtime) selectExisting(key string) (string, error) {
+	if err := m.movedAway(key); err != nil {
+		return "", err
+	}
 	if it, ok := m.snap.Find(key); ok && it.Factory.Archived() {
 		return "", fmt.Errorf("%s is archived. In the factory list, H shows archived factories and a on the row unarchives it.", it.Factory.Label())
 	}

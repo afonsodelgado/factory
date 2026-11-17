@@ -194,6 +194,9 @@ func (m *Runtime) Wake(key string) error {
 	if !ok || !it.Status.Asleep() || m.Engine == nil {
 		return nil
 	}
+	if err := m.unverified(key); err != nil {
+		return err
+	}
 	_, err := m.wake(it)
 	return err
 }

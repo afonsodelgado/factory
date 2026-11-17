@@ -296,7 +296,7 @@ func TestDiscoveryAsksEachMachineForAtMostItsCapAndListsTheRestAsDiagnostics(t *
 	macbook := tn.Machine("macbook").Start()
 	tn.Machine("homelab").Start()
 	sleeper := tn.Machine("sleeper")
-	sleeper.Hang()
+	sleeper.SetHang(true)
 	tn.Machine("nas")
 	offline := tn.Machine("old-mini")
 	offline.SetOnline(false)
@@ -1826,5 +1826,453 @@ func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
 		if report := homelab.Transfers.Preflight(context.Background(), request); !strings.Contains(report.Refusal, c.reason) {
 			t.Errorf("preflight with a %s answered %q; want a refusal naming %q", c.name, report.Refusal, c.reason)
 		}
+	}
+}
+
+type hostLog struct {
+	mu      sync.Mutex
+	entries []string
+}
+
+func (l *hostLog) add(entry string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = append(l.entries, entry)
+}
+
+func (l *hostLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.entries)
+}
+
+func (l *hostLog) count(entry string) int {
+	n := 0
+	for _, e := range l.all() {
+		if e == entry {
+			n++
+		}
+	}
+	return n
+}
+
+type moveHost struct {
+	name string
+	log  *hostLog
+
+	mu           sync.Mutex
+	factories    map[string]host.Movable
+	adopted      map[string]host.AdoptRequest
+	refusals     map[string]string
+	unmovable    map[string]string
+	holdings     map[string]host.Holding
+	waiting      string
+	onCheckpoint func()
+	onRelease    func()
+}
+
+func newMoveHost(name string, log *hostLog, factories ...host.Movable) *moveHost {
+	h := &moveHost{name: name, log: log, factories: map[string]host.Movable{}, adopted: map[string]host.AdoptRequest{}, refusals: map[string]string{}, unmovable: map[string]string{}, holdings: map[string]host.Holding{}}
+	for _, f := range factories {
+		h.factories[f.Key] = f
+	}
+	return h
+}
+
+func (h *moveHost) set(change func(*moveHost)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	change(h)
+}
+
+func (h *moveHost) runs(key string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.factories[key]
+	return ok
+}
+
+func (h *moveHost) holding(key string) host.Holding {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.holdings[key]
+}
+
+func (h *moveHost) Call(_ context.Context, m host.Message) (host.Message, error) {
+	h.mu.Lock()
+	value, then, err := h.handle(m)
+	h.mu.Unlock()
+	if then != nil {
+		then()
+	}
+	if err != nil {
+		return host.Message{T: "error", Error: err.Error()}, nil
+	}
+	data, _ := json.Marshal(value)
+	return host.Message{T: "done", Data: data}, nil
+}
+
+func (h *moveHost) handle(m host.Message) (any, func(), error) {
+	var r struct {
+		Key, Operation, Repo, Slug string
+	}
+	json.Unmarshal(m.Data, &r)
+	switch m.T {
+	case "local":
+		local := host.Local{Factories: []host.LocalFactory{}}
+		for _, key := range slices.Sorted(maps.Keys(h.factories)) {
+			f := h.factories[key]
+			local.Factories = append(local.Factories, host.LocalFactory{Key: key, ID: f.ID, Incarnation: f.Incarnation, Repo: f.Repo, Generation: h.holdings[key].Generation, Unverified: h.holdings[key].Unverified})
+		}
+		return local, nil, nil
+	case "movable", "checkpoint":
+		f, ok := h.factories[r.Key]
+		switch {
+		case !ok:
+			return nil, nil, fmt.Errorf("no factory %s", r.Key)
+		case h.unmovable[r.Key] != "":
+			return nil, nil, errors.New(h.unmovable[r.Key])
+		case m.T == "movable":
+			return f, nil, nil
+		case h.refusals[r.Key] != "":
+			return nil, nil, errors.New(h.refusals[r.Key])
+		case h.waiting != "":
+			f.Waiting = h.waiting
+			return f, nil, nil
+		}
+		return f, h.onCheckpoint, supervisorCheckpoints(f.Dir, r.Operation)
+	case "release":
+		key := state.Key(r.Repo, r.Slug)
+		delete(h.factories, key)
+		h.log.add(h.name + " release " + r.Slug)
+		return nil, h.onRelease, nil
+	case "adopt":
+		var adopt host.AdoptRequest
+		json.Unmarshal(m.Data, &adopt)
+		key := state.Key(adopt.Repo, adopt.Slug)
+		h.adopted[key] = adopt
+		return key, nil, nil
+	case "launch-moved":
+		a := h.adopted[r.Key]
+		worktree := filepath.Join(factory.WorktreesDir(a.Repo), a.Slug)
+		h.factories[r.Key] = host.Movable{Key: r.Key, Incarnation: a.Incarnation, ID: a.Slug, Slug: a.Slug, Repo: a.Repo, Worktree: worktree, Dir: filepath.Join(worktree, ".claude", "factory", a.Slug), Branch: "worktree-" + a.Slug}
+		h.log.add(h.name + " launch " + a.Slug)
+		return "%1", nil, nil
+	case "holding":
+		var holding host.HoldingRequest
+		json.Unmarshal(m.Data, &holding)
+		h.holdings[holding.Key] = holding.Holding
+	}
+	return nil, nil, nil
+}
+
+func supervisorCheckpoints(dir, operation string) error {
+	path := filepath.Join(dir, "state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var s map[string]any
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	s["checkpoint"] = map[string]string{"operation": operation, "status": "ready"}
+	data, _ = json.Marshal(s)
+	return os.WriteFile(path, data, 0o644)
+}
+
+type moveFixture struct {
+	g                gitFixture
+	tn               *nodetest.Tailnet
+	macbook, homelab *nodetest.Node
+	mac, lab         *moveHost
+	log              *hostLog
+	csv              host.Movable
+}
+
+func newMoveFixture(t *testing.T) moveFixture {
+	t.Helper()
+	g := newGitFixture(t)
+	writeFiles(t, g.dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","session_id":"old-session"}`, "brief.md": "Export contacts as CSV."})
+	writeFiles(t, g.repo, map[string]string{".factory/config.yml": "qa:\n  mode: terminal\n"})
+	tn := nodetest.New(t)
+	f := moveFixture{g: g, tn: tn, macbook: tn.Machine("macbook").Start(), homelab: tn.Machine("homelab").Start(), log: &hostLog{}}
+	if _, err := f.macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	f.homelab.Nodes.Clone = cloneWithOwnCredentials(f.homelab.Dir)
+	f.macbook.SetRepos(map[string]string{appRemote: g.repo})
+	f.csv = host.Movable{Key: state.Key(g.repo, "csv"), Incarnation: uuid.NewString(), ID: "csv", Slug: "csv", Repo: g.repo, Worktree: g.worktree, Dir: g.dir, Evidence: filepath.Join(g.worktree, ".claude", "qa", "csv"), Branch: "worktree-csv"}
+	f.mac, f.lab = newMoveHost("macbook", f.log, f.csv), newMoveHost("homelab", f.log)
+	f.macbook.Runtime.Behind(f.mac)
+	f.homelab.Runtime.Behind(f.lab)
+	return f
+}
+
+func restarted(n *nodetest.Node) *node.Transfers {
+	return &node.Transfers{Commands: n.Transfers.Commands, Nodes: n.Nodes, StateDir: n.Dir, Holds: n.API.HoldsIncarnation, Poll: 20 * time.Millisecond, Holders: &node.Holders{Dir: filepath.Join(n.Dir, "holders.git")}}
+}
+
+func holderOf(t *testing.T, incarnation string) node.Holder {
+	t.Helper()
+	h, _, err := (&node.Holders{Dir: t.TempDir()}).Read(context.Background(), appRemote, incarnation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func progressOf(t *testing.T, ts *node.Transfers, op string) node.Progress {
+	t.Helper()
+	p, err := ts.Progress(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAMoveInterruptedAtEachStepResumesAndNeverRunsTheFactoryInTwoPlaces(t *testing.T) {
+	f := newMoveFixture(t)
+	op, key, background := uuid.NewString(), f.csv.Key, context.Background()
+
+	f.mac.set(func(h *moveHost) { h.waiting = "waiting for the supervisor of csv to write checkpoint " + op })
+	crashed, crash := context.WithCancel(background)
+	first := restarted(f.macbook)
+	first.Ctx = crashed
+	if _, err := first.Start(background, node.MoveRequest{Operation: op, Factory: "csv", Target: "homelab"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the move to wait for the supervisor's checkpoint", func() bool { return progressOf(t, first, op).State == node.StateCheckpointWaiting })
+	crash()
+	eventually(t, "the crashed move to stop", func() bool { return !first.Running(op) })
+	if p := progressOf(t, restarted(f.macbook), op); p.State != node.StateInterrupted || p.Phase != node.PhasePreflight {
+		t.Fatalf("a crash while the supervisor checkpointed left %s at %s", p.State, p.Phase)
+	}
+
+	f.mac.set(func(h *moveHost) { h.waiting, h.onCheckpoint = "", func() { f.homelab.SetHang(true) } })
+	hung, stop := context.WithTimeout(background, 2*time.Second)
+	restarted(f.macbook).Move(hung, op, key, "homelab")
+	stop()
+	f.homelab.SetHang(false)
+	f.mac.set(func(h *moveHost) { h.onCheckpoint = nil })
+	if p := progressOf(t, restarted(f.macbook), op); p.State != node.StateInterrupted || p.Phase != node.PhaseCheckpoint {
+		t.Fatalf("a crash after the checkpoint left %s at %s", p.State, p.Phase)
+	}
+	if staged, err := restarted(f.macbook).Stage(background, op, key, "homelab"); err != nil || staged.Phase != node.PhaseStaged {
+		t.Fatalf("resuming after the checkpoint answered %+v, %v", staged, err)
+	}
+
+	f.mac.set(func(h *moveHost) { h.onRelease = func() { f.homelab.SetOnline(false) } })
+	if _, err := restarted(f.macbook).Move(background, op, key, "homelab"); err == nil {
+		t.Fatal("a move whose target went away after the release reported success")
+	}
+	stranded := progressOf(t, restarted(f.macbook), op)
+	if stranded.State != node.StateRecoveryNeeded || !strings.Contains(strings.Join(stranded.Recovery, "\n"), "--force") {
+		t.Errorf("a source released to an unavailable target reports %s with %q; want recovery steps", stranded.State, stranded.Recovery)
+	}
+	if f.mac.runs(key) || f.log.count("homelab launch csv") > 0 {
+		t.Fatalf("after an unconfirmed release macbook runs csv: %v, homelab launched it: %v; want it stopped everywhere", f.mac.runs(key), f.log.all())
+	}
+
+	f.mac.set(func(h *moveHost) { h.onRelease = nil })
+	f.homelab.SetOnline(true)
+	for range 2 {
+		if moved, err := restarted(f.macbook).Move(background, op, key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
+			t.Fatalf("retrying the move answered %+v, %v", moved, err)
+		}
+	}
+	entries := f.log.all()
+	if released, launched := slices.Index(entries, "macbook release csv"), slices.Index(entries, "homelab launch csv"); released < 0 || launched < released || f.log.count("homelab launch csv") != 1 {
+		t.Errorf("host calls were %v; want macbook stopped before homelab started csv, and homelab to start it once", entries)
+	}
+	if h := holderOf(t, f.csv.Incarnation); h.Node != f.homelab.ID || h.Generation != 1 || h.Operation != op {
+		t.Errorf("the holder record is %+v; want homelab at generation 1 by this move", h)
+	}
+	moved := filepath.Join(factory.WorktreesDir(gitclone.Dir(f.homelab.Dir, appRemote)), "csv", ".claude", "factory", "csv", "brief.md")
+	if brief, err := os.ReadFile(moved); err != nil || string(brief) != "Export contacts as CSV." {
+		t.Errorf("homelab's worktree holds %q, %v; want the checkpointed factory folder", brief, err)
+	}
+}
+
+func (f moveFixture) moveToHomelab(t *testing.T) {
+	t.Helper()
+	if moved, err := f.macbook.Transfers.Move(context.Background(), uuid.NewString(), f.csv.Key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
+		t.Fatalf("moving csv to homelab answered %+v, %v", moved, err)
+	}
+}
+
+func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *testing.T) {
+	f := newMoveFixture(t)
+	f.moveToHomelab(t)
+	background := context.Background()
+	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	away := filepath.Join(factory.WorktreesDir(clone), "csv")
+	f.g.commit(away, "made-on-homelab.go")
+	back := uuid.NewString()
+	request := node.MoveRequest{Operation: back, Factory: state.Key(clone, "csv"), Target: "macbook"}
+	if status, _, body := f.tn.Request(f.macbook.Machine, f.homelab.Machine, "POST", "/api/transfers", "", request); status != http.StatusAccepted {
+		t.Fatalf("macbook's hub asking homelab to move csv back answered %d %s", status, body)
+	}
+	for deadline := time.Now().Add(time.Minute); progressOf(t, f.homelab.Transfers, back).Running; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the move back never finished")
+		}
+	}
+	if p := progressOf(t, f.homelab.Transfers, back); p.State != node.StateActive {
+		t.Fatalf("the move back ended %s: %s%s", p.State, p.Refusal, p.Failure)
+	}
+	if head, want := f.g.run(f.g.worktree, "rev-parse", "HEAD"), f.g.run(away, "rev-parse", "HEAD"); head != want {
+		t.Errorf("macbook's worktree is at %s after the move back; want homelab's commit %s", head, want)
+	}
+
+	stranded := uuid.NewString()
+	f.mac.set(func(h *moveHost) { h.onRelease = func() { f.homelab.SetOnline(false) } })
+	f.macbook.Transfers.Move(background, stranded, f.csv.Key, "homelab")
+	if p := progressOf(t, f.macbook.Transfers, stranded); p.State != node.StateRecoveryNeeded {
+		t.Fatalf("the stranded move reports %s", p.State)
+	}
+	if taken, err := f.macbook.Transfers.Takeover(background, node.TakeoverRequest{Operation: uuid.NewString(), Factory: "csv", Confirm: true}); err != nil || taken.Phase != node.PhaseActive {
+		t.Fatalf("taking csv back on macbook answered %+v, %v", taken, err)
+	}
+	if p := progressOf(t, f.macbook.Transfers, stranded); p.State == node.StateRecoveryNeeded {
+		t.Errorf("after taking csv back the stranded move still asks for recovery: %q", p.Recovery)
+	}
+	f.homelab.SetOnline(true)
+	f.mac.set(func(h *moveHost) { h.onRelease = nil })
+	next, err := f.macbook.Transfers.Start(background, node.MoveRequest{Operation: uuid.NewString(), Factory: "csv", Target: "homelab"})
+	if err != nil || next.Operation == stranded {
+		t.Errorf("moving csv again answered %+v, %v; want a new move, never the stranded one resumed", next, err)
+	}
+	f.macbook.Transfers.Cancel(next.Operation)
+	eventually(t, "the new move to stop", func() bool { return !f.macbook.Transfers.Running(next.Operation) })
+}
+
+func TestAForcedTakeoverWarnsNeedsACheckpointAndTheReturningHolderLearnsItLost(t *testing.T) {
+	f := newMoveFixture(t)
+	f.moveToHomelab(t)
+	background := context.Background()
+	studio := f.tn.Machine("studio").Start()
+	if _, err := f.macbook.Add("studio"); err != nil {
+		t.Fatal(err)
+	}
+	studio.Runtime.Behind(newMoveHost("studio", f.log))
+	f.homelab.SetOnline(false)
+
+	if _, err := studio.Transfers.Takeover(background, node.TakeoverRequest{Operation: uuid.NewString(), Factory: "csv", Confirm: true}); err == nil || !strings.Contains(err.Error(), "no checkpoint") {
+		t.Errorf("a takeover on a node without a checkpoint answered %v; want a refusal", err)
+	}
+	op := uuid.NewString()
+	var unconfirmed struct{ Warning node.Unconfirmed }
+	err := f.macbook.Local.Do(background, http.MethodPost, "/api/transfers/takeover", node.TakeoverRequest{Operation: op, Factory: "csv"}, &unconfirmed)
+	var status node.StatusError
+	if !errors.As(err, &status) || status.Status != http.StatusPreconditionRequired || !strings.Contains(unconfirmed.Warning.Warning, "may only be out of reach") || f.log.count("macbook launch csv") > 0 {
+		t.Fatalf("an unconfirmed takeover answered %v with %+v; want the warning and nothing started", err, unconfirmed)
+	}
+	if taken, err := f.macbook.Transfers.Takeover(background, node.TakeoverRequest{Operation: op, Factory: "csv", Confirm: true}); err != nil || taken.Phase != node.PhaseActive {
+		t.Fatalf("a confirmed takeover answered %+v, %v", taken, err)
+	}
+	if h := holderOf(t, f.csv.Incarnation); h.Node != f.macbook.ID || h.Generation != 2 || f.mac.holding(f.csv.Key).Generation != 2 {
+		t.Errorf("after the takeover the holder is %+v and macbook answers at generation %d; want macbook at generation 2", h, f.mac.holding(f.csv.Key).Generation)
+	}
+
+	f.homelab.SetOnline(true)
+	bare := filepath.Join(filepath.Dir(f.g.repo), "remote.git")
+	if err := os.Rename(bare, bare+".away"); err != nil {
+		t.Fatal(err)
+	}
+	returning := restarted(f.homelab)
+	returning.HoldUnverified(background)
+	returning.Reconcile(background)
+	homelabKey := state.Key(gitclone.Dir(f.homelab.Dir, appRemote), "csv")
+	if f.lab.holding(homelabKey).Unverified == "" || f.log.count("homelab release csv") > 0 {
+		t.Errorf("homelab restarted without reaching the holder record and holds csv as %+v; want it kept from resuming", f.lab.holding(homelabKey))
+	}
+	if err := os.Rename(bare+".away", bare); err != nil {
+		t.Fatal(err)
+	}
+	returning.Reconcile(background)
+	if f.lab.runs(homelabKey) || f.log.count("homelab release csv") != 1 {
+		t.Errorf("homelab still runs csv after the record says macbook holds it: %v", f.log.all())
+	}
+}
+
+func TestTwoNodesTakingOverAtOnceLeaveExactlyOneHolder(t *testing.T) {
+	g := newGitFixture(t)
+	g.run(g.worktree, "push", "-q", "origin", "worktree-csv")
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	claimants := []*nodetest.Node{tn.Machine("homelab").Start(), tn.Machine("studio").Start()}
+	cp := forgedCheckpoint(macbook.ID, nil)
+	cp.Manifest.Slug, cp.Manifest.Branch = "csv", "worktree-csv"
+	cp.Manifest.Stack = []node.StackBranch{{Branch: "worktree-csv", SHA: g.run(g.worktree, "rev-parse", "worktree-csv")}}
+	log := &hostLog{}
+	for _, n := range claimants {
+		if _, err := macbook.Add(n.Short()); err != nil {
+			t.Fatal(err)
+		}
+		n.Nodes.Clone = cloneWithOwnCredentials(n.Dir)
+		n.Runtime.Behind(newMoveHost(n.Short(), log))
+		if status, _, body := tn.Request(macbook.Machine, n.Machine, "POST", "/api/node/transfer/stage", "", cp); status != http.StatusOK {
+			t.Fatalf("staging on %s answered %d %s", n.Short(), status, body)
+		}
+	}
+	outcomes := make([]error, len(claimants))
+	var wg sync.WaitGroup
+	for i, n := range claimants {
+		wg.Go(func() {
+			_, outcomes[i] = n.Transfers.Takeover(context.Background(), node.TakeoverRequest{Operation: uuid.NewString(), Factory: "csv", Confirm: true})
+		})
+	}
+	wg.Wait()
+	winner := slices.IndexFunc(outcomes, func(err error) bool { return err == nil })
+	loser := 1 - winner
+	if winner < 0 || outcomes[loser] == nil || !strings.Contains(outcomes[loser].Error(), "claimed this factory first") {
+		t.Fatalf("two simultaneous takeovers answered %v; want exactly one to win and the other told who did", outcomes)
+	}
+	won := holderOf(t, cp.Manifest.Incarnation)
+	if won.Node != claimants[winner].ID || won.Generation != 1 || len(slices.DeleteFunc(log.all(), func(e string) bool { return !strings.HasSuffix(e, " launch csv") })) != 1 {
+		t.Errorf("the holder is %+v and the hosts saw %v; want only %s holding and running csv", won, log.all(), claimants[winner].Short())
+	}
+	late := won
+	late.Node, late.Operation = claimants[loser].ID, uuid.NewString()
+	if _, err := (&node.Holders{Dir: t.TempDir()}).Claim(context.Background(), appRemote, "", late); !errors.As(err, new(node.HolderChanged)) || holderOf(t, cp.Manifest.Incarnation).Node != won.Node {
+		t.Errorf("a claimant that read no holder before the winner wrote answered %v; want its claim refused", err)
+	}
+}
+
+func TestMoveAllReportsEachFactorysOutcomeWithoutUndoingTheOthers(t *testing.T) {
+	f := newMoveFixture(t)
+	billing := host.Movable{Key: state.Key(f.g.repo, "billing"), Incarnation: uuid.NewString(), ID: "billing", Slug: "billing", Repo: f.g.repo, Worktree: f.g.worktree, Dir: f.g.dir, Branch: "worktree-csv"}
+	docs := host.Movable{Key: state.Key(f.g.repo, "docs"), Incarnation: uuid.NewString(), ID: "docs", Slug: "docs", Repo: f.g.repo}
+	f.mac.set(func(h *moveHost) {
+		h.factories[billing.Key], h.factories[docs.Key] = billing, docs
+		h.refusals[billing.Key] = "the supervisor of billing cannot checkpoint: its QA stage is running"
+		h.unmovable[docs.Key] = "docs has no state.json in a worktree yet, so it has nothing to checkpoint"
+	})
+	op := uuid.NewString()
+	if _, err := f.macbook.Transfers.StartAll(context.Background(), node.MoveAllRequest{Operation: op, Target: "homelab"}); err != nil {
+		t.Fatal(err)
+	}
+	var report node.BatchProgress
+	for deadline := time.Now().Add(time.Minute); report.Operation == "" || report.Running; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("move all never finished: %+v", report)
+		}
+		report, _ = f.macbook.Transfers.BatchProgress(op)
+	}
+	got := map[string]string{}
+	for _, item := range report.Items {
+		got[item.Factory] = item.State + ": " + item.Reason
+	}
+	want := map[string]string{
+		"billing": node.StateRefused + ": " + f.mac.refusals[billing.Key],
+		"csv":     node.StateActive + ": ",
+		"docs":    node.StateRefused + ": " + f.mac.unmovable[docs.Key],
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("move all reported %v; want %v", got, want)
+	}
+	if h := holderOf(t, f.csv.Incarnation); h.Node != f.homelab.ID {
+		t.Errorf("csv's holder is %+v after move all; want homelab despite the other refusals", h)
 	}
 }

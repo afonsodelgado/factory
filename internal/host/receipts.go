@@ -69,6 +69,7 @@ type ActionRequest struct {
 	Text        string    `json:"text,omitempty"`
 	Option      string    `json:"option,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
+	Generation  int64     `json:"generation,omitempty"`
 }
 
 type ReceiptRequest struct {
@@ -422,6 +423,12 @@ func (m *Runtime) Act(r ActionRequest) (Receipt, error) {
 	}
 	if it.Factory.Archived() {
 		return stale(r, it.Factory.Label()+" is archived. Nothing was sent."), nil
+	}
+	if held := m.holdings[r.Factory]; r.Generation != 0 && r.Generation != held.Generation {
+		return stale(r, fmt.Sprintf("%s moved since this was loaded (generation %d, now %d). Nothing was sent.", it.Factory.Label(), r.Generation, held.Generation)), nil
+	}
+	if err := m.unverified(r.Factory); err != nil {
+		return refused(r, err.Error()), nil
 	}
 	switch r.Action {
 	case ActPause:

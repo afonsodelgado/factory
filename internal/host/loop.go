@@ -215,6 +215,31 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.Checkpoint(r)
 		}
+	case "release":
+		var r ReleaseRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			err = m.Release(r)
+		}
+	case "adopt":
+		var r AdoptRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Adopt(r)
+		}
+	case "launch-moved":
+		var r struct{ Key string }
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.LaunchMoved(r.Key)
+		}
+	case "holding":
+		var r HoldingRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			m.SetHolding(r)
+		}
+	case "can-adopt":
+		var r AdoptRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			err = m.CanAdopt(r)
+		}
 	case "receipt":
 		var r ReceiptRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {

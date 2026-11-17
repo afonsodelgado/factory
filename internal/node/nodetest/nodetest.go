@@ -131,10 +131,10 @@ func (m *Machine) SetOnline(on bool) {
 	m.online = on
 }
 
-func (m *Machine) Hang() {
+func (m *Machine) SetHang(on bool) {
 	m.net.mu.Lock()
 	defer m.net.mu.Unlock()
-	m.hang = true
+	m.hang = on
 }
 
 func (m *Machine) SetFunnel(on bool) {
@@ -465,7 +465,7 @@ func (m *Machine) Start() *Node {
 	}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}
 	n.API.Nodes = n.Nodes
-	n.Transfers = &node.Transfers{Commands: node.Commands{Runtime: n.Runtime}, Nodes: n.Nodes, StateDir: dir, Holds: n.API.HoldsIncarnation, Poll: 20 * time.Millisecond}
+	n.Transfers = &node.Transfers{Commands: node.Commands{Runtime: n.Runtime}, Nodes: n.Nodes, StateDir: dir, Holds: n.API.HoldsIncarnation, Poll: 20 * time.Millisecond, Holders: &node.Holders{Dir: filepath.Join(dir, "holders.git")}, Ctx: ctx}
 	n.API.Transfers = n.Transfers
 	n.Exposure = &node.Exposure{Tailscale: ts}
 	n.Exposure.Check(ctx)

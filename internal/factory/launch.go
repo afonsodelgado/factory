@@ -27,7 +27,7 @@ func Slugify(s string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "node", "remote", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
+var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "node", "move", "remote", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
 
 func IsReservedID(name string) bool {
 	return slices.Contains(ReservedIDs, name) || slices.Contains(ReservedIDs, Slugify(name))
@@ -135,6 +135,14 @@ func (l Launch) ResumeCommand() string {
 		parts = append(parts, "--resume", l.SessionID)
 	}
 	parts = append(parts, l.flags()...)
+	return strings.Join(parts, " ") + " " + ShellQuote(l.ResumeMessage())
+}
+
+func (l Launch) FreshResumeCommand() string {
+	if !l.Supervisor.OnClaude() {
+		return l.supervisor("", l.ResumeMessage())
+	}
+	parts := append([]string{"claude", "--session-id", l.SessionID}, l.flags()...)
 	return strings.Join(parts, " ") + " " + ShellQuote(l.ResumeMessage())
 }
 
