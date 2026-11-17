@@ -506,7 +506,7 @@ func TestAJoinChallengeWorksOnceAndExpires(t *testing.T) {
 
 	first := uuid.NewString()
 	challenge := prepare(first)
-	if status := commit(first, "0"+challenge[1:], ledger); status == 200 {
+	if status := commit(first, "g"+challenge[1:], ledger); status == 200 {
 		t.Error("a commit with the wrong challenge was accepted")
 	}
 	if status := commit(first, challenge, ledger); status == 200 {
