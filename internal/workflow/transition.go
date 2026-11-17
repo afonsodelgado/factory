@@ -92,6 +92,7 @@ func apply(s *state.State, e Event) error {
 		if !designRevisable(s) {
 			return errors.New("design comments apply only while the design or plan awaits approval")
 		}
+		resolveGate(s, "design", e.At)
 		resolveGate(s, "plan", e.At)
 		s.Workflow.Gate = ""
 		return dispatch(s, e, "design")

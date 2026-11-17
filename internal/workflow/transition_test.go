@@ -276,6 +276,15 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 	e := eventFor(s, "design_comments")
 	e.Receipt, e.Answer = "batch:1", "revise spacing"
 	s = step(t, s, e)
+	failed := eventFor(s, "result")
+	failed.Stack = s.Stack
+	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+	broken := step(t, s, failed)
+	e = eventFor(broken, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = old.ID, old.Revision, "approved", "old-answer", true
+	if _, err := Next(broken, e); err == nil {
+		t.Fatal("the stale design gate approved over a failed revision")
+	}
 	s = complete(t, s)
 	e = eventFor(s, "approval")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = old.ID, old.Revision, "approved", "old-answer", true
