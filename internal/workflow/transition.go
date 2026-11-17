@@ -51,6 +51,23 @@ func Next(snapshot state.State, event Event) (Proposal, error) {
 
 func apply(s *state.State, e Event) error {
 	switch e.Kind {
+	case "checkpoint":
+		if e.Checkpoint == nil || e.Checkpoint.Operation == "" || e.Receipt == "" || !slices.Contains([]string{state.CheckpointReady, state.CheckpointRefused}, e.Checkpoint.Status) {
+			return errors.New("checkpoint needs a reconciled operation and outcome")
+		}
+		if e.Checkpoint.Status == state.CheckpointReady {
+			if s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil {
+				return errors.New("checkpoint requires completed dispatch")
+			}
+			for _, branch := range s.Stack {
+				if !slices.ContainsFunc(s.PRs, func(p state.PR) bool { return p.Branch == branch.Branch && p.Number > 0 }) {
+					return errors.New("checkpoint cannot publish local branches")
+				}
+			}
+		}
+		checkpoint := *e.Checkpoint
+		checkpoint.At = e.At
+		s.Checkpoint = &checkpoint
 	case "start":
 		if len(s.Workflow.Runs) != 0 {
 			return errors.New("workflow already started")
@@ -118,11 +135,13 @@ func apply(s *state.State, e Event) error {
 			return errors.New("comments preference needs its original developer answer, once")
 		}
 		s.WatchComments, s.Workflow.CommentsAsked = e.WatchComments, true
+		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
 	case "comments_stop":
 		if e.Receipt == "" || e.Answer == "" {
 			return errors.New("stopping comments needs a developer answer")
 		}
 		s.WatchComments, s.Evidence.CommentsStopped = false, true
+		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
 	case "lost_run":
 		if s.Workflow.ActiveRun == "" || e.Receipt == "" {
 			return errors.New("lost run needs reconciliation evidence")

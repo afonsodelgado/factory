@@ -10,6 +10,7 @@ const (
 )
 
 type Event struct {
+	Checkpoint          *state.Checkpoint      `json:"checkpoint,omitempty"`
 	ID                  string                 `json:"id"`
 	Kind                string                 `json:"kind"`
 	At                  state.Time             `json:"at"`

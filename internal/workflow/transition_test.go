@@ -208,3 +208,18 @@ func TestInterviewAnswersDoNotConsumeTransportRetriesAndDesignRemainsConditional
 		t.Fatal("old design approval accepted")
 	}
 }
+
+func TestCheckpointRefusesUnpublishedWorkBeforeAnyExternalEffect(t *testing.T) {
+	s := workflowState()
+	e := eventFor(s, "checkpoint")
+	e.Receipt = "node-operation"
+	e.Checkpoint = &state.Checkpoint{Operation: "move", Status: state.CheckpointReady}
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("unpublished stack checkpointed")
+	}
+	e.Checkpoint.Status, e.Checkpoint.Reason = state.CheckpointRefused, "unpublished branch"
+	s = step(t, s, e)
+	if s.Checkpoint.Status != state.CheckpointRefused || s.Workflow.Pending != nil {
+		t.Fatal(s)
+	}
+}
