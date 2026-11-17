@@ -84,17 +84,7 @@ func (d Draft) Answer(q Question, i int) string {
 	return q.Options[d.Choice[i]]
 }
 
-type PR struct {
-	Number  int
-	Title   string
-	Draft   bool
-	URL     string
-	CI      string
-	Done    int
-	Total   int
-	Loaded  bool
-	Problem string
-}
+type PR = host.PR
 
 type ArtifactRow = host.ArtifactRow
 

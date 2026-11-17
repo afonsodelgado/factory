@@ -340,6 +340,12 @@ design:
     css: apps/web/src/index.css
 ```
 
+Browser QA is moving to a headless Chrome that factory starts with a temporary profile and drives through Chrome DevTools MCP, pinned to `chrome-devtools-mcp@1.13.0` and run with usage statistics and CrUX lookups off. It runs `qa.start`, waits for `qa.health` to answer `qa.health_status` (default 200) within `qa.startup_timeout` (default `2m`), then runs `qa.seed` and `qa.sign_in`. Seed prepares an isolated test environment and must be repeatable; sign-in prints the session cookies as a JSON list of `{name, value}`. Write `none` for an app without fixtures or sign-in. Today's QA does not read these keys yet.
+
+```yaml
+qa: {mode: browser, web_port: 3001, start: npm run dev, health: http://localhost:3000/api/health, seed: npm run db:seed:test, sign_in: none}
+```
+
 `repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
 
 ## Pipelines

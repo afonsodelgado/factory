@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,20 +70,30 @@ func (s Stack) HealthURL() string {
 }
 
 func WaitHealthy(url string, limit time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	return WaitFor(ctx, url, func(status int) bool { return status < 500 })
+}
+
+func WaitFor(ctx context.Context, url string, healthy func(status int) bool) error {
 	client := http.Client{Timeout: 3 * time.Second}
-	deadline := time.Now().Add(limit)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
 	for {
-		resp, err := client.Get(url)
+		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode < 500 {
+			if healthy(resp.StatusCode) {
 				return nil
 			}
 			err = fmt.Errorf("%s answered %d", url, resp.StatusCode)
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-ctx.Done():
 			return err
+		case <-time.After(time.Second):
 		}
-		time.Sleep(time.Second)
 	}
 }
