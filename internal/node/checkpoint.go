@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -225,7 +226,9 @@ func (cp Checkpoint) Validate(limits Limits) error {
 	if factory.Slugify(m.Factory) != strings.ToLower(m.Factory) || m.Factory == "" {
 		return fmt.Errorf("checkpoint factory %q is not a factory id", m.Factory)
 	}
-	invalidSlug := m.Slug == "" || len(m.Slug) > 255 || factory.Slugify(m.Slug) != m.Slug
+	unsafePrefix := strings.HasPrefix(m.Slug, ".") || strings.HasPrefix(m.Slug, "-")
+	unsafeCharacters := strings.ContainsAny(m.Slug, "/\\") || strings.ContainsFunc(m.Slug, unicode.IsControl)
+	invalidSlug := m.Slug == "" || len(m.Slug) > 255 || unsafePrefix || unsafeCharacters
 	if invalidSlug {
 		return fmt.Errorf("checkpoint slug %q is not a factory folder", m.Slug)
 	}
