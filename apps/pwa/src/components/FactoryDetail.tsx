@@ -7,13 +7,21 @@ import { paths, type Tab } from "../route.ts";
 import { useApp } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
 import { Link } from "./Link.tsx";
+import { MoveProgress, MoveTo } from "./Move.tsx";
 import { Pages } from "./Pages.tsx";
-import { ReceiptLine } from "./Receipt.tsx";
+import { Blocked, ReceiptLine } from "./Receipt.tsx";
 import { SupervisorMessage } from "./SupervisorMessage.tsx";
 
 export function FactoryDetail({ route, tab }: { route: string; tab: Tab }) {
-  const { snapshot, reach } = useApp();
+  const { snapshot, reach, moves } = useApp();
   const factory = snapshot?.factories.find((f) => f.route === route);
+  const move = moves.find((m) => m.route === route);
+  if (!factory && move)
+    return (
+      <AppShell back={paths.list()} title={move.id}>
+        <MoveProgress move={move} />
+      </AppShell>
+    );
   if (!factory)
     return (
       <AppShell back={paths.list()}>
@@ -27,6 +35,7 @@ export function FactoryDetail({ route, tab }: { route: string; tab: Tab }) {
   return (
     <AppShell back={paths.list()} title={<Title factory={factory} />}>
       <Head key={factory.incarnation} factory={factory} />
+      {move ? <MoveProgress move={move} /> : null}
       <Tabs factory={factory} tab={tab} />
       {tab === "attention" ? <Attention factory={factory} /> : null}
       {tab === "pages" ? <Pages factory={factory} /> : null}
@@ -47,6 +56,7 @@ export function Title({ factory }: { factory: LocalFactory }) {
 }
 
 function Head({ factory }: { factory: LocalFactory }) {
+  const { multi } = useApp();
   const now = useNow();
   const look = statusLook(factory.status);
   const blocked = useBlocked(factory);
@@ -78,7 +88,8 @@ function Head({ factory }: { factory: LocalFactory }) {
           .filter(Boolean)
           .join(" · ")}
       </p>
-      {factory.can_pause || factory.can_wake ? (
+      <Blocked reason={factory.unverified} />
+      {factory.can_pause || factory.can_wake || multi ? (
         <div className="acts">
           {factory.can_wake ? (
             <button
@@ -101,9 +112,12 @@ function Head({ factory }: { factory: LocalFactory }) {
               <span aria-hidden="true">‖ </span>Pause
             </button>
           ) : null}
+          {multi ? <MoveTo factory={factory} /> : null}
         </div>
       ) : null}
-      {blocked && (factory.can_pause || factory.can_wake) ? (
+      {blocked &&
+      !factory.unverified &&
+      (factory.can_pause || factory.can_wake) ? (
         <p className="xs mute">{blocked}</p>
       ) : null}
       {receipt && failed(receipt) ? <ReceiptLine receipt={receipt} /> : null}
@@ -152,6 +166,16 @@ function PauseDialog(props: {
   );
 }
 
+export function useSheet() {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!dialog.current?.open) dialog.current?.showModal();
+    cancel.current?.focus();
+  }, []);
+  return { dialog, cancel };
+}
+
 export function ConfirmSheet(props: {
   id: string;
   glyph: string;
@@ -162,12 +186,7 @@ export function ConfirmSheet(props: {
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!dialog.current?.open) dialog.current?.showModal();
-    cancel.current?.focus();
-  }, []);
+  const { dialog, cancel } = useSheet();
   return (
     <dialog
       ref={dialog}

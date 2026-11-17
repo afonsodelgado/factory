@@ -11,6 +11,7 @@ import { paths } from "../route.ts";
 import { useApp, type NodeView } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
 import { ConfirmSheet } from "./FactoryDetail.tsx";
+import { MoveAll } from "./Move.tsx";
 import { Check } from "./Setup.tsx";
 
 const marks: Record<string, [string, string]> = {
@@ -39,7 +40,7 @@ const uncloned = (check: Result, repos: string[]) =>
 const phoneWording = (detail: string) =>
   detail.replace(/ not cloned yet;[^·]*?(?= · |$)/g, " isn't cloned yet");
 
-function Problem({ children }: { children: ReactNode }) {
+export function Problem({ children }: { children: ReactNode }) {
   return (
     <p className="stat warn" role="status">
       <span className="gl" aria-hidden="true">
@@ -50,7 +51,11 @@ function Problem({ children }: { children: ReactNode }) {
   );
 }
 
-function ResultRow(props: { check: Result; on: string; children?: ReactNode }) {
+export function ResultRow(props: {
+  check: Result;
+  on: string;
+  children?: ReactNode;
+}) {
   const { check } = props;
   return (
     <Check
@@ -121,6 +126,7 @@ export function NodeDetail({ id }: { id: string }) {
           ) : null}
         </ul>
         {node.live ? <NodeReadiness key={node.id} node={node} /> : null}
+        {node.home ? null : <MoveAll node={node} />}
         {problem ? <Problem>{problem}</Problem> : null}
         <footer className="ab">
           <Again node={node} />

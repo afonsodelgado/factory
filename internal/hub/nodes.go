@@ -319,7 +319,7 @@ func actionsOf(lf host.LocalFactory) string {
 
 func lifecycleOn(ctx context.Context, client *node.Client, lf host.LocalFactory, action string) error {
 	var receipt host.Receipt
-	body := node.ActionBody{Operation: uuid.NewString(), Incarnation: lf.Incarnation, Action: action}
+	body := node.ActionBody{Operation: uuid.NewString(), Incarnation: lf.Incarnation, Generation: lf.Generation, Action: action}
 	if err := client.Do(ctx, http.MethodPost, actionsOf(lf), body, &receipt); err != nil {
 		return err
 	}
@@ -609,7 +609,7 @@ func (m *Model) answerOnNode(it Item, body node.ActionBody) {
 		return
 	}
 	lf := m.nodeFactories[f.Key()]
-	body.Operation, body.Incarnation = uuid.NewString(), lf.Incarnation
+	body.Operation, body.Incarnation, body.Generation = uuid.NewString(), lf.Incarnation, lf.Generation
 	m.nodeSends[key] = nodeSend{node: l.member.ID, name: l.short(), factory: f.Key(), item: body.Item, since: body.Since, draft: m.draftPath(f, body.Item), operation: body.Operation, status: host.StatusSending, checking: true}
 	client := m.peer(l.member.Name)
 	m.later = append(m.later, func() tea.Msg {
@@ -700,4 +700,72 @@ func (m *Model) forgetSend(key string, s nodeSend) {
 	delete(m.nodeSends, key)
 	delete(m.panel.drafts, key)
 	os.Remove(s.draft)
+}
+
+func (m *Model) unverified(it Item) string {
+	if lf, onNode := m.nodeFactories[it.Factory.Key()]; onNode {
+		return lf.Unverified
+	}
+	return m.holdings[it.Factory.Key()].Unverified
+}
+
+func heldUnchecked(it Item, reason string) string {
+	return it.Factory.Label() + " is held but unchecked, so nothing can be done to it until its holder is confirmed: " + withFullStop(reason)
+}
+
+func (m *Model) askMove() tea.Cmd {
+	it, ok := m.selectedItem()
+	if !ok {
+		return nil
+	}
+	if reason := m.unverified(it); reason != "" {
+		m.notice = problem(heldUnchecked(it, reason))
+		return nil
+	}
+	c, err := m.moveContext(it)
+	if err != nil {
+		m.notice = problem(err.Error())
+		return nil
+	}
+	return m.openDialog("move", c)
+}
+
+func (m *Model) moveContext(it Item) (dialog.MoveContext, error) {
+	f := it.Factory
+	c := dialog.MoveContext{Key: f.Key(), Label: f.Label(), Factory: f.Key(), HolderShort: m.Config.NodeName()}
+	holder := ""
+	switch {
+	case f.OnNode():
+		l, ok := m.nodeOf(f)
+		if !ok {
+			return c, fmt.Errorf("%s is not in the node list any more, so %s can't move from there.", f.Remote.Name, f.Label())
+		}
+		lf := m.nodeFactories[f.Key()]
+		c.Factory, c.Incarnation, c.Holder, c.HolderShort = lf.Key, lf.Incarnation, l.member.Name, l.short()
+		c.Lost, holder = l.state(m.Now()) == unreachable, l.member.ID
+		c.Targets = append(c.Targets, dialog.NodeChoice{Name: m.selfName(), Here: true})
+	case f.Remote != nil:
+		return c, fmt.Errorf("%s runs on the legacy remote %s; only factories on nodes move.", f.Label(), f.Remote.Name)
+	}
+	now := m.Now()
+	for _, l := range m.sortedNodes() {
+		if l.member.ID != holder {
+			c.Targets = append(c.Targets, dialog.NodeChoice{Name: l.member.Name, Unreachable: l.state(now) != connected})
+		}
+	}
+	if len(c.Targets) == 0 {
+		return c, fmt.Errorf("No other node is listed, so %s has nowhere to move. N adds one.", f.Label())
+	}
+	return c, nil
+}
+
+func (m *Model) selfName() string {
+	if m.roster != nil {
+		for _, member := range m.roster.Members {
+			if member.Self {
+				return member.Name
+			}
+		}
+	}
+	return m.Config.NodeHostname()
 }

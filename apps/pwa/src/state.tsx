@@ -25,6 +25,7 @@ import type {
   LocalFactory,
   Me,
   Member,
+  Progress,
   Receipt,
   Refusal,
   Roster,
@@ -49,6 +50,27 @@ export type NodeView = {
   scope?: string;
   snapshot?: Snapshot;
 };
+
+export type Move = {
+  incarnation: string;
+  id: string;
+  route: string;
+  origin: string;
+  takeover: boolean;
+  progress: Progress;
+};
+
+const MOVE_POLL = 1_000;
+
+export const settledMove = (p: Progress) =>
+  [
+    "active",
+    "preflight_failed",
+    "refused",
+    "cancelled",
+    "recovery_needed",
+    "interrupted",
+  ].includes(p.state);
 
 type Remote = {
   reach: Reach | "loading";
@@ -77,6 +99,8 @@ export type App = {
   navigate: (path: string, replace?: boolean) => void;
   act: (factory: LocalFactory, body: ActionBody) => Promise<Receipt>;
   retry: () => void;
+  moves: Move[];
+  track: (move: Move) => void;
 };
 
 const Context = createContext<App | null>(null);
@@ -114,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [roster, setRoster] = useState<Roster>();
   const [remote, setRemote] = useState<Record<string, Remote>>({});
   const [joined, setJoined] = useState<string[]>([]);
+  const [moves, setMoves] = useState<Move[]>([]);
   const home = useRef<ReturnType<typeof follow>>(undefined);
   const links = useRef(new Map<string, ReturnType<typeof follow>>());
   const received = useRef<string>(undefined);
@@ -148,6 +173,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPendingBy({});
       setRoster(undefined);
       setJoined([]);
+      setMoves([]);
       setRefusal(why);
       setReach("refused");
       await cache.purge();
@@ -491,6 +517,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const pending = useMemo(() => Object.values(pendingBy).flat(), [pendingBy]);
 
+  const track = useCallback(
+    (move: Move) =>
+      setMoves((all) => [
+        ...all.filter((m) => m.incarnation !== move.incarnation),
+        move,
+      ]),
+    [],
+  );
+
+  const following = moves
+    .filter((m) => !settledMove(m.progress))
+    .map((m) => `${m.origin} ${m.progress.operation}`)
+    .join(",");
+  useEffect(() => {
+    if (!following) return;
+    const timer = setInterval(() => {
+      for (const entry of following.split(",")) {
+        const [origin, operation] = entry.split(" ");
+        nodeApi(origin)
+          .progress(operation)
+          .then(
+            (progress) =>
+              setMoves((all) =>
+                all.map((m) =>
+                  m.progress.operation === operation ? { ...m, progress } : m,
+                ),
+              ),
+            () => undefined,
+          );
+      }
+    }, MOVE_POLL);
+    return () => clearInterval(timer);
+  }, [following]);
+
   const value = useMemo<App>(
     () => ({
       reach,
@@ -512,6 +572,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       navigate,
       act,
       retry,
+      moves,
+      track,
     }),
     [
       reach,
@@ -533,6 +595,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       navigate,
       act,
       retry,
+      moves,
+      track,
     ],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;

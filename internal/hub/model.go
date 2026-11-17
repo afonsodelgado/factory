@@ -95,6 +95,7 @@ type Model struct {
 	nodeFeed      chan nodeMsg
 	nodeFactories map[string]host.LocalFactory
 	nodeSends     map[string]nodeSend
+	holdings      map[string]host.Holding
 }
 
 type pollMsg struct{}
@@ -577,6 +578,8 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.openDialog("phone", struct{}{})
 	case "N":
 		return m.openDialog("nodes", m.nodesContext())
+	case "m":
+		return m.askMove()
 	case "p":
 		return m.askPause()
 	case "a":
@@ -667,6 +670,9 @@ func (m *Model) askPause() tea.Cmd {
 		return nil
 	case it.Pane == nil && m.wires[it.Factory.Key()].Pane == nil && m.nodeFactories[it.Factory.Key()].Pane == "":
 		m.notice = problem(it.Factory.Label() + " has no pane to pause.")
+		return nil
+	case m.unverified(it) != "":
+		m.notice = problem(heldUnchecked(it, m.unverified(it)))
 		return nil
 	}
 	return m.openDialog("pause", m.pauseContext(it))
@@ -926,6 +932,9 @@ func (m *Model) row(it Item) selector.Row {
 		_, settled := m.shownItems(it)
 		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
 	}
+	if m.unverified(it) != "" {
+		row.Stage = "held, unchecked"
+	}
 	return row
 }
 
@@ -1110,6 +1119,8 @@ func dialogHints(kind string) []footer.Hint {
 		return hints("a", "archive", "r", "archive and remove the worktree", "esc", "cancel")
 	case "delete":
 		return hints("y", "delete", "n", "cancel", "esc", "cancel")
+	case "move":
+		return hints("⏎", "move", "j/k", "pick", "x", "cancel the move", "esc", "close")
 	}
 	return hints("esc", "close")
 }
@@ -1129,9 +1140,9 @@ func (m *Model) selectorHints() []footer.Hint {
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
 	if len(m.Config.Remotes) > 0 {
-		return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
+		return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "a", "archive", "d", "delete")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
 }
 
 func (m *Model) panelHints() []footer.Hint {

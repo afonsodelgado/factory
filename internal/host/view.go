@@ -102,6 +102,9 @@ func (m *Runtime) TypeAnswer(r AnswerRequest) (AnswerReply, error) {
 	if !ok {
 		return AnswerReply{}, fmt.Errorf("no factory %s", r.Key)
 	}
+	if err := m.unverified(r.Key); err != nil {
+		return AnswerReply{}, err
+	}
 	if !stillOpen(it.Factory.State, r.ItemID, r.ItemSince) {
 		return AnswerReply{}, fmt.Errorf("%s is no longer open in %s; nothing was sent", r.ItemID, it.Factory.Label())
 	}

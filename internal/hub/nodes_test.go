@@ -64,10 +64,11 @@ func until(t *testing.T, m *Model, done func() bool) {
 	}
 }
 
-func TestAnActionOnAnotherNodeGoesOnlyThereAndItsOutageIsCountedApart(t *testing.T) {
+func TestAnActionOnAnotherNodeGoesOnlyThereWithItsGenerationAndItsOutageIsCountedApart(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
-	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", CanPause: true, Pane: "%3"})
+	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", Generation: 3, ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", CanPause: true, Pane: "%3"})
+	tn.Watch("/api/factories//srv/cowork:csv/actions")
 	if _, err := macbook.Add("homelab"); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +86,12 @@ func TestAnActionOnAnotherNodeGoesOnlyThereAndItsOutageIsCountedApart(t *testing
 	}
 	if got := m.flushLater()(); !strings.Contains(got.(noticeMsg).text, "csv was paused on homelab") || len(homelab.Runtime.Calls()) != 1 {
 		t.Fatalf("pausing csv said %q and reached homelab %v; want it delivered there once", got.(noticeMsg).text, homelab.Runtime.Calls())
+	}
+	csv, _ := m.snap.Find(key)
+	m.answerOnNode(csv, node.ActionBody{Action: host.ActAnswer, Item: "Q1", Text: "yes"})
+	m.flushLater()()
+	if bodies := tn.Bodies("/api/factories//srv/cowork:csv/actions"); len(bodies) != 2 || !strings.Contains(bodies[0], `"generation":3`) || !strings.Contains(bodies[1], `"generation":3`) {
+		t.Fatalf("the pause and the answer sent %q; want both to carry the generation they were loaded at, so a moved factory refuses them as stale", bodies)
 	}
 
 	homelab.SetOnline(false)

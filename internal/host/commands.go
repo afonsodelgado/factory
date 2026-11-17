@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -25,12 +26,14 @@ type Presentation struct {
 	PRs        map[string][]PR
 	Checked    time.Time
 	FirstStart string
+	Holdings   map[string]Holding
 }
 
 func (m *Runtime) Presentation() Presentation {
 	return Presentation{
 		Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
 		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(), FirstStart: m.takeFirstStart(),
+		Holdings: maps.Clone(m.holdings),
 	}
 }
 
@@ -68,6 +71,9 @@ func (m *Runtime) QueueAnswerFor(q QueuedAnswer) (Answer, error) {
 	it, ok := m.snap.Find(q.Answer.Factory)
 	if !ok {
 		return Answer{}, fmt.Errorf("no factory %s", q.Answer.Factory)
+	}
+	if err := m.unverified(q.Answer.Factory); err != nil {
+		return Answer{}, err
 	}
 	if claimed, ok := m.Claim(q.Answer.Key()); ok && claimed.ItemSince.Equal(q.Answer.ItemSince) {
 		return claimed, nil

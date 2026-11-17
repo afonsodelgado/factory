@@ -76,6 +76,9 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if it.Factory.Dir == "" || it.Factory.Worktree == "" {
 		return StageReply{}, fmt.Errorf("%s has no factory directory or worktree yet; write state.json first", it.Factory.Label())
 	}
+	if err := m.unverified(it.Factory.Key()); err != nil {
+		return StageReply{}, err
+	}
 	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
 	if err != nil {
 		return StageReply{}, err

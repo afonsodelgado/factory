@@ -96,7 +96,7 @@ func (n *Nodes) homeOnly(serve func(http.ResponseWriter, *http.Request, string))
 		switch {
 		case viaSocket(r):
 		case !fromHome:
-			fail(w, http.StatusForbidden, "changing the node list or cloning from a browser works only from the phone app at "+home)
+			fail(w, http.StatusForbidden, "changing the node list, cloning or moving from a browser works only from the phone app at "+home)
 			return
 		case !sendsJSON(r):
 			fail(w, http.StatusUnsupportedMediaType, "send JSON")

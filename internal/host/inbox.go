@@ -110,7 +110,7 @@ func (m *Runtime) QueueInbox() {
 	}
 	queued := len(m.typeQueue)
 	for _, it := range m.snap.Items {
-		if it.Factory.Supervisor().OnClaude() || it.Pane == nil || it.Factory.Dir == "" {
+		if it.Factory.Supervisor().OnClaude() || it.Pane == nil || it.Factory.Dir == "" || m.unverified(it.Factory.Key()) != nil {
 			continue
 		}
 		record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)

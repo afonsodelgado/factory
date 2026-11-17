@@ -81,6 +81,9 @@ type NodeActions interface {
 	Remove(op, id string) error
 	SetTarget(name string) error
 	Clone(ctx context.Context, name, op, url string) error
+	MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error)
+	Batch(ctx context.Context, op string) (node.BatchProgress, error)
+	CancelAll(ctx context.Context, op string) (node.BatchProgress, error)
 }
 
 type nodesScreen int
@@ -92,6 +95,7 @@ const (
 	pickScreen
 	typeScreen
 	checkScreen
+	moveAllScreen
 )
 
 type peerState struct {
@@ -147,6 +151,13 @@ type nodeCloned struct {
 	err error
 }
 
+type batchArrived struct {
+	batch node.BatchProgress
+	err   error
+}
+
+type batchTick struct{}
+
 type Nodes struct {
 	Context NodesContext
 	Now     func() time.Time
@@ -177,6 +188,9 @@ type Nodes struct {
 	reportErr  error
 	operation  string
 	adding     bool
+
+	confirmingMove bool
+	batch          node.BatchProgress
 }
 
 func NewNodes(c NodesContext, actions NodeActions) *Nodes {
@@ -279,6 +293,10 @@ func (n *Nodes) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case nodeAdded:
 		return n, n.addedNode(msg)
+	case batchArrived:
+		return n, n.batchArrived(msg)
+	case batchTick:
+		return n, n.pollBatch()
 	case tea.PasteMsg:
 		if n.screen == typeScreen {
 			n.typed += strings.ReplaceAll(DecodeKeys(msg.Content), "\n", "")
@@ -334,6 +352,8 @@ func (n *Nodes) key(msg tea.KeyPressMsg) tea.Cmd {
 		return n.typeKey(msg)
 	case checkScreen:
 		return n.checkKey(key)
+	case moveAllScreen:
+		return n.moveAllKey(key)
 	}
 	return n.listKey(key)
 }
@@ -453,7 +473,16 @@ func (n *Nodes) scrollKey(key string) {
 
 func (n *Nodes) peerDetailsKey(key string) tea.Cmd {
 	row, _ := n.selected()
+	if n.confirmingMove {
+		n.confirmingMove = false
+		if key == "y" {
+			return n.moveAll(row)
+		}
+		return nil
+	}
 	switch key {
+	case "m":
+		n.confirmingMove = n.takesFactories(row)
 	case "esc":
 		n.screen = nodesListScreen
 	case "r":
@@ -681,6 +710,8 @@ func (n *Nodes) addedNode(msg nodeAdded) tea.Cmd {
 func (n *Nodes) View() tea.View {
 	c := theme.NewCanvas(n.width, n.height)
 	switch n.screen {
+	case moveAllScreen:
+		n.drawMoveAll(c)
 	case selfDetailsScreen, peerDetailsScreen, checkScreen:
 		n.drawScrolled(c)
 	case pickScreen:
@@ -1049,9 +1080,17 @@ func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 
 func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	n.drawHeading(c)
-	c.Clip(1, c.H-1)
+	bottom := c.H - 1
+	if n.confirmingMove {
+		bottom = c.H - 6
+	}
+	c.Clip(1, bottom)
 	n.drawBody(c, 2-n.scroll)
 	c.Unclip()
+	if n.confirmingMove {
+		n.drawMoveAllConfirm(c)
+		return
+	}
 	hints := n.hints()
 	if n.maxScroll() > 0 {
 		hints = "j/k scroll   " + hints
@@ -1251,6 +1290,9 @@ func (n *Nodes) peerHints() string {
 	hints := "r check again   "
 	if missing := n.uncloned(row); len(missing) > 0 {
 		hints += "c clone " + repoNames(missing) + "   "
+	}
+	if n.takesFactories(row) {
+		hints += "m move all here   "
 	}
 	return hints + "d make default   x remove   esc back"
 }

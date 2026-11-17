@@ -61,6 +61,7 @@ type NewContext struct {
 
 type NodeChoice struct {
 	Name        string `json:"name"`
+	Here        bool   `json:"here,omitempty"`
 	Unreachable bool   `json:"unreachable,omitempty"`
 }
 

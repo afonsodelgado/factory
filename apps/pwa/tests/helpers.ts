@@ -15,7 +15,13 @@ export type Fake = {
       origin: string;
       replacePushKey?: boolean;
     }[];
-    peers: Record<string, { actions: Record<string, unknown>[] }>;
+    peers: Record<
+      string,
+      {
+        actions: Record<string, unknown>[];
+        takeovers: { operation: string; confirm?: boolean }[];
+      }
+    >;
   }>;
 };
 

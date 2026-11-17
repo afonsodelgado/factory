@@ -74,6 +74,7 @@ func (l *Loader) Load() Snapshot {
 	now := l.Now()
 	found := factory.Discover(l.Config.Repos, l.Registry)
 	l.observe(found, now)
+	found = slices.DeleteFunc(found, Moved)
 	hooks, _ := state.ReadHookFiles(l.Config.StateDir)
 	var panes []tmux.Pane
 	if l.TM != nil {
@@ -114,6 +115,10 @@ func (l *Loader) Load() Snapshot {
 		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage})
 	}
 	return snap
+}
+
+func Moved(f factory.Factory) bool {
+	return f.Entry != nil && f.Entry.MovedTo != ""
 }
 
 func WithoutTokens(hooks []*state.HookFile, tokens map[string]bool) []*state.HookFile {
@@ -307,6 +312,17 @@ func (l *Loader) Lookup(repo, slug string) (factory.Factory, bool) {
 		}
 	}
 	return factory.Factory{}, false
+}
+
+func (l *Loader) Entry(key string) (state.Entry, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, e := range l.Registry.Factories {
+		if e.Key() == key {
+			return e, true
+		}
+	}
+	return state.Entry{}, false
 }
 
 func (l *Loader) UpdateRegistry(fn func(*state.Registry)) error {

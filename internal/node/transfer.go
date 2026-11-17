@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,11 +45,24 @@ type Transfer struct {
 	Role        string    `json:"role"`
 	Incarnation string    `json:"incarnation"`
 	Factory     string    `json:"factory"`
+	Key         string    `json:"key,omitempty"`
+	Repo        string    `json:"repo,omitempty"`
+	Slug        string    `json:"slug,omitempty"`
 	Source      string    `json:"source"`
+	SourceName  string    `json:"source_name,omitempty"`
 	Target      string    `json:"target"`
+	TargetName  string    `json:"target_name,omitempty"`
+	GitURL      string    `json:"git_url,omitempty"`
 	Phase       string    `json:"phase"`
 	Checkpoint  string    `json:"checkpoint,omitempty"`
+	Waiting     string    `json:"waiting,omitempty"`
+	Checks      []Check   `json:"checks,omitempty"`
+	Lease       string    `json:"lease,omitempty"`
+	Generation  int64     `json:"generation,omitempty"`
+	Forced      bool      `json:"forced,omitempty"`
+	Cancelled   bool      `json:"cancelled,omitempty"`
 	Refusal     string    `json:"refusal,omitempty"`
+	Failure     string    `json:"failure,omitempty"`
 	At          time.Time `json:"at"`
 }
 
@@ -81,33 +96,60 @@ func (t Transfer) reached(phase string) bool {
 	return slices.Index(phases, t.Phase) >= slices.Index(phases, phase)
 }
 
+var errCancelled = errors.New("the move was cancelled before the factory was released")
+
 func (ts *Transfers) record(t Transfer, phase string) (Transfer, error) {
 	if t.Phase == "" || !t.reached(phase) {
 		t.Phase = phase
+	}
+	return ts.save(t)
+}
+
+func (ts *Transfers) save(t Transfer) (Transfer, error) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if current, found, _ := LoadTransfer(ts.StateDir, t.Operation); found && current.Cancelled {
+		return current, errCancelled
 	}
 	t.Schema, t.At = TransferSchema, ts.Nodes.now()
 	return t, host.SavePrivate(TransferPath(ts.StateDir, t.Operation), t)
 }
 
+func interrupted(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errCancelled)
+}
+
 func (ts *Transfers) refused(t Transfer, err error) (Transfer, error) {
-	interrupted := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-	if interrupted {
+	if interrupted(err) {
 		return t, err
 	}
-	t.Refusal, t.At = err.Error(), ts.Nodes.now()
-	if saveErr := host.SavePrivate(TransferPath(ts.StateDir, t.Operation), t); saveErr != nil {
-		return t, errors.Join(err, saveErr)
-	}
-	return t, err
+	t.Refusal = err.Error()
+	saved, saveErr := ts.save(t)
+	return saved, cmp.Or(saveErr, err)
+}
+
+func (ts *Transfers) failed(t Transfer, err error) (Transfer, error) {
+	t.Failure = err.Error()
+	saved, saveErr := ts.save(t)
+	return saved, cmp.Or(saveErr, err)
 }
 
 type Transfers struct {
 	Commands
-	Nodes    *Nodes
-	StateDir string
-	Holds    func(incarnation string) bool
-	Limits   Limits
-	Poll     time.Duration
+	Nodes      *Nodes
+	StateDir   string
+	Holds      func(incarnation string) bool
+	Limits     Limits
+	Poll       time.Duration
+	Holders    *Holders
+	HolderPoll time.Duration
+	Ctx        context.Context
+
+	mu       sync.Mutex
+	running  map[string]context.CancelFunc
+	verified map[string]bool
+	sent     map[string]host.Holding
+	remotes  map[string]string
 }
 
 func (ts *Transfers) limits() Limits {
@@ -134,33 +176,32 @@ func (ts *Transfers) Stage(ctx context.Context, operation, key, target string) (
 	case found && t.reached(PhaseStaged):
 		return t, nil
 	case !found:
-		t = Transfer{Operation: operation, Role: RoleSource, Source: ts.Nodes.Self.ID}
+		t = Transfer{Operation: operation, Role: RoleSource, Source: ts.Nodes.Self.ID, SourceName: ts.Nodes.Self.short()}
 	}
 	movable, err := ts.movable(ctx, key)
 	if err != nil {
 		return ts.refused(t, err)
 	}
-	t.Incarnation, t.Factory = movable.Incarnation, movable.ID
+	t.Incarnation, t.Factory, t.Key, t.Repo, t.Slug = movable.Incarnation, movable.ID, movable.Key, movable.Repo, movable.Slug
 	peer, err := ts.destination(ctx, target)
 	if err != nil {
 		return ts.refused(t, err)
 	}
-	t.Target = peer.ID
+	t.Target, t.TargetName = peer.ID, peer.short()
 	if t, err = ts.record(t, PhaseRequested); err != nil {
 		return t, err
 	}
-	gitURL, err := gitclone.RemoteURL(movable.Repo, "")
-	if err != nil {
+	if t.GitURL, err = gitclone.RemoteURL(movable.Repo, ""); err != nil {
 		return ts.refused(t, err)
 	}
-	if t, err = ts.preflight(ctx, t, peer, movable, gitURL); err != nil {
+	if t, err = ts.preflight(ctx, t, peer, movable); err != nil {
 		return t, err
 	}
-	cp, err := ts.checkpoint(ctx, operation, key, gitURL)
+	cp, t, err := ts.checkpoint(ctx, t)
 	if err != nil {
 		return ts.refused(t, err)
 	}
-	t.Checkpoint = cp.Manifest.Digest()
+	t.Checkpoint, t.Waiting = cp.Manifest.Digest(), ""
 	if t, err = ts.record(t, PhaseCheckpoint); err != nil {
 		return t, err
 	}
@@ -181,10 +222,7 @@ func routePath(route string) string {
 
 func (ts *Transfers) movable(ctx context.Context, key string) (host.Movable, error) {
 	var m host.Movable
-	answer, err := ts.call(ctx, "movable", "", host.CheckpointRequest{Key: key}, &m)
-	if err == nil && answer.T != "done" {
-		err = errors.New(answer.Error)
-	}
+	err := ts.host(ctx, "movable", host.CheckpointRequest{Key: key}, &m)
 	return m, err
 }
 
@@ -208,18 +246,19 @@ func (ts *Transfers) destination(ctx context.Context, target string) (Member, er
 	return m.Member, nil
 }
 
-func (ts *Transfers) preflight(ctx context.Context, t Transfer, peer Member, m host.Movable, gitURL string) (Transfer, error) {
+func (ts *Transfers) preflight(ctx context.Context, t Transfer, peer Member, m host.Movable) (Transfer, error) {
 	t, err := ts.record(t, PhasePreflight)
 	if err != nil {
 		return t, err
 	}
 	config, _ := os.ReadFile(state.ProfilePath(m.Repo))
-	request := PreflightRequest{Operation: t.Operation, Source: ts.Nodes.Self.ID, Incarnation: m.Incarnation, Factory: m.ID, GitURL: gitURL, Branch: m.Branch, Config: string(config), Protocol: Protocol}
+	request := PreflightRequest{Operation: t.Operation, Source: ts.Nodes.Self.ID, Incarnation: m.Incarnation, Factory: m.ID, GitURL: t.GitURL, Branch: m.Branch, Config: string(config), Protocol: Protocol}
 	var report Preflight
 	if err := Remote(peer.Name, ts.Nodes.HTTP).Do(ctx, http.MethodPost, routePath(PreflightRoute), request, &report); err != nil {
 		return ts.refused(t, fmt.Errorf("%s did not answer its preflight: %w", peer.short(), err))
 	}
 	if report.refused() {
+		t.Checks = report.Checks
 		return ts.refused(t, RefusedPreflight{Node: peer.short(), Report: report})
 	}
 	return t, nil
@@ -234,44 +273,49 @@ func (e RefusedPreflight) Error() string {
 	return e.Node + " cannot run this factory: " + e.Report.Refusal
 }
 
-func (ts *Transfers) checkpoint(ctx context.Context, operation, key, gitURL string) (Checkpoint, error) {
-	m, err := ts.settled(ctx, operation, key)
+func (ts *Transfers) checkpoint(ctx context.Context, t Transfer) (Checkpoint, Transfer, error) {
+	m, t, err := ts.settled(ctx, t)
 	if err != nil {
-		return Checkpoint{}, err
+		return Checkpoint{}, t, err
 	}
-	stack, err := PushStack(ctx, m, gitURL)
+	stack, err := PushStack(ctx, m, t.GitURL)
 	if err != nil {
-		return Checkpoint{}, err
+		return Checkpoint{}, t, err
 	}
-	manifest := Manifest{Operation: operation, Incarnation: m.Incarnation, Factory: m.ID, Slug: m.Slug, Source: ts.Nodes.Self.ID, GitURL: gitURL, Branch: m.Branch, Stack: stack, At: ts.Nodes.now()}
+	manifest := Manifest{Operation: t.Operation, Incarnation: m.Incarnation, Factory: m.ID, Slug: m.Slug, Source: ts.Nodes.Self.ID, GitURL: t.GitURL, Branch: m.Branch, Stack: stack, At: ts.Nodes.now()}
 	cp, err := Capture(m, manifest, ts.limits())
 	if err != nil {
-		return Checkpoint{}, err
+		return Checkpoint{}, t, err
 	}
 	if err := cp.unchanged(m.Dir); err != nil {
-		return Checkpoint{}, err
+		return Checkpoint{}, t, err
 	}
 	if err := cp.Validate(ts.limits()); err != nil {
-		return Checkpoint{}, err
+		return Checkpoint{}, t, err
 	}
-	return cp, Retain(ts.StateDir, cp)
+	return cp, t, Retain(ts.StateDir, cp)
 }
 
-func (ts *Transfers) settled(ctx context.Context, operation, key string) (host.Movable, error) {
+func (ts *Transfers) settled(ctx context.Context, t Transfer) (host.Movable, Transfer, error) {
 	for {
 		var m host.Movable
-		answer, err := ts.call(ctx, "checkpoint", "", host.CheckpointRequest{Key: key, Operation: operation}, &m)
+		answer, err := ts.call(ctx, "checkpoint", "", host.CheckpointRequest{Key: t.Key, Operation: t.Operation}, &m)
 		switch {
 		case err != nil:
-			return m, err
+			return m, t, err
 		case answer.T != "done":
-			return m, errors.New(answer.Error)
+			return m, t, errors.New(answer.Error)
 		case m.Waiting == "":
-			return m, nil
+			return m, t, nil
+		case m.Waiting != t.Waiting:
+			t.Waiting = m.Waiting
+			if t, err = ts.save(t); err != nil {
+				return m, t, err
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return m, fmt.Errorf("%s: %w", m.Waiting, ctx.Err())
+			return m, t, fmt.Errorf("%s: %w", m.Waiting, ctx.Err())
 		case <-time.After(ts.poll()):
 		}
 	}
@@ -390,11 +434,6 @@ func writeNew(p string, data []byte) error {
 		return err
 	}
 	return f.Close()
-}
-
-func (ts *Transfers) routes(route, bounded func(string, func(http.ResponseWriter, *http.Request, string))) {
-	route(PreflightRoute, nativeOnly(ts.preflightRoute))
-	bounded(StageRoute, nativeOnly(ts.stageRoute))
 }
 
 func StageBody(limits Limits) int64 { return limits.Total*4/3 + maxBody + int64(limits.Files)*512 }

@@ -193,7 +193,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	api.Commands = node.Commands{Runtime: node.Activation{Caller: queue, Ready: nodes.Runnable, Exists: api.Holds}}
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
 	nodes.Clone = cloneFor(cfg, queue)
-	api.Transfers = &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation}
+	transfers := &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation, Holders: &node.Holders{Dir: filepath.Join(cfg.StateDir, "holders.git")}, Ctx: ctx}
+	api.Transfers = transfers
+	transfers.HoldUnverified(ctx)
+	go transfers.Watch(ctx)
 	go api.Poll(ctx)
 	go nodes.Replicate(ctx)
 	app := http.NewServeMux()
@@ -432,14 +435,18 @@ func addNode(ctx context.Context, c *node.Client, name string, out io.Writer) er
 }
 
 func printChecks(out io.Writer, checks []node.Check) {
-	marks := map[string]install.Mark{node.MarkOK: install.Pass, node.MarkWarn: install.Warn, node.MarkFail: install.Fail, node.MarkSkip: install.Skip}
 	for _, c := range checks {
-		fix := c.Fix
-		if fix != "" && c.On != "" {
-			fix = "on " + c.On + "  " + fix
-		}
-		install.WriteCheck(out, install.Check{Name: c.Name, Mark: marks[c.Mark], Detail: c.Detail, Lines: c.Lines, Fix: fix})
+		install.WriteCheck(out, installCheck(c))
 	}
+}
+
+func installCheck(c node.Check) install.Check {
+	marks := map[string]install.Mark{node.MarkOK: install.Pass, node.MarkWarn: install.Warn, node.MarkFail: install.Fail, node.MarkSkip: install.Skip}
+	fix := c.Fix
+	if fix != "" && c.On != "" {
+		fix = "on " + c.On + "  " + fix
+	}
+	return install.Check{Name: c.Name, Mark: marks[c.Mark], Detail: c.Detail, Lines: c.Lines, Fix: fix}
 }
 
 func removeNode(ctx context.Context, c *node.Client, name string, out io.Writer) error {

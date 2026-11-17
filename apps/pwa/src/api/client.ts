@@ -1,18 +1,21 @@
 import type {
   ActionBody,
   Added,
+  BatchProgress,
   Candidate,
   CheckReport,
   LocalFactory,
   Link,
   Exposure,
   Me,
+  Progress,
   PushState,
   Readiness,
   Receipt,
   Refusal,
   Roster,
   Snapshot,
+  Unconfirmed,
 } from "./types.ts";
 
 const DEADLINE = 10_000;
@@ -131,7 +134,46 @@ export const nodeApi = (origin: string) => ({
       "GET",
       `${origin}/api/push/subscription?installation=${encodeURIComponent(installation)}`,
     ),
+  move: (factory: string, target: string) =>
+    call<Progress>("POST", origin + "/api/transfers", {
+      operation: crypto.randomUUID(),
+      factory,
+      target,
+    }),
+  progress: (operation: string) =>
+    call<Progress>("GET", `${origin}/api/transfers/${operation}`),
+  cancel: (operation: string) =>
+    call<Progress>("POST", `${origin}/api/transfers/${operation}/cancel`, {}),
+  takeover: (operation: string, incarnation: string, confirm: boolean) =>
+    call<Progress>("POST", origin + "/api/transfers/takeover", {
+      operation,
+      factory: incarnation,
+      confirm: confirm || undefined,
+    }),
+  moveAll: (target: string) =>
+    call<BatchProgress>("POST", origin + "/api/transfers/all", {
+      operation: crypto.randomUUID(),
+      target,
+    }),
+  batch: (operation: string) =>
+    call<BatchProgress>("GET", `${origin}/api/transfers/all/${operation}`),
+  cancelAll: (operation: string) =>
+    call<BatchProgress>(
+      "POST",
+      `${origin}/api/transfers/all/${operation}/cancel`,
+      {},
+    ),
 });
+
+export function warningOf(error: unknown): Unconfirmed | undefined {
+  if (!(error instanceof HttpError) || error.status !== 428) return undefined;
+  return (error.body as { warning?: Unconfirmed } | undefined)?.warning;
+}
+
+export function progressOf(error: unknown): Progress | undefined {
+  if (!(error instanceof HttpError) || error.status !== 409) return undefined;
+  return (error.body as { progress?: Progress } | undefined)?.progress;
+}
 
 export const api = {
   ...nodeApi(""),
@@ -177,6 +219,7 @@ export async function act(
         ...body,
         operation,
         incarnation: factory.incarnation,
+        generation: factory.generation,
       },
     );
   } catch (error) {

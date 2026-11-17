@@ -360,6 +360,156 @@ func (f *fakeNodeActions) Remove(_, id string) error {
 
 func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
 func (f *fakeNodeActions) Clone(context.Context, string, string, string) error { return nil }
+func (f *fakeNodeActions) MoveAll(context.Context, string, string) (node.BatchProgress, error) {
+	return node.BatchProgress{}, nil
+}
+func (f *fakeNodeActions) Batch(context.Context, string) (node.BatchProgress, error) {
+	return node.BatchProgress{}, nil
+}
+func (f *fakeNodeActions) CancelAll(context.Context, string) (node.BatchProgress, error) {
+	return node.BatchProgress{}, nil
+}
+
+type fakeMoveActions struct {
+	reports   map[string]node.Report
+	progress  node.Progress
+	warning   node.Unconfirmed
+	started   []node.MoveRequest
+	cancelled []string
+	takeovers []node.TakeoverRequest
+	moves     []node.Progress
+}
+
+func (f *fakeMoveActions) Moves(context.Context, string) ([]node.Progress, error) {
+	return f.moves, nil
+}
+
+func (f *fakeMoveActions) Ready(_ context.Context, on string) (node.Report, error) {
+	report, ok := f.reports[on]
+	if !ok {
+		return report, errors.New("dial " + on + ": no route to host")
+	}
+	return report, nil
+}
+
+func (f *fakeMoveActions) Start(_ context.Context, _ string, r node.MoveRequest) (node.Progress, error) {
+	f.started = append(f.started, r)
+	return f.progress, nil
+}
+
+func (f *fakeMoveActions) Progress(context.Context, string, string) (node.Progress, error) {
+	return f.progress, nil
+}
+
+func (f *fakeMoveActions) Cancel(_ context.Context, _, op string) (node.Progress, error) {
+	f.cancelled = append(f.cancelled, op)
+	return f.progress, nil
+}
+
+func (f *fakeMoveActions) Takeover(_ context.Context, _ string, r node.TakeoverRequest) (node.Progress, error) {
+	f.takeovers = append(f.takeovers, r)
+	if !r.Confirm {
+		return node.Progress{}, f.warning
+	}
+	return f.progress, nil
+}
+
+func runMove(m *Move, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			runMove(m, c)
+		}
+	case nil:
+	default:
+		_, next := m.Update(msg)
+		if _, polled := msg.(moveProgressed); !polled {
+			runMove(m, next)
+		}
+	}
+}
+
+func pressMove(m *Move, keys ...string) {
+	for _, k := range keys {
+		msg := tea.KeyPressMsg{Code: rune(k[0]), Text: k}
+		if k == "enter" {
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
+		}
+		_, cmd := m.Update(msg)
+		runMove(m, cmd)
+	}
+}
+
+func TestMovingAFactoryNeverFallsBackCancelsOnlyBeforeReleaseAndReopensOnTheRunningMove(t *testing.T) {
+	actions := &fakeMoveActions{reports: map[string]node.Report{
+		"homelab.tail5e2c.ts.net": {At: nodesNow},
+		"studio.tail5e2c.ts.net":  {At: nodesNow, Problems: 1, Checks: []node.Check{{Name: "claude", Mark: node.MarkFail, Detail: "not logged in"}}},
+	}}
+	csv := MoveContext{Key: "/src/cowork:csv", Label: "csv", Factory: "/src/cowork:csv", HolderShort: "macbook", Targets: []NodeChoice{
+		{Name: "build-box.tail5e2c.ts.net", Unreachable: true},
+		{Name: "homelab.tail5e2c.ts.net"},
+		{Name: "studio.tail5e2c.ts.net"},
+	}}
+	m := NewMove(csv, actions)
+	m.Update(tea.WindowSizeMsg{Width: 88, Height: 22})
+	runMove(m, m.Init())
+	pressMove(m, "enter", "j", "j", "enter")
+	if len(actions.started) > 0 || !strings.Contains(m.View().Content, "studio can't run factories yet: claude: not logged in") {
+		t.Fatalf("⏎ on an unreachable and an unready node started %v and shows:\n%s\nwant nothing started and the reason named", actions.started, m.View().Content)
+	}
+
+	actions.progress = node.Progress{Transfer: node.Transfer{Operation: "op-csv", Role: node.RoleSource, Factory: "csv", Key: "/src/cowork:csv", SourceName: "macbook", TargetName: "homelab", Phase: node.PhaseCheckpoint, Waiting: "csv is implementing; it stops for the move when it next waits for you or between stages."}, State: node.StateCheckpointWaiting, Running: true}
+	pressMove(m, "k", "enter")
+	if len(actions.started) != 1 || actions.started[0].Target != "homelab.tail5e2c.ts.net" {
+		t.Fatalf("⏎ on homelab started %+v; want one move to homelab", actions.started)
+	}
+	golden.RequireEqual(t, m.View().Content)
+
+	actions.progress.Phase, actions.progress.State, actions.progress.Waiting = node.PhaseReleased, node.StateReleased, ""
+	_, poll := m.Update(moveTick{})
+	runMove(m, poll)
+	pressMove(m, "x")
+	if released := m.View().Content; len(actions.cancelled) > 0 || strings.Contains(released, "x cancel") || !strings.Contains(released, "csv is stopped on macbook; homelab is starting it") {
+		t.Errorf("a released move shows:\n%s\nand x cancelled %v; want released-not-active named and no cancel", released, actions.cancelled)
+	}
+
+	actions.moves = []node.Progress{actions.progress}
+	again := NewMove(csv, actions)
+	again.Update(tea.WindowSizeMsg{Width: 88, Height: 22})
+	runMove(again, again.Init())
+	pressMove(again, "enter")
+	if reopened := again.View().Content; len(actions.started) != 1 || !strings.Contains(reopened, "csv is stopped on macbook; homelab is starting it") {
+		t.Errorf("m again during the move started %+v and shows:\n%s\nwant the running move, not a second one", actions.started, reopened)
+	}
+}
+
+func TestATakeoverShowsItsWarningAndStartsOnlyOnY(t *testing.T) {
+	actions := &fakeMoveActions{
+		reports: map[string]node.Report{"": {At: nodesNow}},
+		warning: node.Unconfirmed{Warning: "Forcing a takeover starts csv on macbook from the checkpoint homelab took at 11:40 on 16 Nov. The node that holds csv now may only be out of reach: it can keep running csv until it reconnects and learns it lost it, and work done after that checkpoint may be lost or diverge."},
+	}
+	m := NewMove(MoveContext{Key: "node:n-homelab/inc-csv", Label: "csv", Factory: "/srv/cowork:csv", Incarnation: "inc-csv", Holder: "homelab.tail5e2c.ts.net", HolderShort: "homelab", Lost: true, Targets: []NodeChoice{
+		{Name: "macbook.tail5e2c.ts.net", Here: true},
+	}}, actions)
+	m.Update(tea.WindowSizeMsg{Width: 88, Height: 22})
+	runMove(m, m.Init())
+	pressMove(m, "enter")
+	golden.RequireEqual(t, m.View().Content)
+
+	pressMove(m, "enter", "enter")
+	if confirmed := slices.ContainsFunc(actions.takeovers, func(r node.TakeoverRequest) bool { return r.Confirm }); confirmed || len(actions.started) > 0 {
+		t.Fatalf("takeovers %+v before y; want only unconfirmed requests for the warning", actions.takeovers)
+	}
+	actions.progress = node.Progress{Transfer: node.Transfer{Operation: "op-take", Role: node.RoleTarget, Forced: true, Factory: "csv", SourceName: "homelab", TargetName: "macbook", Phase: node.PhaseStaged}, State: node.StateMoving, Running: true}
+	pressMove(m, "y")
+	last, warned := actions.takeovers[len(actions.takeovers)-1], actions.takeovers[len(actions.takeovers)-2]
+	if !last.Confirm || last.Operation != warned.Operation || last.Factory != "inc-csv" {
+		t.Errorf("y sent %+v after the warning for %+v; want the same operation confirmed for the incarnation", last, warned)
+	}
+}
 
 var nodesNow = time.Date(2026, 11, 16, 12, 10, 0, 0, time.Local)
 

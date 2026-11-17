@@ -297,6 +297,10 @@ func (m *Model) deliver(action string) {
 	if action != "handled" && unanswered(item, d) != "" {
 		return
 	}
+	if reason := m.unverified(it); reason != "" {
+		m.panel.refused[key] = "Not sent. " + heldUnchecked(it, reason)
+		return
+	}
 	remote := it.Factory.Remote != nil
 	wakesItsSupervisor := item.Kind == "handoff"
 	if reason := unqueueable(m.target(it)); reason != "" && !remote && !wakesItsSupervisor {

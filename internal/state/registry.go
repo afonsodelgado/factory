@@ -30,6 +30,7 @@ type Entry struct {
 	Branches    []string     `json:"branches,omitempty"`
 	Incarnation string       `json:"incarnation,omitempty"`
 	Paused      bool         `json:"paused,omitempty"`
+	MovedTo     string       `json:"moved_to,omitempty"`
 
 	Agents map[string]AgentSetting `json:"agents,omitempty"`
 }

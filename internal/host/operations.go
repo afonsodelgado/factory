@@ -77,7 +77,26 @@ func (m *Runtime) uncertain(factoryKey string) []string {
 			blockers = append(blockers, "the answer to "+a.ItemID+" is "+a.Status()+" and must settle first")
 		}
 	}
+	blockers = append(blockers, acceptedFor(m.Config.StateDir, factoryKey)...)
 	slices.Sort(blockers)
+	return blockers
+}
+
+func acceptedFor(stateDir, key string) []string {
+	paths, _ := filepath.Glob(filepath.Join(stateDir, "operations", "*.json"))
+	var blockers []string
+	for _, p := range paths {
+		var op Operation
+		data, err := os.ReadFile(p)
+		if err != nil || json.Unmarshal(data, &op) != nil || op.Status != "accepted" {
+			continue
+		}
+		var target struct{ Factory, Key, Repo, Slug string }
+		json.Unmarshal(op.Data, &target)
+		if target.Factory == key || target.Key == key || state.Key(target.Repo, target.Slug) == key {
+			blockers = append(blockers, "operation "+op.ID+" ("+op.Action+") was accepted and its outcome is unknown; check it before moving")
+		}
+	}
 	return blockers
 }
 
