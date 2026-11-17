@@ -301,7 +301,7 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 	top = append(top, wrapped(it.Body, w, theme.Text)...)
 	switch {
 	case TextAnswered(it):
-		middle := freeText(v, w)
+		middle := freeText(v, TextPrompt(it.Kind), w)
 		if middle == nil {
 			middle = []line{blank(), hints("type", TextPrompt(it.Kind)+", then ctrl+s sends it")}
 		}
@@ -315,11 +315,11 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
 		return top, nil, withStatus(v, w, field("reply", v.Draft, w)), 0
 	case it.Kind == "cap":
-		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+it.LimitKey+" by one for this factory"), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+it.LimitKey+" by one for this factory"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	case it.Kind == "failure":
-		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume"), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	case it.Kind == "handoff":
-		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -574,11 +574,11 @@ func shortURL(url string) string {
 	return url
 }
 
-func freeText(v View, w int) []line {
+func freeText(v View, title string, w int) []line {
 	if v.Draft.Text == "" && !v.Draft.Editing {
 		return nil
 	}
-	return append([]line{blank()}, textBox("instruction", v.Draft, w)...)
+	return append([]line{blank()}, textBox(title, v.Draft, w)...)
 }
 
 func choices(v View, options ...string) []line {
