@@ -82,6 +82,10 @@ func (s Service) State(ctx context.Context) ServiceState {
 	}
 	st.Loaded = true
 	for _, line := range strings.Split(string(out), "\n") {
+		isTopLevel := strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "\t\t")
+		if !isTopLevel {
+			continue
+		}
 		key, value, _ := strings.Cut(strings.TrimSpace(line), " = ")
 		switch key {
 		case "state":
