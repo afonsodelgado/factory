@@ -5,11 +5,24 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/workflow"
 )
 
 func runWorkflow(args []string) int {
+	if len(args) == 2 && args[0] == "commands" {
+		resolved, err := recipe.Resolve(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(resolved.Recipe); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
 	if len(args) != 3 || args[0] != "next" {
 		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json>")
 		return 2

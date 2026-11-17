@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -69,7 +70,11 @@ func (m *Runtime) startStack(it Item, page string) (ReviewReply, error) {
 	case stackEnded(it):
 		return ReviewReply{}, fmt.Errorf("%s is paused, done, archived or has no supervisor pane, so its walkthrough would stop at once; wake it first", f.Label())
 	}
-	_, profile := m.repoConfig(f.Repo)
+	resolved, err := recipe.Resolve(f.Worktree)
+	if err != nil {
+		return ReviewReply{}, err
+	}
+	profile := resolved.Profile
 	os.Remove(LegacyStackPath(f.Dir))
 	m.stopStack(f.Key())
 	lease := StackLease{Factory: f.Key(), Route: ReviewKey(f), Label: f.Label(), Repo: f.Repo, Slug: f.Slug, Worktree: f.Worktree, Page: page}

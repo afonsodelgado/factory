@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -161,6 +162,18 @@ func repoChecks(o Options) []Check {
 			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": no repo config", Fix: "in the hub, press n, then + add a repo… and enter " + tilde(repo)})
 			continue
 		}
+		if resolved, err := recipe.Resolve(repo); err != nil {
+			checks = append(checks, Check{Name: "commands", Mark: Fail, Detail: err.Error()})
+		} else if len(resolved.Recipe.Unresolved) > 0 {
+			checks = append(checks, Check{Name: "commands", Mark: Warn, Detail: "Repository commands need clarification", Lines: resolved.Recipe.Unresolved})
+		} else {
+			var lines []string
+			for _, name := range []string{"build", "lint", "test"} {
+				c := resolved.Recipe.Commands[name]
+				lines = append(lines, name+": "+c.Command+" ("+c.Source+")")
+			}
+			checks = append(checks, Check{Name: "commands", Mark: Pass, Detail: "Effective repository commands", Lines: lines})
+		}
 		if o.Config == nil {
 			continue
 		}
@@ -176,7 +189,8 @@ func repoChecks(o Options) []Check {
 }
 
 func stackProblems(repo string) []string {
-	profile, err := state.ReadProfile(repo)
+	resolved, err := recipe.Resolve(repo)
+	profile := resolved.Profile
 	if err != nil || !profile.BrowserQA() {
 		return nil
 	}

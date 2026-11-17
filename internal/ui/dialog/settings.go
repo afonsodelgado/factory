@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
@@ -19,6 +20,7 @@ type Settings struct {
 	settings      *state.RepoSettings
 	values        map[string]string
 	field         int
+	detected      map[string]state.Command
 	problem       string
 	result        *SettingsResult
 	width, height int
@@ -40,6 +42,15 @@ func NewSettings(context SettingsContext) *Settings {
 		m.problem = err.Error()
 	} else {
 		m.values = maps.Clone(m.settings.Values)
+		if resolved, err := recipe.Resolve(context.Repo); err == nil {
+			m.detected = map[string]state.Command{}
+			for key, c := range resolved.Recipe.Commands {
+				m.detected["commands."+key] = c
+			}
+			for key, c := range resolved.Recipe.QA {
+				m.detected["qa."+key] = c
+			}
+		}
 	}
 	return m
 }
@@ -293,6 +304,11 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 		return
 	}
 	value := strings.ReplaceAll(m.values[key], "\n", " ↵ ")
+	if value == "" && !focused {
+		if detected, ok := m.detected[key]; ok {
+			value = detected.Command + " (detected: " + detected.Source + ")"
+		}
+	}
 	if focused {
 		value += "█"
 	}

@@ -261,8 +261,8 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 		t.Fatalf("init from a subdirectory wrote the profile in the wrong place: %v", err)
 	}
 	profile, err := state.ReadProfile(repo)
-	if err != nil || profile.Commands.Build != "go build ./..." || profile.QA.Mode != "terminal" || profile.CodeRabbit == nil || *profile.CodeRabbit {
-		t.Errorf("profile for a go.mod repo reads as %+v, %v; want go commands, terminal QA and CodeRabbit off", profile, err)
+	if err != nil || profile.Commands.Build != "" || profile.QA.Mode != "terminal" {
+		t.Errorf("profile for a go.mod repo reads as %+v, %v; want detected commands left unset and terminal QA", profile, err)
 	}
 	if err := os.WriteFile(state.RepoConfigPath(repo), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
