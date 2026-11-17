@@ -112,6 +112,13 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 		t.Fatal(reasons)
 	}
 	offerHandoff(&s, eventFor(s, "observe"))
+	red := eventFor(s, "observe")
+	red.Stack, red.PRs = s.Stack, s.PRs
+	red.Observations = []state.PRVerification{s.Evidence.PRs[0]}
+	red.Observations[0].CI = "fail"
+	if redone := step(t, s, red); redone.Stage != "pr" || redone.Workflow.ActiveRun == "" || len(redone.OpenAttention()) != 0 {
+		t.Fatal("red CI on unchanged heads left the handoff offer standing", redone.Stage, redone.OpenAttention())
+	}
 	e := eventFor(s, "handoff")
 	e.At = state.Time{Time: time.Unix(300, 0)}
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = s.Attention[0].ID, s.Attention[0].Revision, "done", "receipt"

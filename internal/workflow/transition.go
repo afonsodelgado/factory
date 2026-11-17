@@ -128,7 +128,8 @@ func apply(s *state.State, e Event) error {
 		}
 		if len(Readiness(*s)) == 0 {
 			offerHandoff(s, e)
-		} else if changed && (wasDone || offered) {
+		} else if changed && wasDone || offered {
+			withdrawHandoff(s, e.At)
 			return dispatch(s, e, "pr")
 		}
 	case "comments_preference":
@@ -508,6 +509,10 @@ func invalidate(s *state.State, at state.Time) {
 	st := s.Stages["handoff"]
 	st.Status = "pending"
 	s.Stages["handoff"] = st
+	withdrawHandoff(s, at)
+}
+
+func withdrawHandoff(s *state.State, at state.Time) {
 	for i := range s.Attention {
 		if s.Attention[i].Kind == "handoff" && s.Attention[i].Open() {
 			s.Attention[i].ResolvedAt = at
