@@ -218,7 +218,7 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		}
 	}
 	o.CI, o.Reason, o.Notes = interpretChecks(checks, required, now.Sub(o.Window.Discovery))
-	if o.CI == "pass" && awaitingReadyChecks(o.Window, checks, now) {
+	if o.CI == "pass" && awaitingReadyChecks(o.Window, now) {
 		o.CI, o.Reason = "pending", "discovering_checks"
 	}
 	var review struct {
@@ -360,12 +360,16 @@ func interpretChecks(checks []apiCheck, required []requiredCheck, elapsed time.D
 	return "pass", "checks_passed", notes
 }
 
-func awaitingReadyChecks(w CheckWindow, checks []apiCheck, now time.Time) bool {
+func awaitingReadyChecks(w CheckWindow, now time.Time) bool {
 	markedReady := !w.Draft && w.Discovery.After(w.Started)
-	startedSinceReady := slices.ContainsFunc(checks, func(c apiCheck) bool {
-		return !c.CreatedAt.Before(w.Discovery) || !c.StartedAt.Before(w.Discovery)
-	})
-	return markedReady && now.Sub(w.Discovery) < ReadyDiscovery && !startedSinceReady
+	return markedReady && now.Sub(w.Discovery) < ReadyDiscovery
+}
+
+func QueueObservation(dir, kind, runID string, at time.Time, payload map[string]any, instruction string) (string, error) {
+	path := filepath.Join(dir, "inbox", fmt.Sprintf("%s-%s-%d.json", kind, runID, at.UnixNano()))
+	payload["run_id"] = runID
+	payload["text"] = kind + " observation for run " + runID + " is in " + path + ": " + instruction + "."
+	return path, SavePrivate(path, payload)
 }
 
 func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g *GitHub, now func() time.Time, sleep func(context.Context, time.Duration) error) ([]PRObservation, error) {
@@ -406,7 +410,7 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 			}
 		}
 		if !waiting {
-			if err := SavePrivate(filepath.Join(dir, "inbox", "ci-"+runID+".json"), map[string]any{"run_id": runID, "observations": observations, "text": "CI observation ready; validate the current run and head/base tuples."}); err != nil {
+			if _, err := QueueObservation(dir, "ci", runID, at, map[string]any{"observations": observations}, "commit its observations, with the current stack and PRs, as an observe event; validate the run and head/base tuples first"); err != nil {
 				return nil, err
 			}
 			return observations, nil

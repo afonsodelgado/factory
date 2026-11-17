@@ -86,6 +86,12 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	if _, err := os.Stat(filepath.Join(dir, ".heartbeat")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := WatchPRs(context.Background(), dir, dir, "run", []int{1}, gh, func() time.Time { return now.Add(time.Second) }, nil); err != nil {
+		t.Fatal(err)
+	}
+	if queued, _ := filepath.Glob(filepath.Join(dir, "inbox", "ci-run-*.json")); len(queued) != 2 {
+		t.Fatal("a second watch in the same run did not queue its own observation", queued)
+	}
 	draft = false
 	ready := gh.Observe(dir, 1, observations[0].Window, now)
 	if ready.CI != "pending" || ready.Reason != "discovering_checks" || !ready.Window.Started.Equal(start) {
@@ -104,9 +110,8 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 		t.Fatal("a check from before the PR was marked ready passed it", green, stale)
 	}
 	marked := gh.Observe(dir, 1, green.Window, readyAt)
-	checkRuns = `[{"id":2,"name":"ci","status":"completed","conclusion":"success","head_sha":"h","started_at":"` + readyAt.Add(time.Second).UTC().Format(time.RFC3339) + `"}]`
-	if fresh := gh.Observe(dir, 1, marked.Window, readyAt.Add(2*time.Second)); fresh.CI != "pass" {
-		t.Fatal("a check started after the PR was marked ready did not pass it", fresh)
+	if settled := gh.Observe(dir, 1, marked.Window, readyAt.Add(ReadyDiscovery)); settled.CI != "pass" {
+		t.Fatal("green checks did not pass once the ready grace ended", settled)
 	}
 	gh.Run = func(string, ...string) ([]byte, error) { return nil, errors.New("permission denied") }
 	failed := gh.Observe(dir, 1, saved.Window, now)
