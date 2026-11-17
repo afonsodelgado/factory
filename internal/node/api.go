@@ -142,13 +142,18 @@ func (a *API) Poll(ctx context.Context) {
 }
 
 func (a *API) refresh(ctx context.Context) {
-	var local host.Local
-	answer, err := a.call(ctx, "local", "", nil, &local)
-	if err != nil || answer.T != "done" {
+	local, ok := a.read(ctx)
+	if !ok {
 		a.lose()
 		return
 	}
-	a.publish(local.Factories)
+	a.publish(local)
+}
+
+func (a *API) read(ctx context.Context) ([]host.LocalFactory, bool) {
+	var local host.Local
+	answer, err := a.call(ctx, "local", "", nil, &local)
+	return local.Factories, err == nil && answer.T == "done"
 }
 
 func (a *API) publish(local []host.LocalFactory) {
@@ -186,8 +191,14 @@ func (a *API) Holds(repo, slug string) bool {
 }
 
 func (a *API) HoldsIncarnation(incarnation string) bool {
-	a.refresh(context.Background())
-	_, factories, _ := a.Factories()
+	factories, fresh := a.read(context.Background())
+	if fresh {
+		a.publish(factories)
+	} else if _, cached, known := a.Factories(); known {
+		factories = cached
+	} else {
+		return true
+	}
 	return slices.ContainsFunc(factories, func(f host.LocalFactory) bool { return f.Incarnation == incarnation })
 }
 

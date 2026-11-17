@@ -439,6 +439,23 @@ func (c *recordingCaller) Call(_ context.Context, m host.Message) (host.Message,
 	return host.Message{T: "done"}, nil
 }
 
+type unreachableHost struct{}
+
+func (unreachableHost) Call(context.Context, host.Message) (host.Message, error) {
+	return host.Message{}, errors.New("host is down")
+}
+
+func TestTheAlreadyRunsCheckKeepsRefusingWhenTheHostCannotBeReached(t *testing.T) {
+	api := &API{Commands: Commands{Runtime: unreachableHost{}}}
+	if !api.HoldsIncarnation("inc-1") {
+		t.Error("with no snapshot and no host the node answered that it does not hold the factory; a move would then skip the already-runs check")
+	}
+	api.publish([]host.LocalFactory{{Incarnation: "inc-1"}})
+	if !api.HoldsIncarnation("inc-1") || api.HoldsIncarnation("inc-2") {
+		t.Error("with the host down the node must answer from its last snapshot: refuse inc-1, which it holds, and not inc-2")
+	}
+}
+
 func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	const name = "devbox.tail1234.ts.net"
 	dir := t.TempDir()
