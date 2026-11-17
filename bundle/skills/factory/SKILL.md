@@ -7,7 +7,7 @@ description: |
   handoff. This session is the supervisor; every stage runs as a factory-* subagent that
   hands off through files. Use when the user says "/factory <id>", "/factory status",
   "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
-argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan|walkthrough> [item id] [notes] | skip <stage> | checkpoint <operation>"
+argument-hint: "<id> [--pipeline <name>] [--stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan|walkthrough> [item id] [notes] | skip <stage> | checkpoint <operation>"
 ---
 
 # Factory supervisor
@@ -93,7 +93,7 @@ When it is missing everywhere, stop at preflight and ask the user to add the rep
 
 ## Commands
 
-- `/factory <id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` picks the pipeline a new factory runs, and `--stages` gives its exact list instead (see "The pipeline"). Each `--agent` sets one agent's model, effort or both for this factory (see "Agent models"). On resume all three are ignored, because `state.json` already records them. The lines after the first line of the message are the prompt.
+- `/factory <id> [--pipeline <name>] [--stages <a,b,c>] [--agent <role=model:effort>…]`: start the factory if `state.json` does not exist, otherwise resume it. `--pipeline <name>` names the pipeline a new factory runs, and `--stages` gives its exact list (see "The pipeline"). The factory app always passes `--stages`. Each `--agent` sets one agent's model, effort or both for this factory (see "Agent models"). On resume all three are ignored, because `state.json` already records them. The lines after the first line of the message are the prompt.
 - `/factory resume`: find the factory from the current branch or the only open `state.json`, then resume.
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
 - `/factory approve <design|plan|walkthrough> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
@@ -109,12 +109,14 @@ A pipeline is a named list of stage keys (`references/state.md`). Resolve the pi
    - `quick`: `[requirements, plan, implement, review, handoff]`
 2. Read `pipelines` and `default_pipeline` from the global config, `${FACTORY_CONFIG_DIR:-~/.config/factory}/config.yml`, when it exists. An entry replaces the built-in of the same name.
 3. Read `pipelines` and `default_pipeline` from the repo config. Its entries and its `default_pipeline` win over the global config.
-4. With `--stages a,b,c`, the list is those keys and the name is `custom`. Otherwise the name is the `--pipeline` argument. Without one, it is `default_pipeline`, and without that, `full`.
+4. With `--stages a,b,c`, the list is those keys, exactly as given: do not resolve it again. Its name is the `--pipeline` argument, or `custom` without one. Without `--stages`, the name is the `--pipeline` argument; without one, it is `default_pipeline`, and without that, `full`.
 5. Add `requirements` and `handoff` when the list omits them. When the repo config says `coderabbit: false`, remove `coderabbit`. When its `qa.mode` is not `browser`, remove `walkthrough`. When the list has no `qa`, remove `qa_fixes` and `test_gaps`. Put the stages in the order of the stage keys.
 
 If the name is not a pipeline, a list holds a key that is not a stage key, or a config names a pipeline `custom`, stop at preflight and tell the user the file and the key.
 
 A pipeline only removes stages. It never removes or changes a gate: the plan is still reviewed and approved before any code is written. A stage outside the pipeline is `skipped`, and you pass over it in order, the same way stage 6 is passed over when the repo config says `coderabbit: false`.
+
+**Run every stage in `pipeline_stages`.** The user configured them, so never skip one on your own judgement, for example because the change has no user interface or looks too small for it. Only the user skips a stage, with `/factory skip <stage>`. A stage that finds nothing to do still runs and says so.
 
 ### Agent tools and models
 
@@ -142,7 +144,7 @@ Write every role to `state.agents`, including the ones that run on their frontma
    - The current directory is a worktree for this factory. If it is the main checkout, ask the user to restart from `claude --worktree <id>`.
 2. **Create state.**
    - **The prompt.** When the `/factory <id>` message carries more lines, they are the prompt: write them verbatim to `brief.md` and do not ask again. Otherwise ask the user what this factory should do: the change, for whom, and anything they already know they want. Write the answer verbatim to `brief.md`. Pass its path to every stage as the spec.
-   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when the feature changes the user interface the repo config's `design.source` describes. When unsure, ask the user once. When `design` is not in the pipeline, set it to false and do not ask.
+   - Then copy `templates/state.json` and fill in the id, a short title from the prompt, branch, worktree path, start commit, `repo` (the main checkout: `dirname "$(git rev-parse --path-format=absolute --git-common-dir)"`), `session_id` and `updated_at` (see "Files") and `needs_design`. Set `needs_design` to true when `design` is in the pipeline and false otherwise; never decide it from the prompt.
    - **The pipeline.** Resolve it (see "The pipeline") and write `pipeline` (the name) and `pipeline_stages` (the resolved list). Mark every stage not in `pipeline_stages` `skipped`, with the note "not in the <name> pipeline", before stage 1 starts; a `coderabbit` stage removed by `coderabbit: false` gets the note "no CodeRabbit on this repo" instead, and a `walkthrough` stage removed by terminal QA gets "no browser stack on this repo". When `qa` is skipped, `qa_fixes` and `test_gaps` are skipped too.
    - **The agents.** Resolve them (see "Agent models") and write `agents`.
 3. Tell the user the plan in three lines: the pipeline and the stages it skips, the agents that do not run on their defaults, which gates need them, and that everything after the plan runs unattended until handoff.

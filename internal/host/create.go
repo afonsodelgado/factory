@@ -69,7 +69,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.RetiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.SlugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: CustomStages(pipeline), Agents: withToolNamed(agents), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: pipeline.Stages, Agents: withToolNamed(agents), Supervisor: supervisor}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
@@ -116,13 +116,6 @@ func ChosenPipeline(pipelines state.Pipelines, r CreateRequest) (state.Pipeline,
 		return pipelines.Custom(r.Stages)
 	}
 	return pipelines.Find(r.Pipeline)
-}
-
-func CustomStages(p state.Pipeline) []string {
-	if p.Name != state.CustomPipeline {
-		return nil
-	}
-	return p.Stages
 }
 
 func FirstLine(s string) string {
