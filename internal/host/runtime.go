@@ -29,13 +29,14 @@ type Answer struct {
 	Draft      string
 	Received   time.Time
 	LeavesOpen bool
-	Operation  string    `json:",omitempty"`
-	Device     string    `json:",omitempty"`
-	Source     string    `json:",omitempty"`
-	Action     string    `json:",omitempty"`
-	Outcome    string    `json:",omitempty"`
-	Reason     string    `json:",omitempty"`
-	SettledAt  time.Time `json:",omitzero"`
+	Operation  string       `json:",omitempty"`
+	Device     string       `json:",omitempty"`
+	Source     string       `json:",omitempty"`
+	Action     string       `json:",omitempty"`
+	Outcome    string       `json:",omitempty"`
+	Reason     string       `json:",omitempty"`
+	SettledAt  time.Time    `json:",omitzero"`
+	Reply      *state.Reply `json:",omitempty"`
 }
 
 type Runtime struct {

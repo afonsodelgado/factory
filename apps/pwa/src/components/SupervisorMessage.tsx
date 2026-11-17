@@ -7,34 +7,66 @@ import { useBlocked, useNode, useSend } from "../hooks.ts";
 import { Blocked, SendLine } from "./Receipt.tsx";
 
 export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
-  const { scope: account, live, origin } = useNode(factory);
+  const { scope: account, live, origin, snapshot } = useNode(factory);
   const blocked = useBlocked(factory);
   const { sending, send } = useSend(factory);
   const [text, setText] = useState("");
-  const [results, setResults] = useState<MessageResult[]>([]);
-
+  const scope = account && `${account}:${factory.incarnation}`;
+  const [held, setHeld] = useState<Held>();
+  const results = held && held.scope === scope ? held.results : undefined;
   useEffect(() => {
-    if (!account) return;
+    if (!account || !scope) return;
     let current = true;
-    cache.messages(account, factory.incarnation).then(async (saved) => {
-      if (!current) return;
-      setResults(saved);
-      if (!live) return;
-      const fresh = await Promise.all(saved.map(refresh(origin)));
-      if (current) setResults(fresh);
+    cache.messages(account, factory.incarnation).then((saved) => {
+      if (current)
+        setHeld((now) =>
+          now?.scope === scope ? now : { scope, results: saved },
+        );
     });
     return () => {
       current = false;
     };
-  }, [account, factory.incarnation, live, origin]);
+  }, [account, factory.incarnation, scope]);
+
+  useEffect(() => {
+    if (account && held && held.scope === scope)
+      void cache.saveMessages(account, factory.incarnation, held.results);
+  }, [account, factory.incarnation, scope, held]);
+
+  const asking = (results ?? [])
+    .filter(awaitsNode)
+    .map((result) => result.receipt.operation)
+    .join(" ");
+  const revision = snapshot?.revision;
+  useEffect(() => {
+    if (!live || !asking || !scope) return;
+    let current = true;
+    Promise.all(asking.split(" ").map(lookup(origin))).then((fresh) => {
+      if (!current) return;
+      setHeld((now) =>
+        now?.scope === scope
+          ? { scope, results: now.results.map(merge(fresh)) }
+          : now,
+      );
+    });
+    return () => {
+      current = false;
+    };
+  }, [asking, live, origin, revision, scope]);
 
   const submit = async () => {
     const sent = text;
     const receipt = await send({ action: "message", text: sent });
     const result = { text: sent, receipt, at: new Date().toISOString() };
-    setResults((recent) => [result, ...recent].slice(0, 3));
+    if (scope)
+      setHeld((current) => ({
+        scope,
+        results: [
+          result,
+          ...(current?.scope === scope ? current.results : []),
+        ].slice(0, 3),
+      }));
     if (receipt.status !== "refused") setText("");
-    if (account) await cache.addMessage(account, factory.incarnation, result);
   };
 
   const disabled =
@@ -61,7 +93,7 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
       </fieldset>
       <SendLine send={factory.message} />
       <Blocked reason={blocked} />
-      {results.length > 0 ? (
+      {results?.length ? (
         <section>
           <h2 className="sub">Sent from this phone</h2>
           <ul className="checks">
@@ -89,20 +121,41 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
   );
 }
 
-const refresh =
+type Held = { scope: string; results: MessageResult[] };
+
+const REPLY_WAIT = 24 * 60 * 60_000;
+
+const awaitsNode = ({ receipt, at }: MessageResult) => {
+  const pending = ["queued", "sending", "unknown"].includes(receipt.status);
+  const awaitsReply =
+    receipt.status === "delivered" &&
+    !receipt.reply &&
+    Date.now() - Date.parse(at) < REPLY_WAIT;
+  return !!receipt.operation && (pending || awaitsReply);
+};
+
+const lookup =
   (origin: string) =>
-  async (result: MessageResult): Promise<MessageResult> => {
-    const pending =
-      result.receipt.status === "queued" || result.receipt.status === "unknown";
-    if (!pending || !result.receipt.operation) return result;
+  async (operation: string): Promise<Receipt | undefined> => {
     try {
-      return {
-        ...result,
-        receipt: await nodeApi(origin).receipt(result.receipt.operation),
-      };
+      return await nodeApi(origin).receipt(operation);
     } catch {
-      return result;
+      return undefined;
     }
+  };
+
+const merge =
+  (fresh: (Receipt | undefined)[]) =>
+  (result: MessageResult): MessageResult => {
+    const found = fresh.find(
+      (receipt) => receipt?.operation === result.receipt.operation,
+    );
+    if (!found) return result;
+    const delivered = result.receipt.status === "delivered";
+    return {
+      ...result,
+      receipt: delivered ? { ...result.receipt, reply: found.reply } : found,
+    };
   };
 
 const resultLooks: Record<Receipt["status"], [string, string, string]> = {
@@ -131,6 +184,14 @@ function Result(props: {
         {label} {clock(result.at)}
       </span>
       <span className="d">{result.text}</span>
+      {result.receipt.reply ? (
+        <figure className="reply">
+          <figcaption>
+            Supervisor replied {clock(result.receipt.reply.at)}
+          </figcaption>
+          <p>{result.receipt.reply.text}</p>
+        </figure>
+      ) : null}
       {result.receipt.reason ? (
         <span className={refused ? "fix" : "d"}>{result.receipt.reason}</span>
       ) : null}

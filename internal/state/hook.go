@@ -19,12 +19,23 @@ type HookFile struct {
 	Last           HookEvent      `json:"last"`
 	Submit         *HookEvent     `json:"submit,omitempty"`
 	Submits        []HookEvent    `json:"submits,omitempty"`
+	Replies        []Reply        `json:"replies,omitempty"`
 	Prompt         *PendingPrompt `json:"prompt,omitempty"`
 }
 
 const promptHeadLength = 120
 
 const keptSubmits = 8
+
+const (
+	keptReplies = 4
+	replyLength = 6000
+)
+
+type Reply struct {
+	At   time.Time `json:"at"`
+	Text string    `json:"text"`
+}
 
 type PendingPrompt struct {
 	At      time.Time `json:"at"`
@@ -53,6 +64,7 @@ type hookPayload struct {
 	ToolName         string `json:"tool_name"`
 	Reason           string `json:"reason"`
 	Prompt           string `json:"prompt"`
+	LastMessage      string `json:"last_assistant_message"`
 }
 
 func (p hookPayload) matcher() string {
@@ -66,6 +78,17 @@ func (p hookPayload) matcher() string {
 
 func (p hookPayload) asksPermission() bool {
 	return p.HookEventName == "PermissionRequest" || (p.HookEventName == "Notification" && p.NotificationType == "permission_prompt")
+}
+
+func (p hookPayload) mainReply() (string, bool) {
+	text := strings.TrimSpace(p.LastMessage)
+	if p.HookEventName != "Stop" || p.AgentID != "" || text == "" {
+		return "", false
+	}
+	if runes := []rune(text); len(runes) > replyLength {
+		text = string(runes[:replyLength]) + "…"
+	}
+	return text, true
 }
 
 func (p hookPayload) toolFinished() bool {
@@ -155,6 +178,9 @@ func RecordHook(stateDir string, payload []byte, token string, now time.Time) er
 		event.PromptHead = PromptHead(p.Prompt)
 		file.Submit = &event
 		file.Submits = append(file.Submits, event)[max(len(file.Submits)+1-keptSubmits, 0):]
+	}
+	if text, ok := p.mainReply(); ok {
+		file.Replies = append(file.Replies, Reply{At: now, Text: text})[max(len(file.Replies)+1-keptReplies, 0):]
 	}
 	if token != "" {
 		file.Token = token

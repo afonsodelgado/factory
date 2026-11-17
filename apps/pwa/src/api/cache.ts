@@ -117,22 +117,11 @@ export const cache = {
   messages: async (account: string, incarnation: string) =>
     (await read<MessageResult[]>(`messages:${scope(account, incarnation)}`)) ??
     [],
-  addMessage: async (
+  saveMessages: (
     account: string,
     incarnation: string,
-    result: MessageResult,
-  ) => {
-    const recent = await cache.messages(account, incarnation);
-    await write(
-      `messages:${scope(account, incarnation)}`,
-      [
-        result,
-        ...recent.filter(
-          (r) => r.receipt.operation !== result.receipt.operation,
-        ),
-      ].slice(0, 3),
-    );
-  },
+    results: MessageResult[],
+  ) => write(`messages:${scope(account, incarnation)}`, results),
 
   pending: async (account: string) =>
     (await read<Pending[]>(`pending:${account}`)) ?? [],

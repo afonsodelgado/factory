@@ -33,12 +33,15 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 		t.Error("a session ending after its factory was deleted wrote its hook file back")
 	}
 
-	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"Stop","transcript_path":"/t.jsonl"}`, at)
+	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"Stop","transcript_path":"/t.jsonl","last_assistant_message":"  QA waits on CI.\n"}`, at)
 	record(`{"session_id":"s1","cwd":"`+worktree+`","hook_event_name":"PreToolUse","tool_name":"Bash","agent_id":"a1","agent_type":"factory-engineer"}`, at.Add(time.Minute))
 
 	file, err := ReadHookFile(filepath.Join(SessionsDir(stateDir), "s1.json"))
 	if err != nil {
 		t.Fatalf("factory session has no hook file: %v", err)
+	}
+	if len(file.Replies) != 1 || file.Replies[0].Text != "QA waits on CI." {
+		t.Errorf("replies = %+v, want the supervisor's last message so the phone can show its answer", file.Replies)
 	}
 	if file.MainEvent().Event != "Stop" {
 		t.Errorf("main slot = %q, want Stop: a stage agent's tool call must not make the supervisor look busy", file.MainEvent().Event)
