@@ -1222,11 +1222,15 @@ func TestTwoWalkthroughsGetTheirOwnTailnetPortsAndTheProxyPassesOnlyTheOwnerWith
 	both := make(chan started, 2)
 	for _, f := range []factory.Factory{csv, pdf} {
 		go func() {
-			status, env := w.start(f)
-			both <- started{status, env}
+			var result started
+			defer func() { both <- result }()
+			result.status, result.env = w.start(f)
 		}()
 	}
 	a, b := <-both, <-both
+	if t.Failed() {
+		return
+	}
 	switch {
 	case a.status.Origin == b.status.Origin || a.env[node.WebPortEnv] == b.env[node.WebPortEnv]:
 		t.Fatalf("both walkthroughs share %s on app port %s; want a tailnet port and an app port each", a.status.Origin, a.env[node.WebPortEnv])
