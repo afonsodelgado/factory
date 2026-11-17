@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,9 +103,11 @@ func TestCapRefusalAndDuplicateApprovalNeverDispatchOrChargeTwice(t *testing.T) 
 	}
 }
 
-func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
+func offeredHandoff(t *testing.T) state.State {
+	t.Helper()
 	s := workflowState()
 	s.PipelineStages = []string{"requirements", "plan", "implement", "review", "pr", "handoff"}
+	s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
 	s.Evidence.Local, s.Evidence.Review = passed(s), passed(s)
 	s.PRs = []state.PR{{Number: 1, Branch: "feature", Base: "main", HeadSHA: "a", BaseSHA: "b", URL: "https://example.test/1"}}
 	s.Evidence.PRs = []state.PRVerification{{Number: 1, Head: "a", Base: "b", Open: true, CI: "pass", Reason: "no_checks", Policy: "pass", At: state.Time{Time: time.Unix(100, 0)}}}
@@ -112,6 +115,63 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 		t.Fatal(reasons)
 	}
 	offerHandoff(&s, eventFor(s, "observe"))
+	return s
+}
+
+func confirmed(t *testing.T, s state.State) state.State {
+	t.Helper()
+	e := eventFor(s, "handoff")
+	e.At = state.Time{Time: time.Unix(300, 0)}
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = s.Attention[0].ID, s.Attention[0].Revision, "done", "receipt", true
+	e.Stack, e.Observations = s.Stack, []state.PRVerification{s.Evidence.PRs[0]}
+	e.Observations[0].At = state.Time{Time: time.Unix(200, 0)}
+	return step(t, s, e)
+}
+
+func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
+	recipe := func(s state.State, digest string, unresolved ...string) Event {
+		e := eventFor(s, "commands")
+		r := s.Recipe
+		r.Digest, r.Unresolved = digest, unresolved
+		e.Recipe = &r
+		return e
+	}
+	for name, s := range map[string]state.State{"offered": offeredHandoff(t), "done": confirmed(t, offeredHandoff(t))} {
+		t.Run(name, func(t *testing.T) {
+			next := step(t, s, recipe(s, "new-recipe"))
+			if next.Stage != "pr" || next.Workflow.ActiveRun == "" || next.Done() || len(next.OpenAttention()) != 0 {
+				t.Fatal("a changed recipe left the factory with nothing dispatched", next.Stage, next.Workflow, next.OpenAttention())
+			}
+			asked := step(t, s, recipe(s, "new-recipe", "lint: no command found"))
+			if asked.Workflow.ActiveRun != "" || len(asked.OpenAttention()) != 1 {
+				t.Fatal("an unresolved recipe dispatched before the developer answered", asked.Workflow, asked.OpenAttention())
+			}
+			answered := step(t, asked, recipe(asked, "new-recipe"))
+			if answered.Stage != "pr" || answered.Workflow.ActiveRun == "" {
+				t.Fatal("answering the commands question left the factory stranded", answered.Stage, answered.Workflow)
+			}
+			partial := eventFor(s, "observe")
+			partial.Stack, partial.Observations = s.Stack, s.Evidence.PRs
+			if _, err := Next(s, partial); err == nil {
+				t.Fatal("an observation without PRs wiped the published records")
+			}
+			partial.PRs, partial.Stack = s.PRs, nil
+			if _, err := Next(s, partial); err == nil {
+				t.Fatal("an observation without a stack wiped the published heads")
+			}
+		})
+	}
+	reviewing := workflowState()
+	if err := dispatch(&reviewing, eventFor(reviewing, "result"), "review"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Next(reviewing, recipe(reviewing, "new-recipe")); err == nil {
+		t.Fatal("a changed recipe during review stranded the review result")
+	}
+}
+
+func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
+	s := offeredHandoff(t)
 	red := eventFor(s, "observe")
 	red.Stack, red.PRs = s.Stack, s.PRs
 	red.Observations = []state.PRVerification{s.Evidence.PRs[0]}
@@ -142,6 +202,46 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 	s = step(t, s, e)
 	if !s.Done() || s.Confirmation.Heads[0].Head != "a" {
 		t.Fatal("confirmation missing")
+	}
+	green := eventFor(s, "observe")
+	green.Stack, green.PRs, green.Observations = s.Stack, s.PRs, e.Observations
+	if s = step(t, s, green); len(s.OpenAttention()) != 0 || !s.Done() {
+		t.Fatal("a green observation of a done factory asked to confirm it again", s.OpenAttention())
+	}
+}
+
+func TestStaleGateItemsCannotApproveAnotherStage(t *testing.T) {
+	s := workflowState()
+	if err := dispatch(&s, eventFor(s, "start"), "plan"); err != nil {
+		t.Fatal(err)
+	}
+	s = complete(t, s, state.Finding{ID: "nav", Severity: "design", Disposition: "open", Description: "navigation hides the export"})
+	back := s.Attention[len(s.Attention)-1]
+	if !strings.Contains(back.Body, "nav: navigation hides the export") {
+		t.Fatal("the design return item does not name its findings", back.Body)
+	}
+	e := eventFor(s, "design_return")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = back.ID, back.Revision, "decline", "conversation:1"
+	s = step(t, s, e)
+	plan := s.Attention[len(s.Attention)-1]
+	quick := s
+	quick.PipelineStages = []string{"requirements", "plan", "implement", "review", "pr", "handoff"}
+	e = eventFor(s, "design_comments")
+	e.Receipt, e.Answer = "batch:1", "tighten the header"
+	if _, err := Next(quick, e); err == nil {
+		t.Fatal("design comments dispatched a designer in a pipeline without design")
+	}
+	s = step(t, s, e)
+	s = complete(t, s)
+	e = eventFor(s, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = plan.ID, plan.Revision, "approved", "conversation:2", true
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("the plan item approved while a revised design waits")
+	}
+	design := s.Attention[len(s.Attention)-1]
+	e.ItemID, e.ArtifactRevision = design.ID, design.Revision
+	if s = step(t, s, e); s.Stage != "plan" {
+		t.Fatal("approving the design item did not recheck the plan", s.Stage)
 	}
 }
 

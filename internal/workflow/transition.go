@@ -86,12 +86,21 @@ func apply(s *state.State, e Event) error {
 		if e.Receipt == "" || e.Answer == "" {
 			return errors.New("design comments require their batch receipt")
 		}
+		if !designRevisable(s) {
+			return errors.New("design comments apply only while the design or plan awaits approval")
+		}
+		resolveGate(s, "plan", e.At)
+		s.Workflow.Gate = ""
 		return dispatch(s, e, "design")
 	case "commands":
 		if e.Recipe == nil || e.Recipe.Digest == "" {
 			return errors.New("missing command recipe")
 		}
+		running := s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil
 		if s.Recipe.Digest != e.Recipe.Digest {
+			if running {
+				return errors.New("changed commands wait until the active run reports")
+			}
 			invalidate(s, e.At)
 		}
 		s.Recipe = *e.Recipe
@@ -99,17 +108,26 @@ func apply(s *state.State, e Event) error {
 			if !slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "commands" }) {
 				attention(s, e, "commands", "Resolve repository commands", strings.Join(s.Recipe.Unresolved, "\n"))
 			}
-		} else {
-			for i := range s.Attention {
-				if s.Attention[i].Kind == "commands" && s.Attention[i].Open() {
-					s.Attention[i].ResolvedAt = e.At
-				}
+			return nil
+		}
+		for i := range s.Attention {
+			if s.Attention[i].Kind == "commands" && s.Attention[i].Open() {
+				s.Attention[i].ResolvedAt = e.At
 			}
+		}
+		if stranded(s) {
+			if len(s.PRs) > 0 {
+				return dispatch(s, e, "pr")
+			}
+			return dispatch(s, e, "implement")
 		}
 	case "observe":
 		wasDone := s.Done()
 		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
 		changed := !SameHeads(s.Stack, e.Stack)
+		if len(e.Stack) == 0 || len(s.PRs) > 0 && len(e.PRs) == 0 {
+			return errors.New("observation must carry the stack and its published PRs")
+		}
 		if s.Workflow.ActiveRun != "" && !SameHeads(s.Stack, e.Stack) {
 			return errors.New("cannot replace heads while a run is active")
 		}
@@ -126,9 +144,10 @@ func apply(s *state.State, e Event) error {
 			s.Evidence.Comments = *e.Comments
 			s.Evidence.CommentDispositions = e.CommentDispositions
 		}
-		if len(Readiness(*s)) == 0 {
+		ready := len(Readiness(*s)) == 0
+		if ready && !s.Done() {
 			offerHandoff(s, e)
-		} else if changed && wasDone || offered {
+		} else if !ready && (changed && wasDone || offered) {
 			withdrawHandoff(s, e.At)
 			return dispatch(s, e, "pr")
 		}
@@ -250,8 +269,8 @@ func result(s *state.State, e Event) error {
 	case "design":
 		return gate(s, e, "design")
 	case "plan":
-		if slices.ContainsFunc(s.Findings, func(f state.Finding) bool { return f.Severity == "design" && Gating(f) }) {
-			attention(s, e, "design_return", "Return findings to design?", "Accept to revise and approve the design again; decline to record these findings as accepted risks in the plan.")
+		if slices.ContainsFunc(s.Findings, gatingDesign) {
+			attention(s, e, "design_return", "Return findings to design?", withFindings("Accept to revise and approve the design again; decline to record these findings as accepted risks in the plan.", s.Findings, gatingDesign))
 			return nil
 		}
 		return gate(s, e, "plan")
@@ -317,14 +336,45 @@ func result(s *state.State, e Event) error {
 }
 
 func gate(s *state.State, e Event, stage string) error {
-	for i := range s.Attention {
-		if s.Attention[i].Kind == "gate" && s.Attention[i].StageKey == stage && s.Attention[i].Open() {
-			s.Attention[i].ResolvedAt = e.At
-		}
-	}
+	resolveGate(s, stage, e.At)
 	attention(s, e, "gate", "Approve "+stage, "Approval applies to this artifact revision only.")
+	s.Attention[len(s.Attention)-1].StageKey = stage
 	s.Workflow.Gate = stage
 	return nil
+}
+
+func resolveGate(s *state.State, stage string, at state.Time) {
+	for i := range s.Attention {
+		if s.Attention[i].Kind == "gate" && s.Attention[i].StageKey == stage && s.Attention[i].Open() {
+			s.Attention[i].ResolvedAt = at
+		}
+	}
+}
+
+func designRevisable(s *state.State) bool {
+	awaitingApproval := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool {
+		return a.Kind == "gate" && (a.StageKey == "design" || a.StageKey == "plan")
+	})
+	return slices.Contains(s.PipelineStages, "design") && awaitingApproval
+}
+
+func stranded(s *state.State) bool {
+	implemented := s.Stages["implement"].Rounds > 0
+	idle := s.Workflow.ActiveRun == "" && s.Workflow.Pending == nil && len(s.OpenAttention()) == 0
+	return implemented && idle && !LocalChecks(*s, s.Evidence.Local)
+}
+
+func gatingDesign(f state.Finding) bool {
+	return f.Severity == "design" && Gating(f)
+}
+
+func withFindings(body string, findings []state.Finding, include func(state.Finding) bool) string {
+	for _, f := range findings {
+		if include(f) {
+			body += "\n" + f.ID + ": " + f.Description
+		}
+	}
+	return body
 }
 
 func attention(s *state.State, e Event, kind, title, body string) {
@@ -353,14 +403,9 @@ func correct(s *state.State, e Event, c state.Correction) error {
 	}
 	if s.Loops.Used[c.Loop] >= *allowed {
 		s.Workflow.Correction = &c
-		attention(s, e, "cap", "Allow more correction cycles?", "Open findings remain; refusal keeps the factory waiting.")
+		attention(s, e, "cap", "Allow more correction cycles?", withFindings("Open findings remain; refusal keeps the factory waiting.", s.Findings, Gating))
 		a := &s.Attention[len(s.Attention)-1]
 		a.Loop, a.LimitKey, a.Used, a.Allowed = c.Loop, c.Loop+"_rounds", s.Loops.Used[c.Loop], *allowed
-		for _, f := range s.Findings {
-			if Gating(f) {
-				a.Body += "\n" + f.ID + ": " + f.Description
-			}
-		}
 		return nil
 	}
 	if c.Loop == ReviewLoop && s.Loops.Active != ReviewLoop {
@@ -444,7 +489,7 @@ func answer(s *state.State, e Event) error {
 			return correct(s, e, state.Correction{Loop: DesignLoop, Stage: "design", ReturnTo: "plan"})
 		}
 		for i := range s.Findings {
-			if s.Findings[i].Severity == "design" && Gating(s.Findings[i]) {
+			if gatingDesign(s.Findings[i]) {
 				s.Findings[i].Disposition = "accepted_risk"
 			}
 		}
@@ -466,6 +511,7 @@ func answer(s *state.State, e Event) error {
 				return fmt.Errorf("handoff is not ready: %s", strings.Join(reasons, "; "))
 			}
 			s.Confirmation = &state.Confirmation{ItemID: e.ItemID, Heads: slices.Clone(s.Stack), At: e.At, Receipt: e.Receipt}
+			s.WaitingOn, s.WaitingReason = "", ""
 			st := s.Stages["handoff"]
 			st.Status = "done"
 			s.Stages["handoff"] = st
@@ -484,7 +530,7 @@ func answer(s *state.State, e Event) error {
 		return nil
 	}
 	a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
-	stage := s.Workflow.Gate
+	stage := a.StageKey
 	s.Workflow.Gate = ""
 	switch stage {
 	case "requirements":
