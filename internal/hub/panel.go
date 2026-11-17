@@ -318,7 +318,7 @@ func (m *Model) deliver(action string) {
 
 func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool {
 	switch key {
-	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+x", "ctrl+k", "enter":
+	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+k", "enter":
 	default:
 		return false
 	}
@@ -608,7 +608,7 @@ func confirmTyped(item panel.Item, d *panel.Draft) {
 }
 
 func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
-	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+x" || key == "ctrl+k"
+	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+k"
 	if sends {
 		d.Editing = false
 	}

@@ -10,7 +10,7 @@ Review the cumulative local stack from trunk to top with one read-only `revmux:r
 
 Write review.md with this run's input heads, findings and assessment. Re-review prior findings and affected code after corrections. Do not accept a result merely because checks pass: this is the independent review gate.
 
-A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
 End with:
 

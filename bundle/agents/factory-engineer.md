@@ -45,7 +45,7 @@ Before each commit, reread the layer's diff as its reviewer and delete what it d
 
 When the prompt asks only for the QA brief, you are a fresh agent with no history: write it with `qa-brief-factory` from `plan.md` and the local diff, and put everything you did not exercise under "Unsure about".
 
-A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
 End every turn with:
 

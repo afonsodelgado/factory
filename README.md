@@ -164,7 +164,7 @@ Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` cal
 
 The phone app's `dev` serves `127.0.0.1:4323` and its Playwright tests start their own fake gateway on 4324; both fail rather than move. `make pwa-embed` is never cached, so a Turbo cache hit still refreshes the embedded copy. A Go-only build embeds only `bundle/pwa/unavailable.html`: the node answers the app's routes with a "run make build" page. The app's icons in `apps/pwa/public/icons` are committed; `pnpm --filter @factory/pwa icons` regenerates them from the site's favicon.
 
-Repo config autodetection still chooses Go commands because `go.mod` takes precedence over `package.json`. The workspace does not change the repo config.
+Command detection prefers the root Makefile's build, lint and test targets, then package scripts, then Go defaults, so this repository resolves to its `make` targets. The workspace does not change the repo config.
 
 ### CI
 
@@ -193,13 +193,13 @@ For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push or
 
 The factory works in any git repo. In the hub, press `n`, then `+ add a repo…`. Type a path (`~` expands and `tab` completes directories), then press Enter to set it up and open its settings:
 
-- It writes `.factory/config.yml`, with build, lint and test commands detected from `go.mod` or `package.json`.
+- It writes `.factory/config.yml` with blank build, lint and test commands. A factory detects blank commands when it runs, from the root Makefile, package scripts, `go.mod` or unambiguous CI steps, and asks for the ones it cannot find.
 - It adds `.factory/` and the factory's other paths to `.git/info/exclude`.
 - It remembers the main checkout in the hub's list, even when you enter a worktree path.
 
 A non-git path or a setup failure stays in the dialog so you can correct it and retry. Adding a listed repo with a current config opens settings without repeating setup. A listed repo with no current config is set up first.
 
-Press `ctrl+e` on any repo row to edit build, lint and test commands, QA mode, browser start and health, and CodeRabbit. `ctrl+s` saves; `esc` returns without saving. Both return to `n` with that repo selected. Saving preserves comments, existing key order and every other setting. Cleared commands remain as empty strings; terminal mode leaves start and health in the file. Set CodeRabbit on only if it reviews the repo.
+Press `ctrl+e` on any repo row to edit build, lint and test commands, QA mode, and browser start and health. A blank field shows the detected value and its source. `ctrl+s` saves; `esc` returns without saving. Both return to `n` with that repo selected. Saving preserves comments, existing key order and every other setting. Cleared commands remain as empty strings; terminal mode leaves start and health in the file.
 
 Running `factory` inside a repo still sets it up and opens the hub. In this Here mode, `n` shows that repo and the add row; `↑↓` opens the full list to pick another repo. From outside a repo, the dialog lists them all. With no repos, it starts on the path field.
 
@@ -365,7 +365,7 @@ State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/fa
 
 Add and configure repos from the hub: press `n`, then `+ add a repo…`, or `ctrl+e` on a listed repo. `ctrl+s` saves only the form's keys; `esc` cancels. A malformed file is shown as an error and cannot be overwritten. If the file changes while settings are open, reopen the form before saving.
 
-Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA, design and CodeRabbit settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after` and `codex.writable_dirs`.
+Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA and design settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after` and `codex.writable_dirs`.
 
 ```yaml
 commands: {build: make build, lint: make lint, test: make test}
