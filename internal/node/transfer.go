@@ -222,10 +222,7 @@ func routePath(route string) string {
 
 func (ts *Transfers) movable(ctx context.Context, key string) (host.Movable, error) {
 	var m host.Movable
-	answer, err := ts.call(ctx, "movable", "", host.CheckpointRequest{Key: key}, &m)
-	if err == nil && answer.T != "done" {
-		err = errors.New(answer.Error)
-	}
+	err := ts.host(ctx, "movable", host.CheckpointRequest{Key: key}, &m)
 	return m, err
 }
 
