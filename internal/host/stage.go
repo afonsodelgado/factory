@@ -81,14 +81,15 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if err := m.unverified(it.Factory.Key()); err != nil {
 		return StageReply{}, err
 	}
-	if it.Factory.State == nil || it.Factory.State.Workflow.Pending == nil || r.EffectID == "" {
+	if it.Factory.State == nil || it.Factory.State.Workflow.ActiveRun != r.EffectID || r.EffectID == "" {
 		return StageReply{}, errors.New("commit a workflow stage effect before dispatch")
 	}
 	if len(it.Factory.State.Workflow.Runs) == 0 {
 		return StageReply{}, errors.New("committed effect has no run")
 	}
 	effect := it.Factory.State.Workflow.Pending
-	if effect.ID != r.EffectID || effect.Role != r.Role || effect.Kind != "stage" {
+	active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
+	if active.ID != r.EffectID || active.Role != r.Role || (effect != nil && (effect.ID != r.EffectID || effect.Role != r.Role || effect.Kind != "stage")) {
 		return StageReply{}, errors.New("stage request does not match the committed effect")
 	}
 	lockPath := state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug) + ".lock"
@@ -107,21 +108,25 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if err != nil {
 		return StageReply{}, err
 	}
-	for _, previous := range runs.Runs {
+	for i := len(runs.Runs) - 1; i >= 0; i-- {
+		previous := runs.Runs[i]
 		if previous.ID != r.EffectID {
 			continue
 		}
-		live := false
+		live := m.preparing[it.Factory.Key()] == previous.Token || m.leases[it.Factory.Key()].Token == previous.Token
 		if _, ok := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, previous.Token)); ok {
 			live = true
 		}
 		if previous.Finished() || live {
 			return StageReply{Result: previous.Result}, nil
 		}
-		active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
 		if active.Retries <= previous.Attempt {
 			return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 		}
+		break
+	}
+	if effect == nil {
+		return StageReply{}, errors.New("acknowledged dispatch has no receipt; reconcile before retrying")
 	}
 	if r.Action == "send" {
 		return m.SendStage(it, runs, r)

@@ -58,6 +58,14 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 		t.Fatalf("first %+v, retry %+v: a retried operation must return the first receipt", first, retry)
 	}
 
+	f.State.Workflow.Pending = nil
+	livePanes, _ := e.TM.Panes()
+	n.show(m, Snapshot{At: time.Now(), Panes: livePanes, Items: []Item{{Factory: f, Pane: &supervisorPane}}})
+	op = uuid.NewString()
+	if resumed := send(); resumed.T != "done" || string(resumed.Data) != string(first.Data) {
+		t.Fatalf("acknowledged effect lost its receipt: %+v", resumed)
+	}
+
 	prompt := filepath.Join(f.Dir, "stages", "engineer-1.prompt.md")
 	want := "--model sonnet --effort medium Read " + prompt + " and follow it.\n"
 	if args := waitForFile(t, calls, want); args != want {

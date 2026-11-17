@@ -159,7 +159,7 @@ func (m *Runtime) closeQA(f factory.Factory, run state.StageRun, failure, reason
 		m.Engine.KillStages(f.Repo, f.Slug, run.Role)
 	}
 	m.note(f, "browser QA failed at "+failure+": "+reason)
-	return WriteFile(run.Result, failedResult(failure, reason, evidence))
+	return WriteFile(run.Result, failedResult(f.State, run, failure, reason, evidence))
 }
 
 func (m *Runtime) currentQARun(f factory.Factory, token string) (state.StageRun, bool) {
@@ -227,13 +227,23 @@ func stagesEnded(it Item) bool {
 	return it.Status == factory.Done || it.Status == factory.Gone || it.Factory.Archived()
 }
 
-func failedResult(failure, reason, evidence string) string {
+func failedResult(snapshot *state.State, run state.StageRun, failure, reason, evidence string) string {
+	var heads []state.StackBranch
+	for _, active := range snapshot.Workflow.Runs {
+		if active.ID == run.ID {
+			heads = active.InputHeads
+		}
+	}
 	data, _ := json.Marshal(map[string]any{
-		"status":    "failed",
-		"summary":   "browser QA failed at " + failure + ": " + reason,
-		"outputs":   []string{},
-		"questions": []string{},
-		"data":      map[string]any{"failure": failure, "evidence": evidence},
+		"schema_version": 2,
+		"run_id":         run.ID,
+		"input_heads":    heads,
+		"output_heads":   snapshot.Stack,
+		"status":         "failed",
+		"summary":        "browser QA failed at " + failure + ": " + reason,
+		"outputs":        []string{},
+		"questions":      []string{},
+		"data":           map[string]any{"failure": failure, "evidence": evidence},
 	})
 	return string(data) + "\n"
 }

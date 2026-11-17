@@ -42,7 +42,7 @@ func (m *Runtime) Movable(key string) (Movable, Item, error) {
 		return Movable{}, it, fmt.Errorf("%s runs on %s, not here", f.Label(), f.Where())
 	case f.State == nil || f.Dir == "" || f.Worktree == "":
 		return Movable{}, it, fmt.Errorf("%s has no state.json in a worktree yet, so it has nothing to checkpoint", f.Label())
-	case len(f.State.Stack) > len(f.State.PRs):
+	case unpublished(f.State):
 		return Movable{}, it, errors.New("cannot move unpublished implementation branches; publish through the PR stage first")
 	case f.Archived():
 		return Movable{}, it, fmt.Errorf("%s is archived", f.Label())
@@ -168,4 +168,19 @@ func MarkDelivered(path, key string) {
 		return
 	}
 	state.WriteFileAtomic(path, data)
+}
+
+func unpublished(s *state.State) bool {
+	for _, branch := range s.Stack {
+		found := false
+		for _, pr := range s.PRs {
+			if pr.Branch == branch.Branch && pr.Number > 0 {
+				found = true
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }
