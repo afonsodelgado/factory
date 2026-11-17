@@ -41,8 +41,12 @@ func Handled(id string) string {
 	return id + " handled: settled outside the panel"
 }
 
-func Tested(id string) string {
-	return id + " tested: the developer tested the handoff"
+func MarkDone(id string) string {
+	return id + " done: the developer marked this factory done"
+}
+
+func KeepWorking(id, text string) string {
+	return id + " continue: " + strings.TrimSpace(text)
 }
 
 func Instruction(id, text string) string {
@@ -80,7 +84,9 @@ const MaxMessageRunes = 4000
 func ActionText(item AttentionItem, action string, answers []string, text string) string {
 	switch {
 	case action == ActHandled && item.Kind == "handoff":
-		return Tested(item.ID)
+		return MarkDone(item.ID)
+	case action == ActContinue && item.Kind == "handoff":
+		return KeepWorking(item.ID, text)
 	case action == ActHandled:
 		return Handled(item.ID)
 	case action == ActAnswer && item.AsksQuestions():
@@ -112,7 +118,7 @@ func Fits(item AttentionItem, action string) bool {
 	case ActReply:
 		return item.Kind == "comment"
 	case ActContinue:
-		return item.Kind == "cap"
+		return item.Kind == "cap" || item.Kind == "handoff"
 	case ActRetry:
 		return item.Kind == "failure"
 	case ActSkip:

@@ -1172,7 +1172,7 @@ func (m *Model) panelHints() []footer.Hint {
 	case item.Kind == "failure":
 		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "handoff":
-		return hints("ctrl+k", "tested", "ctrl+n/p", "item", "esc", "back")
+		return hints("ctrl+k", "mark done", "type", "what to do next", "ctrl+s", "continue working", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	}

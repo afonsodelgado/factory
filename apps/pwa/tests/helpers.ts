@@ -115,12 +115,12 @@ export function handoff(key = "k-handoff") {
     id: "handoff-rate-limits",
     key,
     kind: "handoff",
-    title: "ready for you to test",
+    title: "Work done: mark it done or continue working?",
     since: minutesAgo(2),
     send: {
       ready: true,
       reason:
-        "No supervisor runs for rate-limits, so this wakes one to close it.",
+        "No supervisor runs for rate-limits, so this wakes one to answer it.",
     },
   };
 }

@@ -447,19 +447,14 @@ test("a phone adds a node only through its home origin, switches its push key on
   }
 });
 
-test("a done factory's handoff on another node waits in Needs you, and its notification link opens it and sends Tested to that node while home is down", async ({
+test("a finished factory's handoff on another node waits in Needs you, and its notification link opens it and sends what to do next to that node while home is down", async ({
   page,
 }) => {
   const server = fake(page.request);
   const homelab = peer("homelab");
   await server.set({ roster: roster("homelab") });
   await server.node(homelab, {
-    factories: [
-      factory("rate-limits", [handoff()], {
-        status: "done",
-        needs_since: undefined,
-      }),
-    ],
+    factories: [factory("rate-limits", [handoff()], { stage: "handoff" })],
   });
   await page.goto("/");
   const list = page.getByRole("navigation", { name: "Factories" });
@@ -472,13 +467,20 @@ test("a done factory's handoff on another node waits in Needs you, and its notif
   await server.set({ mode: "offline" });
   await page.goto("/n/node-2/k-handoff");
   await expect(
-    page.getByRole("heading", { name: "ready for you to test" }),
+    page.getByRole("heading", {
+      name: "Work done: mark it done or continue working?",
+    }),
   ).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "Tested" }).click();
+  const keepGoing = page.getByRole("button", { name: "Continue working" });
+  await expect(keepGoing).toBeDisabled();
+  await page
+    .getByRole("textbox", { name: "What to do next" })
+    .fill("Also limit the export endpoint.");
+  await keepGoing.click();
   await expect(page.getByText("Delivered.")).toBeVisible();
   const reached = (await server.state()).peers[homelab].actions;
-  expect(reached.map((a) => [a.action, a.item])).toEqual([
-    ["handled", "handoff-rate-limits"],
+  expect(reached.map((a) => [a.action, a.item, a.text])).toEqual([
+    ["continue", "handoff-rate-limits", "Also limit the export endpoint."],
   ]);
 });
 
