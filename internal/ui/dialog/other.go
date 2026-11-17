@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -442,7 +443,7 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 var keyColumns = [][][2]string{
 	{{"Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
 	{{"Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"m", "move to a node"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
-	{{"Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "Activity: all factories"}},
+	{{"Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"ctrl+o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "Activity: all factories"}},
 	{{"Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"N", "nodes and the phone app"}, {"P", "phone app setup"}, {"?", "these keys"}},
 }
 
@@ -456,8 +457,15 @@ var answerKeys = [][2]string{
 	{"ctrl+x", "skip"},
 	{"ctrl+d", "discard"},
 	{"ctrl+k", "already handled elsewhere"},
-	{"ctrl+o", "open link"},
 	{"⏎", "next factory, once nothing is left"},
+}
+
+func keyWidth(column [][2]string) int {
+	width := 3
+	for _, row := range column[1:] {
+		width = max(width, lipgloss.Width(row[0]))
+	}
+	return width
 }
 
 func (k *Keys) View() tea.View {
@@ -468,13 +476,14 @@ func (k *Keys) View() tea.View {
 	for i, column := range columns {
 		x := 1 + i*col
 		rows = max(rows, len(column))
+		keys := keyWidth(column)
 		for y, row := range column {
 			if row[1] == "" {
 				c.Put(x, y, row[0], theme.FgInk(theme.Magenta).B())
 				continue
 			}
-			c.Put(x, y, fmt.Sprintf("%-3s", row[0]), theme.Key)
-			c.PutMax(x+4, y, "➜ "+row[1], theme.Text, col-5)
+			c.Put(x, y, row[0], theme.Key)
+			c.PutMax(x+keys+1, y, "➜ "+row[1], theme.Text, col-keys-2)
 		}
 	}
 	heading := rows + 1

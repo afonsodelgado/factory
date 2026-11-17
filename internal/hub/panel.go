@@ -806,7 +806,7 @@ func (m *Model) listKey(key string) tea.Cmd {
 		if m.panel.tab == panel.PRs {
 			m.report(m.ask("refresh-prs", nil, nil))
 		}
-	case "o":
+	case "ctrl+o":
 		return m.openRow(v)
 	case "enter":
 		if m.panel.tab == panel.Activity && m.panel.row < len(v.Activity) && v.Activity[m.panel.row].Key != "" {

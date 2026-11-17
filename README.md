@@ -312,7 +312,7 @@ Upgrading from a release with pairing: the first `factory node run` moves `phone
 
 ### Reviewing designs and plans
 
-Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `o` opens one in your browser on the node's review page at `https://<machine>.<tailnet>.ts.net/r/…`, the same page the phone app opens. The node never opens a browser itself. There:
+Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `ctrl+o` opens one in your browser on the node's review page at `https://<machine>.<tailnet>.ts.net/r/…`, the same page the phone app opens. The node never opens a browser itself. There:
 
 - `C`, then click anything, leaves a comment on that element: a fix, a change or a question. *Comment on the whole page* in the comments list covers the rest.
 - Comments are saved as you write them. **Send** delivers the ones not sent yet to the agent that owns the page: the designer or the architect, in its own pane.

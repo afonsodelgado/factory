@@ -550,7 +550,7 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		m.share = min(m.share+1.0/6, 5.0/6)
 	case "-":
 		m.share = max(m.share-1.0/6, 1.0/6)
-	case "o":
+	case "ctrl+o":
 		return m.openRow(m.panelView())
 	case "n":
 		return m.openDialog("new", m.newContext())
@@ -1124,9 +1124,9 @@ func (m *Model) selectorHints() []footer.Hint {
 func (m *Model) panelHints() []footer.Hint {
 	switch m.panel.tab {
 	case panel.PRs:
-		return hints("j/k", "move", "o", "open in browser", "r", "refresh now", "tab", "next tab", "esc", "back")
+		return hints("j/k", "move", "ctrl+o", "open in browser", "r", "refresh now", "tab", "next tab", "esc", "back")
 	case panel.Artifacts:
-		return hints("j/k", "move", "o", "open in browser", "tab", "next tab", "esc", "back")
+		return hints("j/k", "move", "ctrl+o", "open in browser", "tab", "next tab", "esc", "back")
 	case panel.Activity:
 		return hints("j/k", "scroll", "t", "all factories", "⏎", "jump to factory", "tab", "next tab", "esc", "back")
 	}

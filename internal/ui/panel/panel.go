@@ -617,7 +617,7 @@ func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		c.Spans(col+8, r, ci)
 		c.Put(col+19, r, checks, theme.Muted)
 	}
-	place(c, x, y+h-1, w, hints("o", "open in browser", "r", "refresh now", "tab", "next tab"))
+	place(c, x, y+h-1, w, hints("ctrl+o", "open in browser", "r", "refresh now", "tab", "next tab"))
 }
 
 func ciLabel(pr PR, ic theme.Icons) line {
@@ -679,7 +679,7 @@ func renderArtifacts(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		}
 		c.Right(x+w-1, r, checked, theme.Muted)
 	}
-	place(c, x, y+h-1, w, hints("o", "open in browser", "tab", "next tab"))
+	place(c, x, y+h-1, w, hints("ctrl+o", "open in browser", "tab", "next tab"))
 }
 
 func checkedLabel(now, at time.Time) string {
