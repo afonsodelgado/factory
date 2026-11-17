@@ -13,8 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -299,9 +301,29 @@ func TestThePinnedChromeDevToolsMCPNavigatesAndScreenshotsAJobsBrowserOverStdio(
 		return result
 	}
 	pages := toolCall("list_pages", nil)
+	type listedPage struct {
+		id  int
+		url string
+	}
+	var openPages []listedPage
 	for _, p := range pages.StructuredContent.Pages {
-		if strings.TrimRight(p.URL, "/") == app.URL && p.ID != nil {
-			pageID = p.ID
+		if p.ID != nil {
+			openPages = append(openPages, listedPage{*p.ID, p.URL})
+		}
+	}
+	if len(openPages) == 0 {
+		pageLine := regexp.MustCompile(`(?m)^(\d+): (\S+)`)
+		for _, c := range pages.Content {
+			for _, match := range pageLine.FindAllStringSubmatch(c.Text, -1) {
+				id, _ := strconv.Atoi(match[1])
+				openPages = append(openPages, listedPage{id, match[2]})
+			}
+		}
+	}
+	for _, p := range openPages {
+		if strings.TrimRight(p.url, "/") == app.URL {
+			id := p.id
+			pageID = &id
 			break
 		}
 	}
