@@ -243,6 +243,12 @@ function ItemHead({ item }: { item: LocalItem }) {
       <h2>{item.title}</h2>
       {item.body ? <p className="sm">{item.body}</p> : null}
       {item.role ? <p className="sm mute">from {item.role}</p> : null}
+      {item.revising ? (
+        <p className="sm mute">
+          The {item.revising} is working on your comments. You are told when the
+          page is ready to review again.
+        </p>
+      ) : null}
       {item.detail?.length ? (
         <ul className="detail">
           {item.detail.map((line) => (

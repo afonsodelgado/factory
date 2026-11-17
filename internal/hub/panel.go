@@ -622,7 +622,7 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 	case "ctrl+k":
 		m.deliver("handled")
 	case "ctrl+o":
-		return m.openCmd(itemURL(item, d)), true
+		return m.openCmd(m.reviewURL(itemURL(item, d))), true
 	case "ctrl+d":
 		m.discardDraft()
 	case "ctrl+u":
@@ -806,7 +806,7 @@ func (m *Model) listKey(key string) tea.Cmd {
 		if m.panel.tab == panel.PRs {
 			m.report(m.ask("refresh-prs", nil, nil))
 		}
-	case "o":
+	case "ctrl+o":
 		return m.openRow(v)
 	case "enter":
 		if m.panel.tab == panel.Activity && m.panel.row < len(v.Activity) && v.Activity[m.panel.row].Key != "" {

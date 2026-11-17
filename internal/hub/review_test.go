@@ -12,6 +12,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/panel"
 )
 
 type reviewFixture struct {
@@ -221,5 +222,23 @@ func TestAReviewRoundDoesNotTellTheSupervisorTheStageIsDone(t *testing.T) {
 
 	if len(messages) != 1 || !strings.HasSuffix(messages[0].Text, "designer-1.result.json") {
 		t.Errorf("inbox %+v; want only the real stage result, never the review round's, which would move the supervisor past its gate", messages)
+	}
+}
+
+func TestCtrlOOnADesignGateOpensTheNodesReviewPage(t *testing.T) {
+	fx := newReviewFixture(t, false, idleHook(time.Now()))
+	fx.f.State.Attention = []state.Attention{{ID: "gate-design", Kind: "gate", Title: "Approve the design"}}
+	fx.m.Config.Node.Hostname = "mac.tail.ts.net"
+	fx.n.show(fx.m, Snapshot{At: time.Now(), Panes: []tmux.Pane{fx.supervisor}, Items: []Item{{Factory: fx.f, Pane: &fx.supervisor}}})
+	var opened []string
+	fx.m.Open = func(url string) { opened = append(opened, url) }
+	fx.m.choose(fx.f.Key())
+	fx.m.panel.tab = panel.Attention
+	if _, cmd := fx.m.Update(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: "ctrl+o"}})); cmd != nil {
+		cmd()
+	}
+	want := "https://mac.tail.ts.net/r/" + state.FileStem(fx.f.Repo, fx.f.Slug) + "/design/variant-a.html"
+	if len(opened) != 1 || opened[0] != want {
+		t.Fatalf("ctrl+o on the gate opened %q; want %s, the review page with comments", opened, want)
 	}
 }

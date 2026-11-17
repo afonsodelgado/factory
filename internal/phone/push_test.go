@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -283,6 +284,44 @@ func TestAHandoffAsksOnceWhetherTheWorkIsDoneEvenAsItsSupervisorExits(t *testing
 	}
 	if calls := v.took(); len(calls) != 1 || len(bodies) != 1 || bodies[0] != workDone {
 		t.Fatalf("the handoff reached the push service %d times saying %q; want once, asking whether the work is done, and never again for its supervisor exiting", len(calls), bodies)
+	}
+}
+
+func TestAGateIsPushedAgainOnceTheDesignerHasWorkedOnTheComments(t *testing.T) {
+	ctx := context.Background()
+	store := Open(t.TempDir())
+	if _, err := store.VAPIDKey(""); err != nil {
+		t.Fatal(err)
+	}
+	v := newVendor(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
+	gate := state.Attention{ID: "gate-csv-design", Kind: "gate", Title: "Approve the design", CreatedAt: state.Time{Time: now}}
+	gated := func(revising map[string]string) []host.LocalFactory {
+		st := &state.State{ID: "csv", Stage: "design", WaitingOn: "user", Attention: []state.Attention{gate}}
+		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})
+		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Pane: &tmux.Pane{ID: "%1", Command: "claude"}, Revising: revising}}})
+		return r.Local().Factories
+	}
+	offline := func(string) bool { return false }
+	store.Reconcile(testNode, nil, offline, now)
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a")); err != nil {
+		t.Fatal(err)
+	}
+	var bodies []string
+	for _, revising := range []map[string]string{nil, {gate.ID: "designer"}, nil} {
+		store.Reconcile(testNode, gated(revising), offline, now)
+		var l ledger
+		store.read(pushFile, &l)
+		for _, j := range l.Jobs {
+			var p Payload
+			json.Unmarshal([]byte(j.Payload), &p)
+			bodies = append(bodies, p.Body)
+		}
+		pusher.Deliver(ctx)
+	}
+	if want := []string{needsYou, workingBody, revisedBody}; !slices.Equal(bodies, want) {
+		t.Fatalf("the gate was pushed saying %q; want %q: cleared while the designer works, then pushed again to review", bodies, want)
 	}
 }
 

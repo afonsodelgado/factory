@@ -300,6 +300,9 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		middle, focus := questionForm(v, it, w)
 		return top, middle, questionFooter(v, w), focus
 	case it.Kind == "gate":
+		if it.Revising != "" {
+			top = append(top, wrapped("The "+it.Revising+" is working on your comments. You are told when the page is ready to review again.", w, theme.Muted)...)
+		}
 		return top, gateForm(v, it, ic, w), withStatus(v, w, field("notes", v.Draft, w)), 1 + v.Draft.Artifact
 	case it.Kind == "comment":
 		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
@@ -617,7 +620,7 @@ func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		c.Spans(col+8, r, ci)
 		c.Put(col+19, r, checks, theme.Muted)
 	}
-	place(c, x, y+h-1, w, hints("o", "open in browser", "r", "refresh now", "tab", "next tab"))
+	place(c, x, y+h-1, w, hints("ctrl+o", "open in browser", "r", "refresh now", "tab", "next tab"))
 }
 
 func ciLabel(pr PR, ic theme.Icons) line {
@@ -679,7 +682,7 @@ func renderArtifacts(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		}
 		c.Right(x+w-1, r, checked, theme.Muted)
 	}
-	place(c, x, y+h-1, w, hints("o", "open in browser", "tab", "next tab"))
+	place(c, x, y+h-1, w, hints("ctrl+o", "open in browser", "tab", "next tab"))
 }
 
 func checkedLabel(now, at time.Time) string {

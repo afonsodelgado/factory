@@ -118,7 +118,9 @@ A pipeline only removes stages. It never removes or changes a gate: the plan is 
 
 ### Agent tools and models
 
-Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Each role runs on a **tool**, `claude` (the default), `codex` or `opencode`, with a model and an effort of that tool. Resolve the **effective agents** for a new factory, field by field, each layer over the one before:
+Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Each role runs on a **tool**, `claude` (the default), `codex` or `opencode`, with a model and an effort of that tool.
+
+When the factory app starts a factory, it has already resolved every role and passes each one as `--agent role=tool/model:effort`. When every role has an `--agent` argument, those arguments are the **effective agents**: write them to `state.agents` exactly as given, and do not read the frontmatter or the configs for them. Resolve the layers yourself only when some role has no `--agent` argument, as when the user types `/factory` by hand. Resolve the **effective agents** then, field by field, each layer over the one before:
 
 1. the `model` and `effort` in the agent's own frontmatter, on `claude`
 2. `agents.<role>.tool`, `agents.<role>.model` and `agents.<role>.effort` in the global config
@@ -195,7 +197,7 @@ Never send a PushNotification. The factory app alerts the developer on every ope
 
 Designs and plans are HTML files in the factory directory. Never publish them as Artifacts. Record each in `state.stages.<stage>.artifacts` as `{"url": "file://<absolute path>", "title": "…"}` and post the paths. Leave `open_threads` and `threads_checked_at` null.
 
-The factory node serves these files on its review pages, which the phone app and the node's tailnet address open. `o` on a file in the panel opens it. The user comments on the page's elements there and presses Send. The app types the batch straight into the pane of the agent that owns the page: the designer for `design/`, the architect for `plan.html` and `schematic.html`. That agent changes the page, which reloads by itself, and answers each thread with `factory review reply`. You do not relay comments and do not track threads; `"${FACTORY_BIN:-factory}" review threads [--open]` lists them with their answers when you need them.
+The factory node serves these files on its review pages, which the phone app and the node's tailnet address open. `ctrl+o` on a file in the panel or on its gate opens it. The user comments on the page's elements there and presses Send. The app types the batch straight into the pane of the agent that owns the page: the designer for `design/`, the architect for `plan.html` and `schematic.html`. That agent changes the page, which reloads by itself, and answers each thread with `factory review reply`. You do not relay comments and do not track threads; `"${FACTORY_BIN:-factory}" review threads [--open]` lists them with their answers when you need them.
 
 The node never opens a browser for the user. `review open`, `review stack` (which starts the app and publishes it on its own tailnet HTTPS port) and `review link <url>` (any other page you want the user to see) print the URL to open, and the user opens it in their phone or their own browser. Never start a browser for the user yourself.
 

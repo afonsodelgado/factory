@@ -63,6 +63,7 @@ type AttentionItem struct {
 	Detail      []string             `json:"detail,omitempty"`
 	Action      string               `json:"-"`
 	Role        string               `json:"role,omitempty"`
+	Revising    string               `json:"revising,omitempty"`
 	Pane        *tmux.Pane           `json:"-"`
 	Prompt      *state.PendingPrompt `json:"-"`
 }
@@ -102,7 +103,9 @@ func AttentionItems(it Item, now time.Time, counter ThreadCounter) []AttentionIt
 	}
 	if f.State != nil {
 		for _, a := range f.State.OpenAttention() {
-			items = append(items, fromAttention(f.State, a, counter))
+			item := fromAttention(f.State, a, counter)
+			item.Revising = it.Revising[a.ID]
+			items = append(items, item)
 		}
 	}
 	items = append(items, permissionItems(it)...)

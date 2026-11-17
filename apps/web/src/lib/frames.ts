@@ -697,7 +697,7 @@ function prs(g: Grid, cx: number, cy: number, cw: number, ch: number) {
     cx,
     cy + ch - 1,
     [
-      ["o", "cyn b"],
+      ["ctrl+o", "cyn b"],
       [" open in browser   ", ""],
       ["⏎", "cyn b"],
       [" show checks   ", ""],
