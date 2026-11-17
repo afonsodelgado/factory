@@ -1,6 +1,7 @@
 package gitclone
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -123,11 +124,14 @@ func Ensure(ctx context.Context, stateDir, gitURL string) (string, error) {
 func Git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	text := strings.TrimSpace(string(out))
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return text, fmt.Errorf("git %s: %w", args[0], ctxErr)
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return text, fmt.Errorf("git %s: %s", args[0], text)
+		return text, fmt.Errorf("git %s: %s", args[0], cmp.Or(strings.TrimSpace(string(exit.Stderr)), text))
 	}
 	return text, err
 }
