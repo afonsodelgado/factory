@@ -311,3 +311,24 @@ func TestInitCarriesARepoConfigFromBeforeTheFactoryDirectory(t *testing.T) {
 		t.Errorf("init removed .claude/factory.yml (%v); factories already running there still read it", err)
 	}
 }
+
+func TestInitProfileDrivesAWebAppInTheBrowser(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := detectProfile(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(state.RepoConfigPath(repo)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state.RepoConfigPath(repo), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := state.ReadProfile(repo)
+	if err != nil || profile.QA.Mode != "browser" || profile.Design.Source != "web" {
+		t.Fatalf("profile for a repo with a dev script reads as %+v, %v; want browser QA and web design", profile, err)
+	}
+}

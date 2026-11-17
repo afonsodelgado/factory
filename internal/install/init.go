@@ -1,6 +1,8 @@
 package install
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -81,7 +83,23 @@ func writeProfile(repo string) (copiedFrom string, written bool, err error) {
 }
 
 func detectProfile(repo string) ([]byte, error) {
-	return fs.ReadFile(bundle.Files, "skills/factory/templates/factory.yml")
+	template, err := fs.ReadFile(bundle.Files, "skills/factory/templates/factory.yml")
+	if err != nil || !servesWeb(repo) {
+		return template, err
+	}
+	template = bytes.Replace(template, []byte("  source: terminal\n"), []byte("  source: web\n"), 1)
+	return bytes.Replace(template, []byte("  mode: terminal\n"), []byte("  mode: browser\n"), 1), nil
+}
+
+func servesWeb(repo string) bool {
+	data, err := os.ReadFile(filepath.Join(repo, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	return json.Unmarshal(data, &pkg) == nil && pkg.Scripts["dev"] != ""
 }
 
 func excludeFactoryFiles(repo, excludeFile string) ([]string, error) {
