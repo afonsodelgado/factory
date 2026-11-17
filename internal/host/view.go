@@ -36,7 +36,7 @@ func (m *Runtime) View() remote.View {
 	home, _ := os.UserHomeDir()
 	view := remote.View{Home: home, Now: m.Now(), Factories: []remote.Factory{}, Opens: m.Opens()}
 	if m.Pages != nil {
-		view.Review = m.Pages.Home()
+		view.Review = remote.ReviewHome{Socket: m.Config.ReviewSocket(), Token: m.Pages.Token()}
 	}
 	names := map[string]string{}
 	for _, it := range m.snap.Items {
@@ -70,10 +70,6 @@ func (m *Runtime) wire(it Item) remote.Factory {
 	}
 	if it.Stage != nil {
 		w.Stage = &remote.Stage{Run: it.Stage.Run, Pane: wirePane(it.Stage.Pane)}
-	}
-	if it.QA != nil {
-		job := it.QA.Public()
-		w.QA = &job
 	}
 	if m.Config.StateDir != "" {
 		logged, _ := state.ReadActivity(state.ActivityPath(m.Config.ActivityDir(), f.Repo, f.Slug))

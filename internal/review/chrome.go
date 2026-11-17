@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,9 +35,9 @@ const (
 
 type Browser struct {
 	server    *Server
+	client    *http.Client
 	profile   string
 	exec      string
-	headless  bool
 	noSandbox bool
 
 	mu     sync.Mutex
@@ -45,25 +46,18 @@ type Browser struct {
 	tabs   []*Tab
 }
 
-type Endpoint struct {
-	Origin string
-	Token  string
-}
-
 type Tab struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	factory  Factory
-	app      bool
-	endpoint Endpoint
+	ctx     context.Context
+	cancel  context.CancelFunc
+	factory Factory
 
 	mu       sync.Mutex
 	console  []string
 	requests map[network.RequestID]string
 }
 
-func (s *Server) NewBrowser(profile, exec string, headless bool) *Browser {
-	b := &Browser{server: s, profile: profile, exec: exec, headless: headless}
+func (s *Server) NewBrowser(socket, profile, exec string) *Browser {
+	b := &Browser{server: s, client: SocketClient(socket), profile: profile, exec: exec}
 	s.mu.Lock()
 	s.browser = b
 	s.mu.Unlock()
@@ -101,9 +95,6 @@ func (b *Browser) start() (context.Context, error) {
 		return nil, err
 	}
 	opts := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.UserDataDir(b.profile), chromedp.Flag("disable-popup-blocking", false))
-	if !b.headless {
-		opts = append(opts, chromedp.VisibleWindow, chromedp.WindowSize(1440, 960))
-	}
 	if b.exec != "" {
 		opts = append(opts, chromedp.ExecPath(b.exec))
 	}
@@ -199,31 +190,20 @@ func (h *Headless) Close() error {
 	return err
 }
 
-func (b *Browser) OpenPage(url string) error {
-	f, ok := b.server.factoryOfPage(url)
-	if !ok {
-		return fmt.Errorf("%s is not a review page", url)
-	}
-	return b.OpenPageAt(b.server.endpoint(), url, f)
-}
-
-func (b *Browser) OpenPageAt(e Endpoint, url string, f Factory) error {
-	_, err := b.open(e, url, f, "", nil)
-	return err
-}
-
 func (b *Browser) OpenApp(url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
-	return b.OpenAppAt(b.server.endpoint(), url, f, page, cookies)
-}
-
-func (b *Browser) OpenAppAt(e Endpoint, url string, f Factory, page string, cookies []Cookie) (*Tab, error) {
 	if !Live(page) {
 		return nil, fmt.Errorf("%q is not a live page; use %s or %s", page, App, Prototype)
 	}
-	return b.open(e, url, f, page, cookies)
+	return b.open(url, f, page, cookies)
 }
 
-func (s *Server) endpoint() Endpoint { return Endpoint{Origin: s.Origin(), Token: s.token} }
+func SocketClient(socket string) *http.Client {
+	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, "unix", socket)
+	}
+	return &http.Client{Transport: &http.Transport{DialContext: dial}, Timeout: callTimeout}
+}
 
 type Cookie struct {
 	Name   string `json:"name"`
@@ -232,14 +212,13 @@ type Cookie struct {
 	Path   string `json:"path,omitempty"`
 }
 
-func (b *Browser) open(e Endpoint, url string, f Factory, livePage string, cookies []Cookie) (*Tab, error) {
-	app := livePage != ""
+func (b *Browser) open(url string, f Factory, livePage string, cookies []Cookie) (*Tab, error) {
 	root, err := b.start()
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := chromedp.NewContext(root, chromedp.WithNewWindow(false))
-	tab := &Tab{ctx: ctx, cancel: cancel, factory: f, app: app, endpoint: e, requests: map[network.RequestID]string{}}
+	tab := &Tab{ctx: ctx, cancel: cancel, factory: f, requests: map[network.RequestID]string{}}
 	if err := chromedp.Listen(ctx, tab.listener(b)); err != nil {
 		cancel()
 		return nil, err
@@ -248,9 +227,7 @@ func (b *Browser) open(e Endpoint, url string, f Factory, livePage string, cooki
 		call(runtime.Enable, cdp.Empty{}),
 		call(network.Enable, network.EnableParams{}),
 		call(runtime.AddBinding, runtime.AddBindingParams{Name: bindingName}),
-	}
-	if app {
-		steps = append(steps, call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: appPrelude(e, f, livePage) + string(b.server.overlay)}))
+		call(page.AddScriptToEvaluateOnNewDocument, page.AddScriptToEvaluateOnNewDocumentParams{Source: appPrelude(b.server.token, f, livePage) + string(b.server.overlay)}),
 	}
 	for _, c := range cookies {
 		steps = append(steps, call(network.SetCookie, network.SetCookieParams{Name: c.Name, Value: c.Value, URL: url, Domain: c.Domain, Path: c.Path}))
@@ -275,9 +252,9 @@ func call[P, R any](cmd cdp.Command[P, R], params P) chromedp.Action[chromedp.Vo
 	})
 }
 
-func appPrelude(e Endpoint, f Factory, page string) string {
+func appPrelude(token string, f Factory, page string) string {
 	config := map[string]string{
-		"api":  "/r/" + e.Token + "/" + f.Key + "/_api",
+		"api":  "/r/" + token + "/" + f.Key + "/_api",
 		"page": f.Key + "/" + page,
 		"file": page,
 	}
@@ -397,29 +374,29 @@ func (b *Browser) handleCall(t *Tab, payload string) {
 }
 
 func (b *Browser) forward(t *Tab, c bindingCall) (int, string) {
-	prefix := "/r/" + t.endpoint.Token + "/"
+	prefix := "/r/" + b.server.token + "/"
 	if !strings.HasPrefix(c.API, prefix) || strings.Contains(c.Path, "..") {
 		return http.StatusForbidden, "not a review API"
 	}
 	if c.Method == http.MethodPost && c.Path == "/send" {
 		b.attachConsole(t, c.API)
 	}
-	status, data := t.call(c.Method, c.API+c.Path, c.Body)
+	status, data := b.call(c.Method, c.API+c.Path, c.Body)
 	if status == http.StatusOK && c.Method == http.MethodPost && c.Path == "/threads" {
 		b.shoot(t, c.API, data)
 	}
 	return status, string(data)
 }
 
-func (t *Tab) call(method, path string, body []byte) (int, []byte) {
-	req, err := http.NewRequest(method, t.endpoint.Origin+path, bytes.NewReader(body))
+func (b *Browser) call(method, path string, body []byte) (int, []byte) {
+	req, err := http.NewRequest(method, "http://"+SocketHost+path, bytes.NewReader(body))
 	if err != nil {
 		return http.StatusBadRequest, []byte(err.Error())
 	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := b.client.Do(req)
 	if err != nil {
 		return http.StatusBadGateway, []byte(err.Error())
 	}
@@ -434,7 +411,7 @@ func (b *Browser) attachConsole(t *Tab, api string) {
 		return
 	}
 	body, _ := json.Marshal(map[string][]string{"lines": lines})
-	t.call(http.MethodPost, api+"/console", body)
+	b.call(http.MethodPost, api+"/console", body)
 }
 
 func (b *Browser) shoot(t *Tab, api string, created []byte) {
@@ -447,7 +424,7 @@ func (b *Browser) shoot(t *Tab, api string, created []byte) {
 		return
 	}
 	body, _ := json.Marshal(map[string][]byte{"png": png})
-	t.call(http.MethodPost, api+"/threads/"+url.PathEscape(thread.ID)+"/shot", body)
+	b.call(http.MethodPost, api+"/threads/"+url.PathEscape(thread.ID)+"/shot", body)
 }
 
 func (b *Browser) capture(t *Tab, a Anchor) ([]byte, error) {
@@ -493,7 +470,7 @@ func (b *Browser) push(e event) {
 	tabs := append([]*Tab(nil), b.tabs...)
 	b.mu.Unlock()
 	for _, t := range tabs {
-		if t.app && t.factory.Key == e.data && t.ctx.Err() == nil {
+		if t.factory.Key == e.data && t.ctx.Err() == nil {
 			go b.evaluate(t, fmt.Sprintf("window.__factoryReviewEvent && window.__factoryReviewEvent(%s, %s)", jsString(e.name), jsString(e.data)))
 		}
 	}

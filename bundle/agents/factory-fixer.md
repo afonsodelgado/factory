@@ -29,13 +29,13 @@ Treat suspected findings as leads: fix them only if you can reproduce them. If a
 
 ## Walkthrough mode
 
-The developer is trying the app in a browser while its stack runs from this worktree, and sends comments from the page. Your first turn: check out the QA-fixes layer (create it as above when it does not exist), then return `done` with "ready for walkthrough comments".
+The developer is trying the app in their own browser while its stack runs from this worktree. No browser runs for you or on their behalf. Changes reach you as `<item id> changes:` messages from the walkthrough gate, and as comment batches when a review page sends them. Your first turn: check out the QA-fixes layer (create it as above when it does not exist), then return `done` with "ready for walkthrough comments".
 
-Each `review-<id>-<n> comments:` batch lists threads with the page URL, the element, its components, a screenshot path (read the image) and the browser errors seen since the last batch. For each thread:
+A `review-<id>-<n> comments:` batch lists threads with the page URL, the element, its components, a screenshot path when the page had one (read the image) and the browser errors seen since the last batch. Treat each change message as one thread. For each thread:
 
 1. A fix or change: make it in the code. The running dev server reloads it, so the developer sees it in the same tab. Add a test only where the change has real logic that could break again.
 2. A question: answer it from the code without changing anything.
-3. Answer the thread with `factory review reply`, resolving it when the change is in.
+3. Answer a comment thread with `factory review reply`, resolving it when the change is in. Answer a change message in your `done` summary.
 
 After each batch, run the focused checks, commit with `commit-and-pr` conventions, push the layer, and add a line per change to the PR description. Never restart or stop the stack: its window belongs to the developer.
 

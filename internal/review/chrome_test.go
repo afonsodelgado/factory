@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +16,7 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func TestChromeCommentsThroughATunnelOnARunningAppWithAScreenshotAndItsErrors(t *testing.T) {
+func TestHeadlessChromeCommentsOnARunningAppThroughTheReviewSocketWithAScreenshotAndItsErrors(t *testing.T) {
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "script-src 'self' 'unsafe-inline'")
 		fmt.Fprint(w, `<!doctype html><html><body><h1>Contacts</h1><button id="export" style="width:120px;height:40px">Export</button><script>console.error("export failed to load")</script></body></html>`)
@@ -28,11 +27,7 @@ func TestChromeCommentsThroughATunnelOnARunningAppWithAScreenshotAndItsErrors(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Listen(0, "tok", overlay)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s, socket := serveSocket(t, "tok", overlay)
 	f := Factory{Key: "k", Label: "csv", Dir: t.TempDir()}
 	s.SetFactories([]Factory{f})
 	var mu sync.Mutex
@@ -47,12 +42,10 @@ func TestChromeCommentsThroughATunnelOnARunningAppWithAScreenshotAndItsErrors(t 
 		return map[string]string{}, nil
 	})
 
-	chrome := s.NewBrowser(t.TempDir(), "", true)
+	chrome := s.NewBrowser(socket, t.TempDir(), "")
 	chrome.noSandbox = goruntime.GOOS == "linux"
 	t.Cleanup(chrome.Close)
-	tunnel := forwardTo(t, s.ln.Addr().String())
-	s.Allow(tunnel)
-	tab, err := chrome.OpenAppAt(Endpoint{Origin: "http://127.0.0.1:" + strconv.Itoa(tunnel), Token: "tok"}, app.URL, f, App, nil)
+	tab, err := chrome.OpenApp(app.URL, f, App, nil)
 	if err != nil {
 		if os.Getenv("CI") == "" {
 			t.Skip("no Chrome here: ", err)

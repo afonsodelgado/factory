@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { factory, fake, gate, question } from "./helpers.ts";
+import { controlled, factory, fake, gate, question } from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
   await fake(request).reset();
 });
 
-test("a paired phone answers, approves, messages, then goes read-only and unpaired", async ({
+test("the owner answers, approves and messages, goes read-only offline, then another Tailscale account sees only the refusal", async ({
   page,
   context,
 }) => {
@@ -20,17 +20,7 @@ test("a paired phone answers, approves, messages, then goes read-only and unpair
     factory("search-typos", []),
   ]);
 
-  const code = await server.code();
-  await page.goto(`/#pair=${code}`);
-  await page.getByLabel("Device name").fill("Pixel");
-  await page.getByRole("button", { name: "Pair this phone" }).click();
-  await expect(page.getByText("Paired as Pixel")).toBeVisible();
   await page.goto("/");
-  expect(
-    (
-      await page.request.post("/api/pair/exchange", { data: { code } })
-    ).status(),
-  ).toBe(410);
 
   const rows = page
     .getByRole("navigation", { name: "Factories" })
@@ -80,11 +70,18 @@ test("a paired phone answers, approves, messages, then goes read-only and unpair
   await expect(rows.filter({ hasText: "csv-export" })).toBeVisible();
   await context.setOffline(false);
 
-  await server.revoke();
+  await controlled(page);
+  await context.setExtraHTTPHeaders({
+    "Tailscale-User-Login": "sam@example.com",
+  });
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "This phone is not paired" }),
+    page.getByRole("heading", { name: /answers afonso@example\.com only/ }),
   ).toBeVisible();
+  await expect(
+    page.getByText(/sam@example\.com.*shown or kept here/),
+  ).toBeVisible();
+  await expect(page.getByText("csv-export")).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(async () =>
@@ -99,7 +96,6 @@ test("the shell has no sideways scroll at phone and desktop widths", async ({
   page,
 }) => {
   const server = fake(page.request);
-  await server.pair();
   await server.factories([factory("csv-export", [question()])]);
   for (const width of [320, 390, 900, 1280]) {
     await page.setViewportSize({ width, height: 800 });

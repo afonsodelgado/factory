@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -15,6 +16,7 @@ import (
 
 type reviewFixture struct {
 	m          *Model
+	n          *testNode
 	typist     *fakeTypist
 	f          factory.Factory
 	store      *review.Store
@@ -34,7 +36,7 @@ func newReviewFixture(t *testing.T, designerRan bool, supervisorHook *state.Hook
 	st := &state.State{ID: "csv", Stages: map[string]state.Stage{"design": {Artifacts: []state.Artifact{{URL: "file://" + page}}}}}
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: st}
 
-	srv, err := review.Listen(0, "tok", nil)
+	srv, err := review.New("tok", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +65,15 @@ func newReviewFixture(t *testing.T, designerRan bool, supervisorHook *state.Hook
 		hooks = append(hooks, withToken(idleHook(at), "t-des"))
 	}
 	typist := &fakeTypist{}
-	m := NewModel(Model{Config: &state.Config{StateDir: stateDir}, Typist: typist, Review: srv})
-	m.snap = Snapshot{At: time.Now(), Panes: panes, Hooks: hooks, Items: []Item{{Factory: f, Pane: &supervisor, Hook: hooks[0]}}}
-	return reviewFixture{m: m, typist: typist, f: f, store: store, supervisor: supervisor, designer: designer}
+	m, n := withNode(Model{Config: &state.Config{StateDir: stateDir}}, host.Runtime{Typist: typist, Pages: srv})
+	n.show(m, Snapshot{At: time.Now(), Panes: panes, Hooks: hooks, Items: []Item{{Factory: f, Pane: &supervisor, Hook: hooks[0]}}})
+	return reviewFixture{m: m, n: n, typist: typist, f: f, store: store, supervisor: supervisor, designer: designer}
+}
+
+func (fx reviewFixture) review(r ReviewRequest) (ReviewReply, error) {
+	fx.n.mu.Lock()
+	defer fx.n.mu.Unlock()
+	return fx.n.r.Review(r)
 }
 
 func idleHook(at time.Time) *state.HookFile {
@@ -81,12 +89,21 @@ func withToken(h *state.HookFile, token string) *state.HookFile {
 	return h
 }
 
+func TestThePanelCountsAPagesOpenThreadsFromTheNode(t *testing.T) {
+	fx := newReviewFixture(t, false, idleHook(time.Now()))
+	fx.m.choose(fx.f.Key())
+	artifacts := fx.m.panelView().Artifacts
+	if len(artifacts) != 1 || artifacts[0].OpenThreads == nil || *artifacts[0].OpenThreads != 1 {
+		t.Fatalf("the panel lists %+v; want the variant with its one open thread, counted by the node's review server", artifacts)
+	}
+}
+
 func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 	at := time.Now().Add(-time.Minute)
 
 	t.Run("the designer's pane gets the batch, not the supervisor", func(t *testing.T) {
 		fx := newReviewFixture(t, true, idleHook(at))
-		reply, err := fx.m.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})
+		reply, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +127,7 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 	t.Run("a prototype on the app's dev server is the designer's, not the walkthrough fixer's", func(t *testing.T) {
 		fx := newReviewFixture(t, true, idleHook(at))
 		fx.store.Create(review.NewThread{Page: review.Prototype, Intent: "change", Text: "Use the compact table.", Anchor: review.Anchor{URL: "http://localhost:3001/prototypes/csv/variant-a.html", Selector: "table"}})
-		reply, err := fx.m.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: review.Prototype})
+		reply, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: review.Prototype})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,15 +138,17 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 
 	t.Run("without a designer pane the busy supervisor gets the batch once it is idle", func(t *testing.T) {
 		fx := newReviewFixture(t, false, busyHook(at))
-		reply, err := fx.m.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})
+		reply, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if reply.Target != "supervisor" || len(fx.typist.typed) != 0 {
 			t.Fatalf("target %q, typed %q; want it held for the busy supervisor", reply.Target, fx.typist.typed)
 		}
-		fx.m.snap.Hooks[0] = withToken(idleHook(time.Now()), "t-sup")
-		fx.m.flushTypeQueue()
+		snap := fx.m.snap
+		snap.Hooks = []*state.HookFile{withToken(idleHook(time.Now()), "t-sup")}
+		snap.Items[0].Hook = snap.Hooks[0]
+		fx.n.show(fx.m, snap)
 		want := "%1: review-csv-1 comments: " + review.BatchPath(fx.f.Dir, 1)
 		if len(fx.typist.typed) != 1 || fx.typist.typed[0] != want {
 			t.Errorf("typed %q; want %q", fx.typist.typed, want)
@@ -143,10 +162,11 @@ func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T)
 	fx.f.State.Attention = []state.Attention{{ID: "gate-csv-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-time.Hour)}}}
 	clock := now
 	fx.m.Now = func() time.Time { return clock }
-	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design-earlier"}); err == nil {
+	fx.n.r.Now = fx.m.Now
+	if _, err := fx.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design-earlier"}); err == nil {
 		t.Fatal("a page that loaded before the gate was replaced approved the new gate")
 	}
-	if _, err := fx.m.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design"}); err != nil {
+	if _, err := fx.review(ReviewRequest{Action: "approve", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html", Gate: "gate-csv-design"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,7 +176,7 @@ func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T)
 		snap.At = clock
 		snap.Hooks = []*state.HookFile{withToken(hook, "t-sup")}
 		snap.Items = []Item{{Factory: fx.f, Pane: &fx.supervisor, Hook: snap.Hooks[0]}}
-		fx.m.apply(snap)
+		fx.n.show(fx.m, snap)
 	}
 	later(30*time.Second, idleHook(now.Add(29*time.Second)))
 	received := idleHook(now.Add(29 * time.Second))
@@ -173,7 +193,7 @@ func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T)
 func TestAnAgentAnswersAndResolvesAThreadFromItsPane(t *testing.T) {
 	fx := newReviewFixture(t, true, idleHook(time.Now()))
 	thread := fx.store.Threads("")[0]
-	reply, err := fx.m.review(ReviewRequest{Action: "reply", Token: "t-des", Cwd: fx.f.Worktree, Thread: thread.ID, Text: "Export is now the primary button.", Resolve: true})
+	reply, err := fx.review(ReviewRequest{Action: "reply", Token: "t-des", Cwd: fx.f.Worktree, Thread: thread.ID, Text: "Export is now the primary button.", Resolve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,14 +210,14 @@ func TestAReviewRoundDoesNotTellTheSupervisorTheStageIsDone(t *testing.T) {
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, f.Repo, f.Slug))
 	for i, isReview := range []bool{false, true} {
 		result := filepath.Join(dir, "stages", "designer-"+string(rune('1'+i))+".result.json")
-		writeFile(result, "{}")
+		host.WriteFile(result, "{}")
 		runs.Runs = append(runs.Runs, state.StageRun{Role: "designer", Round: i + 1, Result: result, Review: isReview})
 	}
 	if err := runs.Save(); err != nil {
 		t.Fatal(err)
 	}
 
-	messages := inboxMessages(stateDir, Item{Factory: f}, nil)
+	messages := host.InboxMessages(stateDir, Item{Factory: f}, nil)
 
 	if len(messages) != 1 || !strings.HasSuffix(messages[0].Text, "designer-1.result.json") {
 		t.Errorf("inbox %+v; want only the real stage result, never the review round's, which would move the supervisor past its gate", messages)
@@ -209,23 +229,26 @@ func TestTheWalkthroughStackRunsInItsOwnWindowAndStopsWithTheFactory(t *testing.
 	worktree := t.TempDir()
 	dir := filepath.Join(worktree, ".claude", "factory", "csv")
 	script := filepath.Join(dir, "review", "stack.sh")
-	writeFile(script, "exec sleep 600\n")
-	writeFile(StackPath(dir), `{"url": "http://127.0.0.1:1/", "script": "`+script+`"}`)
+	host.WriteFile(script, "exec sleep 600\n")
+	host.WriteFile(host.StackPath(dir), `{"url": "http://127.0.0.1:1/", "script": "`+script+`"}`)
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: &state.State{ID: "csv"}}
-	m := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Engine: e, Layout: l, Typist: e})
-	m.snap = Snapshot{At: time.Now(), Items: []Item{{Factory: f}}}
-	reply := make(chan Message, 1)
+	panes := &host.Panes{TM: e.TM, Session: e.Session}
+	pages, err := review.New("tok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	m, n := withNode(Model{Config: &state.Config{StateDir: t.TempDir()}, Engine: e, Layout: l}, host.Runtime{Engine: panes, Typist: panes, TM: e.TM, Pages: pages})
+	n.show(m, Snapshot{At: time.Now(), Items: []Item{{Factory: f}}})
 
-	m.startStack(Event{Reply: reply}, ReviewRequest{Action: "stack", Cwd: worktree})
-
-	if got := <-reply; got.T != "done" {
-		t.Fatalf("stack request: %+v", got)
+	if err := m.ask("review", ReviewRequest{Action: "stack", Cwd: worktree}, nil); err != nil && !strings.Contains(err.Error(), "laptop") {
+		t.Fatalf("stack request: %v", err)
 	}
 	stackPanes := func() int {
 		panes, _ := e.TM.Panes()
 		n := 0
 		for _, p := range panes {
-			if p.StageOf == "csv" && p.Stage == stackRole {
+			if p.StageOf == "csv" && p.Stage == host.StackRole {
 				n++
 			}
 		}
@@ -234,9 +257,10 @@ func TestTheWalkthroughStackRunsInItsOwnWindowAndStopsWithTheFactory(t *testing.
 	if stackPanes() != 1 {
 		t.Fatalf("%d stack panes after the request; want one window running the stack", stackPanes())
 	}
-	m.snap.Items[0].Status = factory.Done
-	m.snap.Panes, _ = e.TM.Panes()
-	m.closeFinishedStages()
+	done := m.snap
+	done.Items[0].Status = factory.Done
+	done.Panes, _ = e.TM.Panes()
+	n.show(m, done)
 	if stackPanes() != 0 {
 		t.Error("the stack still runs after the factory is done, leaving dev servers behind")
 	}

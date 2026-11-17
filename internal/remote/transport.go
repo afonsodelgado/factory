@@ -136,13 +136,13 @@ func (t Transport) Args(tty bool, command []string) []string {
 	return append(t.connection(args), command...)
 }
 
-func (t Transport) tunnelArgs(local, port int) []string {
+func (t Transport) tunnelArgs(local int, destination string) []string {
 	return t.connection([]string{
 		"-o", "ControlMaster=no",
 		"-o", "ControlPath=none",
 		"-o", "ExitOnForwardFailure=yes",
 		"-N",
-		"-L", fmt.Sprintf("127.0.0.1:%d:localhost:%d", local, port),
+		"-L", fmt.Sprintf("127.0.0.1:%d:%s", local, destination),
 	})
 }
 

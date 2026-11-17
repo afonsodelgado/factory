@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
@@ -68,8 +69,8 @@ func TestWorktreeRemovalRefusesUnsafeWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
-	model := NewModel(Model{Config: cfg, Loader: loader})
-	model.SetSnapshot(loader.Load())
+	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: loader})
+	node.show(model, loader.Load())
 	key := state.Key(repo, "eng-1-x")
 	if err := model.archive(dialog.ArchiveResult{Key: key, Remove: true}); err != nil {
 		t.Fatalf("a clean, pushed worktree was not removed: %v", err)

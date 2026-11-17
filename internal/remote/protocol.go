@@ -16,11 +16,16 @@ import (
 )
 
 type View struct {
-	Home      string    `json:"home"`
-	Now       time.Time `json:"now,omitzero"`
-	Review    string    `json:"review,omitempty"`
-	Factories []Factory `json:"factories"`
-	Opens     []Open    `json:"opens,omitempty"`
+	Home      string     `json:"home"`
+	Now       time.Time  `json:"now,omitzero"`
+	Review    ReviewHome `json:"review_socket,omitzero"`
+	Factories []Factory  `json:"factories"`
+	Opens     []Open     `json:"opens,omitempty"`
+}
+
+type ReviewHome struct {
+	Socket string `json:"socket"`
+	Token  string `json:"token"`
 }
 
 type Open struct {
@@ -86,7 +91,6 @@ type Factory struct {
 	Hook        *state.HookFile       `json:"hook,omitempty"`
 	Pane        *Pane                 `json:"pane,omitempty"`
 	Stage       *Stage                `json:"stage,omitempty"`
-	QA          *QAJob                `json:"qa,omitempty"`
 	Activity    []state.ActivityEntry `json:"activity,omitempty"`
 }
 

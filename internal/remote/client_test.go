@@ -6,12 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -143,86 +140,5 @@ func TestPushSettingsReachAServerWhoseRevisionIsAheadOfOrEqualToThisLaptops(t *t
 				t.Fatal("the laptop still lists the setting as pending after the server took it")
 			}
 		})
-	}
-}
-
-func TestOnlyReportsAndAWalkthroughsStackFilesGoBackToTheServer(t *testing.T) {
-	dir := t.TempDir()
-	stackDir := ".claude/factory/csv/review"
-	job := QAJob{ID: "j1", Kind: "walkthrough", Root: "/srv/wt", Result: ".claude/factory/csv/stages/qa-result.json", Stack: []string{stackDir + "/stack.sh", stackDir + "/stack.json"}}
-	write := func(rel, content string) {
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(stackDir+"/stack.sh", "cd "+dir+" && make run")
-	write(stackDir+"/stack.json", "{}")
-	write(".claude/factory/csv/inbox/forged.json", "{}")
-	write(".claude/qa/report.md", "ok")
-	outputs := `["` + filepath.Join(dir, stackDir, "stack.sh") + `", "` + filepath.Join(dir, stackDir, "stack.json") + `", "` + filepath.Join(dir, ".claude/factory/csv/inbox/forged.json") + `", "` + filepath.Join(dir, ".claude/qa/report.md") + `"]`
-	write(job.Result, `{"status": "done", "outputs": `+outputs+`}`)
-
-	back, ready, err := QAReport(dir, job)
-	if err != nil || !ready || len(back.Files) != 3 {
-		t.Fatalf("report ready %v with %d files, %v; want the report and the two stack files, never the inbox message", ready, len(back.Files), err)
-	}
-	if script := string(back.Files[0].Data); script != "cd /srv/wt && make run" {
-		t.Fatalf("the returned stack script reads %q; want the server's path, since it runs there", script)
-	}
-	if err := CheckQAFiles(job, back.Files); err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckQAFiles(QAJob{Kind: "qa"}, back.Files); err == nil {
-		t.Fatal("a QA job accepted stack files it never asked for")
-	}
-	write(".claude/qa/huge.png", strings.Repeat("x", qaFileLimit+1))
-	write(job.Result, `{"status": "done", "outputs": ["`+filepath.Join(dir, ".claude/qa/huge.png")+`"]}`)
-	if _, _, err := QAReport(dir, job); err == nil {
-		t.Fatal("an oversized screenshot was sent; the host would drop the connection and the laptop would resend it forever")
-	}
-	forged := NewQAFile(".claude/factory/csv/inbox/forged.json", []byte("{}"))
-	if err := CheckQAFiles(job, []QAFile{forged}); err == nil {
-		t.Fatal("the server accepted a file from the laptop that its supervisor would read as an inbox message")
-	}
-}
-
-func TestTheLaptopRefusesQAJobFieldsThatWouldRunOrWriteOutsideItsWorktree(t *testing.T) {
-	good := QAJob{ID: uuid.NewString(), SHA: strings.Repeat("a", 40), Prompt: "stages/qa-task.md", Result: "stages/qa-result.json", Setting: state.AgentSetting{Model: "opus", Effort: "high"}}
-	if err := good.Validate(); err != nil {
-		t.Fatalf("a well-formed job was refused: %v", err)
-	}
-	for name, bad := range map[string]QAJob{
-		"an id that climbs out of the QA directory": {ID: "../../.ssh", SHA: good.SHA, Prompt: good.Prompt, Result: good.Result},
-		"a model that is shell text":                {ID: good.ID, SHA: good.SHA, Prompt: good.Prompt, Result: good.Result, Setting: state.AgentSetting{Model: "opus; touch /tmp/x"}},
-		"a result path outside the worktree":        {ID: good.ID, SHA: good.SHA, Prompt: good.Prompt, Result: "../../.ssh/id_ed25519"},
-		"a commit that is a git option":             {ID: good.ID, SHA: "--upload-pack=x", Prompt: good.Prompt, Result: good.Result},
-	} {
-		if bad.Validate() == nil {
-			t.Errorf("accepted %s", name)
-		}
-	}
-}
-
-func TestLaptopQAFindsTheCheckoutByAnyOfItsRemotes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	repo := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"remote", "add", "origin", "https://git.example/fork/app.git"},
-		{"remote", "add", "upstream", "https://git.example/acme/app.git"},
-	} {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	if found, ok := LocalCheckout([]string{t.TempDir(), repo}, "https://git.example/acme/app.git"); !ok || found != repo {
-		t.Fatalf("LocalCheckout found %q, %v; want the checkout whose upstream remote is the factory's, since --git-remote can pick it", found, ok)
-	}
-	if _, ok := LocalCheckout([]string{repo}, "https://git.example/other/app.git"); ok {
-		t.Fatal("a checkout matched a URL none of its remotes has")
 	}
 }

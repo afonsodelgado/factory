@@ -1,15 +1,15 @@
 import type {
   ActionBody,
-  Device,
   LocalFactory,
   Link,
   Me,
   PushState,
   Receipt,
+  Refusal,
 } from "./types.ts";
 
 export type Reach =
-  "online" | "offline" | "serve-down" | "restarting" | "unpaired";
+  "online" | "offline" | "node-down" | "restarting" | "refused";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -21,15 +21,23 @@ export class HttpError extends Error {
   }
 }
 
+export function refusalOf(error: unknown): Refusal | undefined {
+  if (!(error instanceof HttpError)) return undefined;
+  if (error.status === 401) return {};
+  const body = error.body as Refusal | undefined;
+  if (error.status === 403 && typeof body?.owner === "string")
+    return { owner: body.owner, login: body.login };
+  return undefined;
+}
+
 export function reachOf(error: unknown): Reach {
+  if (refusalOf(error)) return "refused";
   if (!(error instanceof HttpError)) return "offline";
   switch (error.status) {
     case 0:
       return "offline";
-    case 401:
-      return "unpaired";
     case 502:
-      return "serve-down";
+      return "node-down";
     case 503:
       return "restarting";
   }
@@ -74,10 +82,6 @@ const factoryPath = (factory: LocalFactory, what: string) =>
 
 export const api = {
   me: () => call<Me>("GET", "/api/me"),
-  pairStatus: (code: string) =>
-    call<{ expires_at: string }>("POST", "/api/pair/status", { code }),
-  pair: (code: string, name: string) =>
-    call<{ device: Device }>("POST", "/api/pair/exchange", { code, name }),
   preview: (factory: LocalFactory, body: ActionBody) =>
     call<{ text: string }>("POST", factoryPath(factory, "preview"), {
       ...body,
@@ -87,9 +91,18 @@ export const api = {
     call<Receipt>("GET", `/api/operations/${operation}`),
   link: (key: string) =>
     call<Link>("GET", `/api/links/${encodeURIComponent(key)}`),
-  subscribe: (subscription: PushSubscriptionJSON) =>
-    call<PushState>("POST", "/api/push/subscription", subscription),
-  unsubscribe: () => call<PushState>("DELETE", "/api/push/subscription", {}),
+  push: (installation: string) =>
+    call<PushState>(
+      "GET",
+      `/api/push/subscription?installation=${encodeURIComponent(installation)}`,
+    ),
+  subscribe: (subscription: PushSubscriptionJSON, installation: string) =>
+    call<PushState>("POST", "/api/push/subscription", {
+      ...subscription,
+      installation,
+    }),
+  unsubscribe: (endpoint: string) =>
+    call<PushState>("DELETE", "/api/push/subscription", { endpoint }),
 };
 
 export async function act(

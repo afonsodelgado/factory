@@ -1,10 +1,15 @@
 package hub
 
 import (
+	"cmp"
+	"context"
+	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -16,6 +21,52 @@ type fakeTypist struct {
 func (f *fakeTypist) Type(pane, text string) error {
 	f.typed = append(f.typed, pane+": "+text)
 	return nil
+}
+
+type testNode struct {
+	mu sync.Mutex
+	r  *host.Runtime
+}
+
+func (n *testNode) Call(_ context.Context, m host.Message) (host.Message, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.r.Handle(m), nil
+}
+
+func (n *testNode) present(s Snapshot) presentationMsg {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.r.SetSnapshot(localOnly(s))
+	n.r.SettleReceipts(n.r.Snapshot().Items, func(string) time.Time { return s.At })
+	n.r.QueueInbox()
+	n.r.FlushTypeQueue()
+	n.r.CloseFinishedStages()
+	return overTheSocket(n.r.Presentation())
+}
+
+func overTheSocket(p host.Presentation) presentationMsg {
+	data, _ := json.Marshal(p)
+	var copied host.Presentation
+	json.Unmarshal(data, &copied)
+	return presentationMsg(copied)
+}
+
+func (n *testNode) show(m *Model, s Snapshot) {
+	m.applyPresentation(host.Presentation(n.present(s)))
+}
+
+func withNode(m Model, r host.Runtime) (*Model, *testNode) {
+	r.Config = cmp.Or(r.Config, m.Config)
+	if r.Now == nil {
+		r.Now = m.Now
+	}
+	n := &testNode{r: host.New(r)}
+	if r.Config != nil && r.Config.StateDir != "" {
+		n.r.Recover()
+	}
+	m.Node = n
+	return NewModel(m), n
 }
 
 func TestDeliveryGate(t *testing.T) {

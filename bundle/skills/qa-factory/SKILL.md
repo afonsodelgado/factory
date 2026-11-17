@@ -29,15 +29,15 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 
 - **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
 - **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing.
-- **Phase 2:** the environment must run this worktree's code. In browser mode, check which process serves the repo config's ports and from which directory (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If it is another checkout, leave it running and start this worktree's stack on free ports, as the notes describe. In terminal mode, build the binary from this worktree into a temporary directory.
+- **Phase 2:** the environment must run this worktree's code. In browser mode, the factory node already did it before starting you: it ran `qa.start` in this worktree, waited for `qa.health`, ran `qa.seed` and `qa.sign_in`, and opened the app signed in in a headless Chrome on a temporary profile that only this stage uses. Do not start another stack or another browser. Check with `curl` that `qa.health` answers, then check that this worktree serves the web port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If another checkout holds the port, the node's stack could not bind it and the browser shows the wrong build: return `failed` naming the port and the other checkout, and test nothing. In terminal mode, build the binary from this worktree into a temporary directory.
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
 
 ## Stack mode
 
-Applies when the prompt says **stack mode** (the factory's walkthrough, or a design stage with prototypes). Do not test. Bring up this worktree's stack for the developer and hand it over:
+Applies when the prompt says **stack mode** (the factory's walkthrough, or a design stage with prototypes). Do not test, and ignore factory mode's Phase 2: the stack you write here is a second one for the developer, not the one the node started for you. Bring it up and hand it over:
 
-1. Follow Phase 2's browser mode and the notes to find free ports, run migrations and seed a test principal, exactly as for testing. Never reuse a stack another checkout runs.
+1. Follow the notes to find free ports (not `qa.web_port`, which the node's stack holds), run migrations and seed a test principal. Never reuse a stack another checkout runs.
 2. Write `<factory dir>/review/stack.sh`: a POSIX shell script that starts the whole stack in the foreground from the worktree, with every environment variable and port it needs, and stops all of it when its window closes or on Ctrl-C (`trap 'kill 0' HUP INT TERM EXIT`). Run it in the background, check that `qa.health` and the web port answer, then stop it. The factory app runs it again in a window of its own, where the developer can see its logs.
 3. Sign the test principal in the way the notes say, and record what the browser needs to be signed in: for a session cookie, its name and value.
 4. Write `<factory dir>/review/stack.json`:
@@ -84,7 +84,7 @@ Wait for the user to confirm or adjust the charter. Don't start testing before t
 1. **Check the stack.** `curl -s <qa.health>` should answer healthy, and `curl -sI localhost:<qa.web_port>` should answer. Make sure the listener is this repo: another repo's dev server may hold the port. If nothing runs, start it with `qa.start` in the background from the repo root. If curl to localhost fails inside the sandbox, retry it outside the sandbox.
 2. **Migrations, flags, principals and seed data:** follow the notes. A 500 on a new column usually means a migration was skipped.
 3. **HTTP.** Use curl for role, tenant and validation matrices: it is faster and leaves cleaner evidence.
-4. **Browser.** Load the Chrome tools in one ToolSearch call: `tabs_context_mcp`, `navigate`, `computer`, `read_page`, `tabs_create_mcp`, `tabs_close_mcp`, `javascript_tool`, `read_network_requests` and `read_console_messages`. Open a new tab on the web port. Use the browser for flows, rendering and stale-UI checks.
+4. **Browser.** Drive the headless Chrome through the `chrome-devtools` MCP server's tools (`mcp__chrome-devtools__*`): `list_pages`, `navigate_page`, `take_snapshot`, `click`, `fill`, `press_key`, `wait_for`, `take_screenshot`, `evaluate_script`, `list_console_messages` and `list_network_requests`. Use it for flows, rendering and stale-UI checks, and save screenshots under `.claude/qa/` as evidence. In factory mode the node attached these tools to a browser already signed in on the web port. Outside a factory, add the server yourself as `npx -y chrome-devtools-mcp@1.13.0 --headless --isolated --no-usage-statistics --no-performance-crux`. Never open a visible browser, never use a real Chrome profile, and never wait for someone to type into the browser: a captcha, an interactive 2FA prompt or a sign-in the repo recipe cannot complete stops the run as a blocker finding that names the step.
 
 ### Terminal mode
 

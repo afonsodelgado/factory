@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -29,6 +30,29 @@ type Machine struct {
 	DefaultRemote string            `yaml:"default_remote,omitempty"`
 	Push          Push              `yaml:"push,omitempty"`
 	Phone         Phone             `yaml:"phone,omitempty"`
+	Node          Node              `yaml:"node,omitempty"`
+}
+
+type Node struct {
+	Owner    string `yaml:"owner,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Hostname string `yaml:"hostname,omitempty"`
+}
+
+func (m Machine) NodePort() int {
+	if m.Node.Port != 0 {
+		return m.Node.Port
+	}
+	return m.Phone.ListenPort()
+}
+
+func (m Machine) NodeHostname() string { return cmp.Or(m.Node.Hostname, m.Phone.Hostname) }
+
+func (m Machine) NodeOrigin() string {
+	if m.NodeHostname() == "" {
+		return ""
+	}
+	return "https://" + m.NodeHostname()
 }
 
 type Phone struct {
@@ -44,8 +68,6 @@ func (p Phone) ListenPort() int {
 	}
 	return p.Port
 }
-
-func (p Phone) Origin() string { return "https://" + p.Hostname }
 
 type Remote struct {
 	Host     string `yaml:"host"`
@@ -92,7 +114,7 @@ func LoadMachine(configDir string) (Machine, error) {
 }
 
 func (m Machine) Equal(other Machine) bool {
-	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone
+	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone && m.Node == other.Node
 }
 
 func (m Machine) Validate() error {
@@ -112,6 +134,12 @@ func (m Machine) Validate() error {
 	if m.Push.Topic != "" && !pushTopic.MatchString(m.Push.Topic) {
 		return errors.New("push.topic may hold only letters, digits, - and _; run factory remote push to generate one")
 	}
+	if m.Node.Port < 0 || m.Node.Port > 65535 {
+		return fmt.Errorf("node.port %d must be between 1 and 65535", m.Node.Port)
+	}
+	if m.Node.Hostname != "" && !tailnetDNS.MatchString(m.Node.Hostname) {
+		return fmt.Errorf("node.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", m.Node.Hostname)
+	}
 	return m.Phone.validate()
 }
 
@@ -121,8 +149,6 @@ func (p Phone) validate() error {
 		return fmt.Errorf("phone.port %d must be between 1 and 65535", p.Port)
 	case p.Hostname != "" && !tailnetDNS.MatchString(p.Hostname):
 		return fmt.Errorf("phone.hostname %q must be this machine's full Tailscale name, such as devbox.tail1234.ts.net", p.Hostname)
-	case p.Enabled && p.Hostname == "":
-		return errors.New("phone.enabled needs phone.hostname, this machine's full Tailscale name; run factory phone configure --hostname")
 	}
 	return nil
 }
@@ -201,6 +227,7 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 		{"default_remote", m.DefaultRemote, m.DefaultRemote == ""},
 		{"push", m.Push, m.Push == Push{}},
 		{"phone", m.Phone, m.Phone == Phone{}},
+		{"node", m.Node, m.Node == Node{}},
 	}
 	for _, key := range keys {
 		if err := setKey(file, key.name, key.value, key.zero); err != nil {

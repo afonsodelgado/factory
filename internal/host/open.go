@@ -30,6 +30,7 @@ type RepoRequest struct {
 type DeleteRequest struct {
 	Repo string `json:"repo"`
 	Slug string `json:"slug"`
+	Work string `json:"work,omitempty"`
 }
 
 func (m *Runtime) Open(r OpenRequest) (string, error) {

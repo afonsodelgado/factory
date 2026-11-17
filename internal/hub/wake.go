@@ -23,6 +23,6 @@ const (
 func SessionFor(f factory.Factory, token string, hooks []*state.HookFile) (string, SessionSource) {
 	return host.SessionFor(f, token, hooks)
 }
-func PlanWake(it Item, chrome bool, hooks []*state.HookFile, writableDirs []string) Wake {
-	return host.PlanWake(it, chrome, hooks, writableDirs)
+func PlanWake(it Item, hooks []*state.HookFile, writableDirs []string) Wake {
+	return host.PlanWake(it, hooks, writableDirs)
 }

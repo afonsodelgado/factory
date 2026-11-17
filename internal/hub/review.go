@@ -2,11 +2,10 @@ package hub
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -19,118 +18,6 @@ import (
 
 type ReviewRequest = host.ReviewRequest
 type ReviewReply = host.ReviewReply
-
-func ReviewActions(events chan<- Event) func(review.Action) (any, error) {
-	return host.ReviewActions(events)
-}
-
-func (m *Model) reviewRequest(e Event) tea.Cmd {
-	var r ReviewRequest
-	var reply ReviewReply
-	err := json.Unmarshal(e.Data, &r)
-	if err == nil && r.Action == "open" {
-		return m.openApp(e, r)
-	}
-	if err == nil && r.Action == "stack" {
-		return m.startStack(e, r)
-	}
-	if err == nil && r.Action == "link" && m.Open != nil {
-		e.Respond(Message{T: "done", Data: json.RawMessage("{}")})
-		open, url := m.Open, r.URL
-		return func() tea.Msg {
-			open(url)
-			return nil
-		}
-	}
-	if err == nil {
-		reply, err = m.review(r)
-	}
-	if err != nil {
-		e.Respond(Message{T: "error", Error: err.Error()})
-		return nil
-	}
-	data, _ := json.Marshal(reply)
-	e.Respond(Message{T: "done", Data: data})
-	return m.load()
-}
-
-func (m *Model) review(r ReviewRequest) (ReviewReply, error) { return m.execution().Review(r) }
-
-func (m *Model) openApp(e Event, r ReviewRequest) tea.Cmd {
-	fail := func(err error) tea.Cmd {
-		e.Respond(Message{T: "error", Error: err.Error()})
-		return nil
-	}
-	if m.Chrome == nil || m.Review == nil {
-		return fail(errors.New("the factory's Chrome is off; set review.browser to chrome"))
-	}
-	it, ok := m.reviewItem(r)
-	if !ok {
-		return fail(errors.New("no factory owns this session; pass --factory <id>"))
-	}
-	chrome, f, url := m.Chrome, reviewFactory(it), r.URL
-	return func() tea.Msg {
-		if _, err := chrome.OpenApp(url, f, livePage(r.Page), nil); err != nil {
-			e.Respond(Message{T: "error", Error: err.Error()})
-			return nil
-		}
-		data, _ := json.Marshal(ReviewReply{Target: f.Label})
-		e.Respond(Message{T: "done", Data: data})
-		return nil
-	}
-}
-
-func (m *Model) reviewItem(r ReviewRequest) (Item, bool) { return m.execution().ReviewItem(r) }
-
-func reviewKey(f factory.Factory) string { return host.ReviewKey(f) }
-
-func reviewFactory(it Item) review.Factory { return host.ReviewFactory(it) }
-
-func livePage(page string) string {
-	if page == review.Prototype {
-		return review.Prototype
-	}
-	return review.App
-}
-
-func (m *Model) syncReview() { m.execution().SyncReview() }
-
-func (m *Model) reviewURL(url string) string {
-	if m.Review == nil {
-		return url
-	}
-	if page, ok := m.Review.PageURL(url); ok {
-		return page
-	}
-	return url
-}
-
-func (m *Model) threadCounter(f factory.Factory) threadCounter {
-	if m.Review == nil || f.Remote != nil {
-		return nil
-	}
-	return m.Review.OpenCount
-}
-
-func (m *Model) openLive(url string) tea.Cmd {
-	if m.Chrome == nil {
-		return nil
-	}
-	for _, it := range localOnly(m.snap).Items {
-		page, ok := liveStageOf(it.Factory, url)
-		if !ok {
-			continue
-		}
-		chrome, f, fallback := m.Chrome, reviewFactory(it), m.Open
-		return func() tea.Msg {
-			if _, err := chrome.OpenApp(url, f, page, nil); err != nil {
-				fallback(url)
-			}
-			return nil
-		}
-	}
-	return nil
-}
 
 func liveStageOf(f factory.Factory, url string) (string, bool) {
 	if f.State == nil || !strings.HasPrefix(url, "http") {
@@ -153,16 +40,18 @@ func livePageOf(stage string) string {
 	return review.App
 }
 
-const openReceipts = 100
+const (
+	openReceipts   = 100
+	stackReadyWait = 3 * time.Minute
+)
 
 func (m *Model) servedBy(f factory.Factory) string {
 	l := m.linkOf(f)
-	port, ok := remote.LoopbackPort(l.view.Review)
-	if !ok {
+	if l.view.Review.Socket == "" {
 		return ""
 	}
-	served := f.Remote.Name + ":" + strconv.Itoa(port)
-	if local, ok := remote.LocalPort(m.Config.StateDir, f.Remote.Name, l.server, port); ok {
+	served := f.Remote.Name
+	if local, ok := remote.LocalPort(m.Config.StateDir, f.Remote.Name, remote.Tunnel{Server: l.server, Socket: l.view.Review.Socket}); ok {
 		return served + ", through the tunnel at 127.0.0.1:" + strconv.Itoa(local)
 	}
 	return served + ", through a tunnel that ctrl+o opens"
@@ -229,9 +118,9 @@ func (m *Model) openRemote(name string, o remote.Open) tea.Cmd {
 		m.notice = problem(name + " is unreachable, so " + o.URL + " cannot open through a tunnel now.")
 		return nil
 	}
-	cfg, tunnels, chrome, open, home := m.Config, m.Tunnels, m.Chrome, m.Open, l.view.Review
+	cfg, tunnels, open, home := m.Config, m.Tunnels, m.Open, l.view.Review
 	return func() tea.Msg {
-		if err := openThrough(cfg, tunnels, chrome, open, name, home, o); err != nil {
+		if err := openThrough(cfg, tunnels, open, name, home, o); err != nil {
 			return noticeMsg(problem("Could not open " + o.URL + " from " + name + ": " + err.Error() + ". It stays queued and opens when the hub starts again."))
 		}
 		if o.ID != "" {
@@ -246,7 +135,7 @@ func (m *Model) openRemote(name string, o remote.Open) tea.Cmd {
 	}
 }
 
-func openThrough(cfg *state.Config, tunnels *remote.Tunnels, chrome *review.Browser, open func(string), name, home string, o remote.Open) error {
+func openThrough(cfg *state.Config, tunnels *remote.Tunnels, open func(string), name string, home remote.ReviewHome, o remote.Open) error {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 	defer cancel()
 	client, err := remote.For(cfg, name)
@@ -266,24 +155,6 @@ func openThrough(cfg *state.Config, tunnels *remote.Tunnels, chrome *review.Brow
 			return err
 		}
 	}
-	served := strings.HasPrefix(o.URL, "file://") || strings.HasPrefix(o.URL, strings.TrimSuffix(home, "/"))
-	if chrome == nil || home == "" || !(review.Live(o.Page) || served) {
-		open(url)
-		return nil
-	}
-	api, err := client.Resolve(ctx, tunnels, home, home)
-	if err != nil {
-		open(url)
-		return nil
-	}
-	endpoint, f := remote.EndpointOf(api), review.Factory{Key: o.Key, Label: o.Factory + " on " + name}
-	if review.Live(o.Page) {
-		_, err = chrome.OpenAppAt(endpoint, url, f, o.Page, o.Cookies)
-	} else {
-		err = chrome.OpenPageAt(endpoint, url, f)
-	}
-	if err != nil {
-		open(url)
-	}
+	open(url)
 	return nil
 }

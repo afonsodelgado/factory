@@ -45,42 +45,65 @@ const remove = (key: string) => run("readwrite", (store) => store.delete(key));
 const keys = () =>
   run<IDBValidKey[]>("readonly", (store) => store.getAllKeys());
 
-const scope = (device: string, incarnation: string) =>
-  `${device}:${incarnation}`;
+const scope = (account: string, incarnation: string) =>
+  `${account}:${incarnation}`;
+
+export const accountOf = (node: string, owner: string) => `${node}/${owner}`;
 
 export const cache = {
-  device: () => read<string>("device"),
-  setDevice: (device: string) => write("device", device),
+  installation: async () => {
+    const known = await read<string>("installation");
+    if (known) return known;
+    const fresh = crypto.randomUUID();
+    await write("installation", fresh);
+    return fresh;
+  },
+  account: () => read<string>("account"),
+  setAccount: (account: string) => write("account", account),
 
-  snapshot: (device: string) => read<SavedSnapshot>(`snapshot:${device}`),
-  saveSnapshot: (device: string, snapshot: Snapshot) =>
-    write(`snapshot:${device}`, {
+  adoptLegacy: async (account: string) => {
+    const device = await read<string>("device");
+    if (!device) return;
+    for (const key of await keys()) {
+      const name = String(key);
+      const [kind, owner, ...rest] = name.split(":");
+      if (owner !== device) continue;
+      if (kind !== "snapshot")
+        await write([kind, account, ...rest].join(":"), await read(name));
+      await remove(name);
+    }
+    await remove("device");
+  },
+
+  snapshot: (account: string) => read<SavedSnapshot>(`snapshot:${account}`),
+  saveSnapshot: (account: string, snapshot: Snapshot) =>
+    write(`snapshot:${account}`, {
       savedAt: new Date().toISOString(),
       snapshot,
     } satisfies SavedSnapshot),
 
-  draft: (device: string, incarnation: string, item: string) =>
-    read<Draft>(`draft:${scope(device, incarnation)}:${item}`),
+  draft: (account: string, incarnation: string, item: string) =>
+    read<Draft>(`draft:${scope(account, incarnation)}:${item}`),
   saveDraft: (
-    device: string,
+    account: string,
     incarnation: string,
     item: string,
     draft: Draft,
-  ) => write(`draft:${scope(device, incarnation)}:${item}`, draft),
-  dropDraft: (device: string, incarnation: string, item: string) =>
-    remove(`draft:${scope(device, incarnation)}:${item}`),
+  ) => write(`draft:${scope(account, incarnation)}:${item}`, draft),
+  dropDraft: (account: string, incarnation: string, item: string) =>
+    remove(`draft:${scope(account, incarnation)}:${item}`),
 
-  messages: async (device: string, incarnation: string) =>
-    (await read<MessageResult[]>(`messages:${scope(device, incarnation)}`)) ??
+  messages: async (account: string, incarnation: string) =>
+    (await read<MessageResult[]>(`messages:${scope(account, incarnation)}`)) ??
     [],
   addMessage: async (
-    device: string,
+    account: string,
     incarnation: string,
     result: MessageResult,
   ) => {
-    const recent = await cache.messages(device, incarnation);
+    const recent = await cache.messages(account, incarnation);
     await write(
-      `messages:${scope(device, incarnation)}`,
+      `messages:${scope(account, incarnation)}`,
       [
         result,
         ...recent.filter(
@@ -90,18 +113,18 @@ export const cache = {
     );
   },
 
-  pending: async (device: string) =>
-    (await read<Pending[]>(`pending:${device}`)) ?? [],
-  addPending: async (device: string, pending: Pending) =>
-    write(`pending:${device}`, [...(await cache.pending(device)), pending]),
-  settlePending: async (device: string, operation: string) =>
+  pending: async (account: string) =>
+    (await read<Pending[]>(`pending:${account}`)) ?? [],
+  addPending: async (account: string, pending: Pending) =>
+    write(`pending:${account}`, [...(await cache.pending(account)), pending]),
+  settlePending: async (account: string, operation: string) =>
     write(
-      `pending:${device}`,
-      (await cache.pending(device)).filter((p) => p.operation !== operation),
+      `pending:${account}`,
+      (await cache.pending(account)).filter((p) => p.operation !== operation),
     ),
 
-  pruneDrafts: async (device: string, openKeys: Set<string>) => {
-    const prefix = `draft:${device}:`;
+  pruneDrafts: async (account: string, openKeys: Set<string>) => {
+    const prefix = `draft:${account}:`;
     for (const key of await keys()) {
       const name = String(key);
       const item = name.slice(name.lastIndexOf(":") + 1);

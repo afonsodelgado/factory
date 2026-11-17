@@ -44,7 +44,7 @@ const (
 	closedFirst = "The item closed before it was sent, so nothing was sent."
 )
 
-var ErrNoOperation = errors.New("no operation with that id from this device")
+var ErrNoOperation = errors.New("no operation with that id")
 
 type Receipt struct {
 	Operation string    `json:"operation,omitempty"`
@@ -72,7 +72,6 @@ type ActionRequest struct {
 }
 
 type ReceiptRequest struct {
-	Device    string `json:"device"`
 	Operation string `json:"operation"`
 }
 
@@ -203,9 +202,6 @@ func (m *Runtime) stillQueued(a Answer) bool {
 
 func (m *Runtime) dropAnswer(a Answer, reason string) {
 	m.settle(a.Key(), StatusRefused, "Not sent. "+reason)
-	if m.Refused != nil {
-		m.Refused(a, reason)
-	}
 }
 
 func (m *Runtime) unwanted(a Answer) string {
@@ -238,6 +234,9 @@ func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []S
 	open := openSince(items)
 	var settled []Settlement
 	for _, key := range slices.Sorted(maps.Keys(m.receipts.Claims)) {
+		if Remote(m.receipts.Claims[key].Factory) {
+			continue
+		}
 		if s, done := m.settleClaim(m.receipts.Claims[key], open, items, clock); done {
 			settled = append(settled, s)
 		}
@@ -529,7 +528,7 @@ func (m *Runtime) LookupReceipt(r ReceiptRequest) (Receipt, error) {
 	}
 	op, ok := readOperation(m.Config.StateDir, r.Operation)
 	var request ActionRequest
-	if !ok || op.Action != "act" || json.Unmarshal(op.Data, &request) != nil || request.Device != r.Device {
+	if !ok || op.Action != "act" || json.Unmarshal(op.Data, &request) != nil {
 		return Receipt{}, ErrNoOperation
 	}
 	switch {
@@ -546,7 +545,7 @@ func (m *Runtime) LookupReceipt(r ReceiptRequest) (Receipt, error) {
 }
 
 func (m *Runtime) answerFor(r ReceiptRequest) (Answer, bool) {
-	matches := func(a Answer) bool { return a.Operation == r.Operation && a.Device == r.Device }
+	matches := func(a Answer) bool { return a.Operation == r.Operation }
 	for _, a := range m.receipts.Claims {
 		if matches(a) {
 			return a, true

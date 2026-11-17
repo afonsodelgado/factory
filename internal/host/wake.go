@@ -55,13 +55,11 @@ const (
 	WakeResume
 )
 
-func PlanWake(it Item, chrome bool, hooks []*state.HookFile, writableDirs []string) Wake {
+func PlanWake(it Item, hooks []*state.HookFile, writableDirs []string) Wake {
 	id, source := SessionFor(it.Factory, TokenOf(it.Pane), hooks)
 	supervisor := it.Factory.Supervisor()
 	launch := factory.Launch{Repo: it.Factory.Repo, Slug: it.Factory.Slug, SessionID: id, Supervisor: supervisor}
-	if supervisor.OnClaude() {
-		launch.Chrome = chrome
-	} else {
+	if !supervisor.OnClaude() {
 		launch.AddDirs = writableDirs
 	}
 	w := Wake{Launch: launch, Source: source, Command: launch.ResumeCommand()}

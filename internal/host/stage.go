@@ -155,6 +155,12 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
 	}
+	profile, browses := m.browsesForQA(it, r.Role)
+	if browses {
+		if err := m.checkBrowser(profile, it.Factory.Worktree); err != nil {
+			return StageReply{}, err
+		}
+	}
 	run := m.NewRun(it, runs, r.Role, setting, uuid.NewString())
 	prompt, err := StagePrompt(r.Role, r.Text, run.Result, m.Rules(), setting.OnClaude())
 	if err != nil {
@@ -163,11 +169,12 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	if err := WriteFile(run.Prompt, prompt); err != nil {
 		return StageReply{}, err
 	}
-	if m.heldForLaptop(it, r.Role) {
-		return m.HoldQA(it, runs, run, prompt)
-	}
 	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, r.Role); err != nil {
 		return StageReply{}, err
+	}
+	if browses {
+		m.prepareBrowser(it, run, profile)
+		return m.Record(it, runs, run, "started")
 	}
 	launch := m.StageLaunch(it, run, "")
 	if err := m.OpenStagePane(it, run, launch.Command()); err != nil {
@@ -180,6 +187,9 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 	latest, ok := runs.Latest(r.Role)
 	if !ok {
 		return StageReply{}, fmt.Errorf("no %s stage has run in %s; start one with factory stage start", r.Role, it.Factory.Label())
+	}
+	if _, browses := m.browsesForQA(it, r.Role); browses && m.leases[it.Factory.Key()].Token != latest.Token {
+		return StageReply{}, errBrowserGone
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
@@ -211,11 +221,15 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 }
 
 func (m *Runtime) WritableDirs(repo, checkout string, setting state.AgentSetting) []string {
+	return WritableDirsFor(m.Config, repo, checkout, setting)
+}
+
+func WritableDirsFor(config *state.Config, repo, checkout string, setting state.AgentSetting) []string {
 	if setting.ToolName() != state.ToolCodex {
 		return nil
 	}
-	cfg, _ := m.repoConfig(repo)
-	return factory.CodexWritableDirs(cmp.Or(checkout, repo), cfg.Codex.WritableDirs)
+	profile, _ := state.ReadProfile(repo)
+	return factory.CodexWritableDirs(cmp.Or(checkout, repo), config.WithProfile(profile).Codex.WritableDirs)
 }
 
 func (m *Runtime) CloseFinishedStages() {
@@ -223,8 +237,7 @@ func (m *Runtime) CloseFinishedStages() {
 		return
 	}
 	for _, it := range m.snap.Items {
-		finished := it.Status == factory.Done || it.Status == factory.Gone || it.Factory.Archived()
-		if finished && HasStagePanes(m.snap.Panes, it.Factory) {
+		if stagesEnded(it) && HasStagePanes(m.snap.Panes, it.Factory) {
 			m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "")
 		}
 	}
@@ -265,9 +278,9 @@ func (m *Runtime) Record(it Item, runs *state.StageRuns, run state.StageRun, ver
 
 func (m *Runtime) StageLaunch(it Item, run state.StageRun, sessionID string) factory.StageLaunch {
 	launch := factory.StageLaunch{Setting: run.Setting, Kickoff: KickoffFor(run), SessionID: sessionID}
-	cfg, profile := m.repoConfig(it.Factory.Repo)
+	cfg, _ := m.repoConfig(it.Factory.Repo)
 	if run.Role == "qa" {
-		launch.Chrome = m.chrome(it.Factory.Repo, profile)
+		launch.MCPConfig = m.leases[it.Factory.Key()].MCPConfig
 	}
 	if run.Setting.ToolName() == state.ToolCodex {
 		launch.AddDirs = factory.CodexWritableDirs(it.Factory.Worktree, cfg.Codex.WritableDirs)

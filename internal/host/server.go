@@ -8,11 +8,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-
-	"github.com/afonsodelgado/factory/internal/remote"
 )
 
-const MaxMessage = remote.QATotalLimit/3*4 + 1<<20
+const MaxMessage = 16 << 20
 
 type Message struct {
 	T     string          `json:"t"`

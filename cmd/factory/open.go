@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,13 +21,11 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
-	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/google/uuid"
 )
-
-const hubTakeover = 30 * time.Second
 
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
@@ -169,6 +168,14 @@ func takesValue(flags *flag.FlagSet, arg string) bool {
 }
 
 func openMain(r hub.OpenRequest) error {
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		return err
+	}
+	runtime, err := localNode(cfg)
+	if err != nil {
+		return err
+	}
 	name, named := r.Name, r.Repo != ""
 	target := "."
 	if named {
@@ -181,8 +188,7 @@ func openMain(r hub.OpenRequest) error {
 		}
 		fmt.Fprintf(os.Stderr, "factory: could not set up %s: %v\n", install.HomeRelative(setUp), err)
 	}
-	cfg, err := state.LoadConfig()
-	if err != nil {
+	if cfg, err = state.LoadConfig(); err != nil {
 		return err
 	}
 	here, listed := "", false
@@ -196,32 +202,37 @@ func openMain(r hub.OpenRequest) error {
 	if !named {
 		repo = repoOf(cfg, name, here)
 	}
+	ctx := context.Background()
+	if err := runtime.Request(ctx, "repo", "", hub.RepoRequest{Repo: here}, nil); err != nil {
+		return err
+	}
+	show := hub.ShowRequest{Notice: notice}
+	if !named {
+		show.Here = here
+	}
+	if name != "" {
+		open := hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}
+		if err := runtime.Request(ctx, "open", uuid.NewString(), open, &show.Select); err != nil {
+			return err
+		}
+	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	bin, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
-		return err
-	}
-	calls := []hubCall{{"repo", hub.RepoRequest{Repo: here, Here: !named, Notice: notice}}}
-	if name != "" {
-		calls = append(calls, hubCall{"open", hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}})
-	}
 	if !hubOpen(cfg) && sharesServer(tm) {
-		return hubMain(startupEvents(calls), false)
+		return hubMain(startupEvents(show), false)
 	}
 	if err := ensureHub(cfg, tm, bin); err != nil {
 		return err
 	}
-	for _, c := range calls {
-		reply, err := request(cfg.SocketPath(), c.kind, c.payload)
-		if err != nil {
-			return err
-		}
-		if reply.T == "error" {
-			return errors.New(reply.Error)
-		}
+	reply, err := request(cfg.SocketPath(), "show", show)
+	if err != nil {
+		return err
+	}
+	if reply.T == "error" {
+		return errors.New(reply.Error)
 	}
 	if notice != "" {
 		fmt.Println(notice)
@@ -229,20 +240,12 @@ func openMain(r hub.OpenRequest) error {
 	return attach(cfg, tm)
 }
 
-type hubCall struct {
-	kind    string
-	payload any
-}
-
-func startupEvents(calls []hubCall) []hub.Event {
-	var events []hub.Event
-	for _, c := range calls {
-		data, err := json.Marshal(c.payload)
-		if err == nil {
-			events = append(events, hub.Event{Message: hub.Message{T: c.kind, Pane: "cli", Data: data}})
-		}
+func startupEvents(show hub.ShowRequest) []hub.Event {
+	data, err := json.Marshal(show)
+	if err != nil {
+		return nil
 	}
-	return events
+	return []hub.Event{{Message: hub.Message{T: "show", Pane: "cli", Data: data}}}
 }
 
 func sharesServer(tm tmux.Client) bool {
@@ -301,9 +304,7 @@ func cwdRepo(cfg *state.Config) string {
 	return ""
 }
 
-func hubRunning(cfg *state.Config) bool { return fileLocked(cfg.LockPath()) }
-
-func hubOpen(cfg *state.Config) bool { return hubRunning(cfg) && !phone.FallbackOwns(cfg) }
+func hubOpen(cfg *state.Config) bool { return fileLocked(cfg.HubViewLock()) }
 
 func fileLocked(path string) bool {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
@@ -322,18 +323,7 @@ func ensureHub(cfg *state.Config, tm tmux.Client, bin string) error {
 	if hubOpen(cfg) {
 		return nil
 	}
-	fallback := phone.FallbackOwns(cfg)
-	if err := startHub(cfg, tm, bin); err != nil || !fallback {
-		return err
-	}
-	deadline := time.Now().Add(hubTakeover)
-	for !hubOpen(cfg) {
-		if time.Now().After(deadline) {
-			return errors.New("the hub did not take over from factory serve; read the hub window in tmux session " + cfg.Hub.Session)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil
+	return startHub(cfg, tm, bin)
 }
 
 func startHub(cfg *state.Config, tm tmux.Client, bin string) error {

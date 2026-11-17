@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -228,52 +227,4 @@ func (t Time) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 	return json.Marshal(t.Time.UTC().Format(time.RFC3339))
-}
-
-func ResolveAttention(path, id, waitingOn string, now time.Time) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return err
-	}
-	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(doc["attention"], &items); err != nil {
-		return fmt.Errorf("%s has no attention list: %w", path, err)
-	}
-	stamp, _ := json.Marshal(now.UTC().Format(time.RFC3339))
-	found := false
-	for _, item := range items {
-		var itemID string
-		json.Unmarshal(item["id"], &itemID)
-		if itemID != id {
-			continue
-		}
-		found = true
-		if string(item["resolved_at"]) == "" || string(item["resolved_at"]) == "null" {
-			item["resolved_at"] = stamp
-		}
-	}
-	if !found {
-		return fmt.Errorf("no attention item %q in %s", id, path)
-	}
-	doc["attention"], _ = json.Marshal(items)
-	doc["updated_at"] = stamp
-	switch waitingOn {
-	case "":
-	case "none":
-		doc["waiting_on"], doc["waiting_reason"] = json.RawMessage("null"), json.RawMessage("null")
-	default:
-		doc["waiting_on"], _ = json.Marshal(waitingOn)
-	}
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(doc); err != nil {
-		return err
-	}
-	return WriteFileAtomic(path, out.Bytes())
 }

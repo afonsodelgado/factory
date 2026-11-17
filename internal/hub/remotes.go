@@ -241,8 +241,6 @@ func (m *Model) remoteArrived(msg remoteMsg) tea.Cmd {
 	}
 	m.refresh()
 	m.heard(msg.name, msg.server, msg.events)
-	m.checkouts = nil
-	m.tendQA(msg.name)
 	if back {
 		return tea.Batch(m.restoreTunnels(msg.name), m.settleOpens(msg.name))
 	}
@@ -287,11 +285,21 @@ func (m *Model) noteLink(name, text string) {
 	}
 }
 
-func (m *Model) clockOf(key string) time.Time {
-	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
-		return m.snap.At.Add(m.linkOf(it.Factory).offset)
+func (m *Model) settleRemoteClaims() {
+	open := map[string]bool{}
+	for _, it := range m.remoteItems() {
+		for _, item := range attentionItems(it, m.snap.At, nil) {
+			open[draftKey(it.Factory, item.ID)] = true
+		}
 	}
-	return m.snap.At
+	for key, mark := range m.claims {
+		if !host.Remote(mark.Factory) || open[key] {
+			continue
+		}
+		delete(m.panel.drafts, key)
+		os.Remove(mark.Draft)
+		m.dropClaim(key)
+	}
 }
 
 func (m *Model) remoteItems() []Item {
@@ -338,7 +346,6 @@ func remoteItem(name string, l *link, w remote.Factory) Item {
 	if w.Stage != nil {
 		it.Stage = &host.StageView{Run: w.Stage.Run}
 	}
-	it.QA = w.QA
 	return it
 }
 
@@ -434,7 +441,8 @@ func (m *Model) deliverRemote(it Item, mark sentMark, text string) {
 		m.panel.refused[key] = "Not sent. " + f.Remote.Name + " is unreachable."
 		return
 	}
-	m.execution().PutClaim(mark)
+	m.putClaim(mark)
+	m.report(m.ask("put-claim", mark, nil))
 	payload := map[string]any{"id": f.Label(), "incarnation": f.Remote.Incarnation, "ItemID": mark.ItemID, "ItemSince": mark.ItemSince, "Text": text, "LeavesOpen": mark.LeavesOpen}
 	cfg, name := m.Config, f.Remote.Name
 	m.later = append(m.later, func() tea.Msg {
@@ -448,13 +456,15 @@ func (m *Model) answered(msg answeredMsg) {
 	key := msg.mark.Factory + "|" + msg.mark.ItemID
 	switch {
 	case errors.Is(msg.err, remote.ErrUncertain):
-		m.execution().DropClaim(key)
+		m.dropClaim(key)
 		m.panel.refused[key] = "Outcome unknown: the server did not answer. Look at the session before sending again."
 	case msg.err != nil:
-		m.execution().DropClaim(key)
+		m.dropClaim(key)
 		m.panel.refused[key] = "Not sent. " + withFullStop(msg.err.Error())
 	default:
-		m.execution().RecordSent(msg.mark, msg.at)
+		msg.mark.At = msg.at
+		m.putClaim(msg.mark)
+		m.report(m.ask("record-sent", host.SentRecord{Answer: msg.mark, At: msg.at}, nil))
 	}
 }
 
@@ -487,9 +497,6 @@ func (m *Model) remoteTargets(it Item) (string, string) {
 		return target, ""
 	}
 	roomForTwo := m.window[0] == 0 || m.window[0] > NarrowAt
-	if qa, here := m.laptopQAPane(it.Factory.Key()); here && roomForTwo {
-		return p.ID, qa
-	}
 	if w.Stage == nil || w.Stage.Pane == nil || !roomForTwo {
 		return p.ID, ""
 	}
@@ -590,7 +597,7 @@ func (m *Model) dropProxies() {
 		return
 	}
 	for _, p := range m.snap.Panes {
-		if !strings.HasPrefix(p.Repo, "remote:") || m.ranHere(p.Token) {
+		if !strings.HasPrefix(p.Repo, "remote:") {
 			continue
 		}
 		if _, listed := m.snap.Find(p.Repo); !listed {

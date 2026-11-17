@@ -14,7 +14,6 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -424,8 +423,9 @@ func TestWakeTypesNothingIntoAPaneThatLeftItsShell(t *testing.T) {
 	polledAtTheShell := pane(t, e.TM, id)
 	polledAtTheShell.Command = "zsh"
 	exited := Item{Status: factory.Exited, Pane: &polledAtTheShell, Factory: factory.Factory{Repo: "/repo", Slug: "eng-3-z", Worktree: t.TempDir(), Entry: &state.Entry{SessionID: "s3"}}}
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l})
-	model.snap = Snapshot{At: time.Now(), Items: []Item{exited}}
+	panes := &host.Panes{TM: e.TM, Session: e.Session}
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l}, host.Runtime{Engine: panes, Typist: panes, TM: e.TM})
+	node.show(model, Snapshot{At: time.Now(), Items: []Item{exited}})
 
 	err = model.wake(exited.Factory.Key())
 	time.Sleep(300 * time.Millisecond)
@@ -498,7 +498,10 @@ func TestPausingTheShownFactoryKeepsTheHubWhenItsViewerIsGone(t *testing.T) {
 	if err := e.TM.KillPane(viewer); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Pause(&l, "/repo", "x"); err != nil {
+	if err := e.Unshow(&l, "/repo", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&host.Panes{TM: e.TM, Session: e.Session}).Pause("/repo", "x"); err != nil {
 		t.Fatal(err)
 	}
 	panes, _ := e.TM.Panes()
@@ -549,42 +552,5 @@ func TestClosingAFactoryWithoutTheHubStopsItsStagesAndStrayProcesses(t *testing.
 			t.Fatalf("process %s started from the factory pane outlived the delete", strconv.Itoa(stray))
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func TestLaptopQAThroughAShellWrapperIsNotEndedWhileItRuns(t *testing.T) {
-	tm := scratchServer(t)
-	pane, err := tm.NewSession("factory", "qa", 80, 24, "exec /bin/sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := tm.Run("display-message", "-p", "-t", pane, "#{pane_pid}")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shell, _ := strconv.Atoi(strings.TrimSpace(out))
-	run := remote.QARun{Key: "remote:homelab/s-1/inc-csv", Slug: "csv", Job: remote.QAJob{Token: "t-qa"}, Launched: remoteNow.Add(-time.Hour)}
-	m := NewModel(Model{Config: &state.Config{StateDir: t.TempDir()}, Engine: &Engine{TM: tm}, Now: func() time.Time { return remoteNow }})
-	m.snap.Panes = []tmux.Pane{{ID: pane, PID: shell, Command: "sh", UI: "stage", Repo: run.Key, StageOf: run.Slug, Stage: "qa", Token: run.Job.Token}}
-	wait := func(what string, done func() bool) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(20 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for %s", what)
-			}
-		}
-	}
-
-	if err := tm.SendKeys(pane, "sh -c 'sleep 600; true'", "Enter"); err != nil {
-		t.Fatal(err)
-	}
-	wait("the wrapper and its agent to start", func() bool { return len(host.Descendants([]int{shell})) >= 2 })
-	if m.qaEnded(run) {
-		t.Fatal("a claude wrapper that runs its agent without exec was taken for the end of QA, so the hub would kill the running agent")
-	}
-	tm.SendKeys(pane, "C-c")
-	wait("the wrapper to stop", func() bool { return len(host.Descendants([]int{shell})) == 0 })
-	if !m.qaEnded(run) {
-		t.Fatal("a QA pane back at its shell prompt was not taken for the end of QA")
 	}
 }

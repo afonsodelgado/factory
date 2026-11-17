@@ -147,7 +147,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		var r dialog.NewResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			if r.Settings != nil {
-				m.addRepo(RepoRequest{Repo: r.Settings.Repo})
+				err = m.ask("repo", RepoRequest{Repo: r.Settings.Repo}, nil)
 				m.dialogNext = &dialogTransition{settings: r.Settings}
 			} else {
 				cmd, err = m.newResult(r)
@@ -284,6 +284,7 @@ func (m *Model) pauseContext(it Item) dialog.PauseContext {
 func (m *Model) deleteContext(it Item) dialog.DeleteContext {
 	removal := factory.PlanRemoval(it.Factory, m.Config)
 	work := factory.CheckWork(removal)
+	m.confirmedWork = host.WorkDigest(work)
 	return dialog.DeleteContext{
 		Key:          it.Factory.Key(),
 		Label:        it.Factory.Label(),
@@ -345,7 +346,7 @@ func (m *Model) unarchive(it Item) error {
 	if it.Factory.Remote != nil {
 		return m.remoteAct(it, "unarchive", nil)
 	}
-	if err := m.execution().Unarchive(it); err != nil {
+	if err := m.effect("unarchive", map[string]string{"Key": it.Factory.Key()}, nil); err != nil {
 		return err
 	}
 	m.notice = news(it.Factory.Label() + " is back in the list.")
@@ -353,7 +354,8 @@ func (m *Model) unarchive(it Item) error {
 }
 
 func (m *Model) create(r dialog.NewResult) error {
-	key, err := m.execution().Create(host.CreateRequest{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
+	var key string
+	err := m.effect("create", host.CreateRequest{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}, &key)
 	if key != "" {
 		m.selected = key
 	}
@@ -366,7 +368,7 @@ func (m *Model) wake(key string) error {
 	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
 		return m.remoteAct(it, "wake", nil)
 	}
-	return m.execution().Wake(key)
+	return m.ask("wake", map[string]string{"Key": key}, nil)
 }
 
 func (m *Model) wakeSelected() {
@@ -384,14 +386,18 @@ func (m *Model) wakeAll() error {
 			errs = append(errs, m.remoteAct(it, "wake", nil))
 		}
 	}
-	return errors.Join(append(errs, m.execution().WakeAll())...)
+	return errors.Join(append(errs, m.ask("wake-all", nil, nil))...)
 }
 
 func (m *Model) pause(key string) error {
-	if it, ok := m.snap.Find(key); ok && it.Factory.Remote != nil {
+	it, ok := m.snap.Find(key)
+	if ok && it.Factory.Remote != nil {
 		return m.remoteAct(it, "pause", nil)
 	}
-	return m.execution().Pause(key)
+	if ok {
+		m.unshow(it.Factory)
+	}
+	return m.ask("pause", map[string]string{"Key": key}, nil)
 }
 
 func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
@@ -399,17 +405,16 @@ func (m *Model) delete(key string) ([]factory.RemovalStep, error) {
 	if ok && it.Factory.Remote != nil {
 		return nil, m.remoteAct(it, "delete", nil)
 	}
-	if !ok || m.Loader == nil {
+	if !ok {
 		return nil, fmt.Errorf("the hub does not list %s", key)
 	}
 	return m.deleteFactory(it.Factory)
 }
 
 func (m *Model) deleteFactory(f factory.Factory) ([]factory.RemovalStep, error) {
-	steps, err := m.execution().DeleteFactory(f)
-	if m.Chrome != nil {
-		m.Chrome.CloseFactory(reviewKey(f))
-	}
+	m.unshow(f)
+	var report string
+	err := m.effect("delete", host.DeleteRequest{Repo: f.Repo, Slug: f.Slug, Work: m.confirmedWork}, &report)
 	if m.selected == f.Key() {
 		m.choose(m.rowAfter(f.Key()))
 	}
@@ -417,7 +422,7 @@ func (m *Model) deleteFactory(f factory.Factory) ([]factory.RemovalStep, error) 
 	if err == nil {
 		m.notice = news(f.Label() + " is deleted.")
 	}
-	return steps, err
+	return nil, err
 }
 
 func (m *Model) rowAfter(key string) string {
@@ -437,16 +442,16 @@ func (m *Model) rowAfter(key string) string {
 func (m *Model) forgetFactory(key string) {
 	ownDraft := func(draftKey string) bool { return strings.HasPrefix(draftKey, key+"|") }
 	maps.DeleteFunc(m.panel.drafts, func(k string, _ *panel.Draft) bool { return ownDraft(k) })
-	m.execution().ForgetClaims(ownDraft)
+	maps.DeleteFunc(m.claims, func(k string, _ host.Answer) bool { return ownDraft(k) })
+	m.report(m.ask("forget-claims", key+"|", nil))
 	maps.DeleteFunc(m.panel.refused, func(k string, _ string) bool { return ownDraft(k) })
-	delete(m.panel.prs, key)
 }
 
 func (m *Model) archive(r dialog.ArchiveResult) error {
 	if it, ok := m.snap.Find(r.Key); ok && it.Factory.Remote != nil {
 		return m.remoteAct(it, "archive", map[string]any{"Remove": false})
 	}
-	return m.execution().Archive(host.ArchiveRequest{Key: r.Key, Remove: r.Remove})
+	return m.effect("archive", host.ArchiveRequest{Key: r.Key, Remove: r.Remove}, nil)
 }
 
 func dirExists(path string) bool { return host.DirExists(path) }

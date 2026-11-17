@@ -1,6 +1,6 @@
 # Attention items
 
-An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and resolves it with `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <item id>` when the answer arrives. The factory app shows open items (no `resolved_at`) in its panel and never writes them. It stops showing an item once its stage is `done` or `skipped`, or the factory is done.
+An attention item is something the user must act on. The supervisor writes it to `state.json` *before* it asks, and resolves it when the answer arrives: `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <item id>` checks that the item is still open and prints the exact edit (`resolved_at`, `waiting_on`, `updated_at`), which the supervisor then makes to `state.json` itself before it continues. The factory app shows open items (no `resolved_at`) in its panel and never writes them. It stops showing an item once its stage is `done` or `skipped`, or the factory is done.
 
 ```json
 {
@@ -30,7 +30,7 @@ An attention item is something the user must act on. The supervisor writes it to
 | `recommended` | `question` only: one recommended answer per question |
 | `stage` | the stage key the item belongs to, normally the current `stage`; gate, cap and failure ids also end with it |
 | `artifact_url`, `thread_id` | `gate` and `comment`: the artifact, and the thread for a comment. Factories started before the review page have `comment` items; new ones do not |
-| `created_at`, `resolved_at` | ISO 8601 UTC. Set `created_at` when you write the item and never change it: on a server, the id and `created_at` together tell the laptop and the phone that an item is new |
+| `created_at`, `resolved_at` | ISO 8601 UTC. Set `created_at` when you write the item and never change it: the id and `created_at` together tell the hub and the phone that an item is new |
 
 ## Ids
 
@@ -41,8 +41,6 @@ An attention item is something the user must act on. The supervisor writes it to
 | artifact comment | `comment-<id>-<n>` |
 | cap | `cap-<id>-<stage>` |
 | failure | `fail-<id>-<stage>` |
-
-A QA job held for the developer's laptop is not an item you write: the app shows its start item and pushes it.
 
 `<id>` is the factory id, as in the factory directory name. A cap or failure id ends with the stage key, which is how the app knows which stage `/factory skip` names and which limit a cap raises (`coderabbit_rounds` for `coderabbit`, `qa_rounds` otherwise).
 

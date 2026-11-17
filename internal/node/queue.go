@@ -17,6 +17,8 @@ func NewQueue() Queue { return Queue{events: make(chan host.Event, 64)} }
 
 func (q Queue) Events() <-chan host.Event { return q.events }
 
+func (q Queue) Sink() chan<- host.Event { return q.events }
+
 func (q Queue) Call(ctx context.Context, m host.Message) (host.Message, error) {
 	reply := make(chan host.Message, 1)
 	select {
@@ -41,6 +43,7 @@ func (q Queue) post(ctx context.Context, m host.Message) {
 
 type Jobs struct {
 	Queue Queue
+	Ctx   context.Context
 
 	mu      sync.Mutex
 	running map[string]*job
@@ -48,8 +51,8 @@ type Jobs struct {
 
 type job struct{ cancel context.CancelFunc }
 
-func (j *Jobs) Start(parent context.Context, key string, check func(context.Context) host.Message) {
-	ctx, cancel := context.WithCancel(parent)
+func (j *Jobs) Start(key string, check func(context.Context) host.Message) {
+	ctx, cancel := context.WithCancel(j.Ctx)
 	current := &job{cancel: cancel}
 	j.mu.Lock()
 	if j.running == nil {
@@ -64,7 +67,7 @@ func (j *Jobs) Start(parent context.Context, key string, check func(context.Cont
 		defer cancel()
 		done := check(ctx)
 		if j.finish(key, current) && ctx.Err() == nil {
-			j.Queue.post(parent, done)
+			j.Queue.post(j.Ctx, done)
 		}
 	}()
 }

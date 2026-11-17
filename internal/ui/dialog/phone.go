@@ -2,12 +2,8 @@ package dialog
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
@@ -16,47 +12,19 @@ type phoneScreen int
 
 const (
 	phoneMain phoneScreen = iota
-	phoneConfigure
-	phonePairing
 	phoneChecking
 	phoneChecked
 )
 
-const (
-	hostnameField = iota
-	portField
-)
-
 type PhoneContext struct {
-	Enabled  bool          `json:"enabled"`
-	Running  bool          `json:"running"`
-	Owner    string        `json:"owner,omitempty"`
-	Hostname string        `json:"hostname"`
-	Port     int           `json:"port"`
-	Devices  []PhoneDevice `json:"devices"`
-}
-
-type PhoneDevice struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Paired string `json:"paired"`
-}
-
-type PhonePairing struct {
-	URL     string
-	Expires time.Time
-	QR      []string
+	Running       bool   `json:"running"`
+	Hostname      string `json:"hostname"`
+	Port          int    `json:"port"`
+	Subscriptions int    `json:"subscriptions"`
 }
 
 type PhoneActions interface {
 	Status() (PhoneContext, error)
-	Enable() error
-	Disable() error
-	Start() error
-	Stop() error
-	Configure(port int, hostname string) error
-	Pair() (PhonePairing, error)
-	Revoke(id string) error
 	Test() (string, error)
 	Check() []CheckRow
 }
@@ -72,33 +40,20 @@ type phoneChecks struct {
 	rows []CheckRow
 }
 
-type phonePaired struct {
-	pairing PhonePairing
-	err     error
-}
-
-type phoneTick struct{}
-
 type Phone struct {
 	Context PhoneContext
 	actions PhoneActions
-	Now     func() time.Time
 	size
 	screen   phoneScreen
-	cursor   int
-	revoking bool
 	busy     string
 	notice   string
 	problem  string
-	field    int
-	fields   [2]string
-	pairing  PhonePairing
 	checkRun int
 	checks   []CheckRow
 }
 
 func NewPhone(c PhoneContext, actions PhoneActions) *Phone {
-	return &Phone{Context: c, actions: actions, Now: time.Now}
+	return &Phone{Context: c, actions: actions}
 }
 
 func (p *Phone) Init() tea.Cmd { return nil }
@@ -110,25 +65,10 @@ func (p *Phone) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case phoneDone:
 		p.busy, p.Context, p.notice, p.problem = "", msg.status, msg.notice, msg.problem
-		p.cursor = min(p.cursor, max(len(p.Context.Devices)-1, 0))
 	case phoneChecks:
 		if msg.run == p.checkRun && p.screen == phoneChecking {
 			p.checks, p.screen = msg.rows, phoneChecked
 		}
-	case phonePaired:
-		p.busy = ""
-		if msg.err != nil {
-			p.problem = msg.err.Error()
-			return p, nil
-		}
-		p.pairing, p.screen = msg.pairing, phonePairing
-		return p, tick()
-	case phoneTick:
-		if p.screen == phonePairing && p.Now().Before(p.pairing.Expires) {
-			return p, tick()
-		}
-	case tea.PasteMsg:
-		p.typeText(strings.ReplaceAll(DecodeKeys(msg.Content), "\n", ""))
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return p, tea.Quit
@@ -139,35 +79,11 @@ func (p *Phone) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, nil
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg { return phoneTick{} })
-}
-
 func (p *Phone) key(msg tea.KeyPressMsg) tea.Cmd {
-	switch p.screen {
-	case phoneConfigure:
-		return p.configureKey(msg)
-	case phonePairing, phoneChecking, phoneChecked:
-		if msg.String() != "esc" {
-			return nil
-		}
-		p.checkRun++
-		paired := p.screen == phonePairing
-		p.screen = phoneMain
-		if paired {
-			return p.run("Looking for the new phone…", "", func() error { return nil })
-		}
-		return nil
-	}
-	return p.mainKey(msg)
-}
-
-func (p *Phone) mainKey(msg tea.KeyPressMsg) tea.Cmd {
-	if p.revoking {
-		p.revoking = false
-		if msg.String() == "y" {
-			device := p.Context.Devices[p.cursor]
-			return p.run("Revoking "+device.Name+"…", "Revoked "+device.Name+".", func() error { return p.actions.Revoke(device.ID) })
+	if p.screen != phoneMain {
+		if msg.String() == "esc" {
+			p.checkRun++
+			p.screen = phoneMain
 		}
 		return nil
 	}
@@ -177,29 +93,6 @@ func (p *Phone) mainKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		return tea.Quit
-	case "j", "down":
-		p.cursor = min(p.cursor+1, max(len(p.Context.Devices)-1, 0))
-	case "k", "up":
-		p.cursor = max(p.cursor-1, 0)
-	case "e":
-		if p.Context.Enabled {
-			return p.run("Turning Phone off…", "Phone is off. Paired phones keep their pairing.", p.actions.Disable)
-		}
-		return p.run("Turning Phone on…", "Phone is on.", p.actions.Enable)
-	case "s":
-		if p.Context.Running {
-			return p.run("Stopping factory serve…", "factory serve stopped. Phones get no notifications until it starts.", p.actions.Stop)
-		}
-		return p.run("Starting factory serve…", "factory serve is running.", p.actions.Start)
-	case "c":
-		p.screen, p.field = phoneConfigure, hostnameField
-		p.fields = [2]string{p.Context.Hostname, strconv.Itoa(p.Context.Port)}
-	case "p":
-		p.busy = "Making a pairing code…"
-		return func() tea.Msg {
-			pairing, err := p.actions.Pair()
-			return phonePaired{pairing, err}
-		}
 	case "t":
 		p.busy = "Sending a test notification…"
 		fallback := p.Context
@@ -212,16 +105,8 @@ func (p *Phone) mainKey(msg tea.KeyPressMsg) tea.Cmd {
 		p.screen = phoneChecking
 		run := p.checkRun
 		return func() tea.Msg { return phoneChecks{run, p.actions.Check()} }
-	case "r":
-		p.revoking = len(p.Context.Devices) > 0
 	}
 	return nil
-}
-
-func (p *Phone) run(busy, done string, action func() error) tea.Cmd {
-	p.busy = busy
-	fallback := p.Context
-	return func() tea.Msg { return p.finish(fallback, done, action()) }
 }
 
 func (p *Phone) finish(fallback PhoneContext, notice string, err error) phoneDone {
@@ -235,135 +120,48 @@ func (p *Phone) finish(fallback PhoneContext, notice string, err error) phoneDon
 	return phoneDone{status: status, notice: notice}
 }
 
-func (p *Phone) configureKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc":
-		p.screen = phoneMain
-	case "tab", "down", "up", "shift+tab":
-		p.field = 1 - p.field
-	case "backspace":
-		text := []rune(p.fields[p.field])
-		if len(text) > 0 {
-			p.fields[p.field] = string(text[:len(text)-1])
-		}
-	case "enter":
-		port, err := strconv.Atoi(strings.TrimSpace(p.fields[portField]))
-		if err != nil {
-			p.problem = "the port must be a number, such as 7418"
-			return nil
-		}
-		hostname := strings.TrimSpace(p.fields[hostnameField])
-		p.screen = phoneMain
-		return p.run("Saving…", "Saved. Restart factory serve to use a new port or hostname.", func() error { return p.actions.Configure(port, hostname) })
-	default:
-		if msg.Text != "" {
-			p.typeText(msg.Text)
-		}
-	}
-	return nil
-}
-
-func (p *Phone) typeText(text string) {
-	if p.screen == phoneConfigure {
-		p.fields[p.field] += text
-	}
-}
-
 func (p *Phone) View() tea.View {
 	c := theme.NewCanvas(p.width, p.height)
-	switch p.screen {
-	case phoneConfigure:
-		p.drawConfigure(c)
-	case phonePairing:
-		p.drawPairing(c)
-	case phoneChecking, phoneChecked:
-		p.drawChecks(c)
-	default:
+	if p.screen == phoneMain {
 		p.drawMain(c)
+	} else {
+		p.drawChecks(c)
 	}
 	return view(c)
 }
 
 func (p *Phone) drawMain(c *theme.Canvas) {
 	c.Put(1, 0, "Phone", theme.Bright.B())
-	on, onInk := "off", theme.Muted
-	if p.Context.Enabled {
-		on, onInk = "on", theme.FgInk(theme.Green)
-	}
-	serve, serveInk := "not running", theme.FgInk(theme.Yellow)
+	running, runningInk := "not running; start it with factory node run", theme.FgInk(theme.Yellow)
 	if p.Context.Running {
-		serve, serveInk = "running", theme.FgInk(theme.Green)
-		if p.Context.Owner != "" {
-			serve += " · " + p.Context.Owner
-		}
+		running, runningInk = "running", theme.FgInk(theme.Green)
 	}
-	url := "set this machine's ts.net name with c"
+	url, urlInk := "unknown; put node.hostname, this machine's ts.net name, in config.yml", theme.FgInk(theme.Yellow)
 	if p.Context.Hostname != "" {
-		url = "https://" + p.Context.Hostname
+		url, urlInk = "https://"+p.Context.Hostname, theme.Bright
 	}
 	rows := []struct {
 		label, value string
 		ink          theme.Ink
 	}{
-		{"phone", on, onInk},
-		{"serve", serve, serveInk},
-		{"url", url, theme.Bright},
+		{"node", running, runningInk},
+		{"url", url, urlInk},
 		{"port", fmt.Sprintf("127.0.0.1:%d, forwarded by tailscale serve", p.Context.Port), theme.Text},
+		{"notify", fmt.Sprintf("%d subscribed", p.Context.Subscriptions), theme.Text},
 	}
 	for i, row := range rows {
 		c.Put(1, 2+i, row.label, theme.Muted)
 		c.PutMax(checkDetailX-10, 2+i, row.value, row.ink, c.W-checkDetailX+9)
 	}
-	c.Put(1, devicesTop-1, "Paired phones", theme.Bright)
-	hints := packHints(p.mainHints(), c.W-2)
-	hintsTop := c.H - len(hints)
-	space := hintsTop - devicesTop
-	text, ink := p.mainMessage()
-	var lines []string
-	if text != "" {
-		lines = theme.Wrap(text, c.W-2)
+	y := paragraph(c, 7, "Open the url on a phone signed in to Tailscale as this node's owner. Anyone else gets a refusal.", theme.Muted)
+	if text, ink := p.mainMessage(); text != "" {
+		paragraph(c, y+1, text, ink)
 	}
-	if fitsBelowOneDevice := max(space-2, 1); !p.revoking && len(lines) > fitsBelowOneDevice {
-		lines = clipLines(lines, fitsBelowOneDevice, c.W-2)
-	}
-	y := devicesTop + p.drawDevices(c, max(space-1-len(lines), 1)) + 1
-	for i, line := range lines {
-		c.Put(1, y+i, line, ink)
-	}
-	for i, line := range hints {
-		c.Put(1, hintsTop+i, line, theme.Text)
-	}
-}
-
-const devicesTop = 8
-
-func (p *Phone) drawDevices(c *theme.Canvas, rows int) int {
-	devices := p.Context.Devices
-	if len(devices) == 0 {
-		c.Put(3, devicesTop, "none yet; p shows a code to scan", theme.Muted)
-		return 1
-	}
-	shown := min(len(devices), rows)
-	first := max(p.cursor-shown+1, 0)
-	if shown < len(devices) {
-		c.Right(c.W-2, devicesTop-1, fmt.Sprintf("%d–%d of %d", first+1, first+shown, len(devices)), theme.Muted)
-	}
-	for i, d := range devices[first : first+shown] {
-		y, ink := devicesTop+i, theme.Text
-		if first+i == p.cursor {
-			c.Put(1, y, "›", theme.Key)
-			ink = theme.Bright
-		}
-		c.PutMax(3, y, d.Name, ink, 24)
-		c.PutMax(28, y, "paired "+d.Paired, theme.Muted, c.W-29)
-	}
-	return shown
+	c.Put(1, c.H-1, "t test push   h checks   esc close", theme.Text)
 }
 
 func (p *Phone) mainMessage() (string, theme.Ink) {
 	switch {
-	case p.revoking:
-		return fmt.Sprintf("Revoke %s? It loses access and its notifications at once. y revokes, any other key keeps it.", p.Context.Devices[p.cursor].Name), theme.FgInk(theme.Yellow)
 	case p.busy != "":
 		return "◌ " + p.busy, theme.FgInk(theme.Yellow)
 	case p.problem != "":
@@ -372,103 +170,6 @@ func (p *Phone) mainMessage() (string, theme.Ink) {
 		return "✓ " + p.notice, theme.FgInk(theme.Green)
 	}
 	return "", theme.Text
-}
-
-func clipLines(lines []string, keep, width int) []string {
-	kept := append([]string(nil), lines[:keep]...)
-	kept[keep-1] = theme.Truncate(lines[keep-1]+" "+lines[keep], width)
-	return kept
-}
-
-func (p *Phone) mainHints() []string {
-	toggle, serve := "e turn on", "s start"
-	if p.Context.Enabled {
-		toggle = "e turn off"
-	}
-	if p.Context.Running {
-		serve = "s stop"
-	}
-	hints := []string{toggle, serve, "c configure", "p pair", "t test push", "h checks"}
-	if len(p.Context.Devices) > 0 {
-		hints = append(hints, "r revoke")
-	}
-	return append(hints, "esc close")
-}
-
-func packHints(hints []string, width int) []string {
-	var rows []string
-	for _, hint := range hints {
-		last := len(rows) - 1
-		if last >= 0 && theme.Width(rows[last]+"   "+hint) <= width {
-			rows[last] += "   " + hint
-			continue
-		}
-		rows = append(rows, hint)
-	}
-	return rows
-}
-
-func breakAt(text string, width int) []string {
-	var lines []string
-	line := ""
-	for _, r := range text {
-		if line != "" && theme.Width(line+string(r)) > width {
-			lines = append(lines, line)
-			line = ""
-		}
-		line += string(r)
-	}
-	return append(lines, line)
-}
-
-func (p *Phone) drawConfigure(c *theme.Canvas) {
-	c.Put(1, 0, "Configure Phone", theme.Bright.B())
-	labels := [2]string{"This machine's full Tailscale name, such as devbox.tail1234.ts.net", "Local port that tailscale serve forwards to"}
-	for i, label := range labels {
-		text := p.fields[i]
-		if p.field == i {
-			text += "█"
-		}
-		c.Put(1, 2+i*4, label, theme.Text)
-		drawInput(c, 1, 3+i*4, c.W-2, "", []string{text}, p.field == i, theme.Focused)
-	}
-	y := paragraph(c, 11, "The app answers only at https://<name>/, through tailscale serve. factory never changes your tailnet.", theme.Muted)
-	if p.problem != "" {
-		paragraph(c, y+1, "✗ "+p.problem, theme.FgInk(theme.Red))
-	}
-	c.Put(1, c.H-1, "⏎ save   tab next field   esc back", theme.Text)
-}
-
-func (p *Phone) drawPairing(c *theme.Canvas) {
-	left := p.pairing.Expires.Sub(p.Now()).Round(time.Second)
-	c.Put(1, 0, "Pair a phone", theme.Bright.B())
-	if left <= 0 {
-		c.Right(c.W-2, 0, "expired; esc, then p for a new code", theme.FgInk(theme.Red))
-	} else {
-		c.Right(c.W-2, 0, fmt.Sprintf("expires in %d:%02d", int(left.Minutes()), int(left.Seconds())%60), theme.Muted)
-	}
-	y := paragraph(c, 2, "Scan with the phone's camera, or open this link on it. The code works once.", theme.Text)
-	for _, line := range breakAt(p.pairing.URL, c.W-2) {
-		c.Put(1, y, line, theme.Bright)
-		y++
-	}
-	if qrFits := y+1+len(p.pairing.QR) < c.H-1; qrFits {
-		drawQR(c, y+1, p.pairing.QR)
-	} else {
-		paragraph(c, y+1, "Make this window taller to see the QR code.", theme.Muted)
-	}
-	c.Put(1, c.H-1, "esc back", theme.Text)
-}
-
-func drawQR(c *theme.Canvas, y int, qr []string) {
-	width := 0
-	for _, line := range qr {
-		width = max(width, lipgloss.Width(line))
-	}
-	x := max((c.W-width)/2, 1)
-	for i, line := range qr {
-		c.Put(x, y+i, line, theme.Bright)
-	}
 }
 
 func (p *Phone) drawChecks(c *theme.Canvas) {

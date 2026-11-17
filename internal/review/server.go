@@ -25,12 +25,11 @@ type Factory struct {
 	Dir   string
 }
 
+const SocketHost = "review.sock"
+
 type Server struct {
 	token   string
 	overlay []byte
-	ln      net.Listener
-	http    *http.Server
-	mobile  *http.Server
 	watch   *fsnotify.Watcher
 
 	mu        sync.Mutex
@@ -42,8 +41,6 @@ type Server struct {
 	act       func(Action) (any, error)
 	browser   *Browser
 	forwarded map[string]bool
-	listed    chan struct{}
-	listOnce  sync.Once
 }
 
 type event struct {
@@ -52,57 +49,29 @@ type event struct {
 	factory string
 }
 
-func Listen(port int, token string, overlay []byte) (*Server, error) {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil && port != 0 {
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
-	}
-	if err != nil {
-		return nil, err
-	}
+func New(token string, overlay []byte) (*Server, error) {
 	watch, err := fsnotify.NewWatcher()
 	if err != nil {
-		ln.Close()
 		return nil, err
 	}
 	s := &Server{
 		token:     token,
 		overlay:   overlay,
-		ln:        ln,
 		watch:     watch,
 		factories: map[string]Factory{},
 		watched:   map[string]bool{},
 		clients:   map[chan event]bool{},
 		stores:    map[string]*Store{},
 		forwarded: map[string]bool{},
-		listed:    make(chan struct{}),
 		now:       time.Now,
 	}
-	s.http = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
-	go s.http.Serve(ln)
 	go s.forwardChanges()
 	return s, nil
 }
 
-func (s *Server) Close() error {
-	s.watch.Close()
-	s.mu.Lock()
-	mobile := s.mobile
-	s.mu.Unlock()
-	if mobile != nil {
-		mobile.Close()
-	}
-	s.markListed()
-	return s.http.Close()
-}
+func (s *Server) Close() error { return s.watch.Close() }
 
-func (s *Server) Origin() string {
-	return "http://" + s.ln.Addr().String()
-}
-
-func (s *Server) Home() string {
-	return s.Origin() + "/r/" + s.token + "/"
-}
+func (s *Server) Token() string { return s.token }
 
 func (s *Server) SetFactories(factories []Factory) {
 	s.mu.Lock()
@@ -120,14 +89,9 @@ func (s *Server) SetFactories(factories []Factory) {
 			delete(s.stores, dir)
 		}
 	}
-	s.markListed()
 }
 
-func (s *Server) markListed() {
-	s.listOnce.Do(func() { close(s.listed) })
-}
-
-func (s *Server) PageURL(fileURL string) (string, bool) {
+func (s *Server) PagePath(fileURL string) (string, bool) {
 	u, err := url.Parse(fileURL)
 	if err != nil || u.Scheme != "file" {
 		return "", false
@@ -136,28 +100,7 @@ func (s *Server) PageURL(fileURL string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return s.pageURL(f.Key, rel), true
-}
-
-func (s *Server) factoryOfPage(raw string) (Factory, bool) {
-	u, err := url.Parse(raw)
-	if err != nil || "http://"+u.Host != s.Origin() {
-		return Factory{}, false
-	}
-	return s.factoryOfAPI(u.Path)
-}
-
-func (s *Server) factoryOfAPI(path string) (Factory, bool) {
-	rest, ok := strings.CutPrefix(path, "/r/"+s.token+"/")
-	if !ok {
-		return Factory{}, false
-	}
-	key, _, _ := strings.Cut(rest, "/")
-	key, err := url.PathUnescape(key)
-	if err != nil {
-		return Factory{}, false
-	}
-	return s.factory(key)
+	return s.pagePath(f.Key, rel), true
 }
 
 func (s *Server) locate(path string) (Factory, string, bool) {
@@ -172,10 +115,6 @@ func (s *Server) locate(path string) (Factory, string, bool) {
 	return Factory{}, "", false
 }
 
-func (s *Server) pageURL(key, rel string) string {
-	return s.Origin() + s.pagePath(key, rel)
-}
-
 func (s *Server) pagePath(key, rel string) string {
 	return "/r/" + s.token + "/" + url.PathEscape(key) + "/" + escapePath(filepath.ToSlash(rel))
 }
@@ -188,7 +127,7 @@ func escapePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-func (s *Server) routes() http.Handler {
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -217,12 +156,10 @@ func (s *Server) Allow(port int) {
 }
 
 func (s *Server) sameHost(next http.Handler) http.Handler {
-	_, port, _ := net.SplitHostPort(s.ln.Addr().String())
-	own := map[string]bool{"127.0.0.1:" + port: true, "localhost:" + port: true}
 	allowed := func(host string) bool {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return own[host] || s.forwarded[host]
+		return host == SocketHost || s.forwarded[host]
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowed(r.Host) {

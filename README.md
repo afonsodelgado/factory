@@ -155,7 +155,7 @@ The site's scripts are `build` (`astro build` into `apps/web/dist`), `lint` (Pre
 
 Root `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm dev` call the guarded web targets. `pnpm turbo run build` is the direct advanced entry point. Turbo caches the site's `dist/` and generated `.astro/` types, and caches lint, typecheck and test results; `test` depends on the same package's `build`, because the browser tests serve `dist`. The build-time `SITE_URL` variable is part of the build, typecheck and test hashes. Development tasks are persistent and uncached. There is no coverage collection, and remote caching is not configured.
 
-The phone app's `dev` serves `127.0.0.1:4323` and its Playwright tests start their own fake gateway on 4324; both fail rather than move. `make pwa-embed` is never cached, so a Turbo cache hit still refreshes the embedded copy. A Go-only build embeds only `bundle/pwa/unavailable.html`: `factory serve` answers the app's routes with a "run make build" page, and `factory phone enable` refuses to start. The app's icons in `apps/pwa/public/icons` are committed; `pnpm --filter @factory/pwa icons` regenerates them from the site's favicon.
+The phone app's `dev` serves `127.0.0.1:4323` and its Playwright tests start their own fake gateway on 4324; both fail rather than move. `make pwa-embed` is never cached, so a Turbo cache hit still refreshes the embedded copy. A Go-only build embeds only `bundle/pwa/unavailable.html`: the node answers the app's routes with a "run make build" page. The app's icons in `apps/pwa/public/icons` are committed; `pnpm --filter @factory/pwa icons` regenerates them from the site's favicon.
 
 Repo config autodetection still chooses Go commands because `go.mod` takes precedence over `package.json`. The workspace does not change the repo config.
 
@@ -202,6 +202,8 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 
 ## Use
 
+Every machine runs one node, which owns its factories: their tmux panes, review pages, attention, phone notifications and background work keep going whether or not a hub is open. Start it in the foreground with `factory node run --owner you@example.com`, where the owner is the Tailscale login allowed through Tailscale Serve (or set `node.owner` in `config.yml`, or `FACTORY_NODE_OWNER`). The node listens on an owner-only `node.sock` in the state directory, which the hub and the CLI use, and on `127.0.0.1:7418` (`node.port`), which accepts only requests from Tailscale Serve on this machine that carry the owner's `Tailscale-User-Login`; until `node.hostname` names this machine's Tailscale name, requests through Serve get 421 with a message saying so. A second `factory node run` for the same state directory refuses, and so does a node beside an open hub, `factory host run` or `factory serve` from an older release: stop those first; the node never stops them. `factory open`, the hub and every command that changes a factory refuse with this guidance when no node runs, before doing anything. `factory attention resolve` asks the node whether the item is open and prints the `state.json` edit for the supervisor to make; the node never writes `state.json`.
+
 | Command | Does |
 |---|---|
 | `factory open` | opens the hub in this pane, or jumps to the hub that is already running |
@@ -217,7 +219,7 @@ Worktrees have no copy of the repo config, so the skill and its agents read it f
 | `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 | `factory open --remote homelab csv-export --prompt "…"` | creates the factory on the remote `homelab` instead of this machine |
 
-An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `host`, `remote`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
+An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `host`, `node`, `remote`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
@@ -241,31 +243,29 @@ A factory can run on an always-on Linux server over SSH, so it keeps going while
 | `factory forget --remote homelab csv-export` | hides it on this machine without touching the server |
 | `factory remote list` / `remove homelab` | lists remotes, or stops this machine connecting to one; its factories and push keep running there |
 
-Everything runs over `ssh` with fixed remote commands: `factory host request` with JSON on its standard input for requests, `factory host attach <view>` for `⏎` on a session, and `-L 127.0.0.1:…` port forwards for review pages and links. The server opens no new listener, nothing forwards your agent, and prompts and paths never reach a shell. The server clones the repo from its git remote under its own state directory and starts the factory in a detached `host` window of its tmux session, so nothing is copied from this machine but the prompt, the repo's `.factory/config.yml` and your `rules.md`. A repo without a network git remote, or with credentials in its remote URL, is refused. If the connection drops after a request was sent, the command says its outcome is unknown; run it again to settle it, and it never creates a second factory. A factory id is checked against this machine and every remote's last known factories, so it stays unique across places. `remotes`, `default_remote` and `push` live in `config.yml`; the commands edit them in place, keep your comments, and write the file privately because the push topic acts as a password.
+Everything runs over `ssh` with fixed remote commands: `factory host request` with JSON on its standard input for requests, `factory host attach <view>` for `⏎` on a session, and `-L 127.0.0.1:…` forwards for links and for review pages, which reach the server node's owner-only review socket rather than any TCP port. These requests need no listener of their own, nothing forwards your agent, and prompts and paths never reach a shell. The server clones the repo from its git remote under its own state directory and its node starts the factory in its tmux session, so nothing is copied from this machine but the prompt, the repo's `.factory/config.yml` and your `rules.md`. A repo without a network git remote, or with credentials in its remote URL, is refused. If the connection drops after a request was sent, the command says its outcome is unknown; run it again to settle it, and it never creates a second factory. A factory id is checked against this machine and every remote's last known factories, so it stays unique across places. `remotes`, `default_remote` and `push` live in `config.yml`; the commands edit them in place, keep your comments, and write the file privately because the push topic acts as a password.
 
-The hub lists remote factories beside local ones, under a `↔ homelab` group, and every action on them (answer, approve, wake, pause, archive, delete) runs on the server. `⏎` attaches to a remote factory's session over ssh in a proxy pane; leaving or closing it never stops the agent. When a server stops answering for 15 seconds its factories turn grey as `↮ unreachable`, keep their last known state, and actions on them are refused with nothing sent; local factories, including new ones, keep working. `n` asks where a new factory runs, and `R` opens the Remotes popup to add, check and pick remotes and set up phone push. Review pages, the running app and links a server agent opens appear on this laptop through the same stable tunnels, on `127.0.0.1` ports the hub remembers per server. Open the hub on this machine only: while an interactive hub is open on a server, requests from your laptop fail with a message to close it and run `factory host run`.
+The hub lists remote factories beside local ones, under a `↔ homelab` group, and every action on them (answer, approve, wake, pause, archive, delete) runs on the server. `⏎` attaches to a remote factory's session over ssh in a proxy pane; leaving or closing it never stops the agent. When a server stops answering for 15 seconds its factories turn grey as `↮ unreachable`, keep their last known state, and actions on them are refused with nothing sent; local factories, including new ones, keep working. `n` asks where a new factory runs, and `R` opens the Remotes popup to add, check and pick remotes and set up phone push. Review pages, the running app and links a server agent opens appear on this laptop through the same stable tunnels, on `127.0.0.1` ports the hub remembers per server. The server needs a running node (`factory node run`); without one, requests from your laptop fail with a message saying so.
 
-With `qa.mode: browser` the server holds browser QA, each re-check and the walkthrough's stack preparation until you press `⏎` on their start item in this hub. They need a checkout of the repo that `factory init` listed here, whose remotes include the server's git remote, and `claude` installed here. The laptop fetches the exact published commit into a worktree of its own, runs `claude --chrome` there and sends only the report and evidence under `.claude/qa/` (plus the walkthrough's `stack.sh` and `stack.json`) back; connecting alone never starts a job, and a dropped link keeps a running one going.
+Browser QA runs on the machine that holds the factory, in its own headless Chrome; no QA job waits for or runs on a laptop. Finish or interrupt QA started by an older version before you upgrade, then start it again on its node.
 
 ### The phone app
 
-The phone app lists this machine's factories, tells you when one needs you, and lets you answer, approve, pause, wake, message a supervisor and review pages with the same comments as the desktop. Remote factories are not shown. It runs at `https://<machine>.<tailnet>.ts.net/` through [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve), so the phone needs Tailscale to act, but notifications arrive through the browser's push service on any network. Press `P` in the hub for the Phone popup, or use the commands:
+The phone app lists this machine's factories, tells you when one needs you, and lets you answer, approve, pause, wake, message a supervisor and review pages with the same comments as the desktop. Remote factories are not shown. It runs at `https://<machine>.<tailnet>.ts.net/` through [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve), so the phone needs Tailscale to act, but notifications arrive through the browser's push service on any network. The node serves it whenever it runs; there is no pairing. Every request must carry the node owner's Tailscale login, which Serve adds for a device signed in to Tailscale as that user. Anyone else on the tailnet gets a page that names the owner and shows nothing, and an app that was signed in as the owner clears what it saved. Press `P` in the hub for the Phone popup, or use the commands:
 
 | Command | Does |
 |---|---|
-| `factory phone configure --hostname devbox.tail1234.ts.net [--port 7418]` | sets this machine's full Tailscale name and the loopback port |
-| `factory phone enable` / `disable` | turns Phone on (making the private push keys once) and starts `factory serve`, or stops it; disabling keeps paired phones and keys |
-| `factory phone pair` | prints a QR code and link with a one-time code that expires in five minutes |
-| `factory phone devices` / `revoke <id>` | lists paired phones, or revokes one with its notifications |
-| `factory phone test` | sends a test notification; "accepted" means the push service took it, not that the phone showed it |
+| `factory phone status` | prints the app's URL, the loopback port, whether the node runs and how many browsers have notifications on |
+| `factory phone test` | asks the running node to send a test notification; "accepted" means the push service took it, not that the phone showed it |
 | `factory phone check` | checks Tailscale, HTTPS, the serve mapping, Funnel and the push services, with a fix for each failure |
-| `factory phone start` / `stop` / `status` | runs `factory serve` in the background, stops it, or reports what runs |
 
-Once, on this machine: turn on HTTPS Certificates for the tailnet, then run `tailscale serve --bg --https=443 http://127.0.0.1:7418`. Never use Funnel. `factory serve` listens only on `127.0.0.1` and answers the plain Tailscale IP with a page that points to the HTTPS name. While the hub is closed, `factory serve` runs the factories headless so notifications and answers keep working; opening the hub takes them back. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Phone is off by default; its keys, device hashes and subscriptions live in the state directory with private modes.
+Once, on this machine: turn on HTTPS Certificates for the tailnet, put this machine's full Tailscale name in `config.yml` as `node.hostname` (for example `devbox.tail1234.ts.net`), then run `tailscale serve --bg --https=443 http://127.0.0.1:7418`. Never use Funnel. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Each browser that turns notifications on is kept by its push endpoint; opening the app again re-registers the same subscription without turning it off.
+
+Upgrading from a release with pairing: the first `factory node run` moves `phone.hostname` and `phone.port` to `node.hostname` and `node.port`, keeps the push keys, every subscription and the queued notifications, then deletes the pairing codes and device hashes. Paired phones keep getting notifications and open the app again over the tailnet as the owner; operations a phone sent before the upgrade stay readable until they settle.
 
 ### Reviewing designs and plans
 
-Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `o` opens one on the hub's review page on `127.0.0.1`, in any browser. There:
+Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `o` opens one in your browser on the node's review page at `https://<machine>.<tailnet>.ts.net/r/…`, the same page the phone app opens. The node never opens a browser itself. There:
 
 - `C`, then click anything, leaves a comment on that element: a fix, a change or a question. *Comment on the whole page* in the comments list covers the rest.
 - Comments are saved as you write them. **Send** delivers the ones not sent yet to the agent that owns the page: the designer or the architect, in its own pane.
@@ -276,9 +276,9 @@ In a web repo, the design can instead be a working prototype built from the app'
 
 1. Set `design.prototype` in the repo config (see "Repo config").
 2. The designer writes each variant into that git-ignored directory.
-3. The hub runs the app's dev server and opens the variants in its Chrome. Comments on them go to the designer, as on any design.
+3. The hub runs the app's dev server; open the variants' URLs in your own browser. Until the node publishes dev servers on the tailnet, ask for changes through the design gate in the panel or the phone.
 
-The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` opens any page, such as your app on its dev server, in the factory's Chrome with the same comment layer; its comments go to the factory you run it from, or the one `--factory <id>` names.
+The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` prints the URL of any page, such as your app on its dev server, for you to open; a laptop hub connected over ssh opens it through its tunnel.
 
 ### Walking through the finished app
 
@@ -286,9 +286,9 @@ In repos with browser QA, the `walkthrough` stage comes after QA, just before th
 
 1. QA writes a script that starts this worktree's stack on free ports, signed in as a test user.
 2. The hub runs that script in a window of its own, so you can see its logs.
-3. When the stack answers, the hub opens the app in the factory's Chrome with the same comment layer.
+3. When the stack answers, open the app's URL from the walkthrough gate in your own browser.
 
-Click through the change and comment on anything you want different. Each Send goes to the fixer, which changes the code on the QA-fixes layer. The dev server reloads the change in the same tab, and the fixer answers each thread. Approve on the page or in the panel when it is right. The stack stops when the factory is done.
+Click through the change and send anything you want different as changes on the walkthrough gate. Each goes to the fixer, which changes the code on the QA-fixes layer, and the dev server reloads it in the same tab. Approve in the panel or on the phone when it is right. The stack stops when the factory is done.
 
 ## Configuration
 
@@ -305,12 +305,10 @@ alerts:
   desktop: false
 icons: nerd
 review:
-  port: 7417
-  browser: chrome
   chrome: ""
 ```
 
-`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. `review.port` is where the hub serves the factories' design and plan pages on `127.0.0.1`; when another program holds it, the hub takes a free port. `review.browser: chrome` opens them in a Chrome window that factory drives, with its own profile in the state directory, so comments carry a screenshot of the element and the page's console errors and failed requests; `system` opens them in your default browser instead, without those. `review.chrome` names the Chrome binary when it is not in the usual place. Every other value above is the default.
+`alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the background session that holds the factories' panes, and the hub's own window outside tmux. `return_key: prefix` binds `prefix f` instead of `M-0`; `icons: unicode` draws plain Unicode instead of Nerd Font icons. The node serves the factories' design and plan pages to the phone app and the hub through its own listener and to local tools and ssh tunnels through the owner-only `review.sock` in the state directory; it never opens a browser window. `review.chrome` names the Chrome binary for headless browser QA when it is not in the usual place. Older `review.port` and `review.browser` keys are ignored. Every other value above is the default.
 
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`.
 
@@ -340,7 +338,7 @@ design:
     css: apps/web/src/index.css
 ```
 
-Browser QA is moving to a headless Chrome that factory starts with a temporary profile and drives through Chrome DevTools MCP, pinned to `chrome-devtools-mcp@1.13.0` and run with usage statistics and CrUX lookups off. It runs `qa.start`, waits for `qa.health` to answer `qa.health_status` (default 200) within `qa.startup_timeout` (default `2m`), then runs `qa.seed` and `qa.sign_in`. Seed prepares an isolated test environment and must be repeatable; sign-in prints the session cookies as a JSON list of `{name, value}`. Write `none` for an app without fixtures or sign-in. Today's QA does not read these keys yet.
+Browser QA runs on Mac and Linux nodes in a headless Chrome that the node starts for one QA stage at a time, with a new temporary profile, and drives only through Chrome DevTools MCP, pinned to `chrome-devtools-mcp@1.13.0` and run with usage statistics and CrUX lookups off. Before the QA pane starts, the node runs `qa.start`, waits for `qa.health` to answer `qa.health_status` (default 200) within `qa.startup_timeout` (default `2m`), then runs `qa.seed` and `qa.sign_in`, sets the printed cookies in that profile and writes an MCP config for that stage alone; it never edits your global Claude config. Seed prepares an isolated test environment and must be repeatable; sign-in prints the session cookies as a JSON list of `{name, value}`. Write `none` for an app without fixtures or sign-in: QA refuses to start, by name and before any browser launches, while either key is missing. Nobody can watch or type into that browser, so captchas and interactive 2FA are not supported; a failing step ends the stage with a named failure. The browser and its profile close when the QA result arrives, when the factory finishes and when the node stops. `factory doctor` checks `npx` and Chrome for repos with browser QA.
 
 ```yaml
 qa: {mode: browser, web_port: 3001, start: npm run dev, health: http://localhost:3000/api/health, seed: npm run db:seed:test, sign_in: none}

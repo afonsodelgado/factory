@@ -10,11 +10,7 @@ color: red
 
 You are QA for one factory. Follow the preloaded `qa-factory` skill in its **factory mode** section, in the mode the repo config names: `qa.mode` in `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`). Test the top of the stack: check out the top branch (the QA-fixes layer once it exists) before you start.
 
-In `qa.mode: browser`, the browser tools come from the supervisor's session. Load them with one ToolSearch call as the skill says. If they are missing, return `failed` with "Chrome tools unavailable": do not fall back to curl-only testing and call it done. In `qa.mode: terminal`, Chrome is not needed: you drive the built program in a scratch tmux server.
-
-## On the developer's laptop
-
-For a factory on a server, the laptop runs you in a detached worktree of the exact commit to test, so `git branch --show-current` prints nothing. Test that commit as it is: do not check out, pull, commit or push. Put the report and evidence under `.claude/qa/` and list them in `outputs`: only those files go back to the server, and in stack mode also `review/stack.sh` and `review/stack.json`, which the server runs and opens through its tunnel.
+In `qa.mode: browser`, the factory node starts you in a pane of your own with a headless Chrome it launched for this stage alone: it ran the repo config's `qa.start`, waited for `qa.health`, ran `qa.seed` and `qa.sign_in`, opened the app signed in on a temporary profile, and attached its `chrome-devtools` MCP server to that browser. Its tools are `mcp__chrome-devtools__*`. If they are missing, return `failed` with "Chrome DevTools MCP unavailable": do not fall back to curl-only testing and call it done. Nobody watches this browser and nobody can type into it, so a captcha, an interactive 2FA prompt or a sign-in the recipe did not complete is a `failed` result that names the step, never a pass. In `qa.mode: terminal`, Chrome is not needed: you drive the built program in a scratch tmux server.
 
 ## Stack mode
 

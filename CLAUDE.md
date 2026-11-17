@@ -17,7 +17,7 @@ go test ./...
 go run ./cmd/factory --version
 ```
 
-`make` defaults to `build`. `go-build`, `go-lint` and `go-test` run the native Go commands above. Whole-repository build, lint and test also run the matching `web-*` and `pwa-*` targets; lint includes both typechecks. `make build` builds both apps, runs the uncached `pwa-embed` (copies `apps/pwa/dist` to the git-ignored `bundle/pwa/dist` and checks its build stamp), then builds Go, even under `-j`. A Go-only build embeds only the tracked `bundle/pwa/unavailable.html`, and `factory phone enable` then refuses. `make dev` builds Go before `web-dev`, including under `-j`, and never launches the interactive CLI. Run `go run ./cmd/factory` separately only when intentionally opening the hub.
+`make` defaults to `build`. `go-build`, `go-lint` and `go-test` run the native Go commands above. Whole-repository build, lint and test also run the matching `web-*` and `pwa-*` targets; lint includes both typechecks. `make build` builds both apps, runs the uncached `pwa-embed` (copies `apps/pwa/dist` to the git-ignored `bundle/pwa/dist` and checks its build stamp), then builds Go, even under `-j`. A Go-only build embeds only the tracked `bundle/pwa/unavailable.html`, which the node then serves in place of the phone app. `make dev` builds Go before `web-dev`, including under `-j`, and never launches the interactive CLI. Run `go run ./cmd/factory` separately only when intentionally opening the hub.
 
 `web-*` and `pwa-*` targets dispatch to `pnpm exec turbo run <task> --filter=<package>`, and skip successfully before looking for pnpm only when that app's `package.json` is absent. With the site present, whole-repository build, lint, test and dev need Node, pnpm and Playwright's Chromium; `go-build`, `go-lint` and `go-test` stay Go-only. Root pnpm scripts call these guarded targets.
 
@@ -60,7 +60,7 @@ Address panes by id (`%12`) and windows by name. Never assume a window or pane i
 - No comments. Clear names and small functions instead.
 - Readable conditionals: name the condition when it is not obvious.
 - Measure terminal widths with `lipgloss.Width`, never `len()`.
-- The app never writes `state.json`; the factory supervisor is its only writer, including through `factory attention resolve`.
+- The app never writes `state.json`; the factory supervisor is its only writer. `factory attention resolve` only checks the item with the node and prints the edit for the supervisor to make.
 - A factory is an id and a prompt. There are no tickets: never add tracker integration to the app or the bundle. The skill reads a tracker only when the user's prompt asks it to.
 - `state.json` once had `ticket` where it now has `id`; `state.ParseState` reads both.
 

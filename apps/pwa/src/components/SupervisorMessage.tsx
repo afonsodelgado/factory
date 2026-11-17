@@ -8,17 +8,16 @@ import { useApp } from "../state.tsx";
 import { Blocked, SendLine } from "./Receipt.tsx";
 
 export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
-  const { me, live } = useApp();
-  const device = me?.device.id;
+  const { account, live } = useApp();
   const blocked = useBlocked();
   const { sending, send } = useSend(factory);
   const [text, setText] = useState("");
   const [results, setResults] = useState<MessageResult[]>([]);
 
   useEffect(() => {
-    if (!device) return;
+    if (!account) return;
     let current = true;
-    cache.messages(device, factory.incarnation).then(async (saved) => {
+    cache.messages(account, factory.incarnation).then(async (saved) => {
       if (!current) return;
       setResults(saved);
       if (!live) return;
@@ -28,7 +27,7 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
     return () => {
       current = false;
     };
-  }, [device, factory.incarnation, live]);
+  }, [account, factory.incarnation, live]);
 
   const submit = async () => {
     const sent = text;
@@ -36,7 +35,7 @@ export function SupervisorMessage({ factory }: { factory: LocalFactory }) {
     const result = { text: sent, receipt, at: new Date().toISOString() };
     setResults((recent) => [result, ...recent].slice(0, 3));
     if (receipt.status !== "refused") setText("");
-    if (device) await cache.addMessage(device, factory.incarnation, result);
+    if (account) await cache.addMessage(account, factory.incarnation, result);
   };
 
   const disabled =

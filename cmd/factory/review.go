@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/google/uuid"
 )
 
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [--factory id --remote name] [text…]
@@ -55,7 +54,7 @@ func runReviewReply(args []string) int {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	if _, err := owner.ask(hub.ReviewRequest{Action: "reply", Thread: *thread, Text: text, Resolve: *resolve}); err != nil {
+	if _, err := owner.ask(host.ReviewRequest{Action: "reply", Thread: *thread, Text: text, Resolve: *resolve}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
@@ -70,7 +69,7 @@ func runReviewThreads(args []string) int {
 	if err := flags.Parse(args); err != nil || !owner.valid() {
 		return 2
 	}
-	reply, err := owner.ask(hub.ReviewRequest{Action: "threads", Page: *page})
+	reply, err := owner.ask(host.ReviewRequest{Action: "threads", Page: *page})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
@@ -96,16 +95,11 @@ func runReviewOpen(args []string) int {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	reply, err := askReview(hub.ReviewRequest{Action: "open", ID: *id, URL: flags.Arg(0), Page: page})
-	if err != nil {
+	if _, err := askReview(host.ReviewRequest{Action: "open", ID: *id, URL: flags.Arg(0), Page: page}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
-	if reply.Queued {
-		fmt.Printf("Queued %s for the laptop: its hub opens it through a tunnel once connected, and comments come back here.\n", flags.Arg(0))
-		return 0
-	}
-	fmt.Printf("Opened %s in the factory's Chrome; comments go to %s.\n", flags.Arg(0), reply.Target)
+	fmt.Printf("Open %s in your browser to review it; a connected laptop hub also opens it through a tunnel, and its comments come back here.\n", flags.Arg(0))
 	return 0
 }
 
@@ -114,14 +108,11 @@ func runReviewLink(args []string) int {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	reply, err := askReview(hub.ReviewRequest{Action: "link", URL: args[0]})
-	if err != nil {
+	if _, err := askReview(host.ReviewRequest{Action: "link", URL: args[0]}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
-	if reply.Queued {
-		fmt.Printf("Queued %s for the laptop.\n", args[0])
-	}
+	fmt.Printf("Open %s in your browser; a connected laptop hub also opens it.\n", args[0])
 	return 0
 }
 
@@ -138,16 +129,11 @@ func runReviewStack(args []string) int {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	reply, err := askReview(hub.ReviewRequest{Action: "stack", Page: page})
-	if err != nil {
+	if _, err := askReview(host.ReviewRequest{Action: "stack", Page: page}); err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
-	if reply.Queued {
-		fmt.Println("Starting the stack in its own window; the laptop's hub opens it through a tunnel once it answers.")
-		return 0
-	}
-	fmt.Printf("Starting the stack in its own window; the factory's Chrome opens %s once it answers.\n", reply.Target)
+	fmt.Println("Starting the stack in its own window; open its URL from review/stack.json in your browser once it answers. A connected laptop hub opens it through a tunnel.")
 	return 0
 }
 
@@ -162,43 +148,41 @@ func ownerFlags(flags *flag.FlagSet) reviewOwner {
 
 func (o reviewOwner) valid() bool { return *o.remote == "" || *o.id != "" }
 
-func (o reviewOwner) ask(r hub.ReviewRequest) (hub.ReviewReply, error) {
+func (o reviewOwner) ask(r host.ReviewRequest) (host.ReviewReply, error) {
 	r.ID = *o.id
 	if *o.remote == "" {
 		return askReview(r)
 	}
 	cfg, err := state.LoadConfig()
 	if err != nil {
-		return hub.ReviewReply{}, err
+		return host.ReviewReply{}, err
 	}
 	client, err := remote.For(cfg, *o.remote)
 	if err != nil {
-		return hub.ReviewReply{}, err
+		return host.ReviewReply{}, err
 	}
-	var reply hub.ReviewReply
+	var reply host.ReviewReply
 	if r.Action == "threads" {
 		return reply, client.Read(context.Background(), "review", r, &reply)
 	}
 	return reply, client.MutateOnce(context.Background(), "review", r, &reply)
 }
 
-func askReview(r hub.ReviewRequest) (hub.ReviewReply, error) {
+func askReview(r host.ReviewRequest) (host.ReviewReply, error) {
 	cfg, err := state.LoadConfig()
 	if err != nil {
-		return hub.ReviewReply{}, err
+		return host.ReviewReply{}, err
 	}
-	if !hubRunning(cfg) {
-		return hub.ReviewReply{}, errors.New("the factory hub is not running; start it with factory open")
+	runtime, err := localNode(cfg)
+	if err != nil {
+		return host.ReviewReply{}, err
 	}
 	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
 	r.Cwd, _ = os.Getwd()
-	reply, err := request(cfg.SocketPath(), "review", r)
-	if err != nil {
-		return hub.ReviewReply{}, err
+	op := ""
+	if r.Action != "threads" && r.Action != "status" {
+		op = uuid.NewString()
 	}
-	if reply.T == "error" {
-		return hub.ReviewReply{}, errors.New(reply.Error)
-	}
-	var answer hub.ReviewReply
-	return answer, json.Unmarshal(reply.Data, &answer)
+	var answer host.ReviewReply
+	return answer, runtime.Request(context.Background(), "review", op, r, &answer)
 }

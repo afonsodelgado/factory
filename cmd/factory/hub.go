@@ -7,19 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/hub"
-	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/remote"
-	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -38,18 +33,19 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	if err != nil {
 		return err
 	}
+	runtime, err := localNode(cfg)
+	if err != nil {
+		return err
+	}
 	self := os.Getenv("TMUX_PANE")
 	if self == "" {
 		return errors.New("not inside tmux; start the hub with factory open")
 	}
-	if err := os.MkdirAll(cfg.StateDir, 0o755); err != nil {
-		return err
-	}
-	release, err := phone.Claim(cfg, phone.ModeHub, version)
+	unlock, err := lockHub(cfg.HubViewLock())
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer unlock()
 
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
 	bin, err := os.Executable()
@@ -68,10 +64,6 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	if err != nil {
 		return err
 	}
-	registry, err := state.LoadRegistry(cfg.RegistryPath())
-	if err != nil {
-		return err
-	}
 	events := make(chan hub.Event, 64)
 	for _, e := range startup {
 		events <- e
@@ -81,24 +73,10 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer server.Close()
-	pages, phoneProblem, err := startReview(cfg)
-	if err != nil {
-		return err
-	}
-	defer pages.Close()
-	pages.SetActions(hub.ReviewActions(events))
-	var chrome *review.Browser
-	if cfg.Review.FactoryChrome() {
-		chrome = pages.NewBrowser(filepath.Join(cfg.StateDir, "chrome"), cfg.Review.Chrome, false)
-		defer chrome.Close()
-	}
 	restore := engine.BindReturn(cfg.Hub.ReturnKey, layout)
 	defer restore()
 	icons := theme.IconsFor(cfg.Icons)
 	defer engine.SetHeader(hub.StoppedHeader(icons))
-	if err := os.MkdirAll(cfg.SessionsDir(), 0o755); err != nil {
-		return err
-	}
 	watch, err := hub.NewWatcher()
 	if err != nil {
 		return err
@@ -112,19 +90,14 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		Engine:  engine,
 		Layout:  layout,
 		Server:  server,
-		Loader:  &hub.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now},
+		Node:    runtime,
 		Events:  events,
 		Watch:   watch,
-		GitHub:  &hub.GitHub{Run: hub.RunGH},
-		Typist:  engine,
-		Open:    reviewOpener(pages, chrome),
-		Review:  pages,
-		Chrome:  chrome,
+		Open:    openURL,
 		Tunnels: tunnels,
 		Bell:    os.Stderr,
 		Notify:  notify,
 		Icons:   icons,
-		Problem: phoneProblem,
 		DialogCommand: func(kind string) string {
 			return shellQuote(bin) + " dialog " + kind + " --socket " + shellQuote(cfg.SocketPath())
 		},
@@ -145,34 +118,6 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
 	}
 	return err
-}
-
-func reviewOpener(pages *review.Server, chrome *review.Browser) func(string) {
-	return func(url string) {
-		if chrome != nil && strings.HasPrefix(url, pages.Origin()+"/") && chrome.OpenPage(url) == nil {
-			return
-		}
-		openURL(url)
-	}
-}
-
-func startReview(cfg *state.Config) (pages *review.Server, phoneProblem string, err error) {
-	token, err := review.Token(cfg.StateDir)
-	if err != nil {
-		return nil, "", err
-	}
-	overlay, err := bundle.Files.ReadFile("review/overlay.js")
-	if err != nil {
-		return nil, "", err
-	}
-	pages, err = review.Listen(cfg.Review.Port, token, overlay)
-	if err != nil {
-		return nil, "", err
-	}
-	if err := pages.ServeMobile(review.MobileSocket(cfg.StateDir)); err != nil {
-		return pages, "Phone review pages are off; a shorter FACTORY_STATE_DIR may fix it: " + err.Error(), nil
-	}
-	return pages, "", nil
 }
 
 func lockHub(path string) (func(), error) {

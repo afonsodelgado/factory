@@ -9,9 +9,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/google/uuid"
 )
 
 const resultPoll = 2 * time.Second
@@ -85,7 +86,7 @@ func runStageCI(prs []string) int {
 		fmt.Fprintln(os.Stderr, stageUsage)
 		return 2
 	}
-	inbox, err := ask(hub.StageRequest{Action: "ci", PRs: prs})
+	inbox, err := ask(host.StageRequest{Action: "ci", PRs: prs})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
@@ -102,7 +103,7 @@ func stage(c stageCall) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	r := hub.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory}
+	r := host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory}
 	if c.Remote == "" {
 		return ask(r)
 	}
@@ -114,32 +115,23 @@ func stage(c stageCall) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var reply hub.StageReply
+	var reply host.StageReply
 	return reply.Result, client.MutateOnce(context.Background(), "stage", r, &reply)
 }
 
-func ask(r hub.StageRequest) (string, error) {
+func ask(r host.StageRequest) (string, error) {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return "", err
 	}
-	if !hubRunning(cfg) {
-		return "", errors.New("the factory hub is not running; start it with factory open")
-	}
-	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
-	r.Cwd, _ = os.Getwd()
-	reply, err := request(cfg.SocketPath(), "stage", r)
+	runtime, err := localNode(cfg)
 	if err != nil {
 		return "", err
 	}
-	if reply.T == "error" {
-		return "", errors.New(reply.Error)
-	}
-	var answer hub.StageReply
-	if err := json.Unmarshal(reply.Data, &answer); err != nil {
-		return "", err
-	}
-	return answer.Result, nil
+	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
+	r.Cwd, _ = os.Getwd()
+	var answer host.StageReply
+	return answer.Result, runtime.Request(context.Background(), "stage", uuid.NewString(), r, &answer)
 }
 
 func waitForFile(path string) []byte {

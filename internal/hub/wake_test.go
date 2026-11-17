@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
@@ -43,13 +44,13 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := PlanWake(c.item, false, hooks, nil).Command; got != c.want {
+			if got := PlanWake(c.item, hooks, nil).Command; got != c.want {
 				t.Errorf("wake runs %q, want %q", got, c.want)
 			}
 		})
 	}
 
-	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), false, nil, nil)
+	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), nil, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
 	}
@@ -89,10 +90,10 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	}
 	entry := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true})
 	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{ID: "ENG-9"}, Entry: entry}}
-	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
-	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{archived}})
+	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+	node.show(model, Snapshot{At: time.Now(), Items: []Item{archived}})
 	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived", "doctor": "`doctor` is a factory command"} {
-		if err := model.open(OpenRequest{Name: name}); err == nil || !strings.Contains(err.Error(), reason) {
+		if err := model.ask("open", OpenRequest{Name: name}, nil); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Errorf("open %q = %v; want it refused, naming %q", name, err, reason)
 		}
 	}
@@ -117,8 +118,8 @@ func TestDeleteSelectsTheNextRowAndFreesTheId(t *testing.T) {
 	}
 	failed := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-1-x", Created: true})
 	next := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-2-y", Created: true})
-	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
-	model.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{
+	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+	node.show(model, Snapshot{At: time.Now(), Items: []Item{
 		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-1-x", Entry: failed}},
 		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-2-y", Entry: next}},
 	}})
@@ -150,8 +151,8 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	loader := &Loader{Config: cfg, Registry: registry, Now: time.Now}
-	model := NewModel(Model{Config: cfg, Loader: loader})
-	model.SetSnapshot(loader.Load())
+	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: loader})
+	node.show(model, loader.Load())
 
 	tm := teatest.NewTestModel(t, dialog.NewFactory(model.newContext()), teatest.WithInitialTermSize(84, 22))
 	tm.Type("ENG-9")
@@ -164,12 +165,15 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 		t.Errorf("n ENG-9 gave %+v; want a new factory with its prompt, under an id the done row does not hold", result)
 	}
 
-	model.open(OpenRequest{Name: "ENG-9", Prompt: "Retry the export."})
+	model.ask("open", OpenRequest{Name: "ENG-9", Prompt: "Retry the export."}, nil)
 	if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(repo), "eng-9-2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	model.SetSnapshot(loader.Load())
-	model.open(OpenRequest{Name: "eng-9-2"})
+	node.show(model, loader.Load())
+	var key string
+	model.ask("open", OpenRequest{Name: "eng-9-2"}, &key)
+	model.show(ShowRequest{Select: key})
+	node.show(model, loader.Load())
 	var keys []string
 	for _, it := range loader.Load().Items {
 		keys = append(keys, it.Factory.Slug)
@@ -184,12 +188,14 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 
 func TestOpenRefusesARepoTheRunningHubDoesNotListUntilFactoryRunsThere(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
-	model := NewModel(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}})
-	err := model.open(OpenRequest{Name: "ENG-1", Repo: "/r/added-later"})
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}}, host.Runtime{})
+	err := model.ask("open", OpenRequest{Name: "ENG-1", Repo: "/r/added-later"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "does not list /r/added-later") {
 		t.Errorf("open in a repo the hub never discovers = %v; the factory would get no row", err)
 	}
-	model.addRepo(RepoRequest{Repo: "/r/added-later", Here: true})
+	model.ask("repo", RepoRequest{Repo: "/r/added-later"}, nil)
+	model.show(ShowRequest{Here: "/r/added-later"})
+	node.show(model, Snapshot{At: time.Now()})
 	c := model.newContext()
 	if len(c.Repos) != 2 || c.Repos[c.Repo].Path != "/r/added-later" || !c.Here {
 		t.Errorf("after factory ran in /r/added-later the n dialog offers %d repos with %q picked (here %v); want it listed without a restart and picked, so no list to choose from", len(c.Repos), c.Repos[c.Repo].Path, c.Here)
@@ -204,7 +210,7 @@ func TestCreatingAFactoryKeepsTheConfiguredToolUnderAModelPickedInTheDialog(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	model := NewModel(Model{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
+	model, _ := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 
 	err = model.create(dialog.NewResult{Repo: repo, Slug: "csv", Prompt: "Export contacts.", Agents: map[string]state.AgentSetting{"engineer": {Model: "gpt-6.1-sol"}}})
 	if err == nil || !strings.Contains(err.Error(), "not attached to tmux") {
@@ -227,7 +233,7 @@ func TestRepoSettingsWaitsForPopupCloseAndRefreshesTheSelectedRepo(t *testing.T)
 	os.WriteFile(state.RepoConfigPath(repo), []byte("qa: {mode: terminal}\ncoderabbit: false\n"), 0o644)
 	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{t.TempDir()}}
 	loader := &Loader{Config: cfg}
-	model := NewModel(Model{Config: cfg, Loader: loader, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }})
+	model, _ := withNode(Model{Config: cfg, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }}, host.Runtime{Loader: loader})
 	model.window = [2]int{100, 40}
 	model.here = cfg.Repos[0]
 	deliver := func(kind string, result any) {

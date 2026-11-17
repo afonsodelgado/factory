@@ -62,8 +62,8 @@ func run(args []string) int {
 		return runAttention(args[1:])
 	case "remote":
 		return runRemote(args[1:])
-	case "serve":
-		return runServe(args[1:])
+	case "node":
+		return runNode(args[1:])
 	case "phone":
 		return runPhone(args[1:])
 	case "--remote", "--local":
@@ -137,28 +137,30 @@ commands:
   review threads [--page path] [--open] [--factory id [--remote name]]
               list this factory's comment threads
   review open [--factory id] [--for design|walkthrough] <url>
-              open any page, such as the running app, in the factory's
-              Chrome with the comment layer
+              queue any page, such as the running app, for review and print
+              its URL to open in your browser
   review stack [--for design|walkthrough]
               run the stack that factory-qa wrote to review/stack.json in a
-              window of its own, then open the app signed in for the
-              walkthrough
+              window of its own for the walkthrough
   review link <url>
-              open a link in the browser of the machine you work on; on a
-              server, the laptop's hub opens it through a tunnel
+              print a link to open in your browser; a connected laptop hub
+              opens it through a tunnel
   attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <id>
-              set an attention item's resolved_at in state.json, and
-              waiting_on when given (run by the supervisor)
+              check with the node that the item is open, then print the
+              state.json edit that resolves it; the supervisor makes the edit
+              (run by the supervisor)
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
   update      install the latest release, then run its bootstrap
-  hub         run the hub in the factory tmux session
-  host run    run the factories without the hub, in a window of the factory
-              tmux session that keeps going after you disconnect (on a
-              server)
+  node run [--owner login]
+              run this machine's node in the foreground: it owns the
+              factories, their panes, review pages and notifications whether
+              or not a hub is open; --owner is the Tailscale login allowed
+              through Tailscale Serve
+  hub         show the node's factories in the factory tmux session
   host request
-              answer one JSON request from another machine on stdin (run
-              over ssh by the factory on that machine)
+              answer one JSON request from another machine on stdin through
+              the running node (run over ssh by the factory on that machine)
   view        run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a hook event (run by Claude Code, Codex and OpenCode)

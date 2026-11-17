@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -40,19 +41,19 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := NewModel(Model{Config: cfg, Engine: e, Layout: l, Typist: e})
+	engine := &host.Panes{TM: e.TM, Session: e.Session}
+	m, n := withNode(Model{Config: cfg, Engine: e, Layout: l}, host.Runtime{Engine: engine, Typist: engine, TM: e.TM})
 	supervisorPane := pane(t, e.TM, supervisor)
-	m.snap = Snapshot{At: time.Now(), Items: []Item{{Factory: f, Pane: &supervisorPane}}}
+	n.show(m, Snapshot{At: time.Now(), Items: []Item{{Factory: f, Pane: &supervisorPane}}})
 
 	op := uuid.NewString()
-	request, _ := json.Marshal(StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
+	request, _ := json.Marshal(host.StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
 	send := func() Message {
-		replies := make(chan Message, 1)
-		m.handleEvent(Event{Message: Message{T: "stage", Op: op, Data: request}, Reply: replies})
-		return <-replies
+		reply, _ := n.Call(context.Background(), Message{T: "stage", Op: op, Data: request})
+		return reply
 	}
 	first, retry := send(), send()
-	var reply StageReply
+	var reply host.StageReply
 	if err := json.Unmarshal(first.Data, &reply); err != nil || first.T != "done" || string(retry.Data) != string(first.Data) {
 		t.Fatalf("first %+v, retry %+v: a retried operation must return the first receipt", first, retry)
 	}
@@ -167,30 +168,30 @@ func TestACodexSupervisorHearsAboutAFinishedStageOnceAndOnlyWhenIdle(t *testing.
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, "/r", "csv"))
 	runs.Runs = append(runs.Runs, state.StageRun{Role: "engineer", Round: 1, Token: "t-eng", Result: result})
 	runs.Save()
-	writeFile(result, `{"status":"done"}`)
+	host.WriteFile(result, `{"status":"done"}`)
 
 	at := time.Now()
 	busy := &state.HookFile{Token: "t-sup", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}
 	idle := &state.HookFile{Token: "t-sup", Main: &state.HookEvent{Event: "Stop", At: at}, Last: state.HookEvent{Event: "Stop", At: at}}
 	typist := &fakeTypist{}
-	m := NewModel(Model{Config: &state.Config{StateDir: stateDir}, Typist: typist})
+	m, n := withNode(Model{Config: &state.Config{StateDir: stateDir}}, host.Runtime{Typist: typist})
 	supervisor := tmux.Pane{ID: "%3", Command: "codex", Token: "t-sup"}
 	f := factory.Factory{Repo: "/r", Slug: "csv", Dir: dir, Entry: &state.Entry{Supervisor: state.AgentSetting{Tool: state.ToolCodex}}}
 	snapshot := func(hook *state.HookFile, at time.Time) Snapshot {
 		return Snapshot{At: at, Items: []Item{{Factory: f, Pane: &supervisor, Hook: hook}}, Panes: []tmux.Pane{supervisor}, Hooks: []*state.HookFile{hook}}
 	}
 
-	m.apply(snapshot(busy, at))
+	n.show(m, snapshot(busy, at))
 	if len(typist.typed) != 0 {
 		t.Fatalf("typed %q into a busy supervisor; want it held until the supervisor is at its prompt", typist.typed)
 	}
-	m.apply(snapshot(idle, at.Add(time.Second)))
-	m.apply(snapshot(idle, at.Add(2*time.Second)))
-	restarted := NewModel(Model{Config: &state.Config{StateDir: stateDir}, Typist: typist})
-	restarted.apply(snapshot(idle, at.Add(3*time.Second)))
+	n.show(m, snapshot(idle, at.Add(time.Second)))
+	n.show(m, snapshot(idle, at.Add(2*time.Second)))
+	restarted, again := withNode(Model{Config: &state.Config{StateDir: stateDir}}, host.Runtime{Typist: typist})
+	again.show(restarted, snapshot(idle, at.Add(3*time.Second)))
 
 	want := []string{"%3: stage engineer done: " + result}
 	if !slices.Equal(typist.typed, want) {
-		t.Errorf("typed %q; want exactly %q, once, even after a hub restart forgets what it queued", typist.typed, want)
+		t.Errorf("typed %q; want exactly %q, once, even after a node restart forgets what it queued", typist.typed, want)
 	}
 }

@@ -144,6 +144,10 @@ func (m *Settings) help() string {
 		return "The command QA runs to start the local browser stack."
 	case "qa.health":
 		return "The URL QA checks to know the local stack is ready."
+	case "qa.seed":
+		return "The command that seeds an isolated test environment before QA, or none. Browser QA refuses to start without it."
+	case "qa.sign_in":
+		return "The command that signs in and prints the session cookies as JSON, or none. Browser QA refuses to start without it."
 	case "coderabbit":
 		return "Include CodeRabbit review in factories started in this repo."
 	default:
@@ -236,8 +240,8 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 		m.drawField(c, y, w, field, focused, edited)
 		y += heights[i]
 	}
-	if m.values["qa.mode"] != "browser" && (m.settings.Present["qa.start"] || m.settings.Present["qa.health"]) {
-		c.PutMax(1, y+1, "start and health stay in the file; terminal QA does not use them.", theme.Muted, w)
+	if m.values["qa.mode"] != "browser" && slices.ContainsFunc(browserOnlyKeys, func(key string) bool { return m.settings.Present[key] }) {
+		c.PutMax(1, y+1, "start, health, seed and sign_in stay in the file; terminal QA does not use them.", theme.Muted, w)
 	}
 	c.Unclip()
 	for i, line := range help {
@@ -248,6 +252,8 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
+
+var browserOnlyKeys = []string{"qa.start", "qa.health", "qa.seed", "qa.sign_in"}
 
 func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edited bool) {
 	title := strings.TrimPrefix(strings.TrimPrefix(key, "commands."), "qa.")

@@ -27,7 +27,7 @@ func Slugify(s string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "remote", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
+var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "node", "remote", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
 
 func IsReservedID(name string) bool {
 	return slices.Contains(ReservedIDs, name) || slices.Contains(ReservedIDs, Slugify(name))
@@ -54,18 +54,13 @@ type Launch struct {
 	Stages     []string
 	Agents     map[string]state.AgentSetting
 	SessionID  string
-	Chrome     bool
 	Supervisor state.AgentSetting
 	AddDirs    []string
 }
 
 func (l Launch) flags() []string {
 	flags := option("--model", l.Supervisor.Model)
-	flags = append(flags, option("--effort", l.Supervisor.Effort)...)
-	if l.Chrome {
-		flags = append(flags, "--chrome")
-	}
-	return flags
+	return append(flags, option("--effort", l.Supervisor.Effort)...)
 }
 
 const openCodeSkillCommand = "Use the factory skill for: /factory"

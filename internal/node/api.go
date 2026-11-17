@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,14 +18,17 @@ import (
 )
 
 const (
+	Protocol    = 1
+	MinProtocol = 1
 	maxBody     = 64 << 10
+	commandWait = time.Minute
 	heartbeat   = 15 * time.Second
 	pollEvery   = time.Second
 	runtimeWait = 10 * time.Second
 	retryAfter  = "2"
 )
 
-var ErrUnavailable = errors.New("the factory runtime is not answering; it may be changing between the hub and factory serve")
+var ErrUnavailable = errors.New("the factory node is not answering; check that factory node run is running")
 
 type Principal func(*http.Request) (string, bool)
 
@@ -33,6 +37,8 @@ type Commands struct{ Runtime Caller }
 type API struct {
 	Commands
 	Version string
+	Node    string
+	Boot    string
 	Now     func() time.Time
 
 	mu        sync.Mutex
@@ -48,8 +54,16 @@ func (a *API) now() time.Time {
 	return a.Now()
 }
 
-func (a *API) Handler(principal Principal) http.Handler {
+func (a *API) With(app http.Handler, principal Principal, kinds ...string) http.Handler {
 	mux := http.NewServeMux()
+	a.Register(mux, principal, kinds...)
+	mux.Handle("/", app)
+	return mux
+}
+
+var NetworkKinds = []string{"create", "removal", "delete", "archive", "unarchive", "wake", "pause", "wake-all"}
+
+func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string) {
 	route := func(pattern string, serve func(http.ResponseWriter, *http.Request, string)) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			caller, ok := principal(r)
@@ -67,12 +81,21 @@ func (a *API) Handler(principal Principal) http.Handler {
 	route("GET /api/operations/{operation}", a.Operation)
 	route("POST /api/factories/{key}/actions", a.Act)
 	route("POST /api/factories/{key}/preview", a.Preview)
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
-	return mux
+	mux.HandleFunc("POST /api/commands/{kind}", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := principal(r); !ok {
+			fail(w, http.StatusUnauthorized, "this request has no owner identity")
+			return
+		}
+		if len(kinds) > 0 && !slices.Contains(kinds, r.PathValue("kind")) {
+			fail(w, http.StatusNotFound, "no such command on this listener")
+			return
+		}
+		a.Command(w, r)
+	})
 }
 
 func (a *API) me(w http.ResponseWriter, r *http.Request, caller string) {
-	reply(w, http.StatusOK, Me{Caller: caller, Version: a.Version, ServerTime: a.now()})
+	reply(w, http.StatusOK, Me{Caller: caller, Node: a.Node, Version: a.Version, ServerTime: a.now()})
 }
 
 func (a *API) snapshot(w http.ResponseWriter, r *http.Request, _ string) {
@@ -129,8 +152,24 @@ func (a *API) publish(local []host.LocalFactory) {
 		revision = a.current.Revision + 1
 	}
 	a.factories = factories
-	a.current = &Snapshot{Revision: revision, ServerTime: a.now(), Factories: local}
+	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local}
 	a.broadcast(event("snapshot", a.current))
+}
+
+func (a *API) Factories() (int64, []host.LocalFactory, bool) {
+	snap, ok := a.Latest()
+	return snap.Revision, snap.Factories, ok
+}
+
+func (a *API) Connected(installation string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for s := range a.streams {
+		if installation != "" && s.installation == installation {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *API) lose() {
@@ -143,7 +182,10 @@ func (a *API) lose() {
 	a.broadcast(event("unavailable", map[string]any{"retry": true}))
 }
 
-type stream struct{ next chan []byte }
+type stream struct {
+	installation string
+	next         chan []byte
+}
 
 func (s *stream) offer(e []byte) {
 	for {
@@ -170,8 +212,8 @@ func event(name string, value any) []byte {
 	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", name, data)
 }
 
-func (a *API) subscribe() *stream {
-	s := &stream{next: make(chan []byte, 1)}
+func (a *API) subscribe(installation string) *stream {
+	s := &stream{installation: installation, next: make(chan []byte, 1)}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.streams == nil {
@@ -198,7 +240,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request, _ string) {
 		fail(w, http.StatusInternalServerError, "streaming is not supported")
 		return
 	}
-	s := a.subscribe()
+	s := a.subscribe(r.URL.Query().Get("installation"))
 	defer a.unsubscribe(s)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -220,14 +262,14 @@ func (a *API) events(w http.ResponseWriter, r *http.Request, _ string) {
 	}
 }
 
-func (c Commands) Operation(w http.ResponseWriter, r *http.Request, caller string) {
+func (c Commands) Operation(w http.ResponseWriter, r *http.Request, _ string) {
 	op := r.PathValue("operation")
 	if uuid.Validate(op) != nil {
 		fail(w, http.StatusNotFound, "no such operation")
 		return
 	}
 	var receipt host.Receipt
-	answer, err := c.call(r.Context(), "receipt", "", host.ReceiptRequest{Device: caller, Operation: op}, &receipt)
+	answer, err := c.call(r.Context(), "receipt", "", host.ReceiptRequest{Operation: op}, &receipt)
 	switch {
 	case err != nil:
 		unavailable(w)
@@ -283,6 +325,32 @@ func (c Commands) Act(w http.ResponseWriter, r *http.Request, caller string) {
 		reply(w, http.StatusConflict, receipt)
 	default:
 		reply(w, http.StatusOK, receipt)
+	}
+}
+
+func (c Commands) Command(w http.ResponseWriter, r *http.Request) {
+	op := r.Header.Get(OperationHeader)
+	if op != "" && uuid.Validate(op) != nil {
+		fail(w, http.StatusBadRequest, OperationHeader+" must be a UUID")
+		return
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, host.MaxMessage))
+	if err != nil || !json.Valid(data) {
+		fail(w, http.StatusBadRequest, "the request body is not JSON")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), commandWait)
+	defer cancel()
+	answer, err := c.Runtime.Call(ctx, host.Message{T: r.PathValue("kind"), Op: op, Data: data})
+	switch {
+	case err != nil:
+		unavailable(w)
+	case answer.T == "done":
+		reply(w, http.StatusOK, answer)
+	case answer.T == "uncertain":
+		reply(w, http.StatusConflict, answer)
+	default:
+		reply(w, http.StatusUnprocessableEntity, answer)
 	}
 }
 

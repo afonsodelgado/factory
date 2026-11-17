@@ -22,6 +22,7 @@ const types = {
   ".md": "text/plain",
 };
 
+const owner = "afonso@example.com";
 let state;
 const streams = new Set();
 const reviewStreams = new Set();
@@ -29,8 +30,6 @@ const reviewStreams = new Set();
 function reset() {
   state = {
     mode: "up",
-    codes: {},
-    devices: {},
     snapshot: { revision: 1, server_time: now(), factories: [] },
     receipts: {},
     actions: [],
@@ -54,9 +53,26 @@ function send(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-function device(req) {
-  const cookie = /factory_device=([^;]+)/.exec(req.headers.cookie ?? "");
-  return cookie ? state.devices[cookie[1]] : undefined;
+function refused(req, res, url) {
+  const login = req.headers["tailscale-user-login"] ?? owner;
+  if (login === owner) return false;
+  const page =
+    req.method === "GET" &&
+    !url.pathname.startsWith("/api/") &&
+    !url.pathname.includes("/_api/");
+  if (page) {
+    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(
+      `<!doctype html><h1>This node answers ${owner} only</h1><p>Signed in as ${login}.</p><script>indexedDB.deleteDatabase("factory-phone")</script>`,
+    );
+    return true;
+  }
+  send(res, 403, {
+    error: `this node belongs to ${owner}, not ${login}`,
+    owner,
+    login,
+  });
+  return true;
 }
 
 async function body(req) {
@@ -179,48 +195,12 @@ async function review(req, res, key, rest, prefix = "") {
 
 async function api(req, res, url) {
   const route = url.pathname;
-  if (route === "/api/pair/status") {
-    const { code } = await body(req);
-    const entry = state.codes[code];
-    if (!entry || entry.used)
-      return send(res, 410, {
-        error: "This pairing code was used or has expired.",
-      });
-    return send(res, 200, { expires_at: entry.expires });
-  }
-  if (route === "/api/pair/exchange") {
-    const { code, name } = await body(req);
-    const entry = state.codes[code];
-    if (!entry || entry.used)
-      return send(res, 410, {
-        error: "This pairing code was used or has expired.",
-      });
-    entry.used = true;
-    const secret = randomUUID();
-    const paired = { id: randomUUID(), name, paired_at: now() };
-    state.devices[secret] = paired;
-    return send(
-      res,
-      200,
-      { device: paired },
-      {
-        "Set-Cookie": `factory_device=${secret}; Path=/; HttpOnly; SameSite=Strict`,
-      },
-    );
-  }
-  const me = device(req);
-  if (!me) return send(res, 401, { error: "This phone is not paired." });
   if (route === "/api/me") {
     return send(res, 200, {
-      device: me,
+      caller: owner,
+      node: "node-1",
       version: "test",
       server_time: now(),
-      push: {
-        vapid_public_key:
-          "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
-        subscribed: Boolean(state.subscription),
-        endpoint: state.subscription?.endpoint,
-      },
     });
   }
   if (route === "/api/snapshot") return send(res, 200, state.snapshot);
@@ -233,8 +213,19 @@ async function api(req, res, url) {
     );
   }
   if (route === "/api/push/subscription") {
-    state.subscription = req.method === "DELETE" ? null : await body(req);
-    return send(res, 200, { subscribed: Boolean(state.subscription) });
+    if (req.method === "POST") state.subscription = await body(req);
+    if (req.method === "DELETE") state.subscription = null;
+    const mine =
+      state.subscription &&
+      (req.method === "POST" ||
+        state.subscription.installation ===
+          url.searchParams.get("installation"));
+    return send(res, 200, {
+      vapid_public_key:
+        "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
+      subscribed: Boolean(mine),
+      endpoint: mine ? state.subscription.endpoint : undefined,
+    });
   }
   let match = /^\/api\/operations\/(.+)$/.exec(route);
   if (match) {
@@ -290,13 +281,6 @@ async function control(req, res, url) {
     reset();
     return send(res, 200, {});
   }
-  if (route === "/__test/code") {
-    const code = randomUUID().replaceAll("-", "");
-    state.codes[code] = {
-      expires: new Date(Date.now() + 300_000).toISOString(),
-    };
-    return send(res, 200, { code });
-  }
   if (route === "/__test/state") {
     Object.assign(state, await body(req));
     if (state.snapshotFactories) {
@@ -304,11 +288,6 @@ async function control(req, res, url) {
       delete state.snapshotFactories;
       publish();
     }
-    return send(res, 200, {});
-  }
-  if (route === "/__test/revoke") {
-    state.devices = {};
-    for (const s of streams) s.end();
     return send(res, 200, {});
   }
   if (route === "/__test/actions") return send(res, 200, state);
@@ -335,8 +314,7 @@ async function sandboxed(req, res, token, rest) {
     });
     return res.end();
   }
-  const holder = state.grants[token];
-  if (!holder || !Object.values(state.devices).some((d) => d.id === holder))
+  if (!state.grants[token])
     return send(res, 401, { error: "This review page expired." });
   if (rest === "/_access") return res.writeHead(204).end();
   if (rest === "/_review/overlay.js")
@@ -354,17 +332,16 @@ http
     try {
       if (url.pathname.startsWith("/__test/"))
         return await control(req, res, url);
-      if (state.mode === "serve-down")
+      if (state.mode === "node-down")
         return send(res, 502, { error: "bad gateway" });
+      if (refused(req, res, url)) return;
       if (url.pathname.startsWith("/api/")) return await api(req, res, url);
       const granted = /^\/rt\/([^/]+)(\/.*)$/.exec(url.pathname);
       if (granted) return await sandboxed(req, res, granted[1], granted[2]);
       const reviewPath = /^\/r\/([^/]+)\/(.+)$/.exec(url.pathname);
       if (reviewPath) {
-        const current = device(req);
-        if (!current) return send(res, 401, {});
         const token = randomUUID();
-        state.grants[token] = current.id;
+        state.grants[token] = true;
         res.writeHead(303, {
           Location: `/rt/${token}${url.pathname}`,
           "Cache-Control": "no-store",

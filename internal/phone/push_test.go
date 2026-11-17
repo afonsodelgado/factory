@@ -6,8 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -52,14 +55,14 @@ func (v *vendor) took() []vendorCall {
 	return calls
 }
 
-func subscriptionFor(t *testing.T, device, endpoint string) Subscription {
+func subscriptionFor(t *testing.T, installation, endpoint string) Subscription {
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	auth := make([]byte, 16)
 	rand.Read(auth)
-	return Subscription{Device: device, Endpoint: endpoint, P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(auth)}
+	return Subscription{Installation: installation, Endpoint: endpoint, P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(auth)}
 }
 
 func factoryWith(paused bool, keys ...string) []host.LocalFactory {
@@ -92,15 +95,8 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	if reconcile(factoryWith(false, "old"), offline) {
 		t.Fatal("enabling Phone notified about an item that was already open")
 	}
-	phones := map[string]Device{}
 	for _, name := range []string{"a", "b"} {
-		code, _, _ := store.NewCode(now)
-		device, _, err := store.Exchange(code, name, now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		phones[name] = device
-		if err := store.Subscribe(subscriptionFor(t, device.ID, v.URL+"/"+name)); err != nil {
+		if _, err := store.Subscribe(subscriptionFor(t, name, v.URL+"/"+name)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -130,7 +126,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 
 	if queued, _ := Open(store.Dir).Reconcile(factoryWith(false, "old", "k1"), offline, now); queued {
-		t.Fatal("a restarted factory serve notified again about an item it already pushed")
+		t.Fatal("a restarted node notified again about an item it already pushed")
 	}
 
 	v.answers["/a"] = []int{http.StatusServiceUnavailable}
@@ -141,7 +137,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	if calls := v.took(); len(calls) != 2 {
 		t.Fatalf("vendor saw %d pushes; want one each, with the failed one held for its Retry-After", len(calls))
 	}
-	if subs, _ := store.Subscriptions(); len(subs) != 1 || subs[0].Device != phones["a"].ID {
+	if subs, _ := store.Subscriptions(); len(subs) != 1 || subs[0].Installation != "a" {
 		t.Fatalf("subscriptions %+v; want phone b dropped after its push service answered 410", subs)
 	}
 	now = now.Add(61 * time.Second)
@@ -159,7 +155,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	if calls := v.took(); len(calls) != 1 || calls[0].topic != "k1" {
 		t.Fatalf("vendor saw %+v; want the replacement under k1's tag", calls)
 	}
-	if reconcile(factoryWith(false, "old"), func(string) bool { return true }) {
+	if reconcile(factoryWith(false, "old"), func(installation string) bool { return installation == "a" }) {
 		t.Fatal("a resolution was pushed to a phone whose open app clears it itself")
 	}
 
@@ -176,12 +172,12 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 
 	reconcile(factoryWith(false, "k5"), offline)
-	if err := store.Revoke(phones["a"].ID); err != nil {
+	if err := store.Unsubscribe(v.URL + "/a"); err != nil {
 		t.Fatal(err)
 	}
 	pusher.Deliver(ctx)
 	if calls := v.took(); len(calls) != 0 {
-		t.Fatalf("a revoked phone was still pushed: %+v", calls)
+		t.Fatalf("a phone that turned notifications off was still pushed: %+v", calls)
 	}
 
 	if _, err := PublicClient().Get(v.URL); err == nil || !strings.Contains(err.Error(), "not public") {
@@ -198,27 +194,71 @@ func TestAnOldEndpointsFailureLeavesTheRenewedSubscriptionOn(t *testing.T) {
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
 	offline := func(string) bool { return false }
-	code, _, _ := store.NewCode(now)
-	device, _, err := store.Exchange(code, "a", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Subscribe(subscriptionFor(t, device.ID, v.URL+"/old")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/old")); err != nil {
 		t.Fatal(err)
 	}
 	store.Reconcile(factoryWith(false, "old"), offline, now)
 	store.Reconcile(factoryWith(false, "old", "k1"), offline, now)
-	if err := store.Subscribe(subscriptionFor(t, device.ID, v.URL+"/new")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new")); err != nil {
 		t.Fatal(err)
 	}
 
 	pusher.Deliver(context.Background())
-	store.settle(job{ID: "in-flight", Device: device.ID, Endpoint: v.URL + "/old"}, http.StatusGone, 0, "", now)
-	if sub, ok := store.SubscriptionOf(device.ID); !ok || sub.Endpoint != v.URL+"/new" {
+	store.settle(job{ID: "in-flight", Endpoint: v.URL + "/old"}, http.StatusGone, 0, "", now)
+	if sub, ok := store.SubscriptionOf("a"); !ok || sub.Endpoint != v.URL+"/new" {
 		t.Fatalf("subscription %+v after the browser's old endpoint failed; want the renewed one kept, or the phone stays silent until the app is opened", sub)
 	}
 	if calls := v.took(); len(calls) != 0 {
 		t.Fatalf("vendor saw %+v; want nothing sent to the replaced endpoint", calls)
+	}
+}
+
+func TestAPairedPhonesSubscriptionKeepsDeliveringAfterTheAuthMigration(t *testing.T) {
+	store := Open(t.TempDir())
+	public, err := store.VAPIDKey("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := newVendor(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	a, b := subscriptionFor(t, "", v.URL+"/a"), subscriptionFor(t, "", v.URL+"/b")
+	legacy := map[string]any{
+		"devices.json":       map[string]any{"devices": []map[string]any{{"id": "dev-a", "name": "Pixel", "hash": "h1"}, {"id": "dev-b", "name": "iPad", "hash": "h2"}}},
+		"codes.json":         map[string]any{"codes": []map[string]any{{"hash": "c1", "expires": now}}},
+		"subscriptions.json": map[string]any{"subscriptions": []map[string]any{{"device": "dev-a", "endpoint": a.Endpoint, "p256dh": a.P256dh, "auth": a.Auth}, {"device": "dev-b", "endpoint": b.Endpoint, "p256dh": b.P256dh, "auth": b.Auth}}},
+		"push.json":          map[string]any{"baseline": true, "items": map[string]any{"old": map[string]any{"route": "r", "item": "q-old", "incarnation": "csv-1", "open": true, "revision": 1}}, "jobs": []map[string]any{{"id": "queued", "device": "dev-a", "endpoint": a.Endpoint, "tag": "old", "payload": "{}", "due": now}}},
+	}
+	for name, value := range legacy {
+		if err := store.write(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for range 2 {
+		if err := store.Adopt(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range pairingFiles {
+		if _, err := os.Stat(store.path(name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s survived the migration; pairing codes and device hashes must be gone", name)
+		}
+	}
+	if again, _ := store.VAPIDKey(""); again != public {
+		t.Fatal("the migration changed the VAPID key, so every subscribed phone would go silent")
+	}
+	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
+	pusher.Deliver(context.Background())
+	if calls := v.took(); len(calls) != 1 || calls[0].path != "/a" {
+		t.Fatalf("after the migration the vendor saw %+v; want the job queued before the upgrade delivered to phone a", calls)
+	}
+	if _, err := store.Subscribe(subscriptionFor(t, "pixel", a.Endpoint)); err != nil {
+		t.Fatal(err)
+	}
+	store.Reconcile(factoryWith(false, "old", "k1"), func(string) bool { return false }, now)
+	pusher.Deliver(context.Background())
+	if calls := v.took(); len(calls) != 2 {
+		t.Fatalf("a new item reached %+v; want both paired phones, including the one whose app re-registered", calls)
 	}
 }
 

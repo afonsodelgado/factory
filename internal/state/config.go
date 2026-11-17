@@ -53,13 +53,7 @@ type Codex struct {
 }
 
 type Review struct {
-	Port    int    `yaml:"port"`
-	Browser string `yaml:"browser"`
-	Chrome  string `yaml:"chrome"`
-}
-
-func (r Review) FactoryChrome() bool {
-	return r.Browser != "system"
+	Chrome string `yaml:"chrome"`
 }
 
 type Tmux struct {
@@ -123,9 +117,6 @@ func (c *Config) applyDefaults() {
 	if c.Hub.ReturnKey == "" {
 		c.Hub.ReturnKey = "M-0"
 	}
-	if c.Review.Port == 0 {
-		c.Review.Port = 7417
-	}
 	if c.Icons == "" {
 		c.Icons = "nerd"
 	}
@@ -153,6 +144,10 @@ func (c *Config) DraftsDir() string    { return filepath.Join(c.StateDir, "draft
 func (c *Config) ActivityDir() string  { return filepath.Join(c.StateDir, "activity") }
 func (c *Config) SocketPath() string   { return filepath.Join(c.StateDir, "hub.sock") }
 func (c *Config) LockPath() string     { return filepath.Join(c.StateDir, "hub.lock") }
+func (c *Config) NodeSocket() string   { return filepath.Join(c.StateDir, "node.sock") }
+func (c *Config) ReviewSocket() string { return filepath.Join(c.StateDir, "review.sock") }
+func (c *Config) NodeLockPath() string { return filepath.Join(c.StateDir, "node.lock") }
+func (c *Config) HubViewLock() string  { return filepath.Join(c.StateDir, "hub-view.lock") }
 func (c *Config) RulesPath() string    { return filepath.Join(c.ConfigDir, "rules.md") }
 
 func SessionsDir(stateDir string) string {

@@ -14,12 +14,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/hub"
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
-	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 func runDelete(args []string, in *os.File, out io.Writer) int {
@@ -61,13 +61,19 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "factory delete:", err)
 		return 1
 	}
+	runtime, err := localNode(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory delete:", err)
+		return 1
+	}
 	removal := factory.PlanRemoval(f, cfg)
 	answers := bufio.NewReader(in)
 	if !*yes && !confirm(out, answers, whatGoes(f, removal)+"Delete "+f.Label()+"? [y/N] ") {
 		fmt.Fprintln(out, "Nothing was deleted.")
 		return 0
 	}
-	if work := factory.CheckWork(removal); !work.Empty() {
+	work := factory.CheckWork(removal)
+	if !work.Empty() {
 		if !term.IsTerminal(in.Fd()) {
 			fmt.Fprintf(os.Stderr, "factory delete: refusing: %s has unpushed or uncommitted work and stdin is not a terminal; run it in a terminal\n", f.Label())
 			return 1
@@ -77,14 +83,16 @@ func runDelete(args []string, in *os.File, out io.Writer) int {
 			return 0
 		}
 	}
-	report, failed, err := deleteFactory(cfg, f, removal)
+	var report string
+	answer, err := runtime.Call(context.Background(), host.Message{T: "delete", Op: uuid.NewString(), Data: mustJSON(host.DeleteRequest{Repo: f.Repo, Slug: f.Slug, Work: host.WorkDigest(work)})})
+	json.Unmarshal(answer.Data, &report)
 	fmt.Fprint(out, report)
-	if err != nil {
+	switch {
+	case err != nil:
 		fmt.Fprintln(os.Stderr, "factory delete:", err)
 		return 1
-	}
-	if failed {
-		fmt.Fprintf(os.Stderr, "factory delete: %s is not fully deleted; run factory delete %s again to finish\n", f.Label(), id)
+	case answer.T != "done":
+		fmt.Fprintf(os.Stderr, "factory delete: %s is not fully deleted: %s. Run factory delete %s again to finish\n", f.Label(), answer.Error, id)
 		return 1
 	}
 	return 0
@@ -259,27 +267,4 @@ func workAtRisk(f factory.Factory, w factory.Work) string {
 	}
 	fmt.Fprintln(&b, "Deleting loses it.")
 	return b.String()
-}
-
-func deleteFactory(cfg *state.Config, f factory.Factory, r factory.Removal) (string, bool, error) {
-	if hubRunning(cfg) {
-		reply, err := request(cfg.SocketPath(), "delete", hub.DeleteRequest{Repo: f.Repo, Slug: f.Slug})
-		if err != nil {
-			return "", false, err
-		}
-		var report string
-		json.Unmarshal(reply.Data, &report)
-		return report, reply.T == "error", nil
-	}
-	closed := factory.PanesClosed(f.Label(), hub.CloseFactoryPanes(tmux.Client{Socket: cfg.Tmux.Socket}, f.Repo, f.Slug))
-	steps := factory.Run(closed, r, func(change func(*state.Registry)) error {
-		registry, err := state.LoadRegistry(cfg.RegistryPath())
-		if err != nil {
-			return err
-		}
-		change(registry)
-		return registry.Save()
-	})
-	_, failed := factory.FirstFailure(steps)
-	return factory.Report(steps), failed, nil
 }

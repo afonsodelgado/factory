@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -22,6 +23,8 @@ type Operation struct {
 }
 
 const ReusedOperation = "operation id already belongs to a different request"
+
+const keptOperations = 30 * 24 * time.Hour
 
 func (m *Runtime) Execute(id, action string, data json.RawMessage, effect func() Message) Message {
 	return Journal(m.Config.StateDir, id, action, data, false, effect)
@@ -123,8 +126,30 @@ func (m *Runtime) saveQueue(queue []QueuedType) bool {
 	return true
 }
 
+func pruneOperations(stateDir string, before time.Time) {
+	if stateDir == "" {
+		return
+	}
+	dir := filepath.Join(stateDir, "operations")
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(before) {
+			continue
+		}
+		var op Operation
+		data, err := os.ReadFile(path)
+		settled := err == nil && json.Unmarshal(data, &op) == nil && op.Status != "accepted"
+		if settled {
+			os.Remove(path)
+		}
+	}
+}
+
 func (m *Runtime) Recover() error {
 	m.allowRememberedTunnels()
+	pruneOperations(m.Config.StateDir, m.Now().Add(-keptOperations))
 	if err := m.loadReceipts(); err != nil {
 		return err
 	}
