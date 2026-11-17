@@ -110,11 +110,13 @@ func declinedf(format string, args ...any) error {
 	return declined{fmt.Errorf(format, args...)}
 }
 
-func (ts *Transfers) settle(t Transfer, err error) (Transfer, error) {
+func (ts *Transfers) settle(ctx context.Context, t Transfer, err error) (Transfer, error) {
 	var changed HolderChanged
 	switch {
 	case interrupted(err):
 		return t, err
+	case ctx.Err() != nil:
+		return t, ctx.Err()
 	case errors.As(err, &declined{}), errors.As(err, &changed):
 		return ts.refused(t, err)
 	}
@@ -169,10 +171,10 @@ func (ts *Transfers) takeOver(ctx context.Context, t Transfer, m Manifest) (Tran
 			return ts.failed(t, err)
 		}
 		if err := ts.ready(ctx, repo, worktree, m); err != nil {
-			return ts.settle(t, err)
+			return ts.settle(ctx, t, err)
 		}
 		if t.Generation, err = ts.claim(ctx, t, m); err != nil {
-			return ts.settle(t, ts.named(err))
+			return ts.settle(ctx, t, ts.named(err))
 		}
 		if t, err = ts.record(t, PhaseReleased); err != nil {
 			return t, err

@@ -2117,6 +2117,47 @@ func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *t
 	}
 }
 
+func TestATakeoverCancelledMidwayIsNotStoredAsARefusal(t *testing.T) {
+	f := newMoveFixture(t)
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shims, marker := t.TempDir(), filepath.Join(t.TempDir(), "stalled")
+	shim := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *cat-file*) [ -e %[1]s ] || { touch %[1]s; exec sleep 30; };; esac\nexec %[2]s \"$@\"\n", marker, git)
+	if err := os.WriteFile(filepath.Join(shims, "git"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.mac.set(func(h *moveHost) { h.onRelease = func() { f.homelab.SetOnline(false) } })
+	op, background := uuid.NewString(), context.Background()
+	if _, err := f.macbook.Transfers.Move(background, op, f.csv.Key, "homelab"); err == nil {
+		t.Fatal("a move whose target went away after the release reported success")
+	}
+	f.homelab.SetOnline(true)
+	source, _, err := node.LoadTransfer(f.macbook.Dir, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation := node.HandOver{Operation: op, Incarnation: source.Incarnation, Checkpoint: source.Checkpoint, Lease: source.Lease}
+	t.Setenv("PATH", shims+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cancelled, cancel := context.WithCancel(background)
+	go func() {
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if _, err := f.homelab.Transfers.Activate(cancelled, activation); err == nil {
+		t.Fatal("an activation cancelled while the target checked its branches reported success")
+	}
+	if taken, err := f.homelab.Transfers.Activate(background, activation); err != nil || taken.Phase != node.PhaseActive {
+		t.Fatalf("activating again after the cancellation answered %+v, %v; want the takeover finished", taken, err)
+	}
+}
+
 func (f moveFixture) moveToHomelab(t *testing.T) {
 	t.Helper()
 	if moved, err := f.macbook.Transfers.Move(context.Background(), uuid.NewString(), f.csv.Key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
