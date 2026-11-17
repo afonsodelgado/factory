@@ -51,6 +51,9 @@ export type LocalItem = {
   body?: string;
   questions?: Question[];
   stage?: string;
+  loop?: string;
+  limit_key?: string;
+  revision: number;
   since: string;
   detail?: string[];
   role?: string;
@@ -67,7 +70,7 @@ export type LocalPage = {
   unavailable?: string;
 };
 
-export type Walkthrough = {
+export type ReviewStack = {
   state: "starting" | "ready" | "failed";
   at: string;
   origin?: string;
@@ -95,13 +98,15 @@ export type LocalFactory = {
   repo: string;
   repo_name: string;
   stage?: string;
+  loop?: string;
+  round?: number;
   status: string;
   paused: boolean;
   needs_since?: string;
   items: LocalItem[];
   resolved?: Resolution[];
   pages: LocalPage[];
-  walkthrough?: Walkthrough;
+  review_stack?: ReviewStack;
   message: Eligibility;
   can_pause: boolean;
   can_wake: boolean;

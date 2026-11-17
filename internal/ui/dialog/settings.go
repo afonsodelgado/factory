@@ -67,7 +67,7 @@ func (m *Settings) fields() []string {
 	return state.SettingsKeys(m.values["qa.mode"])
 }
 
-func settingChoice(key string) bool { return key == "qa.mode" || key == "coderabbit" }
+func settingChoice(key string) bool { return key == "qa.mode" }
 
 func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -106,12 +106,6 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.values[key] = "terminal"
 				} else {
 					m.values[key] = "browser"
-				}
-			case "coderabbit":
-				if m.values[key] == "true" {
-					m.values[key] = "false"
-				} else {
-					m.values[key] = "true"
 				}
 			default:
 				if msg.String() == "space" {
@@ -161,8 +155,6 @@ func (m *Settings) help() string {
 		return "The command that seeds an isolated test environment before QA, or none. Browser QA refuses to start without it."
 	case "qa.sign_in":
 		return "The command that signs in and prints the session cookies as JSON, or none. Browser QA refuses to start without it."
-	case "coderabbit":
-		return "Include CodeRabbit review in factories started in this repo."
 	default:
 		return "build, lint and test are the focused checks every layer of a factory's stack runs. A cleared field is saved as an empty string and keeps its place."
 	}
@@ -245,7 +237,7 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 	c.Clip(y, bottom)
 	for i := start; i < len(fields); i++ {
 		field := fields[i]
-		if blanks > 0 && (field == "qa.mode" || field == "coderabbit") {
+		if blanks > 0 && field == "qa.mode" {
 			y++
 		}
 		focused := i == m.field
@@ -276,13 +268,7 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 	}
 	if settingChoice(key) {
 		title, options, current := "QA mode", []string{"browser", "terminal"}, m.values[key]
-		if key == "coderabbit" {
-			title, options = "CodeRabbit", []string{"on", "off"}
-			current = "off"
-			if m.values[key] == "true" {
-				current = "on"
-			}
-		}
+
 		if focused {
 			c.Put(1, y, "❯", theme.Focused.B())
 		}

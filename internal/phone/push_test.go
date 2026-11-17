@@ -257,7 +257,7 @@ func TestAHandoffAsksOnceWhetherTheWorkIsDoneEvenAsItsSupervisorExits(t *testing
 	}
 	handoff := state.Attention{ID: "handoff-csv-1", Kind: "handoff", Title: "Work done: mark it done or continue working?", StageKey: "handoff", CreatedAt: state.Time{Time: now}}
 	finished := func(pane *tmux.Pane, attention ...state.Attention) []host.LocalFactory {
-		st := &state.State{ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "running"}}, WaitingOn: "user", Attention: attention}
+		st := &state.State{SchemaVersion: 2, ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "running"}}, WaitingOn: "user", Attention: attention}
 		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})
 		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Status: factory.NeedsYou, Pane: pane}}})
 		return r.Local().Factories

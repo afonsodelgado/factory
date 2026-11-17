@@ -39,7 +39,7 @@ func questionFactory(hookEvent string, at time.Time) Snapshot {
 		Recommended: state.Strings{"10 per minute per IP", "429 with Retry-After, and no detail in the body", "10,000 entries, 60 s TTL, LRU"},
 		CreatedAt:   state.Time{Time: at.Add(-4 * time.Minute)},
 	}
-	f := factory.Factory{Repo: "/r/cowork", Slug: "eng-7452-auth-limits", State: &state.State{ID: "ENG-7452", Stage: "requirements", WaitingOn: "user", Attention: []state.Attention{batch}}}
+	f := factory.Factory{Repo: "/r/cowork", Slug: "eng-7452-auth-limits", State: &state.State{SchemaVersion: 2, ID: "ENG-7452", Stage: "requirements", WaitingOn: "user", Attention: []state.Attention{batch}}}
 	hook := &state.HookFile{Main: &state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}, Last: state.HookEvent{Event: hookEvent, At: at.Add(-time.Minute)}}
 	pane := tmux.Pane{ID: "%9", Command: "claude"}
 	return Snapshot{At: at, Panes: []tmux.Pane{pane}, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &pane}}}
@@ -152,8 +152,8 @@ var escapes = regexp.MustCompile("\x1b\\[[0-9;:]*m")
 
 func TestAnswerIsSentOnceAndThePanelSaysWhatHappened(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
-	gate := state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
-	designGate := state.Attention{ID: "gate-7452-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-30 * time.Second)}}
+	gate := state.Attention{ID: "gate-7452-plan", Kind: "gate", StageKey: "plan", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+	designGate := state.Attention{ID: "gate-7452-design", Kind: "gate", StageKey: "design", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-30 * time.Second)}}
 	unrecommended := state.Attention{ID: "q-7452-2", Kind: "question", Title: "1 question", Questions: []string{"Which region?"}, CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 
 	type later struct {
@@ -285,7 +285,7 @@ func TestAfterTheLastAnswerEnterGoesToTheNextFactoryThatNeedsYou(t *testing.T) {
 	snap := questionFactory("Stop", now)
 	other := snap.Items[0]
 	other.Factory.Slug = "eng-7460-exports"
-	other.Factory.State = &state.State{ID: "ENG-7460", Stage: "plan", WaitingOn: "user", Attention: []state.Attention{{ID: "gate-7460-plan", Kind: "gate", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}}}
+	other.Factory.State = &state.State{SchemaVersion: 2, ID: "ENG-7460", Stage: "plan", WaitingOn: "user", Attention: []state.Attention{{ID: "gate-7460-plan", Kind: "gate", StageKey: "plan", Title: "plan approval", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}}}
 	snap.Items = append(snap.Items, other)
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: &fakeTypist{}})
 	node.show(model, snap)
@@ -300,7 +300,7 @@ func TestAfterTheLastAnswerEnterGoesToTheNextFactoryThatNeedsYou(t *testing.T) {
 func TestASmallPanelKeepsTheItemAndItsApproveRow(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	snap := questionFactory("Stop", now)
-	snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "gate-7452-plan", Kind: "gate", Title: "plan approval", Body: "The architect wrote plan.html.", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
+	snap.Items[0].Factory.State.Attention[0] = state.Attention{ID: "gate-7452-plan", Kind: "gate", StageKey: "plan", Title: "plan approval", Body: "The architect wrote plan.html.", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}
 	snap.Items[0].Factory.State.Stages = map[string]state.Stage{"plan": {Artifacts: []state.Artifact{{URL: "plan.html", Title: "Implementation plan"}}}}
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
 	node.show(model, snap)
@@ -314,10 +314,10 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	withCap := func(created time.Time, at time.Time) Snapshot {
 		snap := questionFactory("Stop", at)
-		snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa_fixes", Kind: "cap", Title: "QA rounds 3 of 3", CreatedAt: state.Time{Time: created}}}
+		snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa", Kind: "cap", StageKey: "qa", Loop: "qa_fix", LimitKey: "qa_fix_rounds", Title: "QA rounds 3 of 3", CreatedAt: state.Time{Time: created}}}
 		return snap
 	}
-	firstReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "cap-7452-qa_fixes continue: raise qa_rounds by one for this factory", At: now.Add(time.Second / 2)}
+	firstReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "cap-7452-qa continue: raise qa_fix_rounds by one for this factory", At: now.Add(time.Second / 2)}
 	resolved := questionFactory("Stop", now.Add(time.Second))
 	resolved.Items[0].Factory.State.Attention = []state.Attention{}
 	resolved.Items[0].Hook.Submit = firstReceived
@@ -339,7 +339,7 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
 	asking := questionFactory("Stop", now).Items[0]
-	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
+	quiet := Item{Status: factory.WaitingAgent, Factory: factory.Factory{Repo: "/r/cowork", Slug: "eng-7449-redact", State: &state.State{SchemaVersion: 2, ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{}, PRs: []state.PR{{Number: 1076}, {Number: 1077}}}}}
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{})
 	node.show(model, Snapshot{At: now, Items: []Item{quiet, asking}})
 
@@ -350,7 +350,7 @@ func TestPanelOpensOnAttentionOnlyWhenSomethingIsOpen(t *testing.T) {
 	opened = append(opened, model.panel.tab)
 
 	nowAsking := quiet
-	nowAsking.Factory.State = &state.State{ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
+	nowAsking.Factory.State = &state.State{SchemaVersion: 2, ID: "ENG-7449", Stage: "implement", Attention: []state.Attention{{ID: "q-7449-1", Kind: "question", Title: "1 question", CreatedAt: state.Time{Time: now}}}, PRs: quiet.Factory.State.PRs}
 	node.show(model, Snapshot{At: now.Add(time.Second), Items: []Item{nowAsking, asking}})
 	opened = append(opened, model.panel.tab)
 	model.switchTab(1)
@@ -368,7 +368,7 @@ func TestUnreadableStateIsSaidNotHidden(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	broken := `{"ticket":"ENG-5","attention":[{"id":"q-5-1","kind":"question","options":"zz"}]}`
+	broken := `{"schema_version":2,"id":"ENG-5","attention":[{"id":"q-5-1","kind":"question","options":"zz"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(broken), 0o644); err != nil {
 		t.Fatal(err)
 	}

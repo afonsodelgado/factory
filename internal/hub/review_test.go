@@ -33,7 +33,7 @@ func newReviewFixture(t *testing.T, designerRan bool, supervisorHook *state.Hook
 	}
 	page := filepath.Join(dir, "design", "variant-a.html")
 	os.WriteFile(page, []byte("<body><button>Export</button></body>"), 0o644)
-	st := &state.State{ID: "csv", Stages: map[string]state.Stage{"design": {Artifacts: []state.Artifact{{URL: "file://" + page}}}}}
+	st := &state.State{SchemaVersion: 2, ID: "csv", Stages: map[string]state.Stage{"design": {Artifacts: []state.Artifact{{URL: "file://" + page}}}}}
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir, Worktree: worktree, State: st}
 
 	srv, err := review.New("tok", nil)
@@ -107,31 +107,26 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		message := filepath.Join(fx.f.Dir, "stages", "designer-2.message.md")
-		if reply.Target != "designer" || len(fx.typist.typed) != 1 || fx.typist.typed[0] != "%2: Read "+message+" and follow it." {
-			t.Fatalf("target %q, typed %q; want the designer's pane told to read %s", reply.Target, fx.typist.typed, message)
+		if reply.Target != "supervisor" || len(fx.typist.typed) != 1 || !strings.Contains(fx.typist.typed[0], "design_comments") {
+			t.Fatalf("comments must reach the supervisor before a committed designer dispatch: %+v, %q", reply, fx.typist.typed)
 		}
-		body, _ := os.ReadFile(message)
-		if !strings.HasPrefix(string(body), "review-csv-1 comments: design/variant-a.html") || !strings.Contains(string(body), "Make Export the primary button.") {
-			t.Errorf("the designer's message is %q; want the batch with the comment", body)
-		}
-		runs, _ := state.LoadStageRuns(state.StageRunsPath(fx.m.Config.StateDir, fx.f.Repo, fx.f.Slug))
-		if latest, _ := runs.Latest("designer"); latest.ID == "" {
-			t.Error("the follow-up run is not marked as a review round, so its result would read as the stage finishing")
+		body, _ := os.ReadFile(review.BatchPath(fx.f.Dir, 1))
+		if !strings.Contains(string(body), "Make Export the primary button.") {
+			t.Errorf("saved batch lost its comment: %s", body)
 		}
 		if got := fx.store.Threads("")[0].Status; got != review.Sent {
 			t.Errorf("thread status %q; want sent", got)
 		}
 	})
 
-	t.Run("a prototype on the app's dev server is the designer's, not the walkthrough fixer's", func(t *testing.T) {
+	t.Run("a prototype batch retains design ownership through the supervisor", func(t *testing.T) {
 		fx := newReviewFixture(t, true, idleHook(at))
 		fx.store.Create(review.NewThread{Page: review.Prototype, Intent: "change", Text: "Use the compact table.", Anchor: review.Anchor{URL: "http://localhost:3001/prototypes/csv/variant-a.html", Selector: "table"}})
 		reply, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: review.Prototype})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if reply.Target != "designer" {
+		if reply.Target != "supervisor" || !strings.Contains(fx.typist.typed[0], "designer") {
 			t.Errorf("prototype comments went to %q; want the designer", reply.Target)
 		}
 	})
@@ -150,7 +145,7 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 		snap.Items[0].Hook = snap.Hooks[0]
 		fx.n.show(fx.m, snap)
 		want := "%1: review-csv-1 comments: " + review.BatchPath(fx.f.Dir, 1)
-		if len(fx.typist.typed) != 1 || fx.typist.typed[0] != want {
+		if len(fx.typist.typed) != 1 || !strings.HasPrefix(fx.typist.typed[0], want) {
 			t.Errorf("typed %q; want %q", fx.typist.typed, want)
 		}
 	})
@@ -159,7 +154,7 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 func TestAnApprovalFromTheReviewPageClosesThePanelItemOnceReceived(t *testing.T) {
 	now := time.Now()
 	fx := newReviewFixture(t, false, busyHook(now.Add(-time.Minute)))
-	fx.f.State.Attention = []state.Attention{{ID: "gate-csv-design", Kind: "gate", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-time.Hour)}}}
+	fx.f.State.Attention = []state.Attention{{ID: "gate-csv-design", Kind: "gate", StageKey: "design", Title: "design approval", CreatedAt: state.Time{Time: now.Add(-time.Hour)}}}
 	clock := now
 	fx.m.Now = func() time.Time { return clock }
 	fx.n.r.Now = fx.m.Now

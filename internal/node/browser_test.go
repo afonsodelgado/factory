@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net"
 	"net/http"
@@ -385,7 +386,7 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 	t.Setenv("WAYLAND_DISPLAY", "")
 	repo, stateDir := t.TempDir(), t.TempDir()
 	worktree := filepath.Join(repo, "wt")
-	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{ID: "csv"}}
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "csv"}}
 	configure := func(qa string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Join(repo, ".factory"), 0o755); err != nil {
@@ -401,8 +402,13 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 	t.Cleanup(func() { browsers.Close() })
 	r := host.New(host.Runtime{Config: &state.Config{StateDir: stateDir}, Engine: engine, Jobs: &Jobs{Queue: queue, Ctx: context.Background()}, Browsers: browsers})
 	r.SetSnapshot(host.Snapshot{At: time.Now(), Items: []host.Item{{Factory: f}}})
+	round := 0
 	startQA := func() (host.StageReply, error) {
-		return r.Stage(host.StageRequest{Role: "qa", Factory: "csv", Text: "Test the export."})
+		round++
+		id := fmt.Sprintf("qa-%d", round)
+		f.State.Workflow = state.Workflow{ActiveRun: id, Pending: &state.Effect{ID: id, Kind: "stage", RunID: id, Role: "qa", Stage: "qa"}, Runs: []state.WorkflowRun{{ID: id, Role: "qa", Stage: "qa", Round: round, Prompt: "stages/" + id + ".prompt.md", Result: "stages/" + id + ".result.json"}}}
+		r.SetSnapshot(host.Snapshot{At: time.Now(), Items: []host.Item{{Factory: f}}})
+		return r.Stage(host.StageRequest{EffectID: id, Role: "qa", Factory: "csv", Text: "Test the export."})
 	}
 
 	configure("  seed: none\n")
@@ -461,7 +467,7 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 		t.Fatal("the superseded QA run's late failure wrote the newer run's result")
 	}
 
-	host.WriteFile(reply.Result, `{"status":"done"}`)
+	host.WriteFile(reply.Result, fmt.Sprintf(`{"schema_version":2,"run_id":"qa-%d","status":"done"}`, round))
 	r.ReleaseFinishedBrowsers()
 	if _, err := os.Stat(job.Dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the finished QA stage left its browser profile %s behind: %v", job.Dir, err)

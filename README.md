@@ -42,9 +42,8 @@ Run as many as you like, across every repo you work in. `factory` keeps all of t
 One agent per stage. The factory waits for you at the gates and runs everything between them on its own.
 
 ```
-requirements ─ design ─ plan ─ implement ─ review ─ coderabbit ─ qa ─ qa_fixes ─ test_gaps ─ walkthrough ─ handoff
-      ◆            ◆       ◆                                                                        ◆            ✓
-  you answer   you approve  you approve                                                         you try it   yours to merge
+requirements → design ↔ plan → implement ↔ review → qa → pr → handoff
+   you answer    you approve     local corrections    verification   you confirm
 ```
 
 The plan is always reviewed and approved before any code is written. At the end you get a stack of draft PRs and a handoff note. **Merging is yours.** The factory never merges, deploys or force-pushes `main`.
@@ -282,7 +281,7 @@ The hub follows every node in the list directly: this machine's over `node.sock`
 | `factory move --all --to <node>` | moves every movable factory of this node, one at a time, and prints which moved and why each other one did not; a refusal never undoes a finished move, and Ctrl-C cancels the moves not released yet |
 | `factory move <id> --to <node> --force` | takes a factory over on that node from the last checkpoint it has, when the node that holds it does not answer; prints the warning and asks first, and `--yes` answers for scripts |
 
-A move first asks the target to check itself: protocol, disk, a clone of the repo with its own git login, its tools and agent login, and the repo's stack recipe in a scratch checkout. Then the supervisor writes a checkpoint, while it waits for you or between stages, and the node stops the factory's stages, stack and browser, refuses while an answer or an accepted action is unsettled or product files are uncommitted, pushes the working branch and every stack branch, and sends the factory folder, its QA evidence and the repo config to the target, which stages them without running anything. Credentials, `.env` files, cookies, browser profiles and conversations are never copied. At the commit the target checks itself again, this node records that it released the factory and stops all its processes and walkthrough mappings, and only then does the target take it over: it fetches the branches, checks out the same commits, copies the files, and starts a fresh supervisor with `/factory resume`, never the old conversation. The factory keeps its identity, this node stops listing it, and its files stay here until `factory delete <id>` removes them. A move back fast-forwards that worktree and its branches to the commits the factory made on the other node, and refuses, before anything changes, when they hold uncommitted changes or commits no git remote has.
+A move first asks the target to check itself: protocol, disk, a clone of the repo with its own git login, its tools and agent login, and the repo's stack recipe in a scratch checkout. Then the supervisor writes a checkpoint, while it waits for you or between stages, and the node stops the factory's stages, stack and browser, refuses while an answer or an accepted action is unsettled or product files are uncommitted, pushes the working branch and every stack branch, and sends the factory folder, its QA evidence and the repo config to the target, which stages them without running anything. Credentials, `.env` files, cookies, browser profiles and conversations are never copied. At the commit the target checks itself again, this node records that it released the factory and stops all its processes and review stack mappings, and only then does the target take it over: it fetches the branches, checks out the same commits, copies the files, and starts a fresh supervisor with `/factory resume`, never the old conversation. The factory keeps its identity, this node stops listing it, and its files stay here until `factory delete <id>` removes them. A move back fast-forwards that worktree and its branches to the commits the factory made on the other node, and refuses, before anything changes, when they hold uncommitted changes or commits no git remote has.
 
 Each step is written to `transfers/<operation>.json` in the state directory, so a move interrupted before the release finishes when you run the same `factory move` again, and the factory keeps running here meanwhile. When the target does not confirm after the release, the factory stays stopped on both nodes and the move names the way out: run `factory move <id> --to <node>` again once the target answers, which asks it what happened and never starts the factory twice, or take it back here with `--force`.
 
@@ -304,7 +303,7 @@ The phone app lists this machine's factories, tells you when one needs you, and 
 | `factory phone test` | asks the running node to send a test notification; "accepted" means the push service took it, not that the phone showed it |
 | `factory phone check` | runs the node checks of `factory doctor`: Tailscale, owner, HTTPS, the serve mapping, every Funnel entry, the service, permissions and the push services, with a fix for each failure |
 
-A factory never decides by itself that it is done. When its work is finished it raises a "Work done: mark it done or continue working?" item, and your phone gets one notification saying that the work is done. Mark it done (`ctrl+k` in the panel, or Mark done on the phone) to close the factory. Or type what to do next and send it (`ctrl+s` in the panel, or Continue working on the phone): the fixer does that work on the QA-fixes layer, and then the factory asks you again. Either answer wakes a fresh supervisor first when none runs, and nothing is ever merged. The walkthrough's app stack keeps running while the factory waits for your answer.
+A factory never decides by itself that it is done. When its work is finished it raises a "Work done: mark it done or continue working?" item, and your phone gets one notification saying that the work is done. Mark it done (`ctrl+k` in the panel, or Mark done on the phone) to close the factory. Or send follow-up work: the engineer implements it, independent review and enabled QA run again, and PR verification must pass before another confirmation. Nothing is merged.
 
 `factory node install` sets up the URL once per machine; never use Funnel. On iPhone, add the app to the Home Screen (iOS 16.4 or later) before turning on notifications. Each browser that turns notifications on is kept by its push endpoint; opening the app again re-registers the same subscription without turning it off.
 
@@ -327,17 +326,17 @@ In a web repo, the design can instead be a working prototype built from the app'
 
 The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` prints the URL of any page, such as your app on its dev server, for you to open.
 
-### Walking through the finished app
+### Reviewing the design stack
 
-In repos with browser QA, the `walkthrough` stage comes after QA, just before the handoff:
+Design review stacks remain available in repos with browser QA:
 
 1. `factory review stack` makes the node start this worktree's stack from the repo config: `qa.start` on free loopback ports, then `qa.health`, `qa.seed` and one `qa.sign_in` to check that a browser could hold its cookies. A `qa.start` that returns 0 after starting the app in the background is fine; one that fails before `qa.health` answers is `stack_start`.
 2. The node publishes the healthy app on its own tailnet HTTPS port, from 8443 to 8499, with `tailscale serve --bg --https=<port>` pointed at a loopback proxy. The proxy answers only your Tailscale login (and nothing while Funnel is on anywhere on the machine), strips Tailscale identity and `X-Factory-*` headers before the app sees a request, passes WebSockets, rewrites the app's redirects to the tailnet origin and adds the review overlay to its pages. It forwards only to that stack, never to a URL a request names, and the node's API is not on that origin.
-3. The factory's Pages tab in the phone app shows the walkthrough. Opening it on the phone or another machine goes through a one-use link: the node runs `qa.sign_in` again for that browser and sets its cookies on the walkthrough's origin. The QA browser's session is never copied. A sign-in that prints a cookie for another site is refused as `phone_sign_in_unsupported`.
+3. The factory's Pages tab in the phone app shows the review stack. Opening it on the phone or another machine goes through a one-use link: the node runs `qa.sign_in` again for that browser and sets its cookies on the review stack's origin. The QA browser's session is never copied. A sign-in that prints a cookie for another site is refused as `phone_sign_in_unsupported`.
 
-Comment on the app's elements with the overlay as on any review page; the comments go to the fixer, which changes the code on the QA-fixes layer, and the dev server reloads it in the same tab. A page of another factory's walkthrough cannot comment on this one. Approve in the panel or on the phone when it is right.
+Comment on design elements in the overlay; comments go to the designer. Design changes require fresh approval. Pages keeps authenticated links to running review stacks.
 
-A step that fails is named on the factory, in the phone app's Pages tab and as a `stack` item: `recipe_missing`, `stack_start`, `stack_health`, `seed`, `sign_in`, `phone_sign_in_unsupported`, `port_exhaustion`, `serve_mapping` or `node_restart`. The hub shows it as an activity note. The node journals each walkthrough's ports and Serve mapping in its state directory. Pausing, archiving, deleting or finishing the factory, and stopping the node, remove the mapping with `tailscale serve --https=<port> off` only while it still points at the walkthrough's proxy; after a crash the node does the same when it starts. It never resets Serve. Cookies are not port-scoped, so walkthroughs on one node share a cookie jar per browser.
+A step that fails is named on the factory, in the phone app's Pages tab and as a `stack` item: `recipe_missing`, `stack_start`, `stack_health`, `seed`, `sign_in`, `phone_sign_in_unsupported`, `port_exhaustion`, `serve_mapping` or `node_restart`. The hub shows it as an activity note. The node journals each review stack's ports and Serve mapping in its state directory. Pausing, archiving, deleting or finishing the factory, and stopping the node, remove the mapping with `tailscale serve --https=<port> off` only while it still points at the review stack's proxy; after a crash the node does the same when it starts. It never resets Serve. Cookies are not port-scoped, so review stacks on one node share a cookie jar per browser.
 
 ## Configuration
 
@@ -371,7 +370,6 @@ Each repo's main checkout has its own config in `.factory/config.yml`. It is nev
 ```yaml
 commands: {build: make build, lint: make lint, test: make test}
 qa: {mode: terminal}
-coderabbit: false
 supervisor: {effort: medium}
 stalled_after: 45m
 ```
@@ -394,7 +392,7 @@ Browser QA runs on Mac and Linux nodes in a headless Chrome that the node starts
 qa: {mode: browser, url: 'http://localhost:${FACTORY_WEB_PORT}/', start: PORT=$FACTORY_WEB_PORT npm run dev, health: 'http://localhost:${FACTORY_WEB_PORT}/api/health', seed: npm run db:seed:test, sign_in: none}
 ```
 
-`qa.url` makes a stack portable: the node picks a free loopback port for each stack, exports it to `qa.start`, `qa.seed` and `qa.sign_in` as `FACTORY_WEB_PORT` and `FACTORY_API_PORT`, expands `${FACTORY_WEB_PORT}` and `${FACTORY_API_PORT}` in `qa.url` and `qa.health`, and runs the commands in the worktree. `FACTORY_PUBLIC_ORIGIN` holds the origin a browser uses: the walkthrough's tailnet HTTPS origin, or the local one for QA. Point the dev server's allowed hosts or public URL at it if the app checks them. Without `qa.url` the stack uses the fixed `qa.web_port` and `qa.api_port`, so only one stack per repo runs on a node at a time; `factory doctor` warns about it. `qa.url` must be an `http` URL on `localhost` with a port. Sign-in reads credentials from the node's own environment; its cookies go only into the job's temporary profile or the browser that opened the one-use link, never into the factory directory.
+`qa.url` makes a stack portable: the node picks a free loopback port for each stack, exports it to `qa.start`, `qa.seed` and `qa.sign_in` as `FACTORY_WEB_PORT` and `FACTORY_API_PORT`, expands `${FACTORY_WEB_PORT}` and `${FACTORY_API_PORT}` in `qa.url` and `qa.health`, and runs the commands in the worktree. `FACTORY_PUBLIC_ORIGIN` holds the origin a browser uses: the review stack's tailnet HTTPS origin, or the local one for QA. Point the dev server's allowed hosts or public URL at it if the app checks them. Without `qa.url` the stack uses the fixed `qa.web_port` and `qa.api_port`, so only one stack per repo runs on a node at a time; `factory doctor` warns about it. `qa.url` must be an `http` URL on `localhost` with a port. Sign-in reads credentials from the node's own environment; its cookies go only into the job's temporary profile or the browser that opened the one-use link, never into the factory directory.
 
 `repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
 
@@ -404,27 +402,27 @@ A pipeline is the list of stages a factory runs. Two are built in, so they work 
 
 ```yaml
 pipelines:
-  full:  [requirements, design, plan, implement, review, coderabbit, qa, qa_fixes, test_gaps, walkthrough, handoff]
-  quick: [requirements, plan, implement, review, handoff]
+  full:  [requirements, design, plan, implement, review, qa, pr, handoff]
+  quick: [requirements, plan, implement, review, pr, handoff]
 default_pipeline: full
 ```
 
-Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.factory/config.yml` can do the same, and it wins over `config.yml`. The keys are the stage keys above. `requirements` and `handoff` always run, even when a preset leaves them out, `qa_fixes` and `test_gaps` run only with `qa`, and `walkthrough` runs only in repos with browser QA (`qa.mode: browser`). The name `custom` is reserved for a factory's own list. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
+Put `pipelines` and `default_pipeline` in `config.yml` to add presets or replace a built-in by name. A repo's `.factory/config.yml` can do the same, and it wins over `config.yml`. The keys are the eight stage keys above. Requirements and handoff always run. Every executable preset must include plan, implement, review and pr. Quick explicitly skips QA; design stays conditional. The name custom is reserved. An unknown stage key is a config error: `factory doctor` reports it and `factory open` refuses to start, naming the file and the key.
 
 Pick the stages when you create a factory: the `n` dialog has a step of its own for them, "Stages & agents", between the id and the prompt. It starts at `default_pipeline`. `tab` loads the next preset, `↑↓` move through the stages, `space` checks or unchecks the selected one, and `⏎` goes on to the prompt. When the checked stages match no preset, the factory runs a `custom` pipeline. From the shell, use `factory open <id> --pipeline <name>` for a preset, or `--stages a,b,c` for an exact list; give one or the other, not both. An unknown name is refused with the list of available ones. The factory list shows the pipeline next to the stage when it is not the default.
 
-A pipeline only removes stages. The gates stay: `quick` still shows you the plan and waits for your approval before any code is written. `coderabbit: false` in the repo config still removes CodeRabbit from whichever pipeline you pick, and the design stage still runs only when the change has a user interface. Skipped stages show as `–` in the stage track.
+A pipeline only removes stages. The gates stay: `quick` still shows you the plan and waits for your approval before any code is written. Design runs only when needed and selected. Skipped stages show as `–` in the stage track.
 
 ## Agent models
 
-Each stage runs one agent, and each agent has a default model and effort in its `bundle/agents/factory-<role>.md` file. The roles are `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa` and `fixer`; the fixer runs `qa_fixes`, `test_gaps` and `walkthrough`. To spend less, set them in `config.yml`, in a repo's `.factory/config.yml`, or for one factory:
+Each stage runs one agent, and each agent has a default model and effort in its `bundle/agents/factory-<role>.md` file. The roles are `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `qa` and `ci`. To spend less, set them in `config.yml`, in a repo's `.factory/config.yml`, or for one factory:
 
 ```yaml
 agents:
   analyst:  {model: sonnet}
   engineer: {model: sonnet, effort: medium}
   reviewer: {effort: medium}
-  shepherd: {model: sonnet, effort: low}
+  ci: {model: sonnet, effort: low}
 ```
 
 Each layer overrides the one before it, one field at a time: the agent file, then `config.yml`, then the repo config, then the factory. Models are `haiku`, `sonnet`, `opus` and `fable`. Efforts are `low`, `medium`, `high`, `xhigh` and `max`. `factory doctor` reports an unknown role, model or effort, naming the file and the key.
@@ -453,3 +451,15 @@ With a Claude supervisor, `claude` roles are still subagents, except the iterati
 Your coding rules go in `~/.config/factory/rules.md` (or `$FACTORY_CONFIG_DIR/rules.md`). Every stage agent receives them, on every tool, before the repo's own `AGENTS.md` and `CLAUDE.md`.
 
 Before the first factory on Codex, run `factory bootstrap`, then `codex` once in each repo and choose "Trust and continue", or Codex stops at that prompt. Factory starts Codex with `--dangerously-bypass-hook-trust`, so Codex never asks to trust hooks in a factory, and every enabled hook runs there, not only factory's. `factory doctor` checks the Codex login, that trust, and that a sandboxed commit, push and `gh` work. It runs the Codex and OpenCode checks whenever the config, a repo config or a factory that is not archived uses that tool, so a pick made only in the dialog is checked too.
+
+## Iterative workflow upgrade
+
+Deploy the binary, embedded phone app and bundled skills together. Node protocol is 3 and checkpoint schema is 2; mixed peers are rejected. Reload cached phone clients. Finish or restart old factories before upgrading: workflow schema 2 deliberately does not read old state, and rollback needs the previous binary with its original state. Keep an in-flight upgrade factory on its old binary/bundle until handoff.
+
+The supervisor alone commits state proposals under a revision lock. Local implementation and review never publish. QA findings and regression gaps return to the original owning layer through review. Only the PR stage publishes drafts; CI fixes and follow-up work rerun independent review and enabled QA. Soft correction caps require explicit positive developer increments; refusal keeps the factory waiting. No skip bypasses a failing check or unreviewed change.
+
+Command discovery resolves explicit per-field overrides, root Make targets, declared package scripts, Go defaults, then unambiguous CI commands. Missing commands and startup prerequisites form one question. Detection is recorded with sources and a digest, never silently written as explicit config during init. Supervisor commits require python3 for the bundled OS-locked commit script.
+
+Handoff requires current local checks, review, enabled QA, open ready PRs, CI and repository policy. Confirmed empty check sets pass after the discovery grace as “Passed — no CI checks”; unknown or incomplete responses never pass. Required human approvals remain notes. Optional review comments default off; opt-in applies to all authors. Only the developer confirms done, bound to final head SHAs. Later head/base changes invalidate verification.
+
+Remove obsolete installed factory-shepherd.md, factory-fixer.md and the coderabbit-comments skill directory from your agent configuration after upgrading. The installer does not delete user-installed files. A stale coderabbit repo key is ignored. No migration or reverse conversion is provided. No external service, account, database, worker fleet, merging or deployment is introduced. Local artifacts need backup, and recovery still requires a live owner and supervisor; a disconnected owner does not authorize a second mutating owner. Moves with unpublished branches are refused.

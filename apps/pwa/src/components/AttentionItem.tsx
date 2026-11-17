@@ -156,6 +156,8 @@ type FormProps = {
 
 const forms: Record<string, (props: FormProps) => ReactNode> = {
   question: QuestionForm,
+  commands: TextAnswer,
+  design_return: TextAnswer,
   gate: GateForm,
   comment: CommentForm,
   cap: CapForm,
@@ -660,7 +662,6 @@ function HandoffForm(props: FormProps) {
 function CapForm(props: FormProps) {
   const text = props.draft.text ?? "";
   const cap = props.item.kind === "cap";
-  const skip = props.item.stage ? `Skip ${props.item.stage}` : "Skip";
   return (
     <>
       <Field
@@ -681,14 +682,6 @@ function CapForm(props: FormProps) {
             onClick={() => props.submit({ action: cap ? "continue" : "retry" })}
           >
             {cap ? "Continue one more round" : "Retry"}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={props.disabled}
-            onClick={() => props.submit({ action: "skip" })}
-          >
-            {skip}
           </button>
         </div>
         <button

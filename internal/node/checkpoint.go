@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	CheckpointSchema = 1
+	CheckpointSchema = 2
 	RootFactory      = "factory"
 	RootEvidence     = "evidence"
 	RepoConfigFile   = "config/config.yml"

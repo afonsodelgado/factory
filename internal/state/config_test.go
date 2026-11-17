@@ -370,7 +370,7 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 	}
 }
 
-func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
+func TestRepoSettingsIgnoresAStaleVendorKey(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
 		t.Fatal(err)
@@ -382,8 +382,8 @@ func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.Values["coderabbit"] != "true" {
-		t.Errorf("coderabbit = %q; the pipeline treats a null as on, so the form must show on", settings.Values["coderabbit"])
+	if settings.Values["coderabbit"] != "" {
+		t.Errorf("coderabbit = %q; the retired setting must not appear in the form", settings.Values["coderabbit"])
 	}
 }
 

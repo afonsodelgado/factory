@@ -247,7 +247,7 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
   await server.node(peer("homelab"), {
     factories: [
       factory("rate-limits", [], {
-        walkthrough: {
+        review_stack: {
           state: "ready",
           at: new Date().toISOString(),
           origin: "https://homelab.tail5e2c.ts.net:8443",

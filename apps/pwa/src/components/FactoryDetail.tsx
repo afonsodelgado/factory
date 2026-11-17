@@ -84,7 +84,12 @@ function Head({ factory }: { factory: LocalFactory }) {
       </p>
       {factory.title ? <p className="prompt">{factory.title}</p> : null}
       <p className="l3">
-        {[factory.stage, age(needsSince(factory), now)]
+        {[
+          factory.stage,
+          factory.loop,
+          factory.round ? `round ${factory.round}` : undefined,
+          age(needsSince(factory), now),
+        ]
           .filter(Boolean)
           .join(" · ")}
       </p>

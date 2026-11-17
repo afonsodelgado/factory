@@ -222,8 +222,8 @@ func TestClosingTheHubLeavesTheNodeRunningStages(t *testing.T) {
 
 	runtime := node.Unix(filepath.Join(s.server, "state", "node.sock"))
 	repo := s.startFactory(t, runtime, "csv")
-	writeFile(t, filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv", "state.json"), `{"id": "csv", "stage": "implement"}`)
-	if err := runtime.Request(context.Background(), "stage", uuid.NewString(), host.StageRequest{Action: "start", Role: "engineer", Text: "Implement the plan.", Factory: "csv"}, nil); err != nil {
+	writeFile(t, filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv", "state.json"), `{"schema_version":2,"id":"csv","stage":"implement","workflow":{"active_run":"engineer-1","pending":{"id":"engineer-1","kind":"stage","role":"engineer"},"runs":[{"id":"engineer-1","role":"engineer","stage":"implement","round":1,"prompt":"stages/engineer-1.prompt.md","result":"stages/engineer-1.result.json"}]}}`)
+	if err := runtime.Request(context.Background(), "stage", uuid.NewString(), host.StageRequest{EffectID: "engineer-1", Action: "start", Role: "engineer", Text: "Implement the plan.", Factory: "csv"}, nil); err != nil {
 		t.Fatalf("starting a stage with the hub closed: %v", err)
 	}
 	windows := func() string { return s.serverTmux(t, "list-windows", "-a", "-F", "#{window_name}") }

@@ -79,9 +79,9 @@ func TestDeleteRemovesEverythingLocalAndCanRunAgain(t *testing.T) {
 	if err := os.Symlink(filepath.Join(repo, ".claude", "factory"), filepath.Join(worktree, ".claude", "factory")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(repo, ".claude", "factory", "ENG-5", "state.json"), `{"id":"ENG-5","worktree":"`+worktree+`","branch":"worktree-eng-5-x","prs":[{"number":1,"branch":"stack-1"},{"number":2,"branch":"stack-2"}]}`)
+	writeFile(t, filepath.Join(repo, ".claude", "factory", "ENG-5", "state.json"), `{"schema_version":2,"id":"ENG-5","worktree":"`+worktree+`","branch":"worktree-eng-5-x","prs":[{"number":1,"branch":"stack-1"},{"number":2,"branch":"stack-2"}]}`)
 	other := filepath.Join(repo, ".claude", "factory", "ENG-6", "state.json")
-	writeFile(t, other, `{"id":"ENG-6"}`)
+	writeFile(t, other, `{"schema_version":2,"id":"ENG-6"}`)
 	writeFile(t, filepath.Join(repo, ".claude", "qa", "eng-5-x", "report.md"), "qa")
 	writeFile(t, filepath.Join(repo, ".claude", "qa", "ENG-5", "brief.md"), "qa")
 	marker := filepath.Join(WorktreesDir(repo), ".eng-5-x.ready")
@@ -259,7 +259,7 @@ func TestCheckWorkTreatsASquashMergedStackAsSafe(t *testing.T) {
 	gitRun(t, merger, "push", "-q", "origin", "main", ":stack-1")
 	gitRun(t, repo, "fetch", "-q", "--prune")
 
-	f := Factory{Repo: repo, Slug: "d", Worktree: worktree, State: &state.State{Branch: "worktree-d", PRs: []state.PR{{Number: 1, Branch: "stack-1"}}}}
+	f := Factory{Repo: repo, Slug: "d", Worktree: worktree, State: &state.State{SchemaVersion: 2, Branch: "worktree-d", PRs: []state.PR{{Number: 1, Branch: "stack-1"}}}}
 	if work := CheckWork(PlanRemoval(f, &state.Config{StateDir: t.TempDir()})); !work.Empty() {
 		t.Errorf("work = %+v; a squash-merged stack whose remote branch is gone is reported as work that exists nowhere else, so deleting a done factory asks twice and refuses without a terminal", work)
 	}

@@ -130,7 +130,7 @@ export const FLEET: Factory[] = [
     prompt: "Log every refund with who approved it.",
     status: "agent",
     track: "dsdddddcoo",
-    stage: "qa_fixes",
+    stage: "implement",
     age: "18m",
     prs: 3,
     arts: 2,
@@ -164,9 +164,8 @@ export const AGENTS: Agent[] = [
   ["architect", "claude", "fable", "high", false],
   ["engineer", "codex", "gpt-6.1-sol", "high", true],
   ["reviewer", "claude", "opus", "high", false],
-  ["shepherd", "opencode", "big-pickle", "", false],
+  ["ci", "opencode", "big-pickle", "", false],
   ["qa", "claude", "opus", "high", false],
-  ["fixer", "claude", "sonnet", "medium", false],
 ];
 
 export const ANSWER = "yes, with a reset link";
@@ -219,7 +218,7 @@ export const HUB_PHASES: HubPhase[] = [
       set(s, "webhook-retry", {
         status: "running",
         track: "dsdddcoooo",
-        stage: "coderabbit",
+        stage: "pr",
       });
     },
   },
@@ -314,7 +313,7 @@ const HERO_STEPS: ((st: DemoState) => void)[] = [
     set(s, "webhook-retry", {
       status: "running",
       track: "dsdddcoooo",
-      stage: "coderabbit",
+      stage: "pr",
     }),
   (s) => set(s, "rate-limits", { status: "needs" }),
   (s) =>
@@ -329,7 +328,7 @@ const HERO_STEPS: ((st: DemoState) => void)[] = [
     set(s, "refund-audit", {
       status: "running",
       track: "dsddddddco",
-      stage: "test_gaps",
+      stage: "qa",
     });
   },
   (s) => {

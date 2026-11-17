@@ -232,7 +232,13 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
   const finished = factory.status === "done" && !waiting;
   const stage = waiting
     ? [factory.repo_name, factory.stage].filter(Boolean).join(" · ")
-    : factory.stage;
+    : [
+        factory.stage,
+        factory.loop,
+        factory.round ? `round ${factory.round}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const asOf =
     lost && node.savedAt
       ? [stage, `as of ${clock(node.savedAt)}`].filter(Boolean).join(", ")

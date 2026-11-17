@@ -53,13 +53,6 @@ func Instruction(id, text string) string {
 	return id + " " + strings.TrimSpace(text)
 }
 
-func LimitFor(stage string) string {
-	if stage == "coderabbit" {
-		return "coderabbit_rounds"
-	}
-	return "qa_rounds"
-}
-
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
@@ -98,7 +91,7 @@ func ActionText(item AttentionItem, action string, answers []string, text string
 	case action == ActReply:
 		return CommentReply(item.ID, text)
 	case action == ActContinue:
-		return CapContinue(item.ID, LimitFor(item.Stage))
+		return CapContinue(item.ID, item.LimitKey)
 	case action == ActSkip:
 		return Skip(item.Stage)
 	case action == ActRetry:
@@ -112,7 +105,7 @@ func Fits(item AttentionItem, action string) bool {
 	case ActHandled:
 		return item.Answerable()
 	case ActAnswer:
-		return item.Kind == "question" || item.Kind == "cap" || item.Kind == "failure"
+		return item.Kind == "question" || item.Kind == "commands" || item.Kind == "design_return" || item.Kind == "cap" || item.Kind == "failure"
 	case ActApprove, ActChanges:
 		return item.Kind == "gate"
 	case ActReply:
@@ -122,7 +115,7 @@ func Fits(item AttentionItem, action string) bool {
 	case ActRetry:
 		return item.Kind == "failure"
 	case ActSkip:
-		return item.Kind == "cap" || item.Kind == "failure"
+		return false
 	}
 	return false
 }

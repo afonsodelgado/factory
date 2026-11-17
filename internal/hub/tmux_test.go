@@ -417,7 +417,7 @@ func TestShellPaneReadsExitedAndMissingPaneReadsGone(t *testing.T) {
 
 	cases := map[string]factory.Status{"exited": factory.Exited, "running": factory.Running, "gone": factory.Gone}
 	for slug, want := range cases {
-		f := factory.Factory{Repo: "/repo", Slug: slug, State: &state.State{Stage: "implement"}}
+		f := factory.Factory{Repo: "/repo", Slug: slug, State: &state.State{SchemaVersion: 2, Stage: "implement"}}
 		live := factory.Live{Pane: host.LivePane(panes, f), Hook: &state.HookFile{Main: &state.HookEvent{Event: "PreToolUse", At: time.Now()}}}
 		if got := factory.StatusOf(f, live, time.Now(), time.Hour); got != want {
 			t.Errorf("%s: status = %s, want %s", slug, got, want)

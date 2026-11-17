@@ -65,7 +65,7 @@ func runStageCI(prs []string) int {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
 	}
-	fmt.Println("The factory app waits for CI and CodeRabbit and types the result into this session; the summary also lands in " + inbox)
+	fmt.Println("The factory app waits for CI and types the result into this session; the summary also lands in " + inbox)
 	return 0
 }
 

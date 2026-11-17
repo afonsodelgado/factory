@@ -22,7 +22,7 @@ var now = time.Date(2026, 10, 22, 15, 0, 0, 0, time.UTC)
 func fleet() hub.Snapshot {
 	at := func(d time.Duration) state.Time { return state.Time{Time: now.Add(-d)} }
 	item := func(repo, label, stage string, status factory.Status, since time.Duration) hub.Item {
-		st := &state.State{ID: label, Stage: stage, Stages: map[string]state.Stage{"design": {Status: "skipped"}}}
+		st := &state.State{SchemaVersion: 2, ID: label, Stage: stage, Stages: map[string]state.Stage{"design": {Status: "skipped"}}}
 		for _, key := range state.StageKeys {
 			if key == stage {
 				break
@@ -47,7 +47,7 @@ func fleet() hub.Snapshot {
 	archived.Factory.Entry.Archived = true
 	return hub.Snapshot{At: now, Items: []hub.Item{
 		item(cowork, "ENG-7445", "qa", factory.Gone, 9*time.Hour),
-		item(cowork, "ENG-7447", "coderabbit", factory.WaitingCI, 12*time.Minute),
+		item(cowork, "ENG-7447", "pr", factory.WaitingCI, 12*time.Minute),
 		item(cowork, "ENG-7449", "implement", factory.Running, 27*time.Minute),
 		item(cowork, "ENG-7450", "review", factory.Stalled, 3*time.Hour),
 		needs,

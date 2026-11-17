@@ -137,17 +137,17 @@ commands:
               (run by the supervisor from its pane; --factory reaches a
               factory from outside its panes)
   stage ci <pr number>...
-              wait for CI and CodeRabbit on these PRs, then type the
+              wait for CI on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
   review reply --thread <id> [--resolve] [--factory id] [text…]
               answer a comment thread from the review page, and resolve it
               when the change is made (run by a stage agent)
   review threads [--page path] [--open] [--factory id]
               list this factory's comment threads
-  review open [--factory id] [--for design|walkthrough] <url>
+  review open [--factory id] [--for design] <url>
               check that any page, such as the running app, belongs to the
               factory and print its URL to open in your browser
-  review stack [--for design|walkthrough]
+  review stack [--for design]
               start the stack from the repo config on free ports, publish it
               on its own tailnet HTTPS port and print its URL
   review link <url>

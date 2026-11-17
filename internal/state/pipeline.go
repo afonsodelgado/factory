@@ -31,12 +31,11 @@ type Pipelines struct {
 }
 
 type RepoSupport struct {
-	CodeRabbit bool
-	BrowserQA  bool
+	BrowserQA bool
 }
 
 func (p Profile) Support() RepoSupport {
-	return RepoSupport{CodeRabbit: p.CodeRabbit == nil || *p.CodeRabbit, BrowserQA: p.BrowserQA()}
+	return RepoSupport{BrowserQA: p.BrowserQA()}
 }
 
 func (ps Pipelines) Names() []string {
@@ -142,8 +141,6 @@ func EffectiveStages(chosen []string, repo RepoSupport) []string {
 func (r RepoSupport) Offers(stage string) bool { return slices.Contains(StageKeys, stage) }
 
 func AlwaysRuns(stage string) bool { return slices.Contains(alwaysRun, stage) }
-
-func DependsOnQA(stage string) bool { return false }
 
 func sortedNames(pipelines map[string][]string) []string {
 	var names []string

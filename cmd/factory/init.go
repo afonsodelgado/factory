@@ -46,7 +46,6 @@ func runInit(args []string) int {
 	}
 	fmt.Printf("\nThe repo config is %s. Configure it from the hub’s n dialog (ctrl+e); nothing in the repo is committed.\n", install.HomeRelative(r.Profile))
 	if r.ProfileWritten && r.CopiedFrom == "" {
-		fmt.Println("CodeRabbit is off. Turn it on from the hub’s n dialog (ctrl+e) only if CodeRabbit reviews this repo's pull requests.")
 	}
 	if cfg, err := state.LoadConfig(); r.Remembered && err == nil && node.Answers(cfg.NodeSocket()) {
 		if repo, ok := configuredRepo(cfg.Repos, r.Repo); ok {
@@ -73,7 +72,7 @@ func setupNotice(r install.InitResult) string {
 	case r.CopiedFrom != "":
 		return fmt.Sprintf("Set up %s: copied %s to %s.", repo, install.HomeRelative(r.CopiedFrom), install.HomeRelative(r.Profile))
 	case r.ProfileWritten:
-		return fmt.Sprintf("Set up %s: wrote %s with CodeRabbit off. Configure it from the hub’s n dialog (ctrl+e).", repo, install.HomeRelative(r.Profile))
+		return fmt.Sprintf("Set up %s: wrote %s with command discovery. Configure overrides for it from the hub’s n dialog (ctrl+e).", repo, install.HomeRelative(r.Profile))
 	case r.Remembered:
 		return fmt.Sprintf("Added %s to the hub.", repo)
 	}

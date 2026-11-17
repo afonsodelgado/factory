@@ -1,16 +1,16 @@
-import type { LocalFactory, LocalPage, Walkthrough } from "../api/types.ts";
+import type { LocalFactory, LocalPage, ReviewStack } from "../api/types.ts";
 
 export function Pages({ factory }: { factory: LocalFactory }) {
-  const walkthrough = factory.walkthrough ? (
+  const reviewStack = factory.review_stack ? (
     <ul className="items">
       <li>
-        <WalkthroughRow walkthrough={factory.walkthrough} />
+        <ReviewStackRow reviewStack={factory.review_stack} />
       </li>
     </ul>
   ) : null;
   if (factory.pages.length === 0)
     return (
-      walkthrough ?? (
+      reviewStack ?? (
         <div className="empty">
           <p className="ink">No pages yet.</p>
           <p className="hint sm">
@@ -22,7 +22,7 @@ export function Pages({ factory }: { factory: LocalFactory }) {
     );
   return (
     <>
-      {walkthrough}
+      {reviewStack}
       <p className="pad sm mute">
         Design and plan pages. Open-thread counts come from the supervisor's
         comment watch.
@@ -32,32 +32,32 @@ export function Pages({ factory }: { factory: LocalFactory }) {
   );
 }
 
-function WalkthroughRow({ walkthrough }: { walkthrough: Walkthrough }) {
-  if (walkthrough.state === "ready" && walkthrough.href)
+function ReviewStackRow({ reviewStack }: { reviewStack: ReviewStack }) {
+  if (reviewStack.state === "ready" && reviewStack.href)
     return (
-      <a className="it" href={walkthrough.href}>
+      <a className="it" href={reviewStack.href}>
         <span className="ic grn" aria-hidden="true">
           ▶
         </span>
-        <span className="ink b">Walkthrough</span>
+        <span className="ink b">Review stack</span>
         <span className="sm grn">running</span>
         <span className="s">
-          {walkthrough.origin?.replace("https://", "")} · open signed in ›
+          {reviewStack.origin?.replace("https://", "")} · open signed in ›
         </span>
       </a>
     );
-  const failed = walkthrough.state === "failed";
+  const failed = reviewStack.state === "failed";
   return (
     <span className="it off" aria-disabled="true">
       <span className={`ic ${failed ? "red" : "dk"}`} aria-hidden="true">
         ▶
       </span>
-      <span className="dk">Walkthrough</span>
+      <span className="dk">Review stack</span>
       <span className={`sm ${failed ? "red" : "dk"}`}>
-        {failed ? `failed at ${walkthrough.failure}` : "starting…"}
+        {failed ? `failed at ${reviewStack.failure}` : "starting…"}
       </span>
       <span className="s">
-        {failed ? walkthrough.reason : "The node is starting the app's stack."}
+        {failed ? reviewStack.reason : "The node is starting the app's stack."}
       </span>
     </span>
   );

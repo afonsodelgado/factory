@@ -305,9 +305,9 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
 		return top, nil, withStatus(v, w, field("reply", v.Draft, w)), 0
 	case it.Kind == "cap":
-		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+it.LimitKey+" by one for this factory"), freeText(v, w)...), withStatus(v, w), 0
 	case it.Kind == "failure":
-		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume"), freeText(v, w)...), withStatus(v, w), 0
 	case it.Kind == "handoff":
 		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, w)...), withStatus(v, w), 0
 	}
@@ -321,13 +321,6 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		bottom = append(bottom, text(it.Action, theme.Key))
 	}
 	return top, middle, bottom, 0
-}
-
-func limitFor(stage string) string {
-	if stage == "coderabbit" {
-		return "coderabbit_rounds"
-	}
-	return "qa_rounds"
 }
 
 func questionForm(v View, it Item, w int) ([]line, int) {
@@ -578,12 +571,12 @@ func freeText(v View, w int) []line {
 	return append([]line{blank()}, textBox("instruction", v.Draft, w)...)
 }
 
-func choices(v View, k1, d1, m1, k2, d2, m2 string) []line {
-	return []line{
-		blank(),
-		append(hints(k1, d1), theme.Span{Text: "  " + m1, Ink: theme.Muted}),
-		append(hints(k2, d2), theme.Span{Text: "  " + m2, Ink: theme.Muted}),
+func choices(v View, options ...string) []line {
+	lines := []line{blank()}
+	for i := 0; i < len(options); i += 3 {
+		lines = append(lines, append(hints(options[i], options[i+1]), theme.Span{Text: "  " + options[i+2], Ink: theme.Muted}))
 	}
+	return lines
 }
 
 func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
@@ -592,7 +585,7 @@ func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		c.Right(x+w-1, y, ic.Icon("gh")+"gh checked "+ago(v.Now, v.Checked)+" ago · refreshes every 60s", theme.Muted)
 	}
 	if len(v.PRs) == 0 {
-		c.Put(x, y+2, "No PRs yet. They appear once the engineer opens the stack.", theme.Muted)
+		c.Put(x, y+2, "No PRs yet. They appear during the PR stage.", theme.Muted)
 		return
 	}
 	c.Put(x+2, y+2, "#  PR      title", theme.Quiet)

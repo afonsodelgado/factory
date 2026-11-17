@@ -219,7 +219,7 @@ func (m *Runtime) Speaker(it Item, token string) string {
 func StageOfPage(f factory.Factory, page string) string {
 	switch page {
 	case review.App:
-		return "walkthrough"
+		return "design"
 	case review.Prototype:
 		return "design"
 	}

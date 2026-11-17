@@ -35,7 +35,7 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 
 ## Stack mode
 
-There is no stack mode any more: the factory node starts walkthrough and prototype stacks itself from the repo config, on free ports, when the supervisor runs `factory review stack`. If a prompt asks for stack mode, start nothing and return `done` with the summary "the node starts this stack from the repo config; run factory review stack".
+There is no stack mode any more: the factory node starts review and prototype stacks itself from the repo config, on free ports, when the supervisor runs `factory review stack`. If a prompt asks for stack mode, start nothing and return `done` with the summary "the node starts this stack from the repo config; run factory review stack".
 
 ## Ground rules
 

@@ -95,7 +95,7 @@ func (s *Stacks) bringUp(ctx context.Context, run *liveStack, profile state.Prof
 		return err
 	}
 	if err := s.listen(run); err != nil {
-		return failed(host.FailPorts, fmt.Errorf("the walkthrough proxy could not listen on a loopback port: %w", err))
+		return failed(host.FailPorts, fmt.Errorf("the review stack proxy could not listen on a loopback port: %w", err))
 	}
 	if _, err := bringUp(ctx, run.recipe, func(p *stackProcess) {
 		run.process = p
@@ -287,7 +287,7 @@ func (s *Stacks) Recover() []host.StackLease {
 		}
 		if r.Status.State != host.StackFailed {
 			stopped = append(stopped, r.StackLease)
-			r.Status = host.StackStatus{Factory: r.Factory, State: host.StackFailed, At: time.Now(), Failure: host.FailRestart, Reason: "the node restarted, so the walkthrough stack stopped and its tailnet port closed; run factory review stack again"}
+			r.Status = host.StackStatus{Factory: r.Factory, State: host.StackFailed, At: time.Now(), Failure: host.FailRestart, Reason: "the node restarted, so the review stack stack stopped and its tailnet port closed; run factory review stack again"}
 		}
 		if r.Stack != nil && r.Stack.ours() {
 			killGroup(r.Stack.PID)
@@ -343,11 +343,11 @@ func (s *Stacks) Open(w http.ResponseWriter, r *http.Request) {
 	run, status, found := s.byRoute(r.PathValue("route"))
 	switch {
 	case !found:
-		phone.Notice(w, http.StatusNotFound, "No walkthrough runs for this factory", "The supervisor starts it with factory review stack, and the factory's Pages tab links to it once it answers.")
+		phone.Notice(w, http.StatusNotFound, "No review stack runs for this factory", "The supervisor starts it with factory review stack, and the factory's Pages tab links to it once it answers.")
 	case status.State == host.StackFailed:
-		phone.Notice(w, http.StatusConflict, "The walkthrough failed at "+status.Failure, status.Reason)
+		phone.Notice(w, http.StatusConflict, "The review stack failed at "+status.Failure, status.Reason)
 	case status.State != host.StackReady:
-		phone.Notice(w, http.StatusConflict, "The walkthrough is still starting", "Open it again in a moment.")
+		phone.Notice(w, http.StatusConflict, "The review stack is still starting", "Open it again in a moment.")
 	case run.recipe.SignIn == state.NotNeeded:
 		http.Redirect(w, r, status.URL, http.StatusSeeOther)
 	default:

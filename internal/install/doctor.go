@@ -135,6 +135,7 @@ func Doctor(o Options) []Check {
 func doctor(o Options, extra ...Check) []Check {
 	checks := []Check{
 		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
+		tool("python3", "3.8", "python3", []string{"--version"}, installCommand("python3")),
 		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
 		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
 		ghCheck(),
@@ -182,7 +183,7 @@ func repoChecks(o Options) []Check {
 		} else if err := state.CheckProfileKeys(repo); err != nil {
 			checks = append(checks, Check{Name: "repo config", Mark: Warn, Detail: tilde(repo) + ": the repo config sets a value the factory ignores there", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		} else if problems := stackProblems(repo); len(problems) > 0 {
-			checks = append(checks, Check{Name: "repo stack", Mark: Warn, Detail: tilde(repo) + ": browser QA and walkthroughs cannot start its stack unattended on any node", Lines: problems, Fix: "edit " + tilde(state.ProfilePath(repo))})
+			checks = append(checks, Check{Name: "repo stack", Mark: Warn, Detail: tilde(repo) + ": browser QA and review stacks cannot start its stack unattended on any node", Lines: problems, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks
@@ -199,7 +200,7 @@ func stackProblems(repo string) []string {
 		problems = strings.Split(err.Error(), "\n")
 	}
 	if profile.QA.URL == "" {
-		problems = append(problems, "qa.url is not declared, so every stack binds the fixed qa.web_port and two walkthroughs on one node collide; declare qa.url with ${"+node.WebPortEnv+"} and start the app on that port")
+		problems = append(problems, "qa.url is not declared, so every stack binds the fixed qa.web_port and two review stacks on one node collide; declare qa.url with ${"+node.WebPortEnv+"} and start the app on that port")
 	}
 	return problems
 }

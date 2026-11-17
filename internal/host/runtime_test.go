@@ -72,7 +72,7 @@ func newFixture(t *testing.T) fixture {
 	cfg := &state.Config{StateDir: os.Getenv("FACTORY_STATE_DIR"), ConfigDir: os.Getenv("FACTORY_CONFIG_DIR"), Repos: []string{repo}}
 	f := fixture{cfg: cfg, tm: tm, engine: &Panes{TM: tm, Session: "factory"}, worktree: filepath.Join(factory.WorktreesDir(repo), "csv")}
 	f.dir = filepath.Join(f.worktree, ".claude", "factory", "csv")
-	f.pipeline = `{"id":"csv","stage":"implement","supervisor":{"tool":"codex"}}`
+	f.pipeline = `{"schema_version":2,"id":"csv","stage":"implement","supervisor":{"tool":"codex"},"workflow":{"active_run":"engineer-1","pending":{"id":"engineer-1","kind":"stage","role":"engineer","run_id":"engineer-1"},"runs":[{"id":"engineer-1","stage":"implement","role":"engineer","round":1,"prompt":"stages/engineer-1.prompt.md","result":"stages/engineer-1.result.json"}]}}`
 	if err := WriteFile(filepath.Join(f.dir, "state.json"), f.pipeline); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,8 @@ func (f fixture) runtime(t *testing.T, typist Typist) *Runtime {
 }
 
 func (f fixture) startRequest(op string) Message {
-	data, _ := json.Marshal(StageRequest{Action: "start", Token: f.supervisor.Token, Role: "engineer", Text: "Implement the plan."})
+	snapshot, _ := state.ReadState(filepath.Join(f.dir, "state.json"))
+	data, _ := json.Marshal(StageRequest{EffectID: snapshot.Workflow.ActiveRun, Action: "start", Token: f.supervisor.Token, Role: "engineer", Text: "Implement the plan."})
 	return Message{T: "stage", Op: op, Data: data}
 }
 
@@ -202,7 +203,7 @@ func TestHostContinuesAfterClientDisconnect(t *testing.T) {
 	calls := make(chan string, 8)
 	socket, stop := serve(t, f.runtime(t, recordingTypist{calls}))
 	first := request(t, socket, f.startRequest(""))
-	if err := WriteFile(first.Result, `{"status":"done"}`); err != nil {
+	if err := WriteFile(first.Result, `{"schema_version":2,"run_id":"engineer-1","status":"done"}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteFile(filepath.Join(f.dir, "inbox", "ci.json"), `{"text":"CI passed"}`); err != nil {
@@ -211,13 +212,17 @@ func TestHostContinuesAfterClientDisconnect(t *testing.T) {
 	f.awaitTyped(t, calls, "stage engineer done: "+first.Result, "CI passed")
 	stop()
 
+	f.pipeline = strings.ReplaceAll(f.pipeline, "engineer-1", "engineer-2")
+	if err := WriteFile(filepath.Join(f.dir, "state.json"), f.pipeline); err != nil {
+		t.Fatal(err)
+	}
 	restarted, stop := serve(t, f.runtime(t, recordingTypist{calls}))
 	defer stop()
 	second := request(t, restarted, f.startRequest(""))
 	if !strings.HasSuffix(second.Result, "engineer-2.result.json") {
 		t.Fatalf("a restarted host did not start the next stage: %+v", second)
 	}
-	if err := WriteFile(second.Result, `{"status":"done"}`); err != nil {
+	if err := WriteFile(second.Result, `{"schema_version":2,"run_id":"engineer-2","status":"done"}`); err != nil {
 		t.Fatal(err)
 	}
 	f.awaitTyped(t, calls, "stage engineer done: "+second.Result)
@@ -340,7 +345,7 @@ var phoneNow = time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
 
 func phoneSnapshot(event string, attention ...state.Attention) Snapshot {
 	pane := tmux.Pane{ID: "%1", Command: "claude", Token: "sup"}
-	f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{ID: "csv", Stage: "plan", Attention: attention}}
+	f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{SchemaVersion: 2, ID: "csv", Stage: "plan", Attention: attention}}
 	hook := &state.HookFile{Main: &state.HookEvent{Event: event, At: phoneNow.Add(-time.Minute)}, Last: state.HookEvent{Event: event, At: phoneNow.Add(-time.Minute)}}
 	return Snapshot{At: phoneNow, Panes: []tmux.Pane{pane}, Items: []Item{{Factory: f, Status: factory.NeedsYou, Hook: hook, Pane: &pane}}}
 }
@@ -353,7 +358,13 @@ func phoneRuntime(stateDir string, typist Typist, snap Snapshot) *Runtime {
 }
 
 func asked(id, kind string, questions ...string) state.Attention {
-	return state.Attention{ID: id, Kind: kind, Questions: questions, CreatedAt: state.Time{Time: phoneNow.Add(-2 * time.Minute)}}
+	stage := ""
+	if kind == "gate" {
+		stage = "plan"
+	} else if kind == "cap" || kind == "failure" {
+		stage = "qa"
+	}
+	return state.Attention{StageKey: stage, Loop: "qa_fix", LimitKey: "qa_fix_rounds", ID: id, Kind: kind, Questions: questions, CreatedAt: state.Time{Time: phoneNow.Add(-2 * time.Minute)}}
 }
 
 func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
@@ -371,9 +382,9 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"approval carries the notes on one line", act(ActApprove, "gate-csv-plan", nil, "ship it,\nkeep retries"), "%1: /factory approve plan gate-csv-plan ship it, keep retries"},
 		{"changes", act(ActChanges, "gate-csv-plan", nil, "darker header"), "%1: gate-csv-plan changes: darker header"},
 		{"comment reply", act(ActReply, "c1", nil, "done"), "%1: c1 reply: done"},
-		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_rounds by one for this factory"},
+		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_fix_rounds by one for this factory"},
 		{"retry a failure", act(ActRetry, "fail-csv-qa", nil, ""), "%1: /factory resume"},
-		{"skip a failure", act(ActSkip, "fail-csv-qa", nil, ""), "%1: /factory skip qa"},
+		{"skip a failure", act(ActSkip, "fail-csv-qa", nil, ""), ""},
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
 		{"mark a handoff done", act(ActHandled, "handoff-csv-1", nil, ""), "%1: handoff-csv-1 done: the developer marked this factory done"},
 		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
@@ -390,6 +401,12 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 			r := phoneRuntime(t.TempDir(), typist, phoneSnapshot("Stop", items...))
 			receipt, err := r.Act(c.request)
 			got := strings.Join(typist.typed, "\n")
+			if c.request.Action == ActSkip {
+				if err == nil || got != "" {
+					t.Fatal("skip bypassed completion", receipt, err)
+				}
+				return
+			}
 			if err != nil || got != c.typed || (c.typed == "") != (receipt.Status == StatusStale) {
 				t.Errorf("typed %q with %+v, %v; want %q: the phone must send the hub's exact text or nothing", got, receipt, err, c.typed)
 			}
@@ -634,7 +651,7 @@ func TestPauseMarksTheFactoryOnlyWhenThePauseWorked(t *testing.T) {
 func TestRuntimeActionsLeaveStateJSONToTheSupervisor(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
-	written := `{"id":"csv","attention":[{"id":"q-csv-1","kind":"question","resolved_at":null}]}`
+	written := `{"schema_version":2,"id":"csv","attention":[{"id":"q-csv-1","kind":"question","resolved_at":null}]}`
 	if err := os.WriteFile(path, []byte(written), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +798,7 @@ func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheck
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv", "state.json")
-	if err := WriteFile(stateFile, `{"id":"csv","session_id":"old-session"}`); err != nil {
+	if err := WriteFile(stateFile, `{"schema_version":2,"id":"csv","session_id":"old-session"}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.LaunchMoved(key); err != nil {

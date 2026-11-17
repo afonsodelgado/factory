@@ -363,6 +363,12 @@ func (m *Model) panelView() panel.View {
 	}
 	f := it.Factory
 	v.Label = f.Placed()
+	if f.State != nil && f.State.Loops.Active != "" {
+		v.Label += " · " + loopStage(f)
+	}
+	if lf, ok := m.nodeFactories[f.Key()]; ok && lf.Loop != "" {
+		v.Label += " · " + workflowStage(lf.Stage, lf.Loop, lf.Round)
+	}
 	v.Items, v.Settled = m.shownItems(it)
 	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
 		v.Next = next.Factory.Label()
@@ -678,9 +684,9 @@ func nothingTyped(kind string) string {
 	case "comment":
 		return "Type a reply first: ctrl+s sends it"
 	case "cap":
-		return "Type an instruction first, or ctrl+r for one more round, ctrl+x to skip"
+		return "Type an instruction first, or ctrl+r for one more round"
 	case "failure":
-		return "Type an instruction first, or ctrl+r to retry, ctrl+x to skip"
+		return "Type an instruction first, or ctrl+r to retry"
 	case "handoff":
 		return "Type what to do next first, or ctrl+k to mark it done"
 	}

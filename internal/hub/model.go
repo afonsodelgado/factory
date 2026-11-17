@@ -895,7 +895,7 @@ func (m *Model) row(it Item) selector.Row {
 		Repo:   f.RepoName(),
 		Status: it.Status,
 		Track:  factory.Track(f.State),
-		Stage:  stageOf(f),
+		Stage:  loopStage(f),
 	}
 	if name := m.pipelines[f.Key()]; name != "" {
 		row.Stage += " · " + name
@@ -909,7 +909,7 @@ func (m *Model) row(it Item) selector.Row {
 	}
 	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
 		_, settled := m.shownItems(it)
-		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
+		row.Stage, row.Items = workflowStage(lf.Stage, lf.Loop, lf.Round), len(lf.Items)-len(settled)
 	}
 	if m.unverified(it) != "" {
 		row.Stage = "held, unchecked"
@@ -1274,4 +1274,21 @@ func noPaneReason(it Item) string {
 		return fmt.Sprintf("The tmux pane is gone. Its last hook event was at %s.", it.Hook.Last.At.Local().Format("Jan 2 15:04"))
 	}
 	return "The tmux pane is gone."
+}
+
+func loopStage(f factory.Factory) string {
+	if f.State != nil {
+		return workflowStage(f.State.Stage, f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds)
+	}
+	return stageOf(f)
+}
+
+func workflowStage(stage, loop string, round int) string {
+	if round == 0 {
+		return stage
+	}
+	if loop != "" {
+		stage += " · " + loop
+	}
+	return fmt.Sprintf("%s · round %d", stage, round)
 }

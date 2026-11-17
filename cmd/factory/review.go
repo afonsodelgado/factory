@@ -17,8 +17,8 @@ import (
 
 const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [--factory id] [text…]
        factory review threads [--page <path>] [--open] [--factory id]
-       factory review open [--factory <id>] [--for design|walkthrough] <url>
-       factory review stack [--for design|walkthrough]
+       factory review open [--factory <id>] [--for design] <url>
+       factory review stack [--for design]
        factory review link <url>`
 
 func runReview(args []string) int {
@@ -87,7 +87,7 @@ func runReviewThreads(args []string) int {
 func runReviewOpen(args []string) int {
 	flags := flag.NewFlagSet("review open", flag.ContinueOnError)
 	id := flags.String("factory", "", "the factory the comments belong to; default: the one this directory is in")
-	stage := flags.String("for", "walkthrough", "the stage whose agent gets the comments: design (the designer) or walkthrough (the fixer)")
+	stage := flags.String("for", "design", "the design stage receives comments")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -117,11 +117,11 @@ func runReviewLink(args []string) int {
 	return 0
 }
 
-var livePages = map[string]string{"design": review.Prototype, "walkthrough": review.App}
+var livePages = map[string]string{"design": review.Prototype}
 
 func runReviewStack(args []string) int {
 	flags := flag.NewFlagSet("review stack", flag.ContinueOnError)
-	stage := flags.String("for", "walkthrough", "the stage whose agent gets the comments: design (the designer) or walkthrough (the fixer)")
+	stage := flags.String("for", "design", "the design stage receives comments")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -140,10 +140,10 @@ func runReviewStack(args []string) int {
 		return 1
 	}
 	if s := reply.Stack; s.State == host.StackFailed {
-		fmt.Fprintf(os.Stderr, "factory review: the walkthrough stack failed at %s: %s\n", s.Failure, s.Reason)
+		fmt.Fprintf(os.Stderr, "factory review: the review stack stack failed at %s: %s\n", s.Failure, s.Reason)
 		return 1
 	}
-	fmt.Printf("The walkthrough runs at %s, for your tailnet only. The factory's Pages tab in the phone app opens it signed in; comments made on it come back here.\n", reply.Stack.URL)
+	fmt.Printf("The review stack runs at %s, for your tailnet only. The factory's Pages tab in the phone app opens it signed in; comments made on it come back here.\n", reply.Stack.URL)
 	return 0
 }
 
