@@ -1922,7 +1922,7 @@ func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
 	}
 	for _, c := range cases {
 		homelab.SetProbes(c.probe)
-		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
+		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
 		if report := homelab.Transfers.Preflight(context.Background(), request); !strings.Contains(report.Refusal, c.reason) {
 			t.Errorf("preflight with a %s answered %q; want a refusal naming %q", c.name, report.Refusal, c.reason)
 		}
@@ -2201,8 +2201,10 @@ func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *t
 	f := newMoveFixture(t)
 	bare := f.g.run(f.g.repo, "ls-remote", "--get-url", "origin")
 	away := bare + ".away"
-	f.lab.set(func(h *moveHost) {
-		h.onAdopt = func() { os.Rename(bare, away) }
+	f.mac.set(func(h *moveHost) {
+		h.onRelease = func() {
+			f.lab.set(func(target *moveHost) { target.onAdopt = func() { os.Rename(bare, away) } })
+		}
 	})
 	op, key, background := uuid.NewString(), f.csv.Key, context.Background()
 	if _, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err == nil {
@@ -2211,6 +2213,7 @@ func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *t
 	if err := os.Rename(away, bare); err != nil {
 		t.Fatal(err)
 	}
+	f.mac.set(func(h *moveHost) { h.onRelease = nil })
 	f.lab.set(func(h *moveHost) { h.onAdopt = nil })
 	if moved, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
 		t.Fatalf("retrying once git was back answered %+v, %v; want the move finished", moved, err)
@@ -2461,4 +2464,111 @@ func TestMoveAllReportsEachFactorysOutcomeWithoutUndoingTheOthers(t *testing.T) 
 	if h := holderOf(t, f.csv.Incarnation); h.Node != f.homelab.ID {
 		t.Errorf("csv's holder is %+v after move all; want homelab despite the other refusals", h)
 	}
+}
+
+type registeredMoveHost struct {
+	inner   *moveHost
+	runtime *host.Runtime
+}
+
+func (h registeredMoveHost) Call(ctx context.Context, m host.Message) (host.Message, error) {
+	if m.T == "can-adopt" || m.T == "adopt" {
+		var r host.AdoptRequest
+		if err := json.Unmarshal(m.Data, &r); err != nil {
+			return host.Message{}, err
+		}
+		err := h.runtime.CanAdopt(r)
+		if err == nil && m.T == "adopt" {
+			_, err = h.runtime.Adopt(r)
+		}
+		if err != nil {
+			return host.Message{T: "error", Error: err.Error()}, nil
+		}
+	}
+	return h.inner.Call(ctx, m)
+}
+
+func assertOccupiedMovePreserved(t *testing.T, existing, incoming string, alias bool) {
+	t.Helper()
+	f := newMoveFixture(t)
+	ctx := context.Background()
+	clone, err := gitclone.Ensure(ctx, t.TempDir(), appRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.homelab.SetRepos(map[string]string{appRemote: clone})
+	worktree := filepath.Join(factory.WorktreesDir(clone), existing)
+	f.g.run(clone, "worktree", "add", "-q", "-b", "occupied", worktree)
+	files := map[string]string{
+		filepath.Join(".claude", "factory", "csv", "state.json"):  `{"id":"csv","waiting_on":"keep this state"}`,
+		filepath.Join(".claude", "factory", "csv", "progress.md"): "keep this progress",
+		filepath.Join(".claude", "qa", existing, "evidence.txt"):  "keep this evidence",
+	}
+	writeFiles(t, worktree, files)
+	writeFiles(t, filepath.Join(clone, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{clone}}
+	reg, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := host.New(host.Runtime{Config: cfg, Loader: &host.Loader{Config: cfg, Registry: reg, Now: time.Now}, Now: time.Now})
+	if _, err := r.Adopt(host.AdoptRequest{Repo: clone, Slug: existing, Incarnation: uuid.NewString()}); err != nil {
+		t.Fatal(err)
+	}
+	f.homelab.Runtime.Behind(registeredMoveHost{inner: f.lab, runtime: r})
+	destination := filepath.Join(factory.WorktreesDir(clone), incoming)
+	if alias {
+		if err := os.Symlink(worktree, destination); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := os.Stat(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, statErr := os.Stat(destination)
+	same := statErr == nil && os.SameFile(a, b)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		t.Fatal(statErr)
+	}
+	f.csv.Slug, f.csv.Key = incoming, state.Key(f.g.repo, incoming)
+	f.mac = newMoveHost("macbook", f.log, f.csv)
+	f.macbook.Runtime.Behind(f.mac)
+	if err := r.CanAdopt(host.AdoptRequest{Repo: clone, Slug: incoming, Incarnation: f.csv.Incarnation}); same && err == nil {
+		t.Error("the runtime accepted another factory's filesystem folder")
+	} else if !same && err != nil {
+		t.Errorf("distinct filesystem folders were refused: %v", err)
+	}
+	moved, err := f.macbook.Transfers.Move(ctx, uuid.NewString(), f.csv.Key, "homelab")
+	if same {
+		if err == nil || moved.Phase != node.PhasePreflight || !f.mac.runs(f.csv.Key) || len(f.log.all()) != 0 || len(f.lab.adopted) != 0 {
+			t.Errorf("occupied folder was not refused before release: phase=%s err=%v log=%v", moved.Phase, err, f.log.all())
+		}
+	} else if err != nil || moved.Phase != node.PhaseActive {
+		t.Errorf("distinct folder could not move: %+v, %v", moved, err)
+	}
+	for path, want := range files {
+		data, err := os.ReadFile(filepath.Join(worktree, path))
+		if err != nil || string(data) != want {
+			t.Errorf("occupied factory's %s changed: %q, %v", path, data, err)
+		}
+	}
+	if branch := f.g.run(worktree, "branch", "--show-current"); branch != "occupied" {
+		t.Errorf("occupied worktree changed branch to %s", branch)
+	}
+}
+
+func TestAMoveRefusesFilesystemAliasesOfAnotherFactoryBeforeRelease(t *testing.T) {
+	for _, c := range []struct {
+		existing, incoming string
+		alias              bool
+	}{
+		{"csv", "CSV", false}, {"café", "cafe\u0301", false}, {"csv", "linked", true},
+	} {
+		t.Run(c.incoming, func(t *testing.T) { assertOccupiedMovePreserved(t, c.existing, c.incoming, c.alias) })
+	}
+}
+
+func TestAMoveRefusesAnOccupiedSlugBeforeReleasingTheSource(t *testing.T) {
+	assertOccupiedMovePreserved(t, "csv", "csv", false)
 }

@@ -296,6 +296,9 @@ func (ts *Transfers) claim(ctx context.Context, t Transfer, m Manifest) (int64, 
 }
 
 func (ts *Transfers) materialize(ctx context.Context, m Manifest, repo, worktree string) (string, error) {
+	if err := ts.host(ctx, "can-adopt", host.AdoptRequest{Repo: repo, Slug: m.Slug, Incarnation: m.Incarnation}, nil); err != nil {
+		return "", err
+	}
 	if err := checkout(ctx, repo, worktree, m); err != nil {
 		return "", err
 	}
