@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -36,7 +35,7 @@ type StatusError struct {
 	Message string
 }
 
-func (e StatusError) Error() string { return fmt.Sprintf("%d: %s", e.Status, e.Message) }
+func (e StatusError) Error() string { return e.Message }
 
 func Unix(socket string) *Client {
 	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
