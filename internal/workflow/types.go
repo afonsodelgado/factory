@@ -34,6 +34,8 @@ type Event struct {
 }
 
 type Result struct {
+	Questions     []string            `json:"questions,omitempty"`
+	NeedsDesign   *bool               `json:"needs_design,omitempty"`
 	Artifacts     []state.Artifact    `json:"artifacts,omitempty"`
 	SchemaVersion int                 `json:"schema_version"`
 	RunID         string              `json:"run_id"`

@@ -156,3 +156,50 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 		t.Fatal("changed completed factory did not restart verification")
 	}
 }
+
+func TestInterviewAnswersDoNotConsumeTransportRetriesAndDesignRemainsConditional(t *testing.T) {
+	s := workflowState()
+	s = step(t, s, eventFor(s, "start"))
+	for range 3 {
+		e := eventFor(s, "result")
+		e.Stack = s.Stack
+		e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "blocked", InputHeads: s.Stack, OutputHeads: s.Stack, Questions: []string{"Which behaviour?"}}
+		s = step(t, s, e)
+		a := s.Attention[len(s.Attention)-1]
+		e = eventFor(s, "answers")
+		e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "chosen behaviour", "conversation-answer"
+		s = step(t, s, e)
+		if s.Workflow.Runs[len(s.Workflow.Runs)-1].Retries != 0 || s.Stage != "requirements" {
+			t.Fatal(s.Workflow)
+		}
+	}
+	e := eventFor(s, "comments_preference")
+	e.Answer, e.Receipt = "off", "conversation-preference"
+	s = step(t, s, e)
+	design := true
+	e = eventFor(s, "result")
+	e.Stack = s.Stack
+	e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "done", InputHeads: s.Stack, OutputHeads: s.Stack, NeedsDesign: &design}
+	s = step(t, s, e)
+	a := s.Attention[len(s.Attention)-1]
+	e = eventFor(s, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = a.ID, a.Revision, "approved", "approval-receipt", true
+	s = step(t, s, e)
+	if s.Stage != "design" {
+		t.Fatal(s.Stage)
+	}
+	s = complete(t, s)
+	a = s.Attention[len(s.Attention)-1]
+	e = eventFor(s, "changes")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "revise navigation", "changes-receipt"
+	s = step(t, s, e)
+	if s.Stage != "design" || s.Loops.Used[DesignLoop] != 1 {
+		t.Fatal(s.Stage, s.Loops)
+	}
+	s = complete(t, s)
+	e = eventFor(s, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = a.ID, a.Revision, "old approval", "stale-receipt", true
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("old design approval accepted")
+	}
+}

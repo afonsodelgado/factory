@@ -63,7 +63,7 @@ func apply(s *state.State, e Event) error {
 		s.Workflow.Pending = nil
 	case "result":
 		return result(s, e)
-	case "approval", "cap", "handoff", "continue", "design_return", "retry":
+	case "approval", "cap", "handoff", "continue", "design_return", "retry", "answers", "changes":
 		return answer(s, e)
 	case "design_comments":
 		if e.Receipt == "" || e.Answer == "" {
@@ -202,12 +202,20 @@ func result(s *state.State, e Event) error {
 	st := s.Stages[stage]
 	st.Status, st.Outputs, st.Artifacts = r.Status, r.Outputs, r.Artifacts
 	s.Stages[stage] = st
+	if r.Status == "blocked" && len(r.Questions) > 0 {
+		attention(s, e, "question", "Stage needs answers", "Answer this batch to resume the owning stage.")
+		s.Attention[len(s.Attention)-1].Questions = r.Questions
+		return nil
+	}
 	if r.Status != "done" {
 		attention(s, e, "failure", "Stage needs attention", stage+": "+r.Status)
 		return nil
 	}
 	switch stage {
 	case "requirements":
+		if r.NeedsDesign != nil {
+			s.NeedsDesign = *r.NeedsDesign
+		}
 		if !s.Workflow.CommentsAsked {
 			return errors.New("record the comments preference before accepting requirements")
 		}
@@ -335,6 +343,21 @@ func answer(s *state.State, e Event) error {
 		return errors.New("answer needs the current item, artifact revision and developer receipt")
 	}
 	a := &s.Attention[i]
+	if e.Kind == "answers" || e.Kind == "changes" {
+		if (e.Kind == "answers" && a.Kind != "question") || (e.Kind == "changes" && a.Kind != "gate") {
+			return errors.New("answer does not match the question or gate")
+		}
+		stage := a.StageKey
+		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		if e.Kind == "changes" {
+			s.Workflow.Gate = ""
+			invalidate(s)
+			if stage == "design" {
+				return correct(s, e, state.Correction{Loop: DesignLoop, Stage: "design", ReturnTo: "plan"})
+			}
+		}
+		return dispatch(s, e, stage)
+	}
 	if e.Kind == "retry" {
 		if a.Kind != "failure" || len(s.Workflow.Runs) == 0 {
 			return errors.New("retry needs a failed run")
