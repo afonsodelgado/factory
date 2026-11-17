@@ -171,7 +171,7 @@ func batchInstruction(f factory.Factory, page string) string {
 	case "design":
 		return "; submit a design_comments event with this batch ID as the receipt before dispatching the designer"
 	case "plan":
-		gate := "the plan gate once it opens"
+		gate := "the plan gate"
 		if open, ok := OpenGate(f, "plan"); ok {
 			gate = "plan gate " + open.ID
 		}

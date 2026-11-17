@@ -131,7 +131,7 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 		}
 	})
 
-	t.Run("a plan page batch revises the plan through its gate, never as design comments", func(t *testing.T) {
+	t.Run("a plan page batch goes to the architect through the plan gate", func(t *testing.T) {
 		fx := newReviewFixture(t, true, idleHook(at))
 		fx.f.State.Attention = []state.Attention{{ID: "gate-csv-plan", Kind: "gate", StageKey: "plan", Title: "Approve plan"}}
 		fx.store.Create(review.NewThread{Page: "plan.html", Intent: "change", Text: "Split the export step.", Anchor: review.Anchor{Selector: "h2"}})
