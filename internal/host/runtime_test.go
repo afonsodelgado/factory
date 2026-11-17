@@ -811,3 +811,24 @@ func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheck
 		t.Errorf("after a restart the released factory lists as %+v and woke %v; want this node to stop offering it", local, engine.created)
 	}
 }
+
+func TestANewFactoryTellsItsSupervisorEveryRoleAsTheAppResolvedIt(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	repo := t.TempDir()
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}, Agents: map[string]state.AgentSetting{
+		"reviewer": {Model: "sonnet"},
+		"fixer":    {Tool: state.ToolCodex, Model: "gpt-6-astra", Effort: "medium"},
+	}}
+	registry, _ := state.LoadRegistry(cfg.RegistryPath())
+	engine := &wakingEngine{}
+	r := New(Runtime{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}, Engine: engine, Now: time.Now})
+	if _, err := r.Create(CreateRequest{Repo: repo, Slug: "csv", Prompt: "Export contacts.", Agents: map[string]state.AgentSetting{"engineer": {Effort: "max"}}}); err != nil {
+		t.Fatal(err)
+	}
+	launched := strings.Join(engine.typed, "\n")
+	for _, flag := range []string{"--agent reviewer=claude/sonnet:high", "--agent fixer=codex/gpt-6-astra:medium", "--agent engineer=claude/opus:max", "--agent analyst=claude/opus:high"} {
+		if !strings.Contains(launched, flag) {
+			t.Errorf("the supervisor was started with %q; want %s, so it never has to resolve the config itself", launched, flag)
+		}
+	}
+}

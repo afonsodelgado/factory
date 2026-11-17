@@ -118,7 +118,9 @@ A pipeline only removes stages. It never removes or changes a gate: the plan is 
 
 ### Agent tools and models
 
-Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Each role runs on a **tool**, `claude` (the default), `codex` or `opencode`, with a model and an effort of that tool. Resolve the **effective agents** for a new factory, field by field, each layer over the one before:
+Each stage agent has a role, its name without `factory-`: `analyst`, `designer`, `architect`, `engineer`, `reviewer`, `shepherd`, `qa`, `fixer`. Each role runs on a **tool**, `claude` (the default), `codex` or `opencode`, with a model and an effort of that tool.
+
+When the factory app starts a factory, it has already resolved every role and passes each one as `--agent role=tool/model:effort`. When every role has an `--agent` argument, those arguments are the **effective agents**: write them to `state.agents` exactly as given, and do not read the frontmatter or the configs for them. Resolve the layers yourself only when some role has no `--agent` argument, as when the user types `/factory` by hand. Resolve the **effective agents** then, field by field, each layer over the one before:
 
 1. the `model` and `effort` in the agent's own frontmatter, on `claude`
 2. `agents.<role>.tool`, `agents.<role>.model` and `agents.<role>.effort` in the global config
