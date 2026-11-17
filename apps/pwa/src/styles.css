@@ -1118,6 +1118,26 @@ code {
   color: var(--yel);
 }
 
+.checks .reply {
+  grid-column: 2;
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+
+.checks .reply figcaption {
+  font-size: 12.5px;
+  color: var(--mute);
+}
+
+.checks .reply p {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .checks .btn {
   grid-column: 2;
   justify-self: start;

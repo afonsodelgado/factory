@@ -5,6 +5,7 @@ export type Fake = {
   set: (values: Record<string, unknown>) => Promise<void>;
   factories: (factories: unknown[]) => Promise<void>;
   node: (name: string, values: Record<string, unknown>) => Promise<void>;
+  reply: (text: string) => Promise<void>;
   state: () => Promise<{
     actions: Record<string, unknown>[];
     previews: Record<string, unknown>[];
@@ -59,6 +60,7 @@ export function fake(request: APIRequestContext): Fake {
       void (await post("/__test/state", { snapshotFactories: factories })),
     node: async (name, values) =>
       void (await post("/__test/node", { name, ...values })),
+    reply: async (text) => void (await post("/__test/reply", { text })),
     state: async () => (await request.post("/__test/actions")).json(),
   };
 }

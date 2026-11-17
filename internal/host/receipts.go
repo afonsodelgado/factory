@@ -36,6 +36,7 @@ const (
 const (
 	keptSettled = 200
 	ReceiptWait = 10 * time.Second
+	ReplyWait   = 24 * time.Hour
 )
 
 const (
@@ -47,14 +48,15 @@ const (
 var ErrNoOperation = errors.New("no operation with that id")
 
 type Receipt struct {
-	Operation string    `json:"operation,omitempty"`
-	Factory   string    `json:"factory"`
-	Item      string    `json:"item,omitempty"`
-	Action    string    `json:"action"`
-	Status    string    `json:"status"`
-	Reason    string    `json:"reason,omitempty"`
-	Source    string    `json:"source,omitempty"`
-	At        time.Time `json:"at,omitzero"`
+	Operation string       `json:"operation,omitempty"`
+	Factory   string       `json:"factory"`
+	Item      string       `json:"item,omitempty"`
+	Action    string       `json:"action"`
+	Status    string       `json:"status"`
+	Reason    string       `json:"reason,omitempty"`
+	Source    string       `json:"source,omitempty"`
+	At        time.Time    `json:"at,omitzero"`
+	Reply     *state.Reply `json:"reply,omitempty"`
 }
 
 type ActionRequest struct {
@@ -107,12 +109,12 @@ func (a Answer) Receipt() Receipt {
 	if !a.SettledAt.IsZero() {
 		at = a.SettledAt
 	}
-	return Receipt{Operation: a.Operation, Factory: a.Factory, Item: a.ItemID, Action: a.Action, Status: a.Status(), Reason: a.Reason, Source: a.Source, At: at}
+	return Receipt{Operation: a.Operation, Factory: a.Factory, Item: a.ItemID, Action: a.Action, Status: a.Status(), Reason: a.Reason, Source: a.Source, At: at, Reply: a.Reply}
 }
 
 func (a Answer) Public() Receipt {
 	r := a.Receipt()
-	r.Operation = ""
+	r.Operation, r.Reply = "", nil
 	return r
 }
 
@@ -271,7 +273,60 @@ func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []S
 			settled = append(settled, s)
 		}
 	}
+	m.attachReplies(items, clock)
 	return settled
+}
+
+func (m *Runtime) attachReplies(items []Item, clock func(string) time.Time) {
+	attached := false
+	for i, a := range m.receipts.Settled {
+		if !a.awaitsReply(clock(a.Factory)) {
+			continue
+		}
+		it, found := findItem(items, a.Factory)
+		if !found {
+			continue
+		}
+		if reply, ok := replyTo(a.Received, it.Hook); ok {
+			m.receipts.Settled[i].Reply = &reply
+			attached = true
+		}
+	}
+	if attached {
+		m.saveReceipts()
+	}
+}
+
+func (a Answer) awaitsReply(now time.Time) bool {
+	delivered := a.Action == ActMessage && a.Outcome == StatusDelivered && !a.Received.IsZero()
+	return delivered && a.Reply == nil && now.Sub(a.Received) < ReplyWait
+}
+
+func replyTo(submitted time.Time, hook *state.HookFile) (state.Reply, bool) {
+	if hook == nil {
+		return state.Reply{}, false
+	}
+	ownSeen := false
+	turnEnd := time.Time{}
+	for _, submit := range submitsOf(hook) {
+		switch {
+		case submit.AgentID != "":
+		case submit.At.Equal(submitted):
+			ownSeen = true
+		case submit.At.After(submitted) && turnEnd.IsZero():
+			turnEnd = submit.At
+		}
+	}
+	if !ownSeen {
+		return state.Reply{}, false
+	}
+	for _, reply := range hook.Replies {
+		answersThisTurn := !reply.At.Before(submitted) && (turnEnd.IsZero() || reply.At.Before(turnEnd))
+		if answersThisTurn {
+			return reply, true
+		}
+	}
+	return state.Reply{}, false
 }
 
 func openSince(items []Item) map[string]time.Time {

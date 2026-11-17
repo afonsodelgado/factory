@@ -29,7 +29,10 @@ export type Receipt = {
   reason?: string;
   source?: string;
   at?: string;
+  reply?: SupervisorReply;
 };
+
+export type SupervisorReply = { at: string; text: string };
 
 export type ItemKind =
   | "question"

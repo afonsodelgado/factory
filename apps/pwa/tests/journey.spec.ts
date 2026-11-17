@@ -61,6 +61,7 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await page.getByRole("button", { name: "Tap again to approve" }).click();
   await expect(page.getByText("Delivered.")).toBeVisible();
 
+  await server.set({ nextStatus: "sending" });
   await page.goto("/f/shop-1a2b-search-typos/message");
   await page
     .getByLabel("Message to the search-typos supervisor")
@@ -69,6 +70,10 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await expect(
     page.getByRole("heading", { name: "Sent from this phone" }),
   ).toBeVisible();
+  await expect(page.getByText(/^Sending/)).toBeVisible();
+  await server.reply("Stage qa, round 2 of 3.\nWaiting on CI.");
+  await expect(page.getByText(/^Supervisor replied/)).toBeVisible();
+  await expect(page.getByText(/Waiting on CI\.$/)).toBeVisible();
 
   const actions = (await server.state()).actions;
   expect(actions.map((a) => [a.action, a.answers ?? a.text])).toEqual([

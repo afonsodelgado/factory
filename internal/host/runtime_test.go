@@ -488,6 +488,47 @@ func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
 	}
 }
 
+func TestAPhoneMessageShowsOnlyTheSupervisorsReplyToItsOwnTurn(t *testing.T) {
+	r := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop"))
+	send := func(text string) string {
+		request := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActMessage, Text: text}
+		if _, err := r.Act(request); err != nil {
+			t.Fatal(err)
+		}
+		return request.Operation
+	}
+	at := func(seconds int) time.Time { return phoneNow.Add(time.Duration(seconds) * time.Second) }
+	submit := func(seconds int, head string) state.HookEvent {
+		return state.HookEvent{Event: "UserPromptSubmit", PromptHead: head, At: at(seconds)}
+	}
+	settle := func(seconds int, submits []state.HookEvent, replies []state.Reply) {
+		snap := phoneSnapshot("Stop")
+		snap.At = at(seconds)
+		hook := snap.Items[0].Hook
+		hook.Submits, hook.Submit, hook.Replies = submits, &submits[len(submits)-1], replies
+		hook.Main = &state.HookEvent{Event: "Stop", At: replies[len(replies)-1].At}
+		hook.Last = *hook.Main
+		r.SetSnapshot(snap)
+		r.SettleReceipts(snap.Items, func(string) time.Time { return snap.At })
+	}
+	submits := []state.HookEvent{submit(1, "why is QA slow?")}
+	replies := []state.Reply{{At: at(-30), Text: "an earlier turn"}, {At: at(2), Text: "QA waits on CI."}}
+	question := send("why is QA slow?")
+	settle(2, submits, replies)
+	interrupted := send("and the plan?")
+	r.FlushTypeQueue()
+	submits = append(submits, submit(3, "and the plan?"), submit(4, "typed in the hub"))
+	replies = append(replies, state.Reply{At: at(5), Text: "answer to the hub"})
+	settle(6, submits, replies)
+
+	if receipt, _ := r.LookupReceipt(ReceiptRequest{Operation: question}); receipt.Reply == nil || receipt.Reply.Text != "QA waits on CI." {
+		t.Errorf("the question's receipt carries reply %+v; want the supervisor's answer to that turn, not an earlier one", receipt.Reply)
+	}
+	if receipt, _ := r.LookupReceipt(ReceiptRequest{Operation: interrupted}); receipt.Status != StatusDelivered || receipt.Reply != nil {
+		t.Errorf("a message whose turn was cut short by a hub prompt reads %+v; want delivered with no reply, not the hub prompt's answer", receipt)
+	}
+}
+
 type fakeConsole struct {
 	screens map[string]string
 	after   map[string]string

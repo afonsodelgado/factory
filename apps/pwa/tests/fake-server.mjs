@@ -668,6 +668,17 @@ async function control(req, res, url) {
     }
     return send(res, 200, {});
   }
+  if (route === "/__test/reply") {
+    const { text } = await body(req);
+    for (const receipt of Object.values(state.receipts))
+      if (receipt.action === "message")
+        Object.assign(receipt, {
+          status: "delivered",
+          reply: { at: now(), text },
+        });
+    publish();
+    return send(res, 200, {});
+  }
   if (route === "/__test/actions")
     return send(res, 200, {
       ...state,
