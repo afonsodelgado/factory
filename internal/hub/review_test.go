@@ -116,7 +116,7 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 			t.Errorf("the designer's message is %q; want the batch with the comment", body)
 		}
 		runs, _ := state.LoadStageRuns(state.StageRunsPath(fx.m.Config.StateDir, fx.f.Repo, fx.f.Slug))
-		if latest, _ := runs.Latest("designer"); !latest.Review {
+		if latest, _ := runs.Latest("designer"); latest.ID == "" {
 			t.Error("the follow-up run is not marked as a review round, so its result would read as the stage finishing")
 		}
 		if got := fx.store.Threads("")[0].Status; got != review.Sent {
@@ -204,22 +204,20 @@ func TestAnAgentAnswersAndResolvesAThreadFromItsPane(t *testing.T) {
 	}
 }
 
-func TestAReviewRoundDoesNotTellTheSupervisorTheStageIsDone(t *testing.T) {
+func TestMalformedStageResultsDoNotWakeTheSupervisor(t *testing.T) {
 	stateDir, dir := t.TempDir(), t.TempDir()
 	f := factory.Factory{Repo: "/repo", Slug: "csv", Dir: dir}
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, f.Repo, f.Slug))
-	for i, isReview := range []bool{false, true} {
+	for i, body := range []string{`{"schema_version":2,"run_id":"designer","status":"done"}`, `{}`, `{"schema_version":2,"run_id":"old","status":"done"}`, `{"schema_version":2,"run_id":"designer","status":"unknown"}`} {
 		result := filepath.Join(dir, "stages", "designer-"+string(rune('1'+i))+".result.json")
-		host.WriteFile(result, "{}")
-		runs.Runs = append(runs.Runs, state.StageRun{Role: "designer", Round: i + 1, Result: result, Review: isReview})
+		host.WriteFile(result, body)
+		runs.Runs = append(runs.Runs, state.StageRun{ID: "designer", Role: "designer", Round: i + 1, Result: result})
 	}
 	if err := runs.Save(); err != nil {
 		t.Fatal(err)
 	}
-
 	messages := host.InboxMessages(stateDir, Item{Factory: f}, nil)
-
 	if len(messages) != 1 || !strings.HasSuffix(messages[0].Text, "designer-1.result.json") {
-		t.Errorf("inbox %+v; want only the real stage result, never the review round's, which would move the supervisor past its gate", messages)
+		t.Errorf("inbox %+v; want only the valid result", messages)
 	}
 }

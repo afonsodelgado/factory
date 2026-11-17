@@ -37,8 +37,6 @@ type StageRequest struct {
 	Text     string   `json:"text"`
 	PRs      []string `json:"prs,omitempty"`
 	Factory  string   `json:"factory,omitempty"`
-
-	Review bool
 }
 
 type StageReply struct {
@@ -248,7 +246,6 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
-	run.Review = r.Review
 	if err := WriteFile(run.Prompt, r.Text+"\n\n## Your result\n\n"+ResultContract(run.Result)); err != nil {
 		return StageReply{}, err
 	}

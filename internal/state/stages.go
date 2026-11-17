@@ -19,7 +19,6 @@ type StageRun struct {
 	Prompt    string       `json:"prompt"`
 	Result    string       `json:"result"`
 	StartedAt time.Time    `json:"started_at"`
-	Review    bool         `json:"review,omitempty"`
 }
 
 func (r StageRun) Finished() bool {
@@ -35,7 +34,7 @@ func (r StageRun) Finished() bool {
 	if json.Unmarshal(data, &result) != nil {
 		return false
 	}
-	return result.SchemaVersion == 2 && result.RunID == r.ID && (result.Status == "done" || result.Status == "blocked" || result.Status == "failed")
+	return r.ID != "" && result.SchemaVersion == 2 && result.RunID == r.ID && (result.Status == "done" || result.Status == "blocked" || result.Status == "failed")
 }
 
 type StageRuns struct {

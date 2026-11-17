@@ -20,6 +20,8 @@ Stages are exactly `requirements, design, plan, implement, review, qa, pr, hando
 
 Resolve commands with `factory workflow commands <worktree>`. Record the returned recipe using a commands event. Ask one persisted batch for unresolved fields, including stack startup prerequisites; retain actual answers and provenance. Explicit config wins per field; never fill missing ports, credentials, seeding or sign-in with guesses. Re-resolve when input digests or execution environment change. Engineers, QA and CI share this recipe, including command working directories.
 
+For a blocked result with questions, persist the result and use an `answers` event with the exact item/revision, developer text and receipt to resume that role. Gate revision requests use `changes`; never use transport retries for interview turns. The analyst result records `needs_design`.
+
 The analyst asks once whether to watch and address review comments, default off. Record the developer's answer through a comments_preference event and in requirements.md before accepting the requirements result.
 
 ## Commit then dispatch
