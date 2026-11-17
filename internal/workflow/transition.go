@@ -261,6 +261,9 @@ func result(s *state.State, e Event) error {
 			return errors.New("partial review or stale local checks cannot pass")
 		}
 		s.Evidence.Review = r.Evidence
+		if s.Loops.Active == ReviewLoop {
+			s.Loops.Active, s.Workflow.ReturnLoop = s.Workflow.ReturnLoop, ""
+		}
 		next := s.Workflow.ReturnTo
 		s.Workflow.ReturnTo = ""
 		if next == "" {
@@ -278,6 +281,9 @@ func result(s *state.State, e Event) error {
 			return errors.New("QA needs complete current evidence")
 		}
 		s.Evidence.QA = r.Evidence
+		if s.Loops.Active == QALoop {
+			s.Loops.Active = ""
+		}
 		return dispatch(s, e, "pr")
 	case "pr":
 		if slices.ContainsFunc(s.Findings, Gating) {
@@ -348,6 +354,9 @@ func correct(s *state.State, e Event, c state.Correction) error {
 			}
 		}
 		return nil
+	}
+	if c.Loop == ReviewLoop && s.Loops.Active != ReviewLoop {
+		s.Workflow.ReturnLoop = s.Loops.Active
 	}
 	s.Loops.Used[c.Loop]++
 	s.Loops.Active, s.Workflow.ReturnTo = c.Loop, c.ReturnTo
@@ -476,6 +485,7 @@ func answer(s *state.State, e Event) error {
 		s.Workflow.ReturnTo = ""
 		return dispatch(s, e, "plan")
 	case "plan":
+		s.Loops.Active = ""
 		return dispatch(s, e, "implement")
 	}
 	return errors.New("unknown approval gate")
@@ -499,6 +509,7 @@ func offerHandoff(s *state.State, e Event) {
 	if slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" }) {
 		return
 	}
+	s.Loops.Active = ""
 	s.Stage = "handoff"
 	attention(s, e, "handoff", "Work done: mark it done or continue", "Confirm these exact stack heads, or send follow-up work through review, QA and PR verification.")
 }

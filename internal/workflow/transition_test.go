@@ -61,8 +61,8 @@ func TestNestedQACorrectionsReturnThroughReviewWithoutChargingQATwice(t *testing
 	review.Disposition = "closed"
 	s = complete(t, s, review)
 	s = complete(t, s)
-	if s.Stage != "qa" {
-		t.Fatalf("returned to %s", s.Stage)
+	if s.Stage != "qa" || s.Loops.Active != QALoop {
+		t.Fatalf("returned to %s in %s", s.Stage, s.Loops.Active)
 	}
 	s = complete(t, s)
 	if s.Stage != "implement" {

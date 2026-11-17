@@ -12,6 +12,7 @@ type Workflow struct {
 	Runs          []WorkflowRun `json:"runs"`
 	ActiveRun     string        `json:"active_run"`
 	Pending       *Effect       `json:"pending,omitempty"`
+	ReturnLoop    string        `json:"return_loop"`
 	ReturnTo      string        `json:"return_to"`
 	Correction    *Correction   `json:"correction,omitempty"`
 	Gate          string        `json:"gate"`
