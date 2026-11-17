@@ -260,7 +260,7 @@ func hostAction(item panel.Item, action string) string {
 		return host.ActChanges
 	case item.Kind == "comment":
 		return host.ActReply
-	case action == "continue" || action == "skip" || action == "retry":
+	case action == "continue" || action == "retry":
 		return action
 	}
 	return host.ActAnswer
@@ -318,7 +318,7 @@ func (m *Model) deliver(action string) {
 
 func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool {
 	switch key {
-	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+x", "ctrl+k", "enter":
+	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+k", "enter":
 	default:
 		return false
 	}
@@ -363,6 +363,12 @@ func (m *Model) panelView() panel.View {
 	}
 	f := it.Factory
 	v.Label = f.Placed()
+	if f.State != nil && f.State.Loops.Active != "" {
+		v.Label += " · " + loopStage(f)
+	}
+	if lf, ok := m.nodeFactories[f.Key()]; ok && lf.Loop != "" {
+		v.Label += " · " + workflowStage(lf.Stage, lf.Loop, lf.Round)
+	}
 	v.Items, v.Settled = m.shownItems(it)
 	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
 		v.Next = next.Factory.Label()
@@ -602,7 +608,7 @@ func confirmTyped(item panel.Item, d *panel.Draft) {
 }
 
 func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
-	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+x" || key == "ctrl+k"
+	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+k"
 	if sends {
 		d.Editing = false
 	}
@@ -615,10 +621,6 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 		}
 	case "ctrl+r":
 		m.recommendedOrRetry(item, d)
-	case "ctrl+x":
-		if item.Kind == "cap" || item.Kind == "failure" {
-			m.deliver("skip")
-		}
 	case "ctrl+k":
 		m.deliver("handled")
 	case "ctrl+o":
@@ -678,11 +680,13 @@ func nothingTyped(kind string) string {
 	case "comment":
 		return "Type a reply first: ctrl+s sends it"
 	case "cap":
-		return "Type an instruction first, or ctrl+r for one more round, ctrl+x to skip"
+		return "Type an instruction first, or ctrl+r for one more round"
 	case "failure":
-		return "Type an instruction first, or ctrl+r to retry, ctrl+x to skip"
+		return "Type an instruction first, or ctrl+r to retry"
 	case "handoff":
 		return "Type what to do next first, or ctrl+k to mark it done"
+	case "design_return":
+		return "Type accept or decline first: ctrl+s sends it"
 	}
 	return "Type an answer first: ctrl+s sends it"
 }

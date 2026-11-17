@@ -36,7 +36,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	cfg.Agents = map[string]state.AgentSetting{"engineer": {Model: "sonnet", Effort: "medium"}}
 	atCreation := &state.Entry{Agents: state.ResolveAgents(cfg, state.Profile{}, nil)}
 	cfg.Agents = map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}}
-	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{SchemaVersion: 2, Workflow: state.Workflow{ActiveRun: "engineer-1", Pending: &state.Effect{ID: "engineer-1", Kind: "stage", RunID: "engineer-1", Role: "engineer", Stage: "implement"}, Runs: []state.WorkflowRun{{ID: "engineer-1", Role: "engineer", Stage: "implement", Round: 1, Prompt: "stages/engineer-1.prompt.md", Result: "stages/engineer-1.result.json"}}}, Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
 	supervisor, err := e.NewFactoryPane(l, NewPane{Repo: repo, Slug: "csv", Dir: worktree})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	n.show(m, Snapshot{At: time.Now(), Items: []Item{{Factory: f, Pane: &supervisorPane}}})
 
 	op := uuid.NewString()
-	request, _ := json.Marshal(host.StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
+	request, _ := json.Marshal(host.StageRequest{EffectID: "engineer-1", Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
 	send := func() Message {
 		reply, _ := n.Call(context.Background(), Message{T: "stage", Op: op, Data: request})
 		return reply
@@ -63,6 +63,14 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	if args := waitForFile(t, calls, want); args != want {
 		t.Errorf("the stage pane ran claude %q; want %q, the engineer as resolved when the factory was created, not the config changed to codex since", args, want)
 	}
+	f.State.Workflow.Pending = nil
+	livePanes, _ := e.TM.Panes()
+	n.show(m, Snapshot{At: time.Now(), Panes: livePanes, Items: []Item{{Factory: f, Pane: &supervisorPane}}})
+	op = uuid.NewString()
+	if resumed := send(); resumed.T != "done" || string(resumed.Data) != string(first.Data) {
+		t.Fatalf("acknowledged effect lost its receipt: %+v", resumed)
+	}
+
 	body, _ := os.ReadFile(prompt)
 	for _, want := range []string{"Write no comments.", "staff engineer", "Implement layer 1 of plan.md.", reply.Result} {
 		if !strings.Contains(string(body), want) {
@@ -94,7 +102,7 @@ func TestWakeResumesTheSupervisorNotTheStageAgentThatWorkedLast(t *testing.T) {
 		now = now.Add(time.Minute)
 	}
 	m := NewModel(Model{Config: &state.Config{StateDir: stateDir}})
-	f := factory.Factory{Repo: "/r", Slug: "csv", Worktree: worktree, State: &state.State{}}
+	f := factory.Factory{Repo: "/r", Slug: "csv", Worktree: worktree, State: &state.State{SchemaVersion: 2}}
 	m.snap = Snapshot{Items: []Item{{Factory: f, Status: factory.Gone}}, StageTokens: map[string]bool{"t-eng": true}}
 
 	m.planWakes()
@@ -166,9 +174,9 @@ func TestACodexSupervisorHearsAboutAFinishedStageOnceAndOnlyWhenIdle(t *testing.
 	dir := filepath.Join(t.TempDir(), ".claude", "factory", "csv")
 	result := filepath.Join(dir, "stages", "engineer-1.result.json")
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, "/r", "csv"))
-	runs.Runs = append(runs.Runs, state.StageRun{Role: "engineer", Round: 1, Token: "t-eng", Result: result})
+	runs.Runs = append(runs.Runs, state.StageRun{ID: "engineer-1", Role: "engineer", Round: 1, Token: "t-eng", Result: result})
 	runs.Save()
-	host.WriteFile(result, `{"status":"done"}`)
+	host.WriteFile(result, `{"schema_version":2,"run_id":"engineer-1","status":"done"}`)
 
 	at := time.Now()
 	busy := &state.HookFile{Token: "t-sup", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}

@@ -30,7 +30,7 @@ type Presentation struct {
 
 func (m *Runtime) Presentation() Presentation {
 	return Presentation{
-		Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
+		Snapshot: m.verificationSnapshot(), Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
 		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(), FirstStart: m.takeFirstStart(),
 		Holdings: maps.Clone(m.holdings),
 	}

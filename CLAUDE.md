@@ -67,7 +67,7 @@ Hub popups such as `N` (Nodes) and `P` (Phone) are tmux client overlays, so `cap
 - Measure terminal widths with `lipgloss.Width`, never `len()`.
 - The app never writes `state.json`; the factory supervisor is its only writer. `factory attention resolve` only checks the item with the node and prints the edit for the supervisor to make.
 - A factory is an id and a prompt. There are no tickets: never add tracker integration to the app or the bundle. The skill reads a tracker only when the user's prompt asks it to.
-- `state.json` once had `ticket` where it now has `id`; `state.ParseState` reads both.
+- Workflow state uses schema 2. Old state and removed stage keys are rejected; finish or restart old factories before upgrading.
 
 ## Tests
 

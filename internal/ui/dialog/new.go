@@ -268,8 +268,8 @@ func (m *NewFactoryModel) resetChoices() {
 }
 
 func (m *NewFactoryModel) locked(stage string) bool {
-	qaSkipped := state.DependsOnQA(stage) && !slices.Contains(m.runStages(), "qa")
-	return state.AlwaysRuns(stage) || !m.selectedRepo().Support().Offers(stage) || qaSkipped
+	required := slices.Contains([]string{"plan", "implement", "review", "pr"}, stage)
+	return state.AlwaysRuns(stage) || !m.selectedRepo().Support().Offers(stage) || required
 }
 
 func (m *NewFactoryModel) toggle(stage string) {
@@ -281,9 +281,6 @@ func (m *NewFactoryModel) toggle(stage string) {
 		stages = slices.Delete(stages, i, i+1)
 	} else {
 		stages = append(stages, stage)
-		if stage == "qa" {
-			stages = append(stages, "qa_fixes", "test_gaps")
-		}
 	}
 	m.chosen = stages
 }
@@ -739,16 +736,13 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			c.Put(1, y, "❯", theme.Focused.B())
 			mark, ink = "● ", theme.Bright
 		}
-		qa, rabbit := "terminal QA", "CodeRabbit off"
+		qa := "terminal QA"
 		if r.Browser {
 			qa = "browser QA"
 		}
-		if r.CodeRabbit {
-			rabbit = "CodeRabbit on"
-		}
 		x := c.Put(3, y, mark+r.Name, ink)
 		x = c.PutMax(max(x+2, 14), y, r.Display, theme.Muted, 28)
-		c.Put(max(x+2, 44), y, qa+" · "+rabbit, theme.Quiet)
+		c.Put(max(x+2, 44), y, qa, theme.Quiet)
 		y++
 	}
 	if m.addingRepo() {
@@ -1061,10 +1055,6 @@ func (m *NewFactoryModel) drawStageRow(c *theme.Canvas, y, i int, stage string, 
 	c.Put(5, y, stage, ink)
 	role := state.RoleOf(stage)
 	switch {
-	case stage == "coderabbit" && !m.selectedRepo().CodeRabbit:
-		c.Put(19, y, "off in this repo", theme.Quiet)
-	case stage == "walkthrough" && !m.selectedRepo().Browser:
-		c.Put(19, y, "browser QA repos only", theme.Quiet)
 	case role == "":
 		c.Put(19, y, "—", theme.Quiet)
 	default:

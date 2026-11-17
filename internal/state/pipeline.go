@@ -14,7 +14,7 @@ const (
 
 var builtinPipelines = map[string][]string{
 	"full":  StageKeys,
-	"quick": {"requirements", "plan", "implement", "review", "handoff"},
+	"quick": {"requirements", "plan", "implement", "review", "pr", "handoff"},
 }
 
 var alwaysRun = []string{"requirements", "handoff"}
@@ -31,12 +31,11 @@ type Pipelines struct {
 }
 
 type RepoSupport struct {
-	CodeRabbit bool
-	BrowserQA  bool
+	BrowserQA bool
 }
 
 func (p Profile) Support() RepoSupport {
-	return RepoSupport{CodeRabbit: p.CodeRabbit == nil || *p.CodeRabbit, BrowserQA: p.BrowserQA()}
+	return RepoSupport{BrowserQA: p.BrowserQA()}
 }
 
 func (ps Pipelines) Names() []string {
@@ -60,7 +59,7 @@ func (ps Pipelines) Find(name string) (Pipeline, error) {
 }
 
 func (ps Pipelines) Custom(stages []string) (Pipeline, error) {
-	if err := checkStages("--stages", stages); err != nil {
+	if err := checkPipeline("--stages", stages); err != nil {
 		return Pipeline{}, err
 	}
 	return Pipeline{Name: CustomPipeline, Stages: EffectiveStages(stages, ps.repo)}, nil
@@ -75,12 +74,24 @@ func checkStages(source string, stages []string) error {
 	return nil
 }
 
+func checkPipeline(source string, stages []string) error {
+	if err := checkStages(source, stages); err != nil {
+		return err
+	}
+	for _, required := range []string{"plan", "implement", "review", "pr"} {
+		if !slices.Contains(stages, required) {
+			return fmt.Errorf("%s must include %s", source, required)
+		}
+	}
+	return nil
+}
+
 func validatePipelines(path string, pipelines map[string][]string) error {
 	for _, name := range sortedNames(pipelines) {
 		if name == CustomPipeline {
 			return fmt.Errorf("%s: pipelines.%s is reserved for a factory's own list of stages; give the preset another name", path, name)
 		}
-		if err := checkStages(fmt.Sprintf("%s: pipelines.%s", path, name), pipelines[name]); err != nil {
+		if err := checkPipeline(fmt.Sprintf("%s: pipelines.%s", path, name), pipelines[name]); err != nil {
 			return err
 		}
 	}
@@ -88,6 +99,9 @@ func validatePipelines(path string, pipelines map[string][]string) error {
 }
 
 func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelines, error) {
+	if err := validatePipelines(cfg.ConfigFile(), cfg.Pipelines); err != nil {
+		return Pipelines{}, err
+	}
 	if err := validatePipelines(profilePath, profile.Pipelines); err != nil {
 		return Pipelines{}, err
 	}
@@ -114,35 +128,19 @@ func ResolvePipelines(cfg *Config, profile Profile, profilePath string) (Pipelin
 }
 
 func EffectiveStages(chosen []string, repo RepoSupport) []string {
-	withoutQA := !slices.Contains(chosen, "qa")
 	var stages []string
 	for _, key := range StageKeys {
 		wanted := slices.Contains(chosen, key) || slices.Contains(alwaysRun, key)
-		removed := (withoutQA && dependsOnQA(key)) || !repo.Offers(key)
-		if wanted && !removed {
+		if wanted {
 			stages = append(stages, key)
 		}
 	}
 	return stages
 }
 
-func (r RepoSupport) Offers(stage string) bool {
-	switch stage {
-	case "coderabbit":
-		return r.CodeRabbit
-	case "walkthrough":
-		return r.BrowserQA
-	}
-	return true
-}
+func (r RepoSupport) Offers(stage string) bool { return slices.Contains(StageKeys, stage) }
 
 func AlwaysRuns(stage string) bool { return slices.Contains(alwaysRun, stage) }
-
-func DependsOnQA(stage string) bool { return dependsOnQA(stage) }
-
-func dependsOnQA(stage string) bool {
-	return stage == "qa_fixes" || stage == "test_gaps"
-}
 
 func sortedNames(pipelines map[string][]string) []string {
 	var names []string

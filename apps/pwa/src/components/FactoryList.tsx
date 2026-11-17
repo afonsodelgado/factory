@@ -230,9 +230,14 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
   const look = lost ? lostLook : statusLook(factory.status);
   const waiting = needsYou(factory) && !lost;
   const finished = factory.status === "done" && !waiting;
-  const stage = waiting
-    ? [factory.repo_name, factory.stage].filter(Boolean).join(" · ")
-    : factory.stage;
+  const stage = [
+    waiting ? factory.repo_name : undefined,
+    factory.stage,
+    factory.loop,
+    factory.round ? `round ${factory.round}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const asOf =
     lost && node.savedAt
       ? [stage, `as of ${clock(node.savedAt)}`].filter(Boolean).join(", ")

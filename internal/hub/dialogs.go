@@ -199,7 +199,7 @@ func (m *Model) newContext() dialog.NewContext {
 	}
 	for i, repo := range m.Config.Repos {
 		cfg, profile := m.repoConfig(repo)
-		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), CodeRabbit: profile.CodeRabbit == nil || *profile.CodeRabbit, Supervisor: cfg.Supervisor}
+		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), Supervisor: cfg.Supervisor}
 		if pipelines, err := m.Config.PipelinesFor(repo); err != nil {
 			option.PipelineProblem = err.Error()
 		} else {

@@ -12,7 +12,7 @@ type AgentSetting struct {
 	Effort string `yaml:"effort" json:"effort,omitempty"`
 }
 
-var AgentRoles = []string{"analyst", "designer", "architect", "engineer", "reviewer", "shepherd", "qa", "fixer"}
+var AgentRoles = []string{"analyst", "designer", "architect", "engineer", "reviewer", "qa", "ci"}
 
 const (
 	ToolClaude   = "claude"
@@ -36,9 +36,8 @@ var DefaultAgents = map[string]AgentSetting{
 	"architect": {Model: "fable", Effort: "high"},
 	"engineer":  {Model: "opus", Effort: "xhigh"},
 	"reviewer":  {Model: "opus", Effort: "high"},
-	"shepherd":  {Model: "opus", Effort: "high"},
+	"ci":        {Model: "opus", Effort: "high"},
 	"qa":        {Model: "opus", Effort: "high"},
-	"fixer":     {Model: "opus", Effort: "xhigh"},
 }
 
 var stageRoles = map[string]string{
@@ -47,11 +46,8 @@ var stageRoles = map[string]string{
 	"plan":         "architect",
 	"implement":    "engineer",
 	"review":       "reviewer",
-	"coderabbit":   "shepherd",
 	"qa":           "qa",
-	"qa_fixes":     "fixer",
-	"test_gaps":    "fixer",
-	"walkthrough":  "fixer",
+	"pr":           "ci",
 }
 
 func RoleOf(stage string) string { return stageRoles[stage] }

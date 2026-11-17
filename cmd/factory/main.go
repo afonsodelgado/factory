@@ -56,6 +56,8 @@ func run(args []string) int {
 		return runBootstrap(args[1:])
 	case "install-hooks":
 		return runInstallHooks(args[1:])
+	case "workflow":
+		return runWorkflow(args[1:])
 	case "stage":
 		return runStage(args[1:])
 	case "review":
@@ -128,24 +130,35 @@ commands:
   install-hooks [--remove]
               add (or remove) only the factory hooks, in Claude's
               settings.json and Codex's hooks.json
-  stage start --role <role> --task <file> [--wait] [--factory id]
-  stage send --role <role> --message <file> [--wait] [--factory id]
+  workflow next <state.json> <event.json>
+              print the state proposal an event makes, without writing it
+              (run by the supervisor)
+  workflow commands <repo>
+              print the repo's resolved build, lint, test and QA commands
+  workflow watch --dir <factory dir> --run <run id> <pr number>...
+              wait for CI on these PRs without model turns and queue the
+              observations for the supervisor (run by the CI agent)
+  workflow comments <state.json> [<dispositions.json>]
+              refresh review comments and queue them, with any proposed
+              dispositions, for the supervisor (run by the CI agent)
+  stage start --role <role> --effect <id> --task <file> [--wait] [--factory id]
+  stage send --role <role> --effect <id> --message <file> [--wait] [--factory id]
               run a stage agent on its own tool in a pane beside the
-              supervisor, or send it a follow-up; prints the result file
-              (run by the supervisor from its pane; --factory reaches a
-              factory from outside its panes)
+              supervisor, or send it a follow-up, for a committed workflow
+              effect; prints the result file (run by the supervisor from
+              its pane; --factory reaches a factory from outside its panes)
   stage ci <pr number>...
-              wait for CI and CodeRabbit on these PRs, then type the
+              wait for CI on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
   review reply --thread <id> [--resolve] [--factory id] [text…]
               answer a comment thread from the review page, and resolve it
               when the change is made (run by a stage agent)
   review threads [--page path] [--open] [--factory id]
               list this factory's comment threads
-  review open [--factory id] [--for design|walkthrough] <url>
+  review open [--factory id] [--for design] <url>
               check that any page, such as the running app, belongs to the
               factory and print its URL to open in your browser
-  review stack [--for design|walkthrough]
+  review stack [--for design]
               start the stack from the repo config on free ports, publish it
               on its own tailnet HTTPS port and print its URL
   review link <url>

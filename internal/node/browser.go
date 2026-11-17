@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -56,6 +57,13 @@ const (
 )
 
 func RecipeOf(profile state.Profile, worktree string) (Recipe, error) {
+	if profile.QA.Start == "" {
+		resolved, err := recipe.Resolve(worktree)
+		if err != nil {
+			return Recipe{}, err
+		}
+		profile.QA.Start = resolved.Profile.QA.Start
+	}
 	qa := profile.QA
 	r := Recipe{Dir: worktree, URL: qa.URL, Start: qa.Start, Health: qa.Health, HealthStatus: qa.HealthStatus, Startup: defaultStartup, Seed: qa.Seed, SignIn: qa.SignIn, portable: qa.URL != "", webPort: qa.WebPort, apiPort: qa.APIPort}
 	if r.HealthStatus == 0 {

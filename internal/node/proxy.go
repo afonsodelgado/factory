@@ -51,7 +51,7 @@ func (s *Stacks) admit(w http.ResponseWriter, r *http.Request, appHost string) b
 		fail(w, status, problem)
 	case s.Gate.exposed(w, r):
 	case r.Host != appHost:
-		fail(w, http.StatusMisdirectedRequest, "this walkthrough answers only at https://"+appHost)
+		fail(w, http.StatusMisdirectedRequest, "this review stack answers only at https://"+appHost)
 	default:
 		return true
 	}
@@ -121,10 +121,10 @@ func (s *Stacks) bridge(route, origin string) http.HandlerFunc {
 		fromItsPage := len(origins) == 1 && origins[0] == origin
 		switch {
 		case slices.Contains(strings.Split(r.PathValue("rest"), "/"), ".."):
-			fail(w, http.StatusBadRequest, "this path leaves the walkthrough's comments")
+			fail(w, http.StatusBadRequest, "this path leaves the review stack's comments")
 			return
 		case mutates(r) && !fromItsPage, len(origins) > 0 && !fromItsPage:
-			fail(w, http.StatusForbidden, "comments on this walkthrough come only from its own page at "+origin)
+			fail(w, http.StatusForbidden, "comments on this review stack come only from its own page at "+origin)
 			return
 		case mutates(r) && r.Method != http.MethodDelete && !sendsJSON(r):
 			fail(w, http.StatusUnsupportedMediaType, "send JSON")
@@ -149,16 +149,16 @@ func (s *Stacks) signIn(run *liveStack, upstream, public *url.URL) http.HandlerF
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if !s.redeem(r.URL.Query().Get("ticket"), run.record.Factory) {
-			phone.Notice(w, http.StatusGone, "This sign-in link was used already", "Each walkthrough link signs this browser in once. Open the walkthrough again from the factory's Pages tab.")
+			phone.Notice(w, http.StatusGone, "This sign-in link was used already", "Each review stack link signs this browser in once. Open the review stack again from the factory's Pages tab.")
 			return
 		}
 		cookies, err := signIn(r.Context(), run.recipe)
 		if err != nil {
-			phone.Notice(w, http.StatusBadGateway, "The walkthrough could not sign you in ("+host.FailSignIn+")", err.Error())
+			phone.Notice(w, http.StatusBadGateway, "The review stack could not sign you in ("+host.FailSignIn+")", err.Error())
 			return
 		}
 		if err := holdable(cookies, upstream.Hostname(), public.Host); err != nil {
-			phone.Notice(w, http.StatusConflict, "The walkthrough cannot sign this browser in ("+host.FailPhoneSignIn+")", err.Error())
+			phone.Notice(w, http.StatusConflict, "The review stack cannot sign this browser in ("+host.FailPhoneSignIn+")", err.Error())
 			return
 		}
 		for _, c := range cookies {

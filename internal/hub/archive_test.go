@@ -110,7 +110,7 @@ func TestDeleteStillKnowsTheStackOfAFactoryWhoseWorktreeWasRemovedByHand(t *test
 	if err := os.MkdirAll(filepath.Join(worktree, ".claude", "factory", "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(worktree, ".claude", "factory", "x", "state.json"), []byte(`{"id":"x","branch":"worktree-x","prs":[{"number":1,"branch":"x-layer-1"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(worktree, ".claude", "factory", "x", "state.json"), []byte(`{"schema_version":2,"id":"x","branch":"worktree-x","prs":[{"number":1,"branch":"x-layer-1"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}

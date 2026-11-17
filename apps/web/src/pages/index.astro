@@ -54,18 +54,12 @@ const stages = [
   {
     key: "implement",
     role: "engineer",
-    desc: "A stack of draft PRs, one reviewable layer each.",
+    desc: "A local stack of commits, one reviewable layer each.",
   },
   {
     key: "review",
     role: "reviewer",
-    desc: "A multi-agent review loop. Each finding is fixed in the layer that caused it.",
-  },
-  {
-    key: "coderabbit",
-    role: "shepherd",
-    desc: "Fixes the CodeRabbit threads that matter and replies to the rest. Only where CodeRabbit runs.",
-    sub: true,
+    desc: "Independent review sends gating findings back to the engineer in their original layer.",
   },
   {
     key: "qa",
@@ -73,16 +67,9 @@ const stages = [
     desc: "Tests the branch by hand, in a browser or a scratch tmux server, then attacks the edges.",
   },
   {
-    key: "qa_fixes",
-    role: "fixer",
-    desc: "Fixes what QA found, on a layer of its own.",
-    sub: true,
-  },
-  {
-    key: "test_gaps",
-    role: "fixer",
-    desc: "Adds the tests QA said were missing.",
-    sub: true,
+    key: "pr",
+    role: "ci",
+    desc: "Publishes drafts, fixes CI through review and QA, then verifies current heads.",
   },
   {
     key: "handoff",
@@ -179,7 +166,7 @@ const keyGroups = [
           ["ctrl+a", "approve"],
           ["ctrl+n/p", "next or previous item"],
           ["ctrl+r", "retry, one more round"],
-          ["ctrl+x", "skip"],
+          ["ctrl+k", "mark done, or already handled"],
         ],
       },
     ],
@@ -355,10 +342,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
         </div>
         <ol class="stages" data-stages>
           {stages.map((stage, i) => (
-            <li
-              class:list={["st", { sub: stage.sub }]}
-              data-s={i < current ? "done" : "cur"}
-            >
+            <li class="st" data-s={i < current ? "done" : "cur"}>
               <span class="dot" aria-hidden="true">
                 {i < current ? "●" : "◉"}
               </span>

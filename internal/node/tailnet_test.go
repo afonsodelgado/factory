@@ -1085,10 +1085,11 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 				t.Fatal(err)
 			}
 		}
-		q := &qaNode{Node: tn.Machine(machine).Start(), f: factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{ID: slug}}}
+		q := &qaNode{Node: tn.Machine(machine).Start(), f: factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: slug}}}
 		q.boot(t)
 		var reply host.StageReply
-		if err := q.Local.Request(context.Background(), "stage", uuid.NewString(), host.StageRequest{Role: "qa", Factory: slug, Text: "Test the export."}, &reply); err != nil {
+		q.f.State.Workflow = state.Workflow{ActiveRun: "qa-1", Pending: &state.Effect{ID: "qa-1", Kind: "stage", RunID: "qa-1", Role: "qa", Stage: "qa"}, Runs: []state.WorkflowRun{{ID: "qa-1", Role: "qa", Stage: "qa", Round: 1, Prompt: "stages/qa-1.prompt.md", Result: "stages/qa-1.result.json"}}}
+		if err := q.Local.Request(context.Background(), "stage", uuid.NewString(), host.StageRequest{EffectID: "qa-1", Role: "qa", Factory: slug, Text: "Test the export."}, &reply); err != nil {
 			t.Fatal(err)
 		}
 		q.result = reply.Result
@@ -1174,7 +1175,7 @@ const stackApp = "qa:\n  mode: browser\n  url: http://127.0.0.1:${FACTORY_WEB_PO
 func (w *walkthroughs) factory(slug, config string) factory.Factory {
 	repo := w.t.TempDir()
 	worktree := filepath.Join(repo, "wt")
-	f := factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{ID: slug}}
+	f := factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: slug}}
 	cookies := `[{"name":"session","value":"s3cret-` + slug + `","domain":"localhost"}]`
 	for _, err := range []error{os.MkdirAll(f.Dir, 0o755), os.MkdirAll(state.RepoDir(repo), 0o755), os.WriteFile(state.RepoConfigPath(repo), []byte(config), 0o644), os.WriteFile(filepath.Join(worktree, "cookies.json"), []byte(cookies), 0o644)} {
 		if err != nil {
@@ -1480,7 +1481,7 @@ func (s *stackRuntime) walkthrough(t *testing.T, key string) (host.LocalFactory,
 	var local host.Local
 	s.call(t, "local", nil, &local)
 	for _, f := range local.Factories {
-		if f.Key == key && f.Walkthrough != nil && f.Walkthrough.State != host.StackStarting {
+		if f.Key == key && f.ReviewStack != nil && f.ReviewStack.State != host.StackStarting {
 			return f, true
 		}
 	}
@@ -1498,8 +1499,8 @@ func TestAStackThatExitsBeforeItAnswersIsNamedOnTheFactory(t *testing.T) {
 		return ok
 	})
 	item := slices.IndexFunc(f.Items, func(i host.LocalItem) bool { return i.Kind == "stack" })
-	if f.Walkthrough.Failure != host.FailStack || item < 0 || !strings.Contains(f.Items[item].Title, host.FailStack) {
-		t.Fatalf("the snapshot shows walkthrough %+v and items %+v; want the stack_start failure on the factory", f.Walkthrough, f.Items)
+	if f.ReviewStack.Failure != host.FailStack || item < 0 || !strings.Contains(f.Items[item].Title, host.FailStack) {
+		t.Fatalf("the snapshot shows walkthrough %+v and items %+v; want the stack_start failure on the factory", f.ReviewStack, f.Items)
 	}
 	if served := w.machine.Served(); len(served) != 2 {
 		t.Errorf("a failed stack left Serve mappings %v; want only the two that were there before", served)
@@ -1686,7 +1687,7 @@ func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConve
 	g.run(g.worktree, "checkout", "-q", "-b", "csv-2")
 	g.commit(g.worktree, "export_test.go")
 	op := uuid.NewString()
-	stateJSON := fmt.Sprintf(`{"id":"csv","branch":"worktree-csv","session_id":"old-session","prs":[{"number":11,"branch":"csv-1"},{"number":12,"branch":"csv-2"}],"stages":{"design":{"artifacts":[{"url":"design/variant-a.html"}]}},"checkpoint":{"operation":%q,"status":"ready"}}`, op)
+	stateJSON := fmt.Sprintf(`{"schema_version":2,"id":"csv","branch":"worktree-csv","session_id":"old-session","prs":[{"number":11,"branch":"csv-1"},{"number":12,"branch":"csv-2"}],"stages":{"design":{"artifacts":[{"url":"design/variant-a.html"}]}},"checkpoint":{"operation":%q,"status":"ready"}}`, op)
 	factoryFiles := map[string]string{
 		"state.json":            stateJSON,
 		"brief.md":              "Export contacts as CSV.",
@@ -1772,7 +1773,7 @@ func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConve
 
 func TestACheckpointRefusesSecretBearingFilesAndLeavesGeneratedCookiesBehind(t *testing.T) {
 	op := uuid.NewString()
-	stateJSON := fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op)
+	stateJSON := fmt.Sprintf(`{"schema_version":2,"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op)
 	for _, secret := range []string{".env", "review/cookies.json", "evidence:qa-1/profile/Default/Preferences", "notes/sessions/old.jsonl"} {
 		t.Run(secret, func(t *testing.T) {
 			root := t.TempDir()
@@ -1808,7 +1809,7 @@ func TestACheckpointRefusesSecretBearingFilesAndLeavesGeneratedCookiesBehind(t *
 func forgedCheckpoint(source string, files map[string]string) node.Checkpoint {
 	op := uuid.NewString()
 	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", Source: source, GitURL: appRemote}}
-	cp = withFile(cp, "factory/state.json", fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op))
+	cp = withFile(cp, "factory/state.json", fmt.Sprintf(`{"schema_version":2,"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op))
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		cp = withFile(cp, name, files[name])
 	}
@@ -2096,7 +2097,7 @@ type moveFixture struct {
 func newMoveFixture(t *testing.T) moveFixture {
 	t.Helper()
 	g := newGitFixture(t)
-	writeFiles(t, g.dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","session_id":"old-session"}`, "brief.md": "Export contacts as CSV."})
+	writeFiles(t, g.dir, map[string]string{"state.json": `{"schema_version":2,"id":"csv","branch":"worktree-csv","session_id":"old-session"}`, "brief.md": "Export contacts as CSV."})
 	writeFiles(t, g.repo, map[string]string{".factory/config.yml": "qa:\n  mode: terminal\n"})
 	tn := nodetest.New(t)
 	f := moveFixture{g: g, tn: tn, macbook: tn.Machine("macbook").Start(), homelab: tn.Machine("homelab").Start(), log: &hostLog{}}
@@ -2500,7 +2501,7 @@ func assertOccupiedMovePreserved(t *testing.T, existing, incoming string, alias 
 	worktree := filepath.Join(factory.WorktreesDir(clone), existing)
 	f.g.run(clone, "worktree", "add", "-q", "-b", "occupied", worktree)
 	files := map[string]string{
-		filepath.Join(".claude", "factory", "csv", "state.json"):  `{"id":"csv","waiting_on":"keep this state"}`,
+		filepath.Join(".claude", "factory", "csv", "state.json"):  `{"schema_version":2,"id":"csv","waiting_on":"keep this state"}`,
 		filepath.Join(".claude", "factory", "csv", "progress.md"): "keep this progress",
 		filepath.Join(".claude", "qa", existing, "evidence.txt"):  "keep this evidence",
 	}
@@ -2579,7 +2580,7 @@ func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *test
 	f.g.run(f.g.repo, "worktree", "move", f.g.worktree, worktree)
 	f.csv.Key, f.csv.Slug, f.csv.Worktree = state.Key(f.g.repo, "zeta"), "zeta", worktree
 	f.csv.Dir = filepath.Join(worktree, ".claude", "factory", "csv")
-	writeFiles(t, f.csv.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"before the move"}`})
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": `{"schema_version":2,"id":"csv","branch":"worktree-csv","waiting_on":"before the move"}`})
 	writeFiles(t, filepath.Join(f.g.repo, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
 	f.mac = newMoveHost("macbook", f.log, f.csv)
 	f.macbook.Runtime.Behind(f.mac)
@@ -2594,7 +2595,7 @@ func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *test
 	if current.ID != "csv" {
 		t.Errorf("the factory id became its folder name: %s", current.ID)
 	}
-	writeFiles(t, current.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"after work on homelab"}`})
+	writeFiles(t, current.Dir, map[string]string{"state.json": `{"schema_version":2,"id":"csv","branch":"worktree-csv","waiting_on":"after work on homelab"}`})
 	f.lab.set(func(h *moveHost) {
 		m := h.factories[current.Key()]
 		m.ID, m.Dir, m.Branch = "csv", current.Dir, "worktree-csv"
@@ -2613,7 +2614,7 @@ func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *test
 
 func TestAMovedLegacyFactoryUsesTheTargetsWorktree(t *testing.T) {
 	f := newMoveFixture(t)
-	writeFiles(t, f.csv.Dir, map[string]string{"state.json": fmt.Sprintf(`{"id":"csv","branch":"worktree-csv","worktree":%q,"unknown_future_field":{"keep":true}}`, f.csv.Worktree)})
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": fmt.Sprintf(`{"schema_version":2,"id":"csv","branch":"worktree-csv","worktree":%q,"unknown_future_field":{"keep":true}}`, f.csv.Worktree)})
 	f.moveToHomelab(t)
 	clone := gitclone.Dir(f.homelab.Dir, appRemote)
 	found := factory.Discover([]string{clone}, &state.Registry{})

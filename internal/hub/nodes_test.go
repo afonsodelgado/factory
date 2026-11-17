@@ -68,7 +68,7 @@ func until(t *testing.T, m *Model, done func() bool) {
 func TestAnActionOnAnotherNodeGoesOnlyThereWithItsGenerationAndItsOutageIsCountedApart(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
-	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", Generation: 3, ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", CanPause: true, Pane: "%3"})
+	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", Generation: 3, ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", Loop: "qa_fix", Round: 2, CanPause: true, Pane: "%3"})
 	tn.Watch("/api/factories//srv/cowork:csv/actions")
 	if _, err := macbook.Add("homelab"); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func askingOn(t *testing.T, n *nodetest.Node, typed host.Typist) {
 	ask := func(id, question string, age time.Duration) state.Attention {
 		return state.Attention{ID: id, Kind: "question", Questions: []string{question}, Options: state.OptionLists{{"eu-west", "us-east"}}, Recommended: state.Strings{"eu-west"}, CreatedAt: state.Time{Time: now.Add(-age)}}
 	}
-	f := factory.Factory{Repo: "/srv/cowork", Slug: "csv", Entry: &state.Entry{Incarnation: "inc-csv"}, State: &state.State{ID: "csv", Stage: "plan", Attention: []state.Attention{ask("q1", "Which region?", 2*time.Minute), ask("q2", "Which bucket region?", time.Minute)}}}
+	f := factory.Factory{Repo: "/srv/cowork", Slug: "csv", Entry: &state.Entry{Incarnation: "inc-csv"}, State: &state.State{SchemaVersion: 2, ID: "csv", Stage: "plan", Attention: []state.Attention{ask("q1", "Which region?", 2*time.Minute), ask("q2", "Which bucket region?", time.Minute)}}}
 	pane := tmux.Pane{ID: "%1", Command: "claude", Token: "sup"}
 	idle := state.HookEvent{Event: "Stop", At: now.Add(-time.Minute)}
 	supervisorNeverAcknowledges := now.Add(host.ReceiptWait + time.Second)

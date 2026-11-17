@@ -61,7 +61,7 @@ func Render(v View, ic theme.Icons, w, h int) string {
 		border = theme.Focused
 	}
 	title := append(line{{Text: "─", Ink: border}}, tabs(v, ic)...)
-	c.Box(0, 0, w, h, theme.Box{Ink: border, Title: title, TitleRight: line{{Text: " " + v.Label + " ", Ink: theme.Muted}}})
+	c.Box(0, 0, w, h, theme.Box{Ink: border, Title: title, TitleRight: label(v.Label, w-2-theme.SpansWidth(title)-1)})
 	x, y, iw, ih := 2, 1, w-4, h-2
 	switch v.Tab {
 	case Attention:
@@ -108,9 +108,19 @@ func tabs(v View, ic theme.Icons) line {
 
 func renderFolded(c *theme.Canvas, v View, ic theme.Icons) {
 	c.HLine(0, 0, c.W, theme.Line)
-	c.Spans(2, 0, tabs(v, ic))
-	right := line{{Text: " " + v.Label + " ", Ink: theme.Muted}, {Text: "─", Ink: theme.Line}, {Text: " z", Ink: theme.FgInk(theme.Cyan)}, {Text: " expand ", Ink: theme.Muted}}
+	left := tabs(v, ic)
+	c.Spans(2, 0, left)
+	expand := line{{Text: "─", Ink: theme.Line}, {Text: " z", Ink: theme.FgInk(theme.Cyan)}, {Text: " expand ", Ink: theme.Muted}}
+	right := append(label(v.Label, c.W-4-theme.SpansWidth(left)-theme.SpansWidth(expand)-1), expand...)
 	c.Spans(c.W-2-theme.SpansWidth(right), 0, right)
+}
+
+func label(text string, room int) line {
+	fitted := theme.KeepTail(text, room-2)
+	if fitted == "" {
+		return nil
+	}
+	return line{{Text: " " + fitted + " ", Ink: theme.Muted}}
 }
 
 func place(c *theme.Canvas, x, y, w int, l line) {
@@ -290,10 +300,10 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 	top := []line{header(it, ic, v)}
 	top = append(top, wrapped(it.Body, w, theme.Text)...)
 	switch {
-	case it.Kind == "question" && len(it.Questions) == 0:
-		middle := freeText(v, w)
+	case TextAnswered(it):
+		middle := freeText(v, TextPrompt(it.Kind), w)
 		if middle == nil {
-			middle = []line{blank(), hints("type", "your answer, then ctrl+s sends it")}
+			middle = []line{blank(), hints("type", TextPrompt(it.Kind)+", then ctrl+s sends it")}
 		}
 		return top, middle, questionFooter(v, w), 0
 	case it.Kind == "question":
@@ -308,11 +318,11 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
 		return top, nil, withStatus(v, w, field("reply", v.Draft, w)), 0
 	case it.Kind == "cap":
-		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+it.LimitKey+" by one for this factory"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	case it.Kind == "failure":
-		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	case it.Kind == "handoff":
-		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, w)...), withStatus(v, w), 0
+		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	}
 	var middle []line
 	middle = append(middle, blank())
@@ -324,13 +334,6 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		bottom = append(bottom, text(it.Action, theme.Key))
 	}
 	return top, middle, bottom, 0
-}
-
-func limitFor(stage string) string {
-	if stage == "coderabbit" {
-		return "coderabbit_rounds"
-	}
-	return "qa_rounds"
 }
 
 func questionForm(v View, it Item, w int) ([]line, int) {
@@ -459,7 +462,7 @@ func textBox(title string, d Draft, w int) []line {
 		border = theme.Focused
 	}
 	inner := max(w-4, 4)
-	head := "─ " + title + " "
+	head := "─ " + theme.Truncate(title, w-5) + " "
 	lines := []line{{{Text: "╭", Ink: border}, {Text: head, Ink: border}, {Text: strings.Repeat("─", max(w-2-theme.Width(head), 0)) + "╮", Ink: border}}}
 	body := theme.Wrap(d.Text, inner)
 	if d.Text == "" {
@@ -574,19 +577,19 @@ func shortURL(url string) string {
 	return url
 }
 
-func freeText(v View, w int) []line {
+func freeText(v View, title string, w int) []line {
 	if v.Draft.Text == "" && !v.Draft.Editing {
 		return nil
 	}
-	return append([]line{blank()}, textBox("instruction", v.Draft, w)...)
+	return append([]line{blank()}, textBox(title, v.Draft, w)...)
 }
 
-func choices(v View, k1, d1, m1, k2, d2, m2 string) []line {
-	return []line{
-		blank(),
-		append(hints(k1, d1), theme.Span{Text: "  " + m1, Ink: theme.Muted}),
-		append(hints(k2, d2), theme.Span{Text: "  " + m2, Ink: theme.Muted}),
+func choices(v View, options ...string) []line {
+	lines := []line{blank()}
+	for i := 0; i < len(options); i += 3 {
+		lines = append(lines, append(hints(options[i], options[i+1]), theme.Span{Text: "  " + options[i+2], Ink: theme.Muted}))
 	}
+	return lines
 }
 
 func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
@@ -595,7 +598,7 @@ func renderPRs(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 		c.Right(x+w-1, y, ic.Icon("gh")+"gh checked "+ago(v.Now, v.Checked)+" ago · refreshes every 60s", theme.Muted)
 	}
 	if len(v.PRs) == 0 {
-		c.Put(x, y+2, "No PRs yet. They appear once the engineer opens the stack.", theme.Muted)
+		c.Put(x, y+2, "No PRs yet. They appear during the PR stage.", theme.Muted)
 		return
 	}
 	c.Put(x+2, y+2, "#  PR      title", theme.Quiet)

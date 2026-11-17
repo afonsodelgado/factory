@@ -77,3 +77,5 @@ How the user will judge it done.
 ```
 
 Then report the path. Do not start designing or planning.
+
+In factory mode use the supervisor-recorded local stack and shared command recipe. Never pull, push, submit or sync during implementation, review or QA. Report untested behaviour and prior unresolved findings explicitly.

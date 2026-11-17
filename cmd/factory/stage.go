@@ -16,8 +16,8 @@ import (
 
 const resultPoll = 2 * time.Second
 
-const stageUsage = `usage: factory stage start --role <role> --task <file> [--factory id] [--wait]
-       factory stage send --role <role> --message <file> [--factory id] [--wait]
+const stageUsage = `usage: factory stage start --role <role> --effect <id> --task <file> [--factory id] [--wait]
+       factory stage send --role <role> --effect <id> --message <file> [--factory id] [--wait]
        factory stage ci <pr number>...`
 
 func runStage(args []string) int {
@@ -30,6 +30,7 @@ func runStage(args []string) int {
 	}
 	action := args[0]
 	flags := flag.NewFlagSet("stage "+action, flag.ContinueOnError)
+	effect := flags.String("effect", "", "the committed workflow effect id")
 	role := flags.String("role", "", "the stage agent's role, such as engineer")
 	text := flags.String(map[string]string{"start": "task", "send": "message"}[action], "", "a file with the task or the follow-up message")
 	wait := flags.Bool("wait", false, "wait for the stage's result file, then print it")
@@ -37,7 +38,7 @@ func runStage(args []string) int {
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}
-	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id})
+	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id, EffectID: *effect})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
@@ -51,7 +52,7 @@ func runStage(args []string) int {
 }
 
 type stageCall struct {
-	Action, Role, TextFile, Factory string
+	Action, Role, TextFile, Factory, EffectID string
 }
 
 func runStageCI(prs []string) int {
@@ -64,7 +65,7 @@ func runStageCI(prs []string) int {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
 	}
-	fmt.Println("The factory app waits for CI and CodeRabbit and types the result into this session; the summary also lands in " + inbox)
+	fmt.Println("The factory app waits for CI and types the result into this session; the summary also lands in " + inbox)
 	return 0
 }
 
@@ -76,7 +77,7 @@ func stage(c stageCall) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ask(host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory})
+	return ask(host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory, EffectID: c.EffectID})
 }
 
 func ask(r host.StageRequest) (string, error) {
