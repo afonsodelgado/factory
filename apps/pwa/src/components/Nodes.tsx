@@ -380,11 +380,67 @@ function candidateDetail(c: Candidate): string {
   return c.detail + fix;
 }
 
+function pushLine(
+  report: CheckReport,
+  short: string,
+  home: string,
+  switchKey: boolean,
+): string | undefined {
+  const row = report.checks?.find((check) => check.name === "push");
+  if (!row) return undefined;
+  if (row.mark === "ok") return `it notifies this phone, with ${home}'s key`;
+  if (!report.push_conflict) return "it can't notify this phone yet";
+  return switchKey
+    ? `it switches to ${home}'s key and notifies this phone; the phone subscribed to ${short}'s old key must subscribe again`
+    : `it keeps ${short}'s own push key unless you switch it, so it can't notify this phone`;
+}
+
+function KeyChoice(props: {
+  short: string;
+  home: string;
+  switchKey: boolean;
+  onChange: (switchKey: boolean) => void;
+}) {
+  const { short, home, switchKey } = props;
+  return (
+    <div className="opts flush" role="group" aria-label="Push key">
+      <button
+        type="button"
+        className="opt"
+        aria-pressed={!switchKey}
+        onClick={() => props.onChange(false)}
+      >
+        <span className="mk" aria-hidden="true" />
+        <span>Keep {short}'s own push key</span>
+        <span className="rec">
+          {short} is added but can't notify this phone
+        </span>
+      </button>
+      <button
+        type="button"
+        className="opt"
+        aria-pressed={switchKey}
+        onClick={() => props.onChange(true)}
+      >
+        <span className="mk" aria-hidden="true" />
+        <span>
+          Switch {short} to {home}'s key
+        </span>
+        <span className="rec">
+          the phone subscribed to {short}'s old key must subscribe again
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function CheckNode({ name }: { name: string }) {
   const { nodes, navigate } = useApp();
   const [report, setReport] = useState<CheckReport>();
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [switchKey, setSwitchKey] = useState(false);
+  const [conflict, setConflict] = useState<string>();
   const live = nodes[0].live;
   const run = useCallback(async () => {
     setBusy(true);
@@ -402,13 +458,17 @@ export function CheckNode({ name }: { name: string }) {
     if (live) run();
   }, [live, run]);
   const short = report?.target.short || name.split(".")[0];
+  const home = homeName(nodes);
   const refused = !!report?.refusal;
+  const switching = switchKey && !!report?.push_conflict;
+  const also = report && pushLine(report, short, home, switching);
   const add = async () => {
     setBusy(true);
     setProblem(undefined);
     try {
-      await api.add(name);
-      navigate(paths.phone());
+      const added = await api.add(name, switching);
+      if (added.push.conflict) setConflict(added.push.conflict);
+      else navigate(paths.phone());
     } catch (error) {
       const body = (error as { body?: { report?: CheckReport } }).body;
       if (body?.report) setReport(body.report);
@@ -436,7 +496,16 @@ export function CheckNode({ name }: { name: string }) {
           </p>
         ) : null}
         {problem && !refused ? <Problem>{problem}</Problem> : null}
-        {report && !refused ? (
+        {conflict ? <Problem>{conflict.replace(/\.?$/, ".")}</Problem> : null}
+        {report?.push_conflict && !refused && !conflict ? (
+          <KeyChoice
+            short={short}
+            home={home}
+            switchKey={switchKey}
+            onChange={setSwitchKey}
+          />
+        ) : null}
+        {report && !refused && !conflict ? (
           <>
             <section className="box">
               <h3 className="bt ink">adding {short} also</h3>
@@ -447,15 +516,14 @@ export function CheckNode({ name }: { name: string }) {
                   </span>
                   <span>the hub and every node list it</span>
                 </li>
-                <li>
-                  <span className="org" aria-hidden="true">
-                    ◆
-                  </span>
-                  <span>
-                    it keeps its own push key for now, so it can't notify this
-                    phone yet
-                  </span>
-                </li>
+                {also ? (
+                  <li>
+                    <span className="org" aria-hidden="true">
+                      ◆
+                    </span>
+                    <span>{also}</span>
+                  </li>
+                ) : null}
                 <li>
                   <span className="blu" aria-hidden="true">
                     ▣
@@ -476,26 +544,38 @@ export function CheckNode({ name }: { name: string }) {
             ) : null}
           </>
         ) : null}
-        <footer className="ab">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy || !live}
-            onClick={run}
-          >
-            Check again
-          </button>
-          {report && !refused ? (
+        {conflict ? (
+          <footer className="ab">
             <button
               type="button"
               className="btn pri"
-              disabled={busy || !live}
-              onClick={add}
+              onClick={() => navigate(paths.phone())}
             >
-              Add {short}
+              Done
             </button>
-          ) : null}
-        </footer>
+          </footer>
+        ) : (
+          <footer className="ab">
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !live}
+              onClick={run}
+            >
+              Check again
+            </button>
+            {report && !refused ? (
+              <button
+                type="button"
+                className="btn pri"
+                disabled={busy || !live}
+                onClick={add}
+              >
+                {switching ? `Switch key and add ${short}` : `Add ${short}`}
+              </button>
+            ) : null}
+          </footer>
+        )}
       </div>
     </AppShell>
   );

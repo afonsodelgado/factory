@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	nodeUsage   = "usage: factory node run [--owner <tailscale login>] | install [--join | --no-join] | uninstall | status | list | add <machine> | remove <node>"
+	nodeUsage   = "usage: factory node run [--owner <tailscale login>] | install [--join | --no-join] | uninstall | status | list | add <machine> | remove <node> | push-key export|import"
 	ownerEnv    = "FACTORY_NODE_OWNER"
 	readTimeout = 10 * time.Second
 )
@@ -49,6 +49,8 @@ func runNode(args []string) int {
 	switch args[0] {
 	case "list", "add", "remove":
 		return runNodeList(args)
+	case "push-key":
+		return runPushKey(args[1:])
 	case "run":
 	default:
 		return runNodeSetup(args)
@@ -134,8 +136,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	if err := os.MkdirAll(cfg.SessionsDir(), 0o700); err != nil {
 		return nil, err
 	}
-	vapidKey, err := node.Migrate(cfg)
-	if err != nil {
+	if err := node.Migrate(cfg); err != nil {
 		return nil, err
 	}
 	tm := tmux.Client{Socket: cfg.Tmux.Socket}
@@ -190,7 +191,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	nodes.Clone = cloneFor(cfg, queue)
 	go api.Poll(ctx)
 	go nodes.Replicate(ctx)
-	app := phoneApp(ctx, cfg, api, pages, vapidKey)
+	app := phoneApp(ctx, cfg, api, pages, nodes)
 	exposure := &node.Exposure{Tailscale: ts}
 	go exposure.Watch(ctx)
 	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage(cfg.NodeName()), ExposedPage: phone.ExposedPage(cfg.NodeName()), Exposure: exposure}
@@ -224,7 +225,8 @@ func nodeRoster(ctx context.Context, cfg *state.Config, id, owner string, ts nod
 			return nil, err
 		}
 	}
-	return &node.Nodes{Self: self, Version: version, Dir: dir, Tailscale: ts, HTTP: node.PeerHTTP(), Ready: node.Readiness{Probes: readinessProbes}, Repos: repoOrigins}, nil
+	store := phone.Open(cfg.StateDir)
+	return &node.Nodes{Self: self, Version: version, Dir: dir, Tailscale: ts, HTTP: node.PeerHTTP(), Ready: node.Readiness{Probes: readinessProbes}, Repos: repoOrigins, Phone: &store}, nil
 }
 
 func repoOrigins() map[string]string {
@@ -295,11 +297,12 @@ func nodeHosts(cfg *state.Config) []string {
 	return hosts
 }
 
-func phoneApp(ctx context.Context, cfg *state.Config, api *node.API, pages *review.Server, vapidKey string) http.Handler {
-	store := phone.Open(cfg.StateDir)
-	pusher := &phone.Pusher{Store: store, Origin: cfg.NodeOrigin(), Client: phone.PublicClient()}
+func phoneApp(ctx context.Context, cfg *state.Config, api *node.API, pages *review.Server, nodes *node.Nodes) http.Handler {
+	store := *nodes.Phone
+	removed := func() bool { return nodes.Dir.Roster().Removed }
+	pusher := &phone.Pusher{Store: store, Origin: cfg.NodeOrigin(), Client: phone.PublicClient(), Removed: removed}
 	go pusher.Run(ctx)
-	server := &phone.Server{Store: store, Factories: api.Factories, Connected: api.Connected, Review: pages.MobileHandler(), Push: pusher, VAPIDKey: vapidKey, Shell: phone.Shell(bundle.Files)}
+	server := &phone.Server{Store: store, Factories: api.Factories, Connected: api.Connected, Review: pages.MobileHandler(), Push: pusher, Node: api.Node, Changed: nodes.Kick, Shell: phone.Shell(bundle.Files)}
 	go server.Poll(ctx)
 	return server.Handler()
 }
@@ -413,6 +416,9 @@ func addNode(ctx context.Context, c *node.Client, name string, out io.Writer) er
 		return fmt.Errorf("%w. Nothing was changed", err)
 	}
 	fmt.Fprintf(out, "\n%s is in the node list; every node, hub and phone lists it.\n", shortName(result.Member.Name))
+	if result.Push.Conflict != "" {
+		fmt.Fprintln(out, result.Push.Conflict+".")
+	}
 	if problems := result.Report.Problems; problems > 0 {
 		fmt.Fprintf(out, "%s. %s is a node now, but factories won't start there until they pass.\n", count(problems, "problem"), shortName(result.Member.Name))
 	}

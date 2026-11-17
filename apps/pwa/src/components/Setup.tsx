@@ -61,13 +61,21 @@ export function Setup() {
           <Check
             ok={health === "on"}
             label="Notifications"
-            detail={notificationDetail(health, support)}
+            detail={
+              push?.health === "no key"
+                ? push.health_detail
+                : notificationDetail(health, support)
+            }
           />
         </ul>
         <p className="sm">
           Notifications come through the phone's push service, so they reach you
-          on or off the tailnet. Each one names the factory and the kind of
-          item. The details load when you open the item on the tailnet.
+          on or off the tailnet.
+          {push?.health === "ready"
+            ? " Every node you add later sends them too, with nothing more to set up here."
+            : ""}{" "}
+          Each one names the factory and the kind of item. The details load when
+          you open the item on the tailnet.
         </p>
         {problem ? (
           <p className="stat warn" role="status">
@@ -90,7 +98,10 @@ export function Setup() {
               type="button"
               className="btn pri"
               disabled={
-                !push || busy || support !== "ready" || health === "blocked"
+                !push?.vapid_public_key ||
+                busy ||
+                support !== "ready" ||
+                health === "blocked"
               }
               onClick={enable}
             >
@@ -152,6 +163,8 @@ function notificationDetail(
       return "Blocked. Allow them in the phone's settings for factory, then come back.";
     case "expired":
       return "The subscription expired. Turn them on again.";
+    case "rekeyed":
+      return "The push key changed. Turn them on again.";
     case undefined:
       return "checking…";
   }

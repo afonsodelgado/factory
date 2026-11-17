@@ -161,6 +161,7 @@ const forms: Record<string, (props: FormProps) => ReactNode> = {
   cap: CapForm,
   failure: CapForm,
   permission: PermissionForm,
+  handoff: HandoffForm,
 };
 
 function OpenItem(props: {
@@ -603,6 +604,28 @@ function CommentForm(props: FormProps) {
             Send reply
           </button>
         </div>
+      </Actions>
+    </>
+  );
+}
+
+function HandoffForm(props: FormProps) {
+  return (
+    <>
+      {props.factory.pages.length > 0 ? (
+        <PageList pages={props.factory.pages} />
+      ) : null}
+      <SendLine send={props.item.send} />
+      {props.outcome}
+      <Actions why={props.why}>
+        <button
+          type="button"
+          className="btn ok"
+          disabled={props.disabled}
+          onClick={() => props.submit({ action: "handled" })}
+        >
+          <span aria-hidden="true">✓ </span>Tested
+        </button>
       </Actions>
     </>
   );

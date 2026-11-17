@@ -4,7 +4,7 @@ export type Route =
   | { screen: "list" }
   | { screen: "factory"; route: string; tab: Tab }
   | { screen: "item"; route: string; item: string }
-  | { screen: "link"; key: string }
+  | { screen: "link"; node: string; key: string }
   | { screen: "setup" }
   | { screen: "phone" }
   | { screen: "node"; id: string }
@@ -27,7 +27,8 @@ export function parse(location: Pick<Location, "pathname">): Route {
       if (parts[1] === "add") return { screen: "add" };
       return { screen: "phone" };
     case "n":
-      if (parts[1]) return { screen: "link", key: parts[1] };
+      if (parts[1] && parts[2])
+        return { screen: "link", node: parts[1], key: parts[2] };
       break;
     case "f":
       if (!parts[1]) break;

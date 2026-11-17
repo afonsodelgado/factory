@@ -318,7 +318,9 @@ type fakeNodeActions struct {
 	answers    map[string]NodeAnswer
 	candidates []node.Candidate
 	report     node.CheckReport
+	result     node.AddResult
 	added      []string
+	switched   []bool
 	removed    []string
 }
 
@@ -346,9 +348,9 @@ func (f *fakeNodeActions) Inspect(context.Context, string) (node.CheckReport, er
 	return f.report, nil
 }
 
-func (f *fakeNodeActions) Add(_ context.Context, _, name string) (node.AddResult, error) {
-	f.added = append(f.added, name)
-	return node.AddResult{}, nil
+func (f *fakeNodeActions) Add(_ context.Context, _, name string, replaceKey bool) (node.AddResult, error) {
+	f.added, f.switched = append(f.added, name), append(f.switched, replaceKey)
+	return f.result, nil
 }
 
 func (f *fakeNodeActions) Remove(_, id string) error {
@@ -453,6 +455,33 @@ func TestAddingANodeShowsDisabledMachinesAndOffersNoEnterForARefusal(t *testing.
 	pressNodes(n, "enter")
 	if strings.Contains(refusal, "⏎") || len(actions.added) > 0 {
 		t.Fatalf("a refused check shows:\n%s\nand ⏎ added %v; want no ⏎ hint and nothing added", refusal, actions.added)
+	}
+}
+
+func TestAddingANodeThatNotifiesAnotherPhoneSwitchesItsKeyOnlyOnP(t *testing.T) {
+	studio := node.Candidate{Name: "studio.tail5e2c.ts.net", Short: "studio", OS: "macOS", State: node.StateNode, Detail: "factory 0.9.4", Selectable: true}
+	conflict := node.CheckReport{Target: studio, PushConflict: true, Checks: []node.Check{
+		{Name: "node", Mark: node.MarkOK, Detail: "0.9.4 · macOS"},
+		{Name: "push", Mark: node.MarkWarn, Detail: "studio has its own push key, and 1 phone subscribed to it"},
+	}}
+	for _, key := range []string{"enter", "p"} {
+		n, actions := threeNodes(t)
+		actions.candidates, actions.report = []node.Candidate{studio}, conflict
+		actions.result = node.AddResult{Member: node.Member{ID: "n-studio", Name: studio.Name}, Push: node.PushOutcome{Conflict: "studio is added, but it keeps its own push key, so it can't notify your phone"}}
+		pressNodes(n, "a", "enter")
+		check := n.View().Content
+		for _, want := range []string{"studio sends with another key", "switches it to macbook's key; that phone subscribes again", "Without p, studio is added but can't notify your phone", "p switch key, then add"} {
+			if !strings.Contains(check, want) {
+				t.Fatalf("the check of a node with its own subscribed push key shows:\n%s\nwant %q", check, want)
+			}
+		}
+		pressNodes(n, key)
+		if want := key == "p"; !slices.Equal(actions.switched, []bool{want}) {
+			t.Fatalf("%s added with key switches %v; want only p to switch studio's key", key, actions.switched)
+		}
+		if key == "enter" && !strings.Contains(n.View().Content, "it keeps its own push key") {
+			t.Fatalf("after ⏎ the list shows:\n%s\nwant the named push conflict", n.View().Content)
+		}
 	}
 }
 

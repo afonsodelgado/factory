@@ -16,7 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 type vendorCall struct {
@@ -55,6 +58,8 @@ func (v *vendor) took() []vendorCall {
 	return calls
 }
 
+const testNode = "3d4c1a2b-node"
+
 func subscriptionFor(t *testing.T, installation, endpoint string) Subscription {
 	key, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -85,7 +90,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	offline := func(string) bool { return false }
 	reconcile := func(factories []host.LocalFactory, connected func(string) bool) bool {
 		t.Helper()
-		queued, err := store.Reconcile(factories, connected, now)
+		queued, err := store.Reconcile(testNode, factories, connected, now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,12 +113,15 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 		var fields map[string]any
 		json.Unmarshal([]byte(j.Payload), &fields)
 		for name := range fields {
-			if !strings.Contains("tag title body url revision resolved", name) {
+			if !strings.Contains("node tag title body url revision resolved", name) {
 				t.Errorf("payload field %q leaves the machine", name)
 			}
 		}
 		if strings.Contains(j.Payload, "secret") {
 			t.Errorf("payload %s carries the question, a path or the repo", j.Payload)
+		}
+		if fields["node"] != testNode || fields["url"] != "/n/"+testNode+"/k1" || !strings.HasPrefix(fields["tag"].(string), testNode+"/") {
+			t.Errorf("payload %s; want the sending node in its tag and in a link the app opens without its home", j.Payload)
 		}
 	}
 	pusher.Deliver(ctx)
@@ -125,7 +133,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 		t.Errorf("VAPID subject %q; want the app's HTTPS origin", sub)
 	}
 
-	if queued, _ := Open(store.Dir).Reconcile(factoryWith(false, "old", "k1"), offline, now); queued {
+	if queued, _ := Open(store.Dir).Reconcile(testNode, factoryWith(false, "old", "k1"), offline, now); queued {
 		t.Fatal("a restarted node notified again about an item it already pushed")
 	}
 
@@ -172,7 +180,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 
 	reconcile(factoryWith(false, "k5"), offline)
-	if err := store.Unsubscribe(v.URL + "/a"); err != nil {
+	if err := store.Unsubscribe(v.URL+"/a", now); err != nil {
 		t.Fatal(err)
 	}
 	pusher.Deliver(ctx)
@@ -185,7 +193,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 }
 
-func TestAnOldEndpointsFailureLeavesTheRenewedSubscriptionOn(t *testing.T) {
+func TestAStaleFailureFromAnyNodeNeverRemovesARenewedSubscription(t *testing.T) {
 	store := Open(t.TempDir())
 	if _, err := store.VAPIDKey(""); err != nil {
 		t.Fatal(err)
@@ -197,8 +205,8 @@ func TestAnOldEndpointsFailureLeavesTheRenewedSubscriptionOn(t *testing.T) {
 	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/old")); err != nil {
 		t.Fatal(err)
 	}
-	store.Reconcile(factoryWith(false, "old"), offline, now)
-	store.Reconcile(factoryWith(false, "old", "k1"), offline, now)
+	store.Reconcile(testNode, factoryWith(false, "old"), offline, now)
+	store.Reconcile(testNode, factoryWith(false, "old", "k1"), offline, now)
 	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new")); err != nil {
 		t.Fatal(err)
 	}
@@ -210,6 +218,68 @@ func TestAnOldEndpointsFailureLeavesTheRenewedSubscriptionOn(t *testing.T) {
 	}
 	if calls := v.took(); len(calls) != 0 {
 		t.Fatalf("vendor saw %+v; want nothing sent to the replaced endpoint", calls)
+	}
+
+	stale, _ := store.SubscriptionOf("a")
+	store.Reconcile(testNode, factoryWith(false, "old", "k1", "k2"), offline, now)
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new")); err != nil {
+		t.Fatal(err)
+	}
+	v.answers["/new"] = []int{http.StatusGone}
+	pusher.Deliver(context.Background())
+	keys, _ := store.KeyState()
+	replicated := Replica{Key: keys.Fingerprint, Records: []Subscription{{Endpoint: stale.Endpoint, Revision: stale.Revision + 1, Removed: true}}}
+	if err := store.Merge(replicated, now); err != nil {
+		t.Fatal(err)
+	}
+	if renewed, ok := store.SubscriptionOf("a"); !ok || renewed.Revision == stale.Revision {
+		t.Fatalf("subscription %+v after a push queued before the browser renewed its keys failed here and on another node; want the renewal kept", renewed)
+	}
+	v.took()
+	now = now.Add(sendingLease + time.Minute)
+	pusher.Deliver(context.Background())
+	if calls := v.took(); len(calls) != 0 {
+		t.Fatalf("the push service saw %+v after a stale failure; want the failed push dropped, not sent again", calls)
+	}
+}
+
+func TestAHandoffNotifiesOnceEvenAsItsSupervisorExitsAndStaysUntilTested(t *testing.T) {
+	ctx := context.Background()
+	store := Open(t.TempDir())
+	if _, err := store.VAPIDKey(""); err != nil {
+		t.Fatal(err)
+	}
+	v := newVendor(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a")); err != nil {
+		t.Fatal(err)
+	}
+	handoff := state.Attention{ID: "handoff-csv", Kind: "handoff", Title: "Done, ready for you to test", CreatedAt: state.Time{Time: now}}
+	done := func(pane *tmux.Pane, attention ...state.Attention) []host.LocalFactory {
+		st := &state.State{ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "done"}}, Attention: attention}
+		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})
+		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Status: factory.Done, Pane: pane}}})
+		return r.Local().Factories
+	}
+	offline := func(string) bool { return false }
+	supervisor := &tmux.Pane{ID: "%1", Command: "claude"}
+	store.Reconcile(testNode, done(supervisor), offline, now)
+	for _, pane := range []*tmux.Pane{supervisor, {ID: "%1", Command: "zsh"}, nil} {
+		factories := done(pane, handoff)
+		if len(factories[0].Items) != 1 {
+			t.Fatalf("a done factory whose supervisor pane is %+v lists %+v; want its handoff until it is tested", pane, factories[0].Items)
+		}
+		store.Reconcile(testNode, factories, offline, now)
+		pusher.Deliver(ctx)
+	}
+	if calls := v.took(); len(calls) != 1 {
+		t.Fatalf("the handoff reached the push service %d times; want once, and never again for its supervisor exiting", len(calls))
+	}
+	tested := handoff
+	tested.ResolvedAt = state.Time{Time: now}
+	if items := done(nil, tested)[0].Items; len(items) != 0 {
+		t.Fatalf("a tested handoff still shows: %+v", items)
 	}
 }
 
@@ -255,7 +325,7 @@ func TestAPairedPhonesSubscriptionKeepsDeliveringAfterTheAuthMigration(t *testin
 	if _, err := store.Subscribe(subscriptionFor(t, "pixel", a.Endpoint)); err != nil {
 		t.Fatal(err)
 	}
-	store.Reconcile(factoryWith(false, "old", "k1"), func(string) bool { return false }, now)
+	store.Reconcile(testNode, factoryWith(false, "old", "k1"), func(string) bool { return false }, now)
 	pusher.Deliver(context.Background())
 	if calls := v.took(); len(calls) != 2 {
 		t.Fatalf("a new item reached %+v; want both paired phones, including the one whose app re-registered", calls)

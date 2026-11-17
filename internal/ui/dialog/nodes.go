@@ -77,7 +77,7 @@ type NodeActions interface {
 	Machines(ctx context.Context) (node.Inventory, error)
 	Candidates(ctx context.Context) ([]node.Candidate, error)
 	Inspect(ctx context.Context, name string) (node.CheckReport, error)
-	Add(ctx context.Context, op, name string) (node.AddResult, error)
+	Add(ctx context.Context, op, name string, replaceKey bool) (node.AddResult, error)
 	Remove(op, id string) error
 	SetTarget(name string) error
 	Clone(ctx context.Context, name, op, url string) error
@@ -624,9 +624,11 @@ func (n *Nodes) checkKey(key string) tea.Cmd {
 	case key == "r":
 		return n.inspect(n.checking)
 	case key == "enter" && n.addable():
-		return n.add(false)
+		return n.add(false, false)
+	case key == "p" && n.addable() && n.report.PushConflict:
+		return n.add(false, true)
 	case key == "d" && n.addable() && n.report.Problems == 0:
-		return n.add(true)
+		return n.add(true, false)
 	default:
 		n.scrollKey(key)
 	}
@@ -640,12 +642,12 @@ func (n *Nodes) origin() nodesScreen {
 	return pickScreen
 }
 
-func (n *Nodes) add(makeDefault bool) tea.Cmd {
+func (n *Nodes) add(makeDefault, replaceKey bool) tea.Cmd {
 	ctx, run := n.start()
 	n.adding = true
 	actions, op, name := n.actions, n.operation, n.checking
 	return func() tea.Msg {
-		result, err := actions.Add(ctx, op, name)
+		result, err := actions.Add(ctx, op, name, replaceKey)
 		return nodeAdded{run: run, result: result, err: err, makeDefault: makeDefault}
 	}
 }
@@ -918,6 +920,9 @@ func (n *Nodes) drawAdded(c *theme.Canvas, y int) int {
 		if check.Mark == node.MarkFail {
 			failing = append(failing, check.Name)
 		}
+	}
+	if conflict := n.added.Push.Conflict; conflict != "" {
+		y = paragraph(c, y, "! "+withStop(conflict), theme.FgInk(theme.Yellow)) + 1
 	}
 	if len(failing) == 0 {
 		return y
@@ -1323,13 +1328,15 @@ func (n *Nodes) checkTitle() (string, theme.Ink) {
 		return "Checking " + short, theme.Bright.B()
 	case n.report.Refusal != "":
 		return n.refusal().title, red
+	case n.report.PushConflict:
+		return short + " sends with another key", theme.FgInk(theme.Yellow).B()
 	case n.report.Problems > 0:
 		return fmt.Sprintf("%s needs %s", short, plural(n.report.Problems, "thing")), theme.Bright.B()
 	}
 	return short + " is ready", theme.Bright.B()
 }
 
-var pendingChecks = []string{"tailscale", "node", "owner", "funnel", "tools", "claude", "git access", "repos"}
+var pendingChecks = []string{"tailscale", "node", "owner", "funnel", "tools", "claude", "git access", "repos", "push"}
 
 func (n *Nodes) drawCheck(c *theme.Canvas, y int) int {
 	short := n.checkingShort()
@@ -1344,7 +1351,7 @@ func (n *Nodes) drawCheck(c *theme.Canvas, y int) int {
 		y = drawChecks(c, y, rows)
 		return paragraph(c, y+1, short+" runs these checks itself and sends back the results. Nothing is written on either machine yet.", theme.Muted)
 	}
-	y = drawChecks(c, y, checkRows(n.report.Checks))
+	y = drawChecks(c, y, n.pushRows(checkRows(n.report.Checks)))
 	if n.report.Refusal != "" {
 		look := n.refusal()
 		y = paragraph(c, y+1, look.explain, look.ink)
@@ -1354,6 +1361,9 @@ func (n *Nodes) drawCheck(c *theme.Canvas, y int) int {
 		return y
 	}
 	y = n.drawAlso(c, y+1, short)
+	if n.report.PushConflict {
+		y = paragraph(c, y+1, "Without p, "+short+" is added but can't notify your phone: one key serves every node.", theme.Muted)
+	}
 	switch {
 	case n.adding:
 		y = paragraph(c, y+1, "◌ adding "+short+"…", theme.FgInk(theme.Cyan))
@@ -1383,13 +1393,29 @@ func (n *Nodes) drawAlso(c *theme.Canvas, y int, short string) int {
 		text string
 	}{
 		{"↔", theme.FgInk(theme.Cyan), " tells your other nodes, so this hub, your phone and every node list it"},
-		{"◆", theme.FgInk(theme.Orange), " keeps its own push key for now, so it can't notify your phone yet"},
+		{"◆", theme.FgInk(theme.Orange), n.pushLine(short)},
 		{"▣", theme.FgInk(theme.Blue), " lets your phone app, which lives on " + n.home() + ", reach " + short + " directly"},
 	}
 	for i, l := range lines {
 		c.Spans(3, y+1+i, []theme.Span{{Text: l.mark, Ink: l.ink}, {Text: l.text, Ink: theme.Text}})
 	}
 	return y + 1 + len(lines)
+}
+
+func (n *Nodes) pushLine(short string) string {
+	if n.report != nil && n.report.PushConflict {
+		return " keeps " + short + "'s own push key unless you press p, so it can't notify your phone"
+	}
+	return " gives it " + n.Context.Machine + "'s push key and your phone's subscription, so it notifies you"
+}
+
+func (n *Nodes) pushRows(rows []CheckRow) []CheckRow {
+	for i := range rows {
+		if rows[i].Name == "push" && n.report.PushConflict {
+			rows[i].Act, rows[i].ActKey = "switches it to "+n.Context.Machine+"'s key; that phone subscribes again", "p"
+		}
+	}
+	return rows
 }
 
 func (n *Nodes) checkHints() string {
@@ -1407,6 +1433,8 @@ func (n *Nodes) checkHints() string {
 		return "r check again   esc back"
 	case n.report.Refusal != "":
 		return "esc back"
+	case n.report.PushConflict:
+		return "⏎ add " + short + "   p switch key, then add   esc back"
 	case n.report.Problems == 0:
 		return "⏎ add " + short + "   d add it as the default for new factories   esc back"
 	}

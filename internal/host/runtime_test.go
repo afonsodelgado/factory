@@ -540,6 +540,67 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 	}
 }
 
+type wakingEngine struct{ created, typed []string }
+
+func (e *wakingEngine) NewFactoryPane(p NewPane) (string, error) {
+	e.created = append(e.created, p.Slug)
+	return "%9", nil
+}
+func (e *wakingEngine) Pause(string, string) error              { return nil }
+func (e *wakingEngine) NewStagePane(StagePane) (string, error)  { return "", nil }
+func (e *wakingEngine) KillStages(string, string, string) error { return nil }
+func (e *wakingEngine) Type(pane, text string) error {
+	e.typed = append(e.typed, pane+": "+text)
+	return nil
+}
+
+func TestMarkingADoneFactorysHandoffTestedWakesItsGoneSupervisorAndTypesItOnce(t *testing.T) {
+	handoff := asked("handoff-csv", "handoff")
+	doneWith := func(pane *tmux.Pane) Snapshot {
+		snap := phoneSnapshot("Stop", handoff)
+		it := &snap.Items[0]
+		it.Factory.State.Stages = map[string]state.Stage{"handoff": {Status: "done"}}
+		it.Factory.Worktree = t.TempDir()
+		it.Status, it.Pane = factory.Done, pane
+		snap.Panes = nil
+		if pane != nil {
+			snap.Panes = []tmux.Pane{*pane}
+		}
+		return snap
+	}
+	engine, typist := &wakingEngine{}, &paneTypist{}
+	r := phoneRuntime(t.TempDir(), typist, doneWith(nil))
+	r.Engine = engine
+	if items := r.Local().Factories[0].Items; len(items) != 1 || items[0].ID != "handoff-csv" {
+		t.Fatalf("a done factory shows %+v; want its handoff item until the developer marks it tested", items)
+	}
+	tested := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActHandled, Item: "handoff-csv", Since: handoff.CreatedAt.Time}
+	if receipt, err := r.Act(tested); err != nil || receipt.Status != StatusQueued || len(engine.created) != 1 {
+		t.Fatalf("marking the handoff tested with no supervisor running gave %+v, %v and woke %v; want a fresh supervisor and the message queued for it", receipt, err, engine.created)
+	}
+	r.Engine, r.Now = nil, func() time.Time { return phoneNow.Add(time.Minute) }
+	r.SetSnapshot(doneWith(&tmux.Pane{ID: "%9", Command: "claude"}))
+	r.FlushTypeQueue()
+	r.FlushTypeQueue()
+	if want := []string{"%9: handoff-csv tested: the developer tested the handoff"}; strings.Join(typist.typed, "\n") != want[0] {
+		t.Fatalf("typed %q into the woken supervisor; want %q once", typist.typed, want)
+	}
+}
+
+func TestALegacyRemoteAnswerItsSupervisorNeverReceivedComesBackAfterTheWait(t *testing.T) {
+	question := asked("q1", "question", "Which region?")
+	f := factory.Factory{Slug: "csv", State: &state.State{ID: "csv", Attention: []state.Attention{question}}, Remote: &factory.Location{Name: "homelab", Server: "s-1", Incarnation: "inc-csv"}}
+	idle := state.HookEvent{Event: "Stop", At: phoneNow.Add(-time.Minute)}
+	item := Item{Factory: f, Status: factory.NeedsYou, Hook: &state.HookFile{Main: &idle, Last: idle}}
+	r := phoneRuntime(t.TempDir(), &paneTypist{}, Snapshot{At: phoneNow})
+	r.PutClaim(Answer{Factory: f.Key(), ItemID: "q1", ItemSince: question.CreatedAt.Time, Head: "q1 answers:", At: phoneNow, Source: SourceHub, Action: ActAnswer})
+	data, _ := json.Marshal(RemoteObservation{Items: []Item{item}, Clocks: map[string]time.Time{f.Key(): phoneNow.Add(ReceiptWait + time.Second)}})
+	r.Handle(Message{T: "settle-remote", Data: data})
+	if receipt, ok := r.Claim(ClaimKey(f.Key(), "q1")); ok || len(r.receipts.Settled) != 1 || r.receipts.Settled[0].Reason != NotReceived {
+		t.Fatalf("a remote answer unreceived past the wait is still %+v, settled as %+v; want it refused as not received so the hub offers it again", receipt, r.receipts.Settled)
+	}
+}
+
 func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
 	dir := t.TempDir()
 	question := asked("q1", "question", "Which region?")

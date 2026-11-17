@@ -146,6 +146,11 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &prefix); err == nil {
 			m.ForgetClaims(func(key string) bool { return strings.HasPrefix(key, prefix) })
 		}
+	case "settle-remote":
+		var o RemoteObservation
+		if err = json.Unmarshal(request.Data, &o); err == nil {
+			m.SettleRemote(o)
+		}
 	case "record-sent":
 		var r SentRecord
 		if err = json.Unmarshal(request.Data, &r); err == nil {

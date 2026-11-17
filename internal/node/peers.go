@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/afonsodelgado/factory/internal/phone"
 )
 
 const (
@@ -98,16 +100,17 @@ func (inv Inventory) Verify(p Peer, owner string) error {
 }
 
 type Hello struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Protocol    int    `json:"protocol"`
-	MinProtocol int    `json:"min_protocol"`
-	OS          string `json:"os"`
-	Owner       string `json:"owner"`
-	Roster      string `json:"roster"`
-	Members     int    `json:"members"`
-	Factories   int    `json:"factories"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Version     string          `json:"version"`
+	Protocol    int             `json:"protocol"`
+	MinProtocol int             `json:"min_protocol"`
+	OS          string          `json:"os"`
+	Owner       string          `json:"owner"`
+	Roster      string          `json:"roster"`
+	Members     int             `json:"members"`
+	Factories   int             `json:"factories"`
+	Push        *phone.KeyState `json:"push,omitempty"`
 }
 
 func compatible(a, b Hello) bool {

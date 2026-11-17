@@ -305,7 +305,7 @@ func TestOpeningTheAppWhileFunnelIsOnShowsAPageWhileTheAPIStillNamesTheFix(t *te
 func TestTheTailnetListenerServesThePhoneAppToItsOwnerWithoutPairing(t *testing.T) {
 	const host = "devbox.tail1234.ts.net"
 	api := &API{Node: "node-1", Version: "test"}
-	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key"}).Handler()
+	app := (&phone.Server{Store: phone.Open(t.TempDir())}).Handler()
 	gate := Gate{Owner: "alice@example.com", Hosts: []string{host}, Origin: "https://" + host, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage("devbox"), Exposure: funnelOff(t)}
 	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
 	cases := []struct {
@@ -453,7 +453,7 @@ func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
 	runtime := &recordingCaller{}
 	api := &API{Commands: Commands{Runtime: runtime}, Node: "node-1", Version: "test"}
-	app := (&phone.Server{Store: phone.Open(t.TempDir()), VAPIDKey: "key", Review: pages.MobileHandler()}).Handler()
+	app := (&phone.Server{Store: phone.Open(t.TempDir()), Review: pages.MobileHandler()}).Handler()
 	gate := Gate{Owner: "alice@example.com", Hosts: []string{name}, Origin: "https://" + name, OpaquePath: phone.GrantPrefix, Exposure: funnelOff(t)}
 	handler := gate.Wrap(api.With(app, gate.Principal, NetworkKinds...))
 	request := func(method, path, origin string) *httptest.ResponseRecorder {

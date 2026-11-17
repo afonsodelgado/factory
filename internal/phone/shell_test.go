@@ -18,7 +18,7 @@ func TestTheShellServesOnlyAppRoutesAndItsOwnFiles(t *testing.T) {
 	}
 	shell := Shell(built)
 	for path, want := range map[string]int{
-		"/": 200, "/f/shop-csv": 200, "/f/shop-csv/i/k1": 200, "/n/k1": 200, "/setup": 200,
+		"/": 200, "/f/shop-csv": 200, "/f/shop-csv/i/k1": 200, "/n/node-1/k1": 200, "/setup": 200,
 		"/sw.js": 200, "/assets/a.js": 200,
 		"/f/shop-csv/unknown/deep": 404, "/assets/": 404, "/index.html": 404, "/secret": 404,
 	} {

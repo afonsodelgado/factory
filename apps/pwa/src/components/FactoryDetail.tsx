@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LocalFactory, Receipt } from "../api/types.ts";
 import { clock, hostName, kindLook, statusLook } from "../format.ts";
 import { useBlocked, useNow, useSend } from "../hooks.ts";
-import { age } from "../order.ts";
+import { age, needsSince } from "../order.ts";
 import { paths, type Tab } from "../route.ts";
 import { useApp } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
@@ -74,7 +74,7 @@ function Head({ factory }: { factory: LocalFactory }) {
       </p>
       {factory.title ? <p className="prompt">{factory.title}</p> : null}
       <p className="l3">
-        {[factory.stage, age(factory.needs_since, now)]
+        {[factory.stage, age(needsSince(factory), now)]
           .filter(Boolean)
           .join(" · ")}
       </p>

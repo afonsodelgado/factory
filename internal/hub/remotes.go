@@ -287,20 +287,18 @@ func (m *Model) noteLink(name, text string) {
 }
 
 func (m *Model) settleRemoteClaims() {
-	open := map[string]bool{}
-	for _, it := range m.remoteItems() {
-		for _, item := range m.attentionItems(it, nil) {
-			open[draftKey(it.Factory, item.ID)] = true
+	pending := slices.ContainsFunc(slices.Collect(maps.Values(m.claims)), func(a host.Answer) bool { return host.Remote(a.Factory) })
+	if !pending {
+		return
+	}
+	observed := host.RemoteObservation{Clocks: map[string]time.Time{}}
+	for _, it := range m.snap.Items {
+		if it.Factory.Remote != nil && !it.Factory.OnNode() {
+			observed.Items = append(observed.Items, it)
+			observed.Clocks[it.Factory.Key()] = m.snap.At.Add(m.linkOf(it.Factory).offset)
 		}
 	}
-	for key, mark := range m.claims {
-		if !host.Remote(mark.Factory) || open[key] {
-			continue
-		}
-		delete(m.panel.drafts, key)
-		os.Remove(mark.Draft)
-		m.dropClaim(key)
-	}
+	m.report(m.ask("settle-remote", observed, nil))
 }
 
 func (m *Model) remoteItems() []Item {

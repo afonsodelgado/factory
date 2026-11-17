@@ -1,13 +1,21 @@
 package node_test
 
 import (
+	"bufio"
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +24,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/node/nodetest"
+	"github.com/afonsodelgado/factory/internal/phone"
 )
 
 func names(n ...string) []string { return n }
@@ -499,8 +508,18 @@ func TestAJoinChallengeWorksOnceAndExpires(t *testing.T) {
 		}
 		return <-fake.challenges
 	}
+	sender := phone.Open(t.TempDir())
+	sender.VAPIDKey("")
+	shared, err := sender.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
 	commit := func(join, challenge string, ledger node.Ledger) int {
-		status, _, _ := tn.Request(coordinator, homelab.Machine, "POST", "/api/node/join/commit", "", node.Commit{Join: join, Challenge: challenge, Ledger: ledger})
+		before := keyOf(t, homelab).Fingerprint
+		status, _, _ := tn.Request(coordinator, homelab.Machine, "POST", "/api/node/join/commit", "", node.Commit{Join: join, Challenge: challenge, Ledger: ledger, Push: &shared})
+		if status != 200 && keyOf(t, homelab).Fingerprint != before {
+			t.Fatalf("a refused commit (%d) still installed the push key it carried", status)
+		}
 		return status
 	}
 
@@ -532,8 +551,8 @@ func TestAJoinChallengeWorksOnceAndExpires(t *testing.T) {
 	if status := commit(fourth, challenge, ledger); status == 200 {
 		t.Error("a used challenge was replayed")
 	}
-	if homelab.Roster().ID != ledger.Roster {
-		t.Error("the one accepted commit did not stage the coordinator's list")
+	if homelab.Roster().ID != ledger.Roster || keyOf(t, homelab).Fingerprint != shared.Fingerprint() {
+		t.Error("the one accepted commit did not take the coordinator's list and push key")
 	}
 }
 
@@ -551,5 +570,302 @@ func TestAttachingToAnotherNodesPaneRunsSSHOnlyForThePreparedView(t *testing.T) 
 	}
 	if args[0] != "ssh" || !slices.Contains(args, homelab.Name) || args[len(args)-1] != "view-/r/app:csv-%12" {
 		t.Errorf("attach ran %v; want ssh to homelab opening the view the node prepared", args)
+	}
+}
+
+type pushVendor struct {
+	*httptest.Server
+	mu      sync.Mutex
+	calls   []string
+	answers []int
+}
+
+func newPushVendor(t *testing.T) *pushVendor {
+	v := &pushVendor{}
+	v.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v.mu.Lock()
+		defer v.mu.Unlock()
+		_, key, _ := strings.Cut(r.Header.Get("Authorization"), ", k=")
+		v.calls = append(v.calls, r.URL.Path+" "+key)
+		status := http.StatusCreated
+		if len(v.answers) > 0 {
+			status, v.answers = v.answers[0], v.answers[1:]
+			w.Header().Set("Retry-After", "60")
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(v.Close)
+	return v
+}
+
+func (v *pushVendor) took() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	calls := v.calls
+	v.calls = nil
+	return calls
+}
+
+func (v *pushVendor) answer(statuses ...int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.answers = statuses
+}
+
+func browserSubscription(t *testing.T, endpoint, installation string) map[string]any {
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := make([]byte, 16)
+	rand.Read(auth)
+	keys := map[string]string{"p256dh": base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(auth)}
+	return map[string]any{"endpoint": endpoint, "expirationTime": nil, "keys": keys, "installation": installation}
+}
+
+func subscribeAt(t *testing.T, tn *nodetest.Tailnet, n *nodetest.Node, body map[string]any) {
+	t.Helper()
+	if status, _, answer := tn.Request(tn.Machine("iphone"), n.Machine, "POST", "/api/push/subscription", "https://"+n.Name, body); status != 200 {
+		t.Fatalf("subscribing at %s answered %d %s", n.Short(), status, answer)
+	}
+}
+
+func endpoints(t *testing.T, n *nodetest.Node) []string {
+	t.Helper()
+	subs, err := n.Phone.Subscriptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, sub := range subs {
+		paths = append(paths, sub.Endpoint[strings.LastIndex(sub.Endpoint, "/"):])
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+func keyOf(t *testing.T, n *nodetest.Node) phone.KeyState {
+	t.Helper()
+	state, err := n.Phone.KeyState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func needingYou(key string) host.LocalFactory {
+	return host.LocalFactory{Key: "/r/app:" + key, ID: key, Incarnation: "inc-" + key, Items: []host.LocalItem{{Key: key, AttentionItem: host.AttentionItem{ID: "q-" + key, Kind: "question"}}}}
+}
+
+func publish(t *testing.T, n *nodetest.Node, f host.LocalFactory) {
+	t.Helper()
+	n.Runtime.SetFactories(f)
+	eventually(t, n.Short()+" to publish its item", func() bool { _, published, _ := n.API.Factories(); return len(published) == 1 })
+}
+
+func firstEvent(t *testing.T, tn *nodetest.Tailnet, n *nodetest.Node, origin string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+n.Name+"/api/events", nil)
+	req.Header.Set("Origin", origin)
+	resp, err := tn.Client(tn.Machine("iphone")).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	lines := bufio.NewScanner(resp.Body)
+	lines.Buffer(nil, 1<<20)
+	for lines.Scan() {
+		if data, ok := strings.CutPrefix(lines.Text(), "data: "); ok {
+			return data
+		}
+	}
+	t.Fatalf("%s's event stream sent no event: %v", n.Short(), lines.Err())
+	return ""
+}
+
+func TestJoiningCopiesThePushKeyOnlyToTheVerifiedNodeAndBothSendToTheSamePhone(t *testing.T) {
+	ctx := context.Background()
+	vendor := newPushVendor(t)
+	tn := nodetest.New(t)
+	tn.PushClient = vendor.Client()
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	subscribeAt(t, tn, macbook, browserSubscription(t, vendor.URL+"/iphone", "iphone"))
+
+	result, err := macbook.Add("homelab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, theirs := keyOf(t, macbook), keyOf(t, homelab)
+	if !result.Push.Shared || theirs.Fingerprint != mine.Fingerprint || !slices.Equal(endpoints(t, homelab), names("/iphone")) {
+		t.Fatalf("after the join homelab sends with %+v and holds %v, the add reported %+v; want macbook's key %s and the phone's subscription", theirs, endpoints(t, homelab), result.Push, mine.Fingerprint)
+	}
+	secret, err := macbook.Phone.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, _ := json.Marshal(result)
+	seen := []string{string(added)}
+	home := "https://" + macbook.Name
+	for _, n := range []*nodetest.Node{macbook, homelab} {
+		for _, path := range []string{"/api/nodes", "/api/snapshot", "/api/nodes/candidates", "/api/push/subscription?installation=iphone"} {
+			_, _, body := tn.Request(tn.Machine("iphone"), n.Machine, "GET", path, home, nil)
+			seen = append(seen, body)
+		}
+		_, _, report := tn.Request(tn.Machine("iphone"), n.Machine, "POST", "/api/nodes/check", home, node.NodeRequest{Name: "studio"})
+		seen = append(seen, report)
+	}
+	seen = append(seen, firstEvent(t, tn, homelab, home))
+	for _, body := range seen {
+		if strings.Contains(body, secret.Private) || strings.Contains(body, secret.Subscriptions[0].Auth) {
+			t.Fatalf("a browser-visible answer carries the private push key or a subscription secret: %s", body)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(homelab.Dir, "phone", "vapid.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("homelab keeps the copied key in %v (%v); want a file only its owner reads", info, err)
+	}
+
+	for _, n := range []*nodetest.Node{macbook, homelab} {
+		n.Notify(ctx)
+	}
+	publish(t, macbook, needingYou("k-mac"))
+	publish(t, homelab, needingYou("k-home"))
+	macbook.Notify(ctx)
+	homelab.Notify(ctx)
+	calls := vendor.took()
+	if len(calls) != 2 || calls[0] != calls[1] || calls[0] != "/iphone "+mine.Public {
+		t.Fatalf("the push service saw %v; want one push from each node to the same subscription, both signed with macbook's key", calls)
+	}
+}
+
+func TestAddWithoutPKeepsTheTargetsOwnKeyAndPSwitchesItAndDropsItsOldPhone(t *testing.T) {
+	vendor := newPushVendor(t)
+	for _, switching := range []bool{false, true} {
+		tn := nodetest.New(t)
+		tn.PushClient = vendor.Client()
+		macbook := tn.Machine("macbook").Start()
+		homelab := tn.Machine("homelab").Start()
+		subscribeAt(t, tn, macbook, browserSubscription(t, vendor.URL+"/iphone", "iphone"))
+		subscribeAt(t, tn, homelab, browserSubscription(t, vendor.URL+"/ipad", "ipad"))
+		before := keyOf(t, homelab)
+		secret, err := macbook.Phone.Export()
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.Watch("/api/node/join/commit")
+
+		var report node.CheckReport
+		if err := macbook.Local.Do(context.Background(), http.MethodPost, "/api/nodes/check", node.NodeRequest{Name: "homelab"}, &report); err != nil || !report.PushConflict {
+			t.Fatalf("checking homelab answered %+v, %v; want the push key conflict named before anything is written", report, err)
+		}
+		result, err := macbook.AddWith(node.NodeRequest{Operation: uuid.NewString(), Name: "homelab", ReplaceKey: switching})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.Settle(macbook, homelab)
+		after, shared := keyOf(t, homelab), keyOf(t, macbook)
+		switch {
+		case !switching && (after.Fingerprint != before.Fingerprint || after.Conflict != shared.Fingerprint || result.Push.Conflict == "" || !slices.Equal(endpoints(t, homelab), names("/ipad"))):
+			t.Errorf("without p homelab sends with %+v and holds %v, the add reported %+v; want its own key %s and phone kept, the conflict named, and no subscription for another key", after, endpoints(t, homelab), result.Push, before.Fingerprint)
+		case switching && (after.Fingerprint != shared.Fingerprint || after.Conflict != "" || !result.Push.Shared || !slices.Equal(endpoints(t, homelab), names("/iphone"))):
+			t.Errorf("with p homelab sends with %+v and holds %v; want macbook's key %s and only the shared phone, its old phone dropped", after, endpoints(t, homelab), shared.Fingerprint)
+		}
+		sentKey := slices.ContainsFunc(tn.Bodies("/api/node/join/commit"), func(body string) bool { return strings.Contains(body, secret.Private) })
+		if sentKey != switching {
+			t.Errorf("the private key went to homelab: %v; want it sent only when p switches homelab's key", sentKey)
+		}
+	}
+}
+
+type impostorTarget struct {
+	tn      *nodetest.Tailnet
+	self    *nodetest.Machine
+	id      string
+	commits chan string
+}
+
+func (f impostorTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	body, _ := io.ReadAll(r.Body)
+	switch r.URL.Path {
+	case "/api/node/hello":
+		json.NewEncoder(w).Encode(node.Hello{ID: f.id, Name: f.self.Name, Version: nodetest.Version, Protocol: node.Protocol, MinProtocol: node.MinProtocol, OS: "linux", Owner: nodetest.Owner, Roster: uuid.NewString(), Members: 1})
+	case "/api/node/readiness":
+		w.Write([]byte(`{"checks":[],"problems":0}`))
+	case "/api/node/pull":
+		w.Write([]byte(`{"roster":"elsewhere","ops":[]}`))
+	case "/api/node/join/prepare":
+		var p node.Prepare
+		json.Unmarshal(body, &p)
+		node.Remote(p.Coordinator, f.tn.Client(f.self)).Do(r.Context(), http.MethodPost, "/api/node/join/verify", node.Verify{Join: p.Join, Node: f.id, Name: "impostor." + nodetest.Suffix, Challenge: "guessed"}, nil)
+		json.NewEncoder(w).Encode(node.Joined{Node: f.id})
+	default:
+		f.commits <- string(body)
+		w.Write([]byte(`{}`))
+	}
+}
+
+func TestACoordinatorSendsNoPushKeyToANodeThatFailsItsCallback(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab")
+	fake := impostorTarget{tn: tn, self: homelab, id: uuid.NewString(), commits: make(chan string, 4)}
+	homelab.Serve(fake)
+	if _, err := macbook.Add("homelab"); err == nil || !strings.Contains(err.Error(), "did not prove") {
+		t.Fatalf("adding a node whose callback names another machine answered %v", err)
+	}
+	select {
+	case body := <-fake.commits:
+		t.Fatalf("the coordinator still sent %s", body)
+	default:
+	}
+}
+
+func TestSubscriptionChangesReachEveryNodeAndARemovedNodeCancelsItsQueuedSends(t *testing.T) {
+	ctx := context.Background()
+	vendor := newPushVendor(t)
+	tn := nodetest.New(t)
+	tn.PushClient = vendor.Client()
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	iphone := browserSubscription(t, vendor.URL+"/iphone", "iphone")
+	subscribeAt(t, tn, macbook, iphone)
+	tn.Settle(macbook, homelab)
+	if got := endpoints(t, homelab); !slices.Equal(got, names("/iphone")) {
+		t.Fatalf("homelab holds %v after the phone subscribed at home; want the subscription replicated", got)
+	}
+	tn.Request(tn.Machine("iphone"), macbook.Machine, "DELETE", "/api/push/subscription", "https://"+macbook.Name, map[string]string{"endpoint": vendor.URL + "/iphone"})
+	tn.Settle(macbook, homelab)
+	if got := endpoints(t, homelab); len(got) != 0 {
+		t.Fatalf("homelab holds %v after the phone turned notifications off; want the removal replicated", got)
+	}
+	subscribeAt(t, tn, macbook, iphone)
+	tn.Settle(macbook, homelab)
+
+	homelab.Notify(ctx)
+	publish(t, homelab, needingYou("k-home"))
+	vendor.answer(http.StatusServiceUnavailable)
+	homelab.Notify(ctx)
+	if calls := vendor.took(); len(calls) != 1 {
+		t.Fatalf("the push service saw %v; want one push, held for its Retry-After", calls)
+	}
+	homelab.SetOnline(false)
+	if err := macbook.Remove(homelab.ID); err != nil {
+		t.Fatal(err)
+	}
+	homelab.SetOnline(true)
+	tn.Settle(macbook, homelab)
+	tn.Advance(2 * time.Minute)
+	homelab.Pusher.Deliver(ctx)
+	if calls := vendor.took(); len(calls) > 0 || len(endpoints(t, homelab)) > 0 {
+		t.Fatalf("after learning its removal homelab pushed %v and still holds %v; want its queued send cancelled and the shared phone forgotten", calls, endpoints(t, homelab))
+	}
+	if got := endpoints(t, macbook); !slices.Equal(got, names("/iphone")) {
+		t.Errorf("macbook holds %v after removing homelab; want its own subscription untouched", got)
 	}
 }

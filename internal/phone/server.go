@@ -27,7 +27,8 @@ type Server struct {
 	Shell     http.Handler
 	Review    http.Handler
 	Push      *Pusher
-	VAPIDKey  string
+	Node      string
+	Changed   func()
 	Now       func() time.Time
 
 	grants grants
@@ -92,15 +93,42 @@ func decode(w http.ResponseWriter, r *http.Request, into any) error {
 }
 
 type PushState struct {
-	Key        string    `json:"vapid_public_key"`
-	Subscribed bool      `json:"subscribed"`
-	Endpoint   string    `json:"endpoint,omitempty"`
-	LastSent   time.Time `json:"last_sent,omitzero"`
-	Problem    string    `json:"problem,omitempty"`
+	Key          string    `json:"vapid_public_key"`
+	Fingerprint  string    `json:"fingerprint,omitempty"`
+	Health       string    `json:"health"`
+	HealthDetail string    `json:"health_detail,omitempty"`
+	Subscribed   bool      `json:"subscribed"`
+	Endpoint     string    `json:"endpoint,omitempty"`
+	LastSent     time.Time `json:"last_sent,omitzero"`
+	Problem      string    `json:"problem,omitempty"`
+}
+
+const (
+	HealthReady    = "ready"
+	HealthConflict = "conflict"
+	HealthNoKey    = "no key"
+)
+
+func (k KeyState) Health() (string, string) {
+	switch {
+	case k.Public == "":
+		return HealthNoKey, "This node has no push key yet."
+	case k.Conflict != "":
+		return HealthConflict, "This node kept its own push key " + k.Fingerprint + " when it joined, because a phone was subscribed to it, so it cannot notify a phone subscribed with the shared key " + k.Conflict + "."
+	}
+	return HealthReady, ""
 }
 
 func (s *Server) stateOf(sub Subscription, subscribed bool) PushState {
-	return PushState{Key: s.VAPIDKey, Subscribed: subscribed, Endpoint: sub.Endpoint, LastSent: sub.LastSent, Problem: sub.Problem}
+	keys, _ := s.Store.KeyState()
+	health, detail := keys.Health()
+	return PushState{Key: keys.Public, Fingerprint: keys.Fingerprint, Health: health, HealthDetail: detail, Subscribed: subscribed, Endpoint: sub.Endpoint, LastSent: sub.LastSent, Problem: sub.Problem}
+}
+
+func (s *Server) changed() {
+	if s.Changed != nil {
+		s.Changed()
+	}
 }
 
 func (s *Server) pushState(w http.ResponseWriter, r *http.Request) {
@@ -123,11 +151,16 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if s.Push.halted() {
+		fail(w, http.StatusConflict, ErrRemoved.Error())
+		return
+	}
 	sub, err := s.Store.Subscribe(Subscription{Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, Installation: body.Installation, Since: s.now()})
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.changed()
 	reply(w, http.StatusOK, s.stateOf(sub, true))
 }
 
@@ -139,10 +172,11 @@ func (s *Server) unsubscribePush(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.Store.Unsubscribe(body.Endpoint); err != nil {
+	if err := s.Store.Unsubscribe(body.Endpoint, s.now()); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.changed()
 	reply(w, http.StatusOK, s.stateOf(Subscription{}, false))
 }
 
@@ -184,7 +218,10 @@ func (s *Server) Poll(ctx context.Context) {
 }
 
 func (s *Server) reconcile(factories []host.LocalFactory) {
-	queued, err := s.Store.Reconcile(factories, s.Connected, s.now())
+	if s.Push.halted() {
+		return
+	}
+	queued, err := s.Store.Reconcile(s.Node, factories, s.Connected, s.now())
 	if err == nil && queued {
 		s.Push.Wake()
 	}

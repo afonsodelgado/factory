@@ -4,6 +4,7 @@ import {
   factory,
   fake,
   gate,
+  handoff,
   peer,
   question,
   roster,
@@ -314,12 +315,18 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
     .not.toContainEqual(expect.stringContaining("node-3/"));
 });
 
-test("a phone adds a node only through its home origin, and a refused machine offers no Add", async ({
+test("a phone adds a node only through its home origin, switches its push key only when chosen, and a refused machine offers no Add", async ({
   page,
 }) => {
   const server = fake(page.request);
   const studio = peer("studio");
+  const homelab = peer("homelab");
   const nas = peer("nas");
+  const ownKey = {
+    name: "push",
+    mark: "warn",
+    detail: "it has its own push key, and 1 phone subscribed to it",
+  };
   await server.set({
     roster: roster(),
     candidates: [
@@ -355,8 +362,16 @@ test("a phone adds a node only through its home origin, and a refused machine of
             fix: "claude, then /login",
             on: "studio",
           },
+          ownKey,
         ],
         problems: 1,
+        push_conflict: true,
+      },
+      [homelab]: {
+        target: { name: homelab, short: "homelab" },
+        checks: [ownKey],
+        problems: 0,
+        push_conflict: true,
       },
       [nas]: {
         target: { name: nas, short: "nas" },
@@ -381,11 +396,22 @@ test("a phone adds a node only through its home origin, and a refused machine of
   await machines.getByRole("button", { name: /studio/ }).click();
   await page.getByRole("button", { name: "Check studio" }).click();
   await expect(page.getByText("Added either way.")).toBeVisible();
-  await page.getByRole("button", { name: "Add studio" }).click();
+  await page.getByRole("button", { name: /^Switch studio to/ }).click();
+  await page.getByRole("button", { name: "Switch key and add studio" }).click();
   await expect(page.getByRole("heading", { name: "This phone" })).toBeVisible();
   await expect(page.locator(".nodes").getByText("studio")).toBeVisible();
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByText("studio joined your nodes.")).toBeVisible();
+
+  await page.goto("/phone/add");
+  await page.getByLabel("Tailnet name").fill(homelab);
+  await page.getByRole("button", { name: /^Check/ }).click();
+  await page.getByRole("button", { name: "Add homelab" }).click();
+  await expect(
+    page.getByText(/homelab is added, but it keeps its own push key/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("heading", { name: "This phone" })).toBeVisible();
 
   await page.goto("/phone/add");
   await page.getByLabel("Tailnet name").fill(nas);
@@ -394,15 +420,52 @@ test("a phone adds a node only through its home origin, and a refused machine of
   await expect(page.getByRole("button", { name: /^Add/ })).toHaveCount(0);
 
   const enrollments = (await server.state()).enrollments;
-  expect(enrollments.map((e) => e.route)).toEqual([
-    "/api/nodes/check",
-    "/api/nodes",
-    "/api/nodes/check",
+  expect(enrollments.map((e) => [e.route, e.replacePushKey])).toEqual([
+    ["/api/nodes/check", undefined],
+    ["/api/nodes", true],
+    ["/api/nodes/check", undefined],
+    ["/api/nodes", undefined],
+    ["/api/nodes/check", undefined],
   ]);
   for (const e of enrollments) {
     expect(e.host).toBe("127.0.0.1:4324");
     expect(e.origin).toBe("http://127.0.0.1:4324");
   }
+});
+
+test("a done factory's handoff on another node waits in Needs you, and its notification link opens it and sends Tested to that node while home is down", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  const homelab = peer("homelab");
+  await server.set({ roster: roster("homelab") });
+  await server.node(homelab, {
+    factories: [
+      factory("rate-limits", [handoff()], {
+        status: "done",
+        needs_since: undefined,
+      }),
+    ],
+  });
+  await page.goto("/");
+  const list = page.getByRole("navigation", { name: "Factories" });
+  await expect(list.getByText("◆ 1 need you")).toBeVisible();
+  await expect(
+    list.getByRole("link").filter({ hasText: "rate-limits" }),
+  ).toContainText("handoff");
+  await controlled(page);
+
+  await server.set({ mode: "offline" });
+  await page.goto("/n/node-2/k-handoff");
+  await expect(
+    page.getByRole("heading", { name: "ready for you to test" }),
+  ).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Tested" }).click();
+  await expect(page.getByText("Delivered.")).toBeVisible();
+  const reached = (await server.state()).peers[homelab].actions;
+  expect(reached.map((a) => [a.action, a.item])).toEqual([
+    ["handled", "handoff-rate-limits"],
+  ]);
 });
 
 async function fitsWidth(page: Page, width: number) {

@@ -157,17 +157,26 @@ commands:
               factories, their panes, review pages and notifications whether
               or not a hub is open; --owner is the Tailscale login allowed
               through Tailscale Serve, read from Tailscale when not saved
-  node install
+  node install [--join | --no-join]
               check Tailscale, HTTPS and Funnel, run the node as a launchd
               agent or systemd user unit, then serve it at
               https://<machine>.<tailnet>.ts.net; the first install prints that
-              URL as a QR
+              URL as a QR; --join joins the node found on the tailnet and
+              --no-join stays a node of its own, both without asking
   node uninstall
               stop and remove the service and its Serve mapping; factories,
               their state and phone notifications stay
   node status
               print the service, the running and configured versions, the
               port and the tailnet, also while the node is stopped
+  node list   list the nodes that share this node's list
+  node add <machine>
+              check a tailnet machine and add its node to the list
+  node remove <node>
+              remove a node from the list
+  node push-key export --file <path> | import [--file <path>] [--replace]
+              copy the phone notification key to or from another node, so
+              every node notifies the same phone subscription
   hub         show the node's factories in the factory tmux session
   host request
               answer one JSON request from another machine on stdin through

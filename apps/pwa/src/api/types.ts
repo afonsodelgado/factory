@@ -157,13 +157,29 @@ export type CheckReport = {
   checks: Check[] | null;
   refusal?: string;
   problems: number;
+  push_conflict?: boolean;
   at: string;
 };
 
-export type Added = { member: Member; report: CheckReport; roster: Roster };
+export type PushOutcome = {
+  fingerprint?: string;
+  phones: number;
+  shared: boolean;
+  conflict?: string;
+};
+
+export type Added = {
+  member: Member;
+  report: CheckReport;
+  roster: Roster;
+  push: PushOutcome;
+};
 
 export type PushState = {
   vapid_public_key: string;
+  fingerprint?: string;
+  health: "ready" | "conflict" | "no key";
+  health_detail?: string;
   subscribed: boolean;
   endpoint?: string;
   last_sent?: string;

@@ -50,7 +50,31 @@ export function usePushHealth() {
     };
   }, [me, installation, round]);
   const recheck = useCallback(() => setRound((n) => n + 1), []);
-  return { health, push, setPush, recheck };
+  return { health, push, setPush, recheck, round };
+}
+
+export function useNodePush(round: number): Record<string, PushState> {
+  const { nodes, installation } = useApp();
+  const [states, setStates] = useState<Record<string, PushState>>({});
+  const asked = JSON.stringify(
+    nodes.filter((n) => n.live && n.id).map((n) => [n.id, n.origin]),
+  );
+  useEffect(() => {
+    if (!installation) return;
+    let current = true;
+    for (const [id, origin] of JSON.parse(asked) as [string, string][]) {
+      nodeApi(origin)
+        .push(installation)
+        .then(
+          (state) => current && setStates((all) => ({ ...all, [id]: state })),
+          () => undefined,
+        );
+    }
+    return () => {
+      current = false;
+    };
+  }, [asked, installation, round]);
+  return states;
 }
 
 export function useBlocked(factory: LocalFactory): string | undefined {

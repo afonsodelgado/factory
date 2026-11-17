@@ -3,6 +3,7 @@ package phone
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,10 +31,11 @@ const (
 var sharedAddresses = netip.MustParsePrefix("100.64.0.0/10")
 
 type Pusher struct {
-	Store  Store
-	Origin string
-	Client webpush.HTTPClient
-	Now    func() time.Time
+	Store   Store
+	Origin  string
+	Client  webpush.HTTPClient
+	Now     func() time.Time
+	Removed func() bool
 
 	once sync.Once
 	wake chan struct{}
@@ -103,9 +105,26 @@ func (p *Pusher) Run(ctx context.Context) {
 	}
 }
 
+var ErrRemoved = errors.New("this node was removed from its node list, so it notifies no phone")
+
+func (p *Pusher) halted() bool {
+	if p == nil || p.Removed == nil || !p.Removed() {
+		return false
+	}
+	keys, _ := p.Store.KeyState()
+	if keys.Conflict != "" {
+		return false
+	}
+	p.Store.Disable()
+	return true
+}
+
 func (p *Pusher) Deliver(ctx context.Context) {
+	if p.halted() {
+		return
+	}
 	keys, err := p.Store.vapidPair()
-	if err != nil {
+	if err != nil || keys.private == "" {
 		return
 	}
 	jobs, err := p.Store.takeDue(p.now())
@@ -119,9 +138,15 @@ func (p *Pusher) Deliver(ctx context.Context) {
 }
 
 func (p *Pusher) Test(ctx context.Context) ([]Delivery, error) {
+	if p.halted() {
+		return nil, ErrRemoved
+	}
 	keys, err := p.Store.vapidPair()
-	if err != nil {
+	switch {
+	case err != nil:
 		return nil, err
+	case keys.private == "":
+		return nil, errors.New("this node has no push key yet; start it with factory node run")
 	}
 	subs, err := p.Store.Subscriptions()
 	if err != nil {
@@ -135,7 +160,7 @@ func (p *Pusher) Test(ctx context.Context) ([]Delivery, error) {
 		results = append(results, Delivery{Subscription: sub.ID, Accepted: accepted(status), Problem: problem})
 		p.Store.recordDelivery(sub.Endpoint, p.now(), problem)
 		if gone(status) {
-			p.Store.Unsubscribe(sub.Endpoint)
+			p.Store.expire(sub.Endpoint, sub.Revision)
 		}
 	}
 	return results, nil
@@ -211,7 +236,8 @@ func (s Store) takeDue(now time.Time) ([]job, error) {
 
 func (s Store) settle(sent job, status int, retry time.Duration, problem string, now time.Time) {
 	if gone(status) {
-		s.Unsubscribe(sent.Endpoint)
+		s.expire(sent.Endpoint, sent.Revision)
+		s.dropJobsWhere(func(j job) bool { return j.ID == sent.ID })
 		return
 	}
 	final := accepted(status) || !transient(status)

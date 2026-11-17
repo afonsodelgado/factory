@@ -10,7 +10,7 @@ import (
 
 var (
 	ErrNoApp   = errors.New("the phone app is not part of this build; run make build, then try again")
-	shellRoute = regexp.MustCompile(`^/(setup|phone(/(add(/[^/]+)?|nodes/[^/]+))?|n/[^/]+|f/[^/]+(/(pages|message|i/[^/]+))?)?$`)
+	shellRoute = regexp.MustCompile(`^/(setup|phone(/(add(/[^/]+)?|nodes/[^/]+))?|n/[^/]+/[^/]+|f/[^/]+(/(pages|message|i/[^/]+))?)?$`)
 )
 
 func App(bundle fs.FS) (fs.FS, error) {

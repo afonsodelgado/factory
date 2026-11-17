@@ -26,7 +26,7 @@ type gateway struct {
 
 func newGateway(t *testing.T) *gateway {
 	g := &gateway{t: t, now: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
-	g.server = &Server{Store: Open(t.TempDir()), VAPIDKey: "key", Now: func() time.Time { return g.now }}
+	g.server = &Server{Store: Open(t.TempDir()), Now: func() time.Time { return g.now }}
 	g.http = httptest.NewServer(g.server.Handler())
 	t.Cleanup(g.http.Close)
 	return g
@@ -65,6 +65,10 @@ func (g *gateway) pushState(resp *http.Response) PushState {
 
 func TestReopeningTheAppReRegistersItsSubscriptionWithoutDroppingOtherPhones(t *testing.T) {
 	g := newGateway(t)
+	key, err := g.server.Store.VAPIDKey("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	register := func(installation string, sub Subscription) PushState {
 		body, _ := json.Marshal(map[string]any{"endpoint": sub.Endpoint, "expirationTime": nil, "keys": map[string]string{"p256dh": sub.P256dh, "auth": sub.Auth}, "installation": installation})
 		return g.pushState(g.do("POST", "/api/push/subscription", string(body)))
@@ -81,7 +85,7 @@ func TestReopeningTheAppReRegistersItsSubscriptionWithoutDroppingOtherPhones(t *
 	renewed := subscriptionFor(t, "", "https://push.example/pixel-renewed")
 	register("pixel", renewed)
 	state := g.pushState(g.do("GET", "/api/push/subscription?installation=pixel", ""))
-	if subs, _ := g.server.Store.Subscriptions(); len(subs) != 2 || state.Endpoint != renewed.Endpoint || state.Key != "key" {
+	if subs, _ := g.server.Store.Subscriptions(); len(subs) != 2 || state.Endpoint != renewed.Endpoint || state.Key != key {
 		t.Fatalf("after the browser renewed its endpoint the store holds %+v and reports %+v; want the old endpoint replaced and the iPad kept", subs, state)
 	}
 }

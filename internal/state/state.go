@@ -110,7 +110,7 @@ func (a Attention) Stage() string {
 
 func (s *State) Moot(a Attention) bool {
 	if s.Done() {
-		return true
+		return a.Kind != "handoff"
 	}
 	stage := a.Stage()
 	if stage == "" {

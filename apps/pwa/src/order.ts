@@ -11,11 +11,19 @@ export type Groups = {
   done: LocalFactory[];
 };
 
-const waitingSince = (f: LocalFactory) =>
-  f.needs_since ? Date.parse(f.needs_since) : Infinity;
+export const needsSince = (f: LocalFactory) =>
+  f.needs_since ?? f.items[0]?.since;
+
+const waitingSince = (f: LocalFactory) => {
+  const since = needsSince(f);
+  return since ? Date.parse(since) : Infinity;
+};
+
+const handedOff = (f: LocalFactory) =>
+  f.items.some((i) => i.kind === "handoff");
 
 export function needsYou(f: LocalFactory): boolean {
-  return f.status === "needs you" && f.items.length > 0;
+  return f.items.length > 0 && (f.status === "needs you" || handedOff(f));
 }
 
 export function group(

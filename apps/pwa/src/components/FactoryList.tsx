@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { LocalFactory } from "../api/types.ts";
 import { clock, hostName, itemTag, kindLook, statusLook } from "../format.ts";
 import { usePushHealth, useNow } from "../hooks.ts";
-import { age, group, needsYou } from "../order.ts";
+import { age, group, needsSince, needsYou } from "../order.ts";
 import { paths } from "../route.ts";
 import { useApp, type NodeView } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
@@ -227,6 +227,7 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
   const lost = node.lost && factory.status !== "done";
   const look = lost ? lostLook : statusLook(factory.status);
   const waiting = needsYou(factory) && !lost;
+  const finished = factory.status === "done" && !waiting;
   const stage = waiting
     ? [factory.repo_name, factory.stage].filter(Boolean).join(" · ")
     : factory.stage;
@@ -236,7 +237,7 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
       : stage;
   return (
     <Link
-      className={`row${factory.status === "done" ? " done" : ""}${lost ? " lost" : ""}${selected ? " on" : ""}`}
+      className={`row${finished ? " done" : ""}${lost ? " lost" : ""}${selected ? " on" : ""}`}
       href={paths.factory(factory.route)}
       aria-current={selected ? "true" : undefined}
     >
@@ -247,11 +248,11 @@ function Row(props: { factory: LocalFactory; selected: boolean; now: number }) {
       <span className={`w ${look.tone}`}>
         {lost ? "unreachable" : factory.status}
       </span>
-      {factory.status === "done" ? null : (
+      {finished ? null : (
         <span className="l2">
           {multi && waiting ? <span className="nd">↔ {node.short}</span> : null}
           <span className="stage">{asOf}</span>
-          <span className="age">{age(factory.needs_since, now)}</span>
+          <span className="age">{age(needsSince(factory), now)}</span>
         </span>
       )}
       {factory.items.length > 0 ? (
