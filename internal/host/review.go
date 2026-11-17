@@ -146,7 +146,7 @@ func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewR
 		if err != nil {
 			return err
 		}
-		if target, err = m.DeliverReview(it, id, path); err != nil {
+		if target, err = m.DeliverReview(it, page, id, path); err != nil {
 			os.Remove(path)
 		}
 		return err
@@ -158,12 +158,26 @@ func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewR
 	return ReviewReply{Target: target, Batch: id, Count: len(sent)}, nil
 }
 
-func (m *Runtime) DeliverReview(it Item, id, path string) (string, error) {
+func (m *Runtime) DeliverReview(it Item, page, id, path string) (string, error) {
 	if it.Pane == nil {
 		return "", fmt.Errorf("%s has no supervisor pane; wake it, then send again", it.Factory.Label())
 	}
-	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: id + " comments: " + path + "; submit a design_comments event with this batch ID as the receipt before dispatching the designer"})
+	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: id + " comments: " + path + batchInstruction(it.Factory, page)})
 	return "supervisor", nil
+}
+
+func batchInstruction(f factory.Factory, page string) string {
+	switch StageOfPage(f, page) {
+	case "design":
+		return "; submit a design_comments event with this batch ID as the receipt before dispatching the designer"
+	case "plan":
+		gate := "the plan gate once it opens"
+		if open, ok := OpenGate(f, "plan"); ok {
+			gate = "plan gate " + open.ID
+		}
+		return "; these are plan comments for the architect: submit them as a changes answer on " + gate + " with this batch ID as the receipt"
+	}
+	return ""
 }
 
 func (m *Runtime) ApproveFromPage(it Item, page, seen string) (ReviewReply, error) {

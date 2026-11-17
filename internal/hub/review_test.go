@@ -131,6 +131,19 @@ func TestSentCommentsReachTheAgentThatOwnsThePage(t *testing.T) {
 		}
 	})
 
+	t.Run("a plan page batch revises the plan through its gate, never as design comments", func(t *testing.T) {
+		fx := newReviewFixture(t, true, idleHook(at))
+		fx.f.State.Attention = []state.Attention{{ID: "gate-csv-plan", Kind: "gate", StageKey: "plan", Title: "Approve plan"}}
+		fx.store.Create(review.NewThread{Page: "plan.html", Intent: "change", Text: "Split the export step.", Anchor: review.Anchor{Selector: "h2"}})
+		if _, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "plan.html"}); err != nil {
+			t.Fatal(err)
+		}
+		typed := fx.typist.typed[0]
+		if !strings.Contains(typed, "changes") || !strings.Contains(typed, "gate-csv-plan") || strings.Contains(typed, "design_comments") || strings.Contains(typed, "designer") {
+			t.Errorf("typed %q; want a changes answer on the plan gate for the architect", typed)
+		}
+	})
+
 	t.Run("without a designer pane the busy supervisor gets the batch once it is idle", func(t *testing.T) {
 		fx := newReviewFixture(t, false, busyHook(at))
 		reply, err := fx.review(ReviewRequest{Action: "send", Factory: state.FileStem(fx.f.Repo, fx.f.Slug), Page: "design/variant-a.html"})

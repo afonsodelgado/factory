@@ -86,6 +86,9 @@ func apply(s *state.State, e Event) error {
 		if e.Receipt == "" || e.Answer == "" {
 			return errors.New("design comments require their batch receipt")
 		}
+		if !slices.Contains(s.PipelineStages, "design") {
+			return errors.New("this pipeline has no design stage; send plan-page comments as a changes answer on the plan gate")
+		}
 		if !designRevisable(s) {
 			return errors.New("design comments apply only while the design or plan awaits approval")
 		}
@@ -351,10 +354,9 @@ func resolveGate(s *state.State, stage string, at state.Time) {
 }
 
 func designRevisable(s *state.State) bool {
-	awaitingApproval := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool {
+	return slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool {
 		return a.Kind == "gate" && (a.StageKey == "design" || a.StageKey == "plan")
 	})
-	return slices.Contains(s.PipelineStages, "design") && awaitingApproval
 }
 
 func recipeChangeable(s *state.State) bool {
