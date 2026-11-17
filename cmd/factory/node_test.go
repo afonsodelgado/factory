@@ -77,7 +77,7 @@ func newStandIn(t *testing.T) standIn {
 		t.Fatalf("tmux: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { exec.Command("tmux", "-L", s.tmux, "kill-server").Run() })
-	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("node:\n  port: %d\n  owner: owner@example.com\n", freePort(t)))
+	writeFile(t, filepath.Join(s.server, "config", "config.yml"), fmt.Sprintf("node:\n  port: %d\n  owner: owner@example.com\n  keep_awake: false\n", freePort(t)))
 	s.serverNode(t)
 	return s
 }
