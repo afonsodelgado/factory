@@ -236,41 +236,86 @@ func TestThePinnedChromeDevToolsMCPNavigatesAndScreenshotsAJobsBrowserOverStdio(
 	call("initialize", map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "factory-test", "version": "0"}})
 	send(map[string]any{"method": "notifications/initialized"})
 
+	type inputSchema struct {
+		Properties map[string]any
+		Required   []string
+	}
 	var listed struct {
 		Tools []struct {
 			Name        string
-			InputSchema struct{ Properties map[string]any }
+			InputSchema inputSchema
 		}
 	}
-	json.Unmarshal(call("tools/list", map[string]any{}), &listed)
-	schemas := map[string]map[string]any{}
-	for _, tool := range listed.Tools {
-		schemas[tool.Name] = tool.InputSchema.Properties
+	if err := json.Unmarshal(call("tools/list", map[string]any{}), &listed); err != nil {
+		t.Fatal(err)
 	}
-	navigate, hasNavigate := schemas["navigate_page"]
-	if _, hasShot := schemas["take_screenshot"]; !hasNavigate || !hasShot {
-		t.Fatalf("%s lists no navigate_page or take_screenshot: %v", DevToolsMCP, slices.Collect(maps.Keys(schemas)))
+	schemas := map[string]inputSchema{}
+	for _, tool := range listed.Tools {
+		schemas[tool.Name] = tool.InputSchema
+	}
+	for _, name := range []string{"list_pages", "navigate_page", "take_screenshot"} {
+		if _, ok := schemas[name]; !ok {
+			t.Fatalf("%s lists no %s: %v", DevToolsMCP, name, slices.Collect(maps.Keys(schemas)))
+		}
 	}
 	type content struct {
 		Type, Text, Data string
 	}
-	var result struct {
-		Content []content
-		IsError bool
+	type toolResult struct {
+		Content           []content
+		IsError           bool
+		StructuredContent struct {
+			Pages []struct {
+				ID  *int
+				URL string
+			}
+		}
 	}
-	args := map[string]any{"url": app.URL + "/export"}
-	if _, typed := navigate["type"]; typed {
-		args["type"] = "url"
+	var pageID *int
+	toolCall := func(name string, values map[string]any) toolResult {
+		t.Helper()
+		schema := schemas[name]
+		args := map[string]any{}
+		for key, value := range values {
+			if _, ok := schema.Properties[key]; ok {
+				args[key] = value
+			}
+		}
+		if _, ok := schema.Properties["pageId"]; ok && pageID != nil {
+			args["pageId"] = *pageID
+		}
+		for _, key := range schema.Required {
+			if _, ok := args[key]; !ok {
+				t.Fatalf("%s requires an argument the test has not supplied: %s", name, key)
+			}
+		}
+		var result toolResult
+		if err := json.Unmarshal(call("tools/call", map[string]any{"name": name, "arguments": args}), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.IsError {
+			t.Fatalf("%s failed: %+v", name, result)
+		}
+		return result
 	}
-	json.Unmarshal(call("tools/call", map[string]any{"name": "navigate_page", "arguments": args}), &result)
+	pages := toolCall("list_pages", nil)
+	for _, p := range pages.StructuredContent.Pages {
+		if strings.TrimRight(p.URL, "/") == app.URL && p.ID != nil {
+			pageID = p.ID
+			break
+		}
+	}
+	if pageID == nil {
+		t.Fatalf("list_pages did not identify the job's app page: %+v", pages)
+	}
+	result := toolCall("navigate_page", map[string]any{"url": app.URL + "/export", "type": "url"})
 	mu.Lock()
 	navigated := slices.Contains(paths, "/export")
 	mu.Unlock()
 	if result.IsError || !navigated {
 		t.Fatalf("navigate_page did not reach the app through the job's browser: %+v", result)
 	}
-	result.Content = nil
-	json.Unmarshal(call("tools/call", map[string]any{"name": "take_screenshot", "arguments": map[string]any{}}), &result)
+	result = toolCall("take_screenshot", map[string]any{"format": "png"})
 	shot := slices.IndexFunc(result.Content, func(c content) bool { return c.Type == "image" && strings.HasPrefix(c.Data, "iVBOR") })
 	if result.IsError || shot < 0 {
 		t.Fatalf("take_screenshot returned no PNG from the job's browser: %+v", result)
