@@ -459,7 +459,7 @@ func textBox(title string, d Draft, w int) []line {
 		border = theme.Focused
 	}
 	inner := max(w-4, 4)
-	head := "─ " + title + " "
+	head := "─ " + theme.Truncate(title, w-5) + " "
 	lines := []line{{{Text: "╭", Ink: border}, {Text: head, Ink: border}, {Text: strings.Repeat("─", max(w-2-theme.Width(head), 0)) + "╮", Ink: border}}}
 	body := theme.Wrap(d.Text, inner)
 	if d.Text == "" {

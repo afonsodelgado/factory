@@ -146,6 +146,10 @@ func TestDesignReturnAndCommandsItemsAreAnsweredInThePanel(t *testing.T) {
 			if hints := escapes.ReplaceAllString(model.FooterView(160, 1), ""); !strings.Contains(hints, "ctrl+s") {
 				t.Errorf("footer reads %q, want ctrl+s offered to send the answer", hints)
 			}
+			narrow := escapes.ReplaceAllString(model.PanelView(50, 40), "")
+			if top := regexp.MustCompile(`│ ╭[^│]*`).FindString(narrow); !strings.HasSuffix(strings.TrimSpace(top), "╮") {
+				t.Errorf("answer box at a narrow panel:\n%s\nwant its title shortened so the top border keeps its corner", narrow)
+			}
 		})
 	}
 }
