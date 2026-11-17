@@ -1,5 +1,12 @@
-import { expect, test } from "@playwright/test";
-import { controlled, factory, fake, question } from "./helpers.ts";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import {
+  controlled,
+  factory,
+  fake,
+  peer,
+  question,
+  roster,
+} from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
   const server = fake(request);
@@ -51,22 +58,7 @@ test("an older push never replaces the resolved notification", async ({
   await context.grantPermissions(["notifications"]);
   await page.goto("/");
   await controlled(page);
-  const cdp = await context.newCDPSession(page);
-  const registration = new Promise<string>((resolve) =>
-    cdp.on("ServiceWorker.workerRegistrationUpdated", ({ registrations }) => {
-      const found = registrations.find((r) => !r.isDeleted);
-      if (found) resolve(found.registrationId);
-    }),
-  );
-  await cdp.send("ServiceWorker.enable");
-  const registrationId = await registration;
-  const origin = new URL(page.url()).origin;
-  const push = (payload: object) =>
-    cdp.send("ServiceWorker.deliverPushMessage", {
-      origin,
-      registrationId,
-      data: JSON.stringify(payload),
-    });
+  const push = await pusher(page, context);
   const base = { tag: "k1", title: "csv-export · question", url: "/n/k1" };
   await push({
     ...base,
@@ -86,3 +78,60 @@ test("an older push never replaces the resolved notification", async ({
     )
     .toEqual(["Resolved elsewhere."]);
 });
+
+test("resolving one node's item leaves another node's notification with the same key", async ({
+  page,
+  context,
+}) => {
+  const server = fake(page.request);
+  await context.grantPermissions(["notifications"]);
+  await server.set({ roster: roster("homelab") });
+  await server.factories([factory("csv-export", [question("k1")])]);
+  await server.node(peer("homelab"), {
+    factories: [factory("rate-limits", [question("k1")])],
+  });
+  await page.goto("/");
+  await controlled(page);
+  await expect(
+    page.getByRole("button", { name: "Nodes: 2 of 2 reachable" }),
+  ).toBeVisible();
+  const push = await pusher(page, context);
+  for (const node of ["node-1", "node-2"])
+    await push({
+      node,
+      tag: `${node}/k1`,
+      title: "question",
+      body: "Needs you. Tap to open it.",
+      url: `/n/${node}/k1`,
+      revision: 1,
+    });
+  const shown = () =>
+    page.evaluate(async () =>
+      (await (await navigator.serviceWorker.ready).getNotifications())
+        .map((n) => n.tag)
+        .sort(),
+    );
+  await expect.poll(shown).toEqual(["node-1/k1", "node-2/k1"]);
+
+  await server.factories([]);
+  await expect.poll(shown).toEqual(["node-2/k1"]);
+});
+
+async function pusher(page: Page, context: BrowserContext) {
+  const cdp = await context.newCDPSession(page);
+  const registration = new Promise<string>((resolve) =>
+    cdp.on("ServiceWorker.workerRegistrationUpdated", ({ registrations }) => {
+      const found = registrations.find((r) => !r.isDeleted);
+      if (found) resolve(found.registrationId);
+    }),
+  );
+  await cdp.send("ServiceWorker.enable");
+  const registrationId = await registration;
+  const origin = new URL(page.url()).origin;
+  return (payload: object) =>
+    cdp.send("ServiceWorker.deliverPushMessage", {
+      origin,
+      registrationId,
+      data: JSON.stringify(payload),
+    });
+}

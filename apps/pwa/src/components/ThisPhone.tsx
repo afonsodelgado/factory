@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { PushState } from "../api/types.ts";
 import { clock, day, hostName } from "../format.ts";
-import { usePushHealth } from "../hooks.ts";
-import { pushSupport, turnOff, turnOn } from "../push.ts";
+import { useNodePush, usePushHealth } from "../hooks.ts";
+import { pushSupport, turnOff, turnOn, type PushHealth } from "../push.ts";
 import { paths } from "../route.ts";
 import { useApp, type NodeView } from "../state.tsx";
 import { AppShell } from "./AppShell.tsx";
@@ -11,8 +11,9 @@ import { factoryCount } from "./Nodes.tsx";
 import { Check } from "./Setup.tsx";
 
 export function ThisPhone() {
-  const { me, installation, reach, retry, nodes, navigate } = useApp();
-  const { health, push, setPush, recheck } = usePushHealth();
+  const { me, installation, reach, retry, nodes, multi, navigate } = useApp();
+  const { health, push, setPush, recheck, round } = usePushHealth();
+  const states = useNodePush(round);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const host = hostName();
@@ -43,6 +44,17 @@ export function ThisPhone() {
       `Couldn't turn notifications off, so they are still on for ${host}.`,
     );
 
+  const live = nodes.filter((n) => n.live && n.id);
+  const silent = live.flatMap((node) => {
+    const why = silence(states[node.id], health);
+    return why ? [{ node, why }] : [];
+  });
+  const everyNodeSends =
+    multi &&
+    silent.length === 0 &&
+    live.length === nodes.length &&
+    live.every((n) => states[n.id]);
+
   return (
     <AppShell back={paths.list()} title="This phone">
       <div className="pad stack">
@@ -66,10 +78,24 @@ export function ThisPhone() {
           ) : null}
           <Notifications
             health={health}
-            busy={busy || !push}
+            detail={
+              everyNodeSends
+                ? "every node sends them, with one shared key"
+                : undefined
+            }
+            busy={busy || !push?.vapid_public_key}
             onSubscribe={subscribe}
             onUnsubscribe={unsubscribe}
           />
+          {silent.map(({ node, why }) => (
+            <Check
+              key={node.id}
+              ok={false}
+              warn
+              label={`${node.short} can't notify this phone`}
+              detail={why}
+            />
+          ))}
           {push ? (
             <Check
               ok={!!push.last_sent && !push.problem}
@@ -175,8 +201,20 @@ function NodeRow({ node }: { node: NodeView }) {
   );
 }
 
+function silence(
+  state: PushState | undefined,
+  phone: PushHealth | undefined,
+): string | undefined {
+  if (!state) return undefined;
+  if (state.health !== "ready") return state.health_detail;
+  if (phone === "on" && !state.subscribed)
+    return "It hasn't got this phone's subscription yet. Your nodes pass it on; check again in a moment.";
+  return undefined;
+}
+
 function Notifications(props: {
-  health: ReturnType<typeof usePushHealth>["health"];
+  health: PushHealth | undefined;
+  detail?: string;
   busy: boolean;
   onSubscribe: () => void;
   onUnsubscribe: () => void;
@@ -184,7 +222,7 @@ function Notifications(props: {
   switch (props.health) {
     case "on":
       return (
-        <Check ok label="Notifications on">
+        <Check ok label="Notifications on" detail={props.detail}>
           <button
             type="button"
             className="btn fit"
@@ -211,6 +249,24 @@ function Notifications(props: {
           warn
           label="Subscription expired"
           detail="The push service dropped this phone's subscription."
+        >
+          <button
+            type="button"
+            className="btn fit"
+            disabled={props.busy}
+            onClick={props.onSubscribe}
+          >
+            Subscribe again
+          </button>
+        </Check>
+      );
+    case "rekeyed":
+      return (
+        <Check
+          ok={false}
+          warn
+          label="Subscribe again"
+          detail="This phone subscribed with a push key its node no longer sends with. One key serves every node."
         >
           <button
             type="button"

@@ -126,6 +126,11 @@ export const nodeApi = (origin: string) => ({
       operation: crypto.randomUUID(),
       url,
     }),
+  push: (installation: string) =>
+    call<PushState>(
+      "GET",
+      `${origin}/api/push/subscription?installation=${encodeURIComponent(installation)}`,
+    ),
 });
 
 export const api = {
@@ -139,20 +144,16 @@ export const api = {
     ),
   check: (name: string) =>
     call<CheckReport>("POST", "/api/nodes/check", { name }),
-  add: (name: string) =>
+  add: (name: string, replacePushKey: boolean) =>
     call<Added>("POST", "/api/nodes", {
       operation: crypto.randomUUID(),
       name,
+      replace_push_key: replacePushKey || undefined,
     }),
   remove: (id: string) =>
     call<Roster>("POST", `/api/nodes/${encodeURIComponent(id)}/remove`, {
       operation: crypto.randomUUID(),
     }),
-  push: (installation: string) =>
-    call<PushState>(
-      "GET",
-      `/api/push/subscription?installation=${encodeURIComponent(installation)}`,
-    ),
   subscribe: (subscription: PushSubscriptionJSON, installation: string) =>
     call<PushState>("POST", "/api/push/subscription", {
       ...subscription,

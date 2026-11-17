@@ -51,6 +51,7 @@ const kinds: Record<string, Look> = {
   cap: { glyph: "⇥", tone: "yel" },
   failure: { glyph: "✕", tone: "red" },
   permission: { glyph: "◈", tone: "org" },
+  handoff: { glyph: "✓", tone: "grn" },
   asleep: { glyph: "☾", tone: "yel" },
   unreadable: { glyph: "!", tone: "red" },
 };

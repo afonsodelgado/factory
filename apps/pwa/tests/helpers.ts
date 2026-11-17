@@ -9,7 +9,12 @@ export type Fake = {
     actions: Record<string, unknown>[];
     previews: Record<string, unknown>[];
     threads: { id: string; status: string; messages: { text: string }[] }[];
-    enrollments: { route: string; host: string; origin: string }[];
+    enrollments: {
+      route: string;
+      host: string;
+      origin: string;
+      replacePushKey?: boolean;
+    }[];
     peers: Record<string, { actions: Record<string, unknown>[] }>;
   }>;
 };
@@ -95,6 +100,21 @@ export function gate(key = "k-gate") {
     send: {
       ready: true,
       reason: "Sends 1 message to invoice-pdf, which is idle at its prompt.",
+    },
+  };
+}
+
+export function handoff(key = "k-handoff") {
+  return {
+    id: "handoff-rate-limits",
+    key,
+    kind: "handoff",
+    title: "ready for you to test",
+    since: minutesAgo(2),
+    send: {
+      ready: true,
+      reason:
+        "No supervisor runs for rate-limits, so this wakes one to close it.",
     },
   };
 }

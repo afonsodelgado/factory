@@ -9,7 +9,7 @@ const dist = path.join(here, "../dist");
 const overlay = path.join(here, "../../../bundle/review/overlay.js");
 const port = Number(process.argv[2] ?? 4324);
 const shellRoute =
-  /^\/(setup|phone(\/(add(\/[^/]+)?|nodes\/[^/]+))?|n\/[^/]+|f\/[^/]+(\/(pages|message|i\/[^/]+))?)?$/;
+  /^\/(setup|phone(\/(add(\/[^/]+)?|nodes\/[^/]+))?|n\/[^/]+\/[^/]+|f\/[^/]+(\/(pages|message|i\/[^/]+))?)?$/;
 const homeHost = `127.0.0.1:${port}`;
 const homeOrigin = `http://${homeHost}`;
 const types = {
@@ -273,16 +273,17 @@ function reportFor(name) {
 }
 
 async function enroll(req, res, route) {
+  const request = await body(req);
   state.enrollments.push({
     route,
     host: req.headers.host,
     origin: req.headers.origin,
+    replacePushKey: request.replace_push_key,
   });
   if (req.headers.origin !== homeOrigin)
     return send(res, 403, {
       error: `changing the node list from a browser works only from the phone app at ${homeOrigin}`,
     });
-  const request = await body(req);
   if (route === "/api/nodes/check")
     return send(res, 200, reportFor(request.name));
   const removing = /^\/api\/nodes\/([^/]+)\/remove$/.exec(route);
@@ -309,7 +310,16 @@ async function enroll(req, res, route) {
   };
   state.roster.members.push(member);
   publishAll();
-  send(res, 200, { member, report, roster: state.roster });
+  const keepsItsOwn = report.push_conflict && !request.replace_push_key;
+  const push = {
+    fingerprint: keepsItsOwn ? "SHA256:theirs" : "SHA256:shared",
+    phones: 1,
+    shared: !keepsItsOwn,
+    conflict: keepsItsOwn
+      ? `${report.target.short} is added, but it keeps its own push key, so it can't notify your phone: one key serves every node`
+      : undefined,
+  };
+  send(res, 200, { member, report, roster: state.roster, push });
 }
 
 async function api(req, res, url, n) {
@@ -356,6 +366,8 @@ async function api(req, res, url, n) {
     return send(res, 200, {
       vapid_public_key:
         "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
+      fingerprint: "SHA256:shared",
+      health: "ready",
       subscribed: Boolean(mine),
       endpoint: mine ? state.subscription.endpoint : undefined,
     });

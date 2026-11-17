@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api/client.ts";
+import { nodeApi } from "./api/client.ts";
 import { FactoryDetail } from "./components/FactoryDetail.tsx";
 import { FactoryList } from "./components/FactoryList.tsx";
 import { AttentionItem } from "./components/AttentionItem.tsx";
@@ -8,7 +8,8 @@ import { Exposed, Setup } from "./components/Setup.tsx";
 import { ThisPhone } from "./components/ThisPhone.tsx";
 import { AppShell, Refused } from "./components/AppShell.tsx";
 import { paths, type Route } from "./route.ts";
-import { useApp } from "./state.tsx";
+import { hostName } from "./format.ts";
+import { routeOn, useApp } from "./state.tsx";
 
 const WIDE = "(min-width: 900px)";
 
@@ -33,7 +34,8 @@ export function App() {
   if (route.screen === "node") return <NodeDetail id={route.id} />;
   if (route.screen === "add") return <AddNode />;
   if (route.screen === "check") return <CheckNode name={route.name} />;
-  if (route.screen === "link") return <LinkResolver notification={route.key} />;
+  if (route.screen === "link")
+    return <LinkResolver node={route.node} notification={route.key} />;
   if (!wide) return <Stack route={route} />;
   const selected =
     route.screen === "list"
@@ -64,31 +66,36 @@ function Detail({ route, selected }: { route: Route; selected: string }) {
   return <FactoryDetail route={selected} tab={tab} />;
 }
 
-function LinkResolver({ notification }: { notification: string }) {
-  const { navigate, snapshot, reach } = useApp();
-  const [missing, setMissing] = useState(false);
+function LinkResolver(props: { node: string; notification: string }) {
+  const { navigate, nodes, reach } = useApp();
+  const node = nodes.find((n) => n.id === props.node);
+  const saved = node?.snapshot?.factories.find((f) =>
+    f.items.some((i) => i.key === props.notification),
+  );
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    const saved = snapshot?.factories.find((f) =>
-      f.items.some((i) => i.key === notification),
-    );
-    if (saved) {
-      navigate(paths.item(saved.route, notification), true);
-      return;
-    }
-    if (reach !== "online") {
-      setMissing(true);
-      return;
-    }
-    api.link(notification).then(
-      (link) => navigate(paths.item(link.route, notification), true),
-      () => setMissing(true),
-    );
-  }, [notification, snapshot, reach, navigate]);
+    if (!node) return;
+    const open = (route: string) =>
+      navigate(paths.item(routeOn(node, route), props.notification), true);
+    if (saved) return open(saved.route);
+    if (!node.live) return;
+    let current = true;
+    nodeApi(node.origin)
+      .link(props.notification)
+      .then(
+        (link) => current && open(link.route),
+        () => current && setFailed(true),
+      );
+    return () => {
+      current = false;
+    };
+  }, [node, saved, props.notification, navigate]);
+  const missing = failed || (node ? !saved && node.lost : reach !== "loading");
   return (
     <AppShell back={paths.list()}>
       <p className="note">
         {missing
-          ? "The details of this notification need the computer. Open factory again when this phone is back on the tailnet."
+          ? `The details of this notification need ${node?.short ?? hostName()}. Open factory again when this phone is back on the tailnet.`
           : "Opening…"}
       </p>
     </AppShell>

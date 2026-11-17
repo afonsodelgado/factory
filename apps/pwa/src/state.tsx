@@ -117,7 +117,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const home = useRef<ReturnType<typeof follow>>(undefined);
   const links = useRef(new Map<string, ReturnType<typeof follow>>());
   const received = useRef<string>(undefined);
-  const remoteKeys = useRef(new Map<string, Set<string>>());
 
   useEffect(() => {
     const dropped =
@@ -134,7 +133,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const closeLinks = useCallback(() => {
     for (const link of links.current.values()) link.close();
     links.current.clear();
-    remoteKeys.current.clear();
     setRemote({});
   }, []);
 
@@ -211,18 +209,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const closeSettledEverywhere = useCallback((own: Set<string>) => {
-    const keys = new Set(own);
-    for (const other of remoteKeys.current.values())
-      for (const key of other) keys.add(key);
-    closeSettled(keys);
-  }, []);
-
   const connect = useCallback(() => {
     home.current?.close();
     let id = "";
+    let self = "";
     home.current = follow("", {
       up: async (current) => {
+        self = current.node;
         id = accountOf(current.node, current.caller);
         const known = await cache.account();
         if (known && known !== id) {
@@ -251,7 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReach("online");
         cache.saveSnapshot(id, next);
         cache.pruneDrafts(id, keys);
-        closeSettledEverywhere(keys);
+        closeSettled(self, keys);
         if (next.roster) adopt(id, next.roster);
       },
       restarting: () => setReach("restarting"),
@@ -267,14 +260,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return true;
       },
     });
-  }, [
-    refuse,
-    showSaved,
-    reconcilePending,
-    closeLinks,
-    adopt,
-    closeSettledEverywhere,
-  ]);
+  }, [refuse, showSaved, reconcilePending, closeLinks, adopt]);
 
   const homeLive = reach === "online" && !savedAt;
   const homeLiveRef = useRef(false);
@@ -309,10 +295,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         snapshot: (next) => {
           const at = new Date().toISOString();
           const keys = openKeys(next);
-          remoteKeys.current.set(id, keys);
           update(() => ({ reach: "online", snapshot: next, received: at }));
           cache.saveSnapshot(scope, next);
           cache.pruneDrafts(scope, keys);
+          closeSettled(id, keys);
           if (next.roster && !homeLiveRef.current) adopt(account, next.roster);
         },
         restarting: () => update((r) => ({ ...r, reach: "restarting" })),
@@ -342,7 +328,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (wanted.some((m) => m.id === id)) continue;
       link.close();
       links.current.delete(id);
-      remoteKeys.current.delete(id);
       setRemote(({ [id]: _, ...rest }) => rest);
     }
     for (const m of wanted)
@@ -553,12 +538,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
+export const routeOn = (node: NodeView, route: string) =>
+  node.home ? route : `${node.id}~${route}`;
+
 const placed =
   (node: NodeView) =>
   (f: LocalFactory): LocalFactory => ({
     ...f,
     node: node.id,
-    route: `${node.id}~${f.route}`,
+    route: routeOn(node, f.route),
     pages: f.pages.map((page) =>
       page.href ? { ...page, href: node.origin + page.href } : page,
     ),

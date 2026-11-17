@@ -21,7 +21,7 @@ function isShellRoute(path: string): boolean {
     path === "/setup" ||
     /^\/phone(\/(add(\/[^/]+)?|nodes\/[^/]+))?$/.test(path) ||
     /^\/f\/[^/]+(\/(pages|message|i\/[^/]+))?$/.test(path) ||
-    /^\/n\/[^/]+$/.test(path)
+    /^\/n\/[^/]+\/[^/]+$/.test(path)
   );
 }
 
