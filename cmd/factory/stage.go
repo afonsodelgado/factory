@@ -16,8 +16,8 @@ import (
 
 const resultPoll = 2 * time.Second
 
-const stageUsage = `usage: factory stage start --role <role> --task <file> [--factory id] [--wait]
-       factory stage send --role <role> --message <file> [--factory id] [--wait]
+const stageUsage = `usage: factory stage start --role <role> --effect <id> --task <file> [--factory id] [--wait]
+       factory stage send --role <role> --effect <id> --message <file> [--factory id] [--wait]
        factory stage ci <pr number>...`
 
 func runStage(args []string) int {

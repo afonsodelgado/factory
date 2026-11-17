@@ -260,7 +260,7 @@ func hostAction(item panel.Item, action string) string {
 		return host.ActChanges
 	case item.Kind == "comment":
 		return host.ActReply
-	case action == "continue" || action == "skip" || action == "retry":
+	case action == "continue" || action == "retry":
 		return action
 	}
 	return host.ActAnswer
@@ -621,10 +621,6 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 		}
 	case "ctrl+r":
 		m.recommendedOrRetry(item, d)
-	case "ctrl+x":
-		if item.Kind == "cap" || item.Kind == "failure" {
-			m.deliver("skip")
-		}
 	case "ctrl+k":
 		m.deliver("handled")
 	case "ctrl+o":

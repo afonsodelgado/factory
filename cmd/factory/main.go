@@ -130,12 +130,23 @@ commands:
   install-hooks [--remove]
               add (or remove) only the factory hooks, in Claude's
               settings.json and Codex's hooks.json
-  stage start --role <role> --task <file> [--wait] [--factory id]
-  stage send --role <role> --message <file> [--wait] [--factory id]
+  workflow next <state.json> <event.json>
+              print the state proposal an event makes, without writing it
+              (run by the supervisor)
+  workflow commands <repo>
+              print the repo's resolved build, lint, test and QA commands
+  workflow watch --dir <factory dir> --run <run id> <pr number>...
+              wait for CI on these PRs without model turns and queue the
+              observations for the supervisor (run by the CI agent)
+  workflow comments <state.json> [<dispositions.json>]
+              refresh review comments and queue them, with any proposed
+              dispositions, for the supervisor (run by the CI agent)
+  stage start --role <role> --effect <id> --task <file> [--wait] [--factory id]
+  stage send --role <role> --effect <id> --message <file> [--wait] [--factory id]
               run a stage agent on its own tool in a pane beside the
-              supervisor, or send it a follow-up; prints the result file
-              (run by the supervisor from its pane; --factory reaches a
-              factory from outside its panes)
+              supervisor, or send it a follow-up, for a committed workflow
+              effect; prints the result file (run by the supervisor from
+              its pane; --factory reaches a factory from outside its panes)
   stage ci <pr number>...
               wait for CI on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)

@@ -64,7 +64,7 @@ func (m *Runtime) startStack(it Item, page string) (ReviewReply, error) {
 	f := it.Factory
 	switch {
 	case m.Stacks == nil || m.Jobs == nil:
-		return ReviewReply{}, errors.New("review stack stacks run only inside factory node run")
+		return ReviewReply{}, errors.New("review stacks run only inside factory node run")
 	case f.Worktree == "":
 		return ReviewReply{}, errors.New("no factory owns this session")
 	case stackEnded(it):
@@ -92,7 +92,7 @@ func (m *Runtime) startStack(it Item, page string) (ReviewReply, error) {
 func (m *Runtime) stackStatus(it Item) (ReviewReply, error) {
 	status, ok := m.reviewStack(it.Factory.Key())
 	if !ok {
-		return ReviewReply{}, errors.New("no review stack stack runs for " + it.Factory.Label() + "; start one with factory review stack")
+		return ReviewReply{}, errors.New("no review stack runs for " + it.Factory.Label() + "; start one with factory review stack")
 	}
 	return ReviewReply{Stack: &status}, nil
 }
@@ -112,7 +112,7 @@ func (m *Runtime) StackReady(s StackStatus) {
 	}
 	switch s.State {
 	case StackFailed:
-		m.note(it.Factory, "the review stack stack failed at "+s.Failure+": "+s.Reason)
+		m.note(it.Factory, "the review stack failed at "+s.Failure+": "+s.Reason)
 	case StackReady:
 		m.note(it.Factory, "the review stack runs at "+s.URL)
 	}
@@ -142,7 +142,7 @@ func (m *Runtime) recoverStacks() {
 		return
 	}
 	for _, lease := range m.Stacks.Recover() {
-		m.note(factory.Factory{Repo: lease.Repo, Slug: lease.Slug}, "the node restarted, so the review stack stack stopped and its tailnet port closed; run factory review stack again")
+		m.note(factory.Factory{Repo: lease.Repo, Slug: lease.Slug}, "the node restarted, so the review stack stopped and its tailnet port closed; run factory review stack again")
 	}
 }
 
@@ -152,7 +152,7 @@ func stackItem(s StackStatus) AttentionItem {
 	return AttentionItem{
 		ID:    "stack",
 		Kind:  "stack",
-		Title: "the review stack stack failed at " + s.Failure,
+		Title: "the review stack failed at " + s.Failure,
 		Body:  s.Reason,
 		Since: s.At,
 	}

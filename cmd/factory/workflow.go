@@ -38,7 +38,7 @@ func runWorkflow(args []string) int {
 		return 0
 	}
 	if len(args) != 3 || args[0] != "next" {
-		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json>")
+		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json> | commands <repo> | comments <state.json> [<dispositions.json>] | watch --dir <factory dir> --run <run id> <pr number>...")
 		return 2
 	}
 	snapshot, err := state.ReadState(args[1])

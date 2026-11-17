@@ -384,7 +384,7 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"comment reply", act(ActReply, "c1", nil, "done"), "%1: c1 reply: done"},
 		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_fix_rounds by one for this factory"},
 		{"retry a failure", act(ActRetry, "fail-csv-qa", nil, ""), "%1: /factory resume"},
-		{"skip a failure", act(ActSkip, "fail-csv-qa", nil, ""), ""},
+		{"skip a failure", act("skip", "fail-csv-qa", nil, ""), ""},
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
 		{"mark a handoff done", act(ActHandled, "handoff-csv-1", nil, ""), "%1: handoff-csv-1 done: the developer marked this factory done"},
 		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
@@ -401,7 +401,7 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 			r := phoneRuntime(t.TempDir(), typist, phoneSnapshot("Stop", items...))
 			receipt, err := r.Act(c.request)
 			got := strings.Join(typist.typed, "\n")
-			if c.request.Action == ActSkip {
+			if c.request.Action == "skip" {
 				if err == nil || got != "" {
 					t.Fatal("skip bypassed completion", receipt, err)
 				}

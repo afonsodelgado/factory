@@ -287,7 +287,7 @@ func (s *Stacks) Recover() []host.StackLease {
 		}
 		if r.Status.State != host.StackFailed {
 			stopped = append(stopped, r.StackLease)
-			r.Status = host.StackStatus{Factory: r.Factory, State: host.StackFailed, At: time.Now(), Failure: host.FailRestart, Reason: "the node restarted, so the review stack stack stopped and its tailnet port closed; run factory review stack again"}
+			r.Status = host.StackStatus{Factory: r.Factory, State: host.StackFailed, At: time.Now(), Failure: host.FailRestart, Reason: "the node restarted, so the review stack stopped and its tailnet port closed; run factory review stack again"}
 		}
 		if r.Stack != nil && r.Stack.ours() {
 			killGroup(r.Stack.PID)

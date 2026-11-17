@@ -140,7 +140,7 @@ func runReviewStack(args []string) int {
 		return 1
 	}
 	if s := reply.Stack; s.State == host.StackFailed {
-		fmt.Fprintf(os.Stderr, "factory review: the review stack stack failed at %s: %s\n", s.Failure, s.Reason)
+		fmt.Fprintf(os.Stderr, "factory review: the review stack failed at %s: %s\n", s.Failure, s.Reason)
 		return 1
 	}
 	fmt.Printf("The review stack runs at %s, for your tailnet only. The factory's Pages tab in the phone app opens it signed in; comments made on it come back here.\n", reply.Stack.URL)

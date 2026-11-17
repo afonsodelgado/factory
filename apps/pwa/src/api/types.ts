@@ -233,7 +233,6 @@ export type Action =
   | "handled"
   | "continue"
   | "retry"
-  | "skip"
   | "message"
   | "pause"
   | "wake"

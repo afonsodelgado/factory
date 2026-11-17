@@ -29,10 +29,6 @@ func CapContinue(id, limit string) string {
 	return fmt.Sprintf("%s continue: raise %s by one for this factory", id, limit)
 }
 
-func Skip(stage string) string {
-	return "/factory skip " + stage
-}
-
 func Retry() string {
 	return "/factory resume"
 }
@@ -65,7 +61,6 @@ const (
 	ActHandled    = "handled"
 	ActContinue   = "continue"
 	ActRetry      = "retry"
-	ActSkip       = "skip"
 	ActMessage    = "message"
 	ActPause      = "pause"
 	ActWake       = "wake"
@@ -92,8 +87,6 @@ func ActionText(item AttentionItem, action string, answers []string, text string
 		return CommentReply(item.ID, text)
 	case action == ActContinue:
 		return CapContinue(item.ID, item.LimitKey)
-	case action == ActSkip:
-		return Skip(item.Stage)
 	case action == ActRetry:
 		return Retry()
 	}
@@ -114,8 +107,6 @@ func Fits(item AttentionItem, action string) bool {
 		return item.Kind == "cap" || item.Kind == "handoff"
 	case ActRetry:
 		return item.Kind == "failure"
-	case ActSkip:
-		return false
 	}
 	return false
 }
