@@ -292,7 +292,9 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
   });
   await list.getByRole("link").filter({ hasText: "rate-limits" }).click();
   await page.getByRole("link", { name: /Pages/ }).click();
-  await expect(page.getByRole("link", { name: /Walkthrough/ })).toHaveAttribute(
+  await expect(
+    page.getByRole("link", { name: /Review stack/ }),
+  ).toHaveAttribute(
     "href",
     `http://${peer("homelab")}/w/shop-1a2b-rate-limits`,
   );
