@@ -30,6 +30,7 @@ func runStage(args []string) int {
 	}
 	action := args[0]
 	flags := flag.NewFlagSet("stage "+action, flag.ContinueOnError)
+	effect := flags.String("effect", "", "the committed workflow effect id")
 	role := flags.String("role", "", "the stage agent's role, such as engineer")
 	text := flags.String(map[string]string{"start": "task", "send": "message"}[action], "", "a file with the task or the follow-up message")
 	wait := flags.Bool("wait", false, "wait for the stage's result file, then print it")
@@ -37,7 +38,7 @@ func runStage(args []string) int {
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}
-	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id})
+	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id, EffectID: *effect})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
@@ -51,7 +52,7 @@ func runStage(args []string) int {
 }
 
 type stageCall struct {
-	Action, Role, TextFile, Factory string
+	Action, Role, TextFile, Factory, EffectID string
 }
 
 func runStageCI(prs []string) int {
@@ -76,7 +77,7 @@ func stage(c stageCall) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return ask(host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory})
+	return ask(host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory, EffectID: c.EffectID})
 }
 
 func ask(r host.StageRequest) (string, error) {

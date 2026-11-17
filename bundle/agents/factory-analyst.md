@@ -19,5 +19,9 @@ A message in the factory panel's answer format (`<item id> answers:`, `<item id>
 End every turn with:
 
 ```factory-result
-{"status": "blocked|done|failed", "summary": "one sentence", "outputs": ["<abs path>"], "questions": [], "data": {"open_decisions": 0}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
 ```
+
+Ask once: “Should the factory watch review comments and address them?” Default off. Record the actual answer in requirements.md and return its reference; the supervisor records watch_comments.
+
+Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.

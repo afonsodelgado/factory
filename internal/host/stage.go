@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -28,13 +29,14 @@ const (
 )
 
 type StageRequest struct {
-	Action  string   `json:"action"`
-	Token   string   `json:"token"`
-	Cwd     string   `json:"cwd"`
-	Role    string   `json:"role"`
-	Text    string   `json:"text"`
-	PRs     []string `json:"prs,omitempty"`
-	Factory string   `json:"factory,omitempty"`
+	EffectID string   `json:"effect_id"`
+	Action   string   `json:"action"`
+	Token    string   `json:"token"`
+	Cwd      string   `json:"cwd"`
+	Role     string   `json:"role"`
+	Text     string   `json:"text"`
+	PRs      []string `json:"prs,omitempty"`
+	Factory  string   `json:"factory,omitempty"`
 
 	Review bool
 }
@@ -79,9 +81,47 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if err := m.unverified(it.Factory.Key()); err != nil {
 		return StageReply{}, err
 	}
+	if it.Factory.State == nil || it.Factory.State.Workflow.Pending == nil || r.EffectID == "" {
+		return StageReply{}, errors.New("commit a workflow stage effect before dispatch")
+	}
+	if len(it.Factory.State.Workflow.Runs) == 0 {
+		return StageReply{}, errors.New("committed effect has no run")
+	}
+	effect := it.Factory.State.Workflow.Pending
+	if effect.ID != r.EffectID || effect.Role != r.Role || effect.Kind != "stage" {
+		return StageReply{}, errors.New("stage request does not match the committed effect")
+	}
+	lockPath := state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return StageReply{}, err
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return StageReply{}, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return StageReply{}, err
+	}
 	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
 	if err != nil {
 		return StageReply{}, err
+	}
+	for _, previous := range runs.Runs {
+		if previous.ID != r.EffectID {
+			continue
+		}
+		live := false
+		if _, ok := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, previous.Token)); ok {
+			live = true
+		}
+		if previous.Finished() || live {
+			return StageReply{Result: previous.Result}, nil
+		}
+		active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
+		if active.Retries <= previous.Attempt {
+			return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
+		}
 	}
 	if r.Action == "send" {
 		return m.SendStage(it, runs, r)
@@ -105,14 +145,14 @@ func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
 	for _, pr := range r.PRs {
 		command += " " + factory.ShellQuote(pr)
 	}
-	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "ci"); err != nil {
+	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "ci-wait"); err != nil {
 		return StageReply{}, err
 	}
 	pane, err := m.TM.NewWindow(tmux.Window{Session: m.Session, Name: "c-" + it.Factory.Slug, Dir: it.Factory.Worktree, Command: command})
 	if err != nil {
 		return StageReply{}, err
 	}
-	for _, o := range [][2]string{{"@factory_ui", "ci"}, {"@factory_repo", it.Factory.Repo}, {"@factory_stage_of", it.Factory.Slug}, {"@factory_stage", "ci"}} {
+	for _, o := range [][2]string{{"@factory_ui", "ci-wait"}, {"@factory_repo", it.Factory.Repo}, {"@factory_stage_of", it.Factory.Slug}, {"@factory_stage", "ci-wait"}} {
 		if err := m.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
 			return StageReply{}, err
 		}
@@ -176,6 +216,9 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	if err := WriteFile(run.Prompt, prompt); err != nil {
 		return StageReply{}, err
 	}
+	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
+		return StageReply{}, err
+	}
 	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, r.Role); err != nil {
 		return StageReply{}, err
 	}
@@ -202,6 +245,9 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
 	run.Review = r.Review
 	if err := WriteFile(run.Prompt, r.Text+"\n\n## Your result\n\n"+ResultContract(run.Result)); err != nil {
+		return StageReply{}, err
+	}
+	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
 		return StageReply{}, err
 	}
 	kickoff := KickoffFor(run)
@@ -274,13 +320,15 @@ func Runnable(repo, role string, setting state.AgentSetting) error {
 }
 
 func (m *Runtime) NewRun(it Item, runs *state.StageRuns, role string, setting state.AgentSetting, token string) state.StageRun {
-	round := runs.NextRound(role)
-	base := filepath.Join(it.Factory.Dir, "stages", fmt.Sprintf("%s-%d", role, round))
-	return state.StageRun{Role: role, Round: round, Setting: setting, Token: token, Prompt: base + ".prompt.md", Result: base + ".result.json", StartedAt: m.Now()}
+	active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
+	return state.StageRun{ID: active.ID, Attempt: active.Retries, Role: role, Round: active.Round, Setting: setting, Token: token, Prompt: filepath.Join(it.Factory.Dir, active.Prompt), Result: filepath.Join(it.Factory.Dir, active.Result), StartedAt: m.Now()}
+
 }
 
 func (m *Runtime) Record(it Item, runs *state.StageRuns, run state.StageRun, verb string) (StageReply, error) {
-	runs.Runs = append(runs.Runs, run)
+	if !slices.ContainsFunc(runs.Runs, func(old state.StageRun) bool { return old.ID == run.ID && old.Attempt == run.Attempt }) {
+		runs.Runs = append(runs.Runs, run)
+	}
 	if err := runs.Save(); err != nil {
 		return StageReply{}, err
 	}

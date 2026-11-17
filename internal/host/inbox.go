@@ -42,6 +42,8 @@ func (m *Runtime) Movable(key string) (Movable, Item, error) {
 		return Movable{}, it, fmt.Errorf("%s runs on %s, not here", f.Label(), f.Where())
 	case f.State == nil || f.Dir == "" || f.Worktree == "":
 		return Movable{}, it, fmt.Errorf("%s has no state.json in a worktree yet, so it has nothing to checkpoint", f.Label())
+	case len(f.State.Stack) > len(f.State.PRs):
+		return Movable{}, it, errors.New("cannot move unpublished implementation branches; publish through the PR stage first")
 	case f.Archived():
 		return Movable{}, it, fmt.Errorf("%s is archived", f.Label())
 	}
@@ -89,9 +91,6 @@ func (m *Runtime) undelivered(it Item) []string {
 			blockers = append(blockers, "a message to "+q.Label+" is still waiting to be typed")
 		}
 	}
-	if it.Factory.Supervisor().OnClaude() {
-		return blockers
-	}
 	record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)
 	if pending := len(InboxMessages(m.Config.StateDir, it, ReadDelivered(record))); pending > 0 {
 		blockers = append(blockers, fmt.Sprintf("%d inbox messages have not reached the supervisor yet", pending))
@@ -110,7 +109,7 @@ func (m *Runtime) QueueInbox() {
 	}
 	queued := len(m.typeQueue)
 	for _, it := range m.snap.Items {
-		if it.Factory.Supervisor().OnClaude() || it.Pane == nil || it.Factory.Dir == "" || m.unverified(it.Factory.Key()) != nil {
+		if it.Pane == nil || it.Factory.Dir == "" || m.unverified(it.Factory.Key()) != nil {
 			continue
 		}
 		record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)

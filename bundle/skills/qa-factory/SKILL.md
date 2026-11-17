@@ -158,3 +158,5 @@ Each gap with its regression sentence, level and file.
 ```
 
 Delete nothing you seeded in the browser mode's database at the end; list it in the report so the user can reuse it. In terminal mode, kill the scratch tmux server and remove the temporary directories.
+
+In factory mode use the supervisor-recorded local stack and shared command recipe. Never pull, push, submit or sync during implementation, review or QA. Report untested behaviour and prior unresolved findings explicitly.

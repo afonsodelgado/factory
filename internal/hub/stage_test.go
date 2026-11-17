@@ -36,7 +36,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	cfg.Agents = map[string]state.AgentSetting{"engineer": {Model: "sonnet", Effort: "medium"}}
 	atCreation := &state.Entry{Agents: state.ResolveAgents(cfg, state.Profile{}, nil)}
 	cfg.Agents = map[string]state.AgentSetting{"engineer": {Tool: state.ToolCodex, Model: "gpt-5.6-sol"}}
-	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, Entry: atCreation, State: &state.State{Workflow: state.Workflow{ActiveRun: "engineer-1", Pending: &state.Effect{ID: "engineer-1", Kind: "stage", RunID: "engineer-1", Role: "engineer", Stage: "implement"}, Runs: []state.WorkflowRun{{ID: "engineer-1", Role: "engineer", Stage: "implement", Round: 1, Prompt: "stages/engineer-1.prompt.md", Result: "stages/engineer-1.result.json"}}}, Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}}
 	supervisor, err := e.NewFactoryPane(l, NewPane{Repo: repo, Slug: "csv", Dir: worktree})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestAStagePaneRunsItsToolWithTheRulesAndNeverStandsInForTheSupervisor(t *te
 	n.show(m, Snapshot{At: time.Now(), Items: []Item{{Factory: f, Pane: &supervisorPane}}})
 
 	op := uuid.NewString()
-	request, _ := json.Marshal(host.StageRequest{Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
+	request, _ := json.Marshal(host.StageRequest{EffectID: "engineer-1", Action: "start", Token: supervisorPane.Token, Role: "engineer", Text: "Implement layer 1 of plan.md."})
 	send := func() Message {
 		reply, _ := n.Call(context.Background(), Message{T: "stage", Op: op, Data: request})
 		return reply

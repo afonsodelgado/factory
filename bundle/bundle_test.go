@@ -46,8 +46,8 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 8 {
-		t.Fatalf("bundled agents = %d, want 8", len(agents))
+	if len(agents) != 7 {
+		t.Fatalf("bundled agents = %d, want 7", len(agents))
 	}
 	for _, agent := range agents {
 		if body, _ := fs.ReadFile(Files, agent); !bytes.Contains(body, []byte("in a `misrouted-message` fenced block")) {
@@ -220,5 +220,31 @@ esac
 	}
 	if !strings.Contains(string(out), "PR 7: coderabbit=pass ci=pass threads=1") {
 		t.Errorf("output = %q, want one open CodeRabbit thread: a passing check must not hide threads the shepherd has to triage", out)
+	}
+}
+
+func TestSupervisorCommitRejectsStaleProposalsAndPreservesMetadata(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	proposal := filepath.Join(dir, "proposal.json")
+	os.WriteFile(path, []byte(`{"schema_version":2,"revision":0,"incarnation":"one","holder_generation":1,"metadata":{"keep":true},"processed_events":[]}`), 0600)
+	os.WriteFile(proposal, []byte(`{"expected_revision":0,"incarnation":"one","holder_generation":1,"snapshot":{"schema_version":2,"revision":1,"incarnation":"one","holder_generation":1,"processed_events":["event"]}}`), 0600)
+	script := filepath.Join("skills", "factory", "scripts", "commit-state.py")
+	for range 2 {
+		if out, err := exec.Command(python, script, path, proposal, "supervisor").CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	data, _ := os.ReadFile(path)
+	if !bytes.Contains(data, []byte(`"keep": true`)) || !bytes.Contains(data, []byte(`"session_id": "supervisor"`)) {
+		t.Fatal(string(data))
+	}
+	os.WriteFile(proposal, []byte(`{"expected_revision":0,"incarnation":"one","holder_generation":1,"snapshot":{"schema_version":2,"revision":1,"incarnation":"one","holder_generation":1,"processed_events":["other"]}}`), 0600)
+	if out, err := exec.Command(python, script, path, proposal, "supervisor").CombinedOutput(); err == nil {
+		t.Fatalf("stale commit accepted: %s", out)
 	}
 }

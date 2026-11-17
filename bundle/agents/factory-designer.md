@@ -48,5 +48,9 @@ A message, or a file a message tells you to read, that starts with `review-<id>-
 End every turn with:
 
 ```factory-result
-{"status": "done|blocked|failed", "summary": "what changed or the answer", "outputs": ["<abs paths you wrote>"], "questions": [], "data": {}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
 ```
+
+A design revision after architect feedback requires a fresh artifact revision and developer approval. A comment follow-up never approves its own design.
+
+Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.
