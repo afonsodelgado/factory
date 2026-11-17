@@ -95,7 +95,7 @@ func (s *Stacks) bringUp(ctx context.Context, run *liveStack, profile state.Prof
 		return err
 	}
 	if err := s.listen(run); err != nil {
-		return failed(host.FailPorts, fmt.Errorf("the walkthrough proxy could not listen on 127.0.0.1:%d: %w", run.record.Proxy, err))
+		return failed(host.FailPorts, fmt.Errorf("the walkthrough proxy could not listen on a loopback port: %w", err))
 	}
 	if _, err := bringUp(ctx, run.recipe, func(p *stackProcess) {
 		run.process = p
@@ -136,11 +136,7 @@ func (s *Stacks) reserve(ctx context.Context, run *liveStack) error {
 	if err != nil {
 		return err
 	}
-	proxy, err := FreePort()
-	if err != nil {
-		return failed(host.FailPorts, fmt.Errorf("no free loopback port for the walkthrough proxy: %w", err))
-	}
-	run.record.HTTPS, run.record.Proxy = https, proxy
+	run.record.HTTPS = https
 	return s.journal(run.record)
 }
 
@@ -153,11 +149,12 @@ func (s *Stacks) reservedLocked() []int {
 }
 
 func (s *Stacks) listen(run *liveStack) error {
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(run.record.Proxy)))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
 	}
 	run.server = &http.Server{Handler: s.proxy(run), ReadHeaderTimeout: proxyTimeout}
+	s.update(run, func(r *stackRecord) { r.Proxy = ln.Addr().(*net.TCPAddr).Port })
 	go run.server.Serve(ln)
 	return nil
 }
