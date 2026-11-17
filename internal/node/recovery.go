@@ -46,6 +46,10 @@ func (ts *Transfers) Takeover(ctx context.Context, r TakeoverRequest) (Transfer,
 	switch {
 	case err != nil:
 		return t, err
+	case found && !t.Forced:
+		return t, errors.New("this operation belongs to a normal move; use a new operation and confirm the takeover warning")
+	case found && r.Factory != t.Factory && r.Factory != t.Incarnation:
+		return t, errors.New("this operation belongs to another factory")
 	case found && t.Refusal != "":
 		return t, errors.New(t.Refusal)
 	case found && t.Phase == PhaseActive:

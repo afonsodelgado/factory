@@ -542,7 +542,17 @@ func (ts *Transfers) takeoverHere(w http.ResponseWriter, r *http.Request, _ stri
 }
 
 func (ts *Transfers) takeover(w http.ResponseWriter, _ context.Context, body TakeoverRequest) {
-	if _, found, _ := LoadTransfer(ts.StateDir, body.Operation); !found && !body.Confirm {
+	t, found, err := LoadTransfer(ts.StateDir, body.Operation)
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	differentFactory := body.Factory != t.Factory && body.Factory != t.Incarnation
+	if found && (!t.Forced || differentFactory) {
+		fail(w, http.StatusConflict, "this operation belongs to another move; use a new operation and confirm the takeover warning")
+		return
+	}
+	if !found && !body.Confirm {
 		warning, err := ts.Preview(body.Factory)
 		if err != nil {
 			fail(w, http.StatusConflict, err.Error())

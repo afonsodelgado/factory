@@ -2253,6 +2253,22 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 }
 
 func TestAForcedTakeoverWarnsNeedsACheckpointAndTheReturningHolderLearnsItLost(t *testing.T) {
+	t.Run("a normal move operation cannot authorize a takeover", func(t *testing.T) {
+		f := newMoveFixture(t)
+		op := uuid.NewString()
+		if _, err := restarted(f.macbook).Stage(context.Background(), op, f.csv.Key, "homelab"); err != nil {
+			t.Fatal(err)
+		}
+		for _, confirm := range []bool{false, true} {
+			status, _, body := f.tn.Request(f.macbook.Machine, f.homelab.Machine, "POST", "/api/node/transfer/takeover", "", node.TakeoverRequest{Operation: op, Factory: "csv", Confirm: confirm})
+			if status != http.StatusConflict || !strings.Contains(body, "new operation") {
+				t.Errorf("reused move operation: %d %s", status, body)
+			}
+			if _, err := f.homelab.Transfers.Takeover(context.Background(), node.TakeoverRequest{Operation: op, Factory: "csv", Confirm: confirm}); err == nil {
+				t.Error("direct takeover reused a normal move")
+			}
+		}
+	})
 	f := newMoveFixture(t)
 	f.moveToHomelab(t)
 	background := context.Background()
