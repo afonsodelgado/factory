@@ -270,12 +270,9 @@ func TestAfterTheLastAnswerEnterGoesToTheNextFactoryThatNeedsYou(t *testing.T) {
 	snap.Items = append(snap.Items, other)
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: &fakeTypist{}})
 	node.show(model, snap)
-	tm := teatest.NewTestModel(t, model, teatest.WithInitialTermSize(34, 44))
+	tm := drive(model, 34, 44)
 	panelKeys(tm, "ctrl+s", "enter")
-	if err := tm.Quit(); err != nil {
-		t.Fatal(err)
-	}
-	final := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(*Model)
+	final := model
 	if final.selected != other.Factory.Key() || final.focus != footer.Panel {
 		t.Errorf("selected %q with focus %s, want %q with the panel focused: answering one factory after another must not dead-end in an empty panel", final.selected, final.focus, other.Factory.Key())
 	}
