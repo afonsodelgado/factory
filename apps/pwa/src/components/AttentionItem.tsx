@@ -245,8 +245,8 @@ function ItemHead({ item }: { item: LocalItem }) {
       {item.role ? <p className="sm mute">from {item.role}</p> : null}
       {item.revising ? (
         <p className="sm mute">
-          The {item.revising} is working on your comments. You are told when
-          the page is ready to review again.
+          The {item.revising} is working on your comments. You are told when the
+          page is ready to review again.
         </p>
       ) : null}
       {item.detail?.length ? (
