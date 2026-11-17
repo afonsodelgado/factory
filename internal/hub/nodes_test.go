@@ -68,7 +68,7 @@ func until(t *testing.T, m *Model, done func() bool) {
 func TestAnActionOnAnotherNodeGoesOnlyThereWithItsGenerationAndItsOutageIsCountedApart(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
-	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", Generation: 3, ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", CanPause: true, Pane: "%3"})
+	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", Generation: 3, ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "implement", Loop: "qa_fix", Round: 2, CanPause: true, Pane: "%3"})
 	tn.Watch("/api/factories//srv/cowork:csv/actions")
 	if _, err := macbook.Add("homelab"); err != nil {
 		t.Fatal(err)

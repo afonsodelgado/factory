@@ -381,6 +381,9 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	if f.State != nil {
 		lf.Stage = f.State.Stage
 		lf.Loop, lf.Round = f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds
+		if lf.Loop != "" {
+			lf.Round = f.State.Loops.Used[lf.Loop]
+		}
 		for _, a := range f.State.Artifacts() {
 			lf.Pages = append(lf.Pages, localPage(ReviewFactory(it), NewArtifactRow(a, m.threadCounter())))
 		}

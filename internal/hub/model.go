@@ -895,12 +895,16 @@ func (m *Model) row(it Item) selector.Row {
 		Repo:   f.RepoName(),
 		Status: it.Status,
 		Track:  factory.Track(f.State),
-		Stage:  loopStage(f),
+		Stage:  stageOf(f),
 	}
 	if name := m.pipelines[f.Key()]; name != "" {
 		row.Stage += " · " + name
 	}
 	if f.State != nil {
+		row.Loop, row.Round = f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds
+		if row.Loop != "" {
+			row.Round = f.State.Loops.Used[row.Loop]
+		}
 		_, settled := m.shownItems(it)
 		row.Items = len(f.State.OpenAttention()) - len(settled)
 	}
@@ -909,7 +913,8 @@ func (m *Model) row(it Item) selector.Row {
 	}
 	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
 		_, settled := m.shownItems(it)
-		row.Stage, row.Items = workflowStage(lf.Stage, lf.Loop, lf.Round), len(lf.Items)-len(settled)
+		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
+		row.Loop, row.Round = lf.Loop, lf.Round
 	}
 	if m.unverified(it) != "" {
 		row.Stage = "held, unchecked"
@@ -1278,7 +1283,11 @@ func noPaneReason(it Item) string {
 
 func loopStage(f factory.Factory) string {
 	if f.State != nil {
-		return workflowStage(f.State.Stage, f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds)
+		round := f.State.Stages[f.State.Stage].Rounds
+		if f.State.Loops.Active != "" {
+			round = f.State.Loops.Used[f.State.Loops.Active]
+		}
+		return workflowStage(f.State.Stage, f.State.Loops.Active, round)
 	}
 	return stageOf(f)
 }
