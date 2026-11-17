@@ -21,9 +21,11 @@ const CheckDiscovery = 15 * time.Minute
 const CheckDeadline = 2 * time.Hour
 
 type CheckWindow struct {
-	Head    string    `json:"head"`
-	Base    string    `json:"base"`
-	Started time.Time `json:"started"`
+	Head      string    `json:"head"`
+	Base      string    `json:"base"`
+	Started   time.Time `json:"started"`
+	Discovery time.Time `json:"discovery"`
+	Draft     bool      `json:"draft"`
 }
 
 type PRObservation struct {
@@ -123,7 +125,13 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 	o.Head, o.Base, o.Branch, o.Parent, o.URL, o.Title = pr.Head.SHA, pr.Base.SHA, pr.Head.Ref, pr.Base.Ref, pr.URL, pr.Title
 	o.Open, o.Draft = pr.State == "open", pr.Draft
 	if o.Window.Head != o.Head || o.Window.Base != o.Base || o.Window.Started.IsZero() {
-		o.Window = CheckWindow{Head: o.Head, Base: o.Base, Started: now}
+		o.Window = CheckWindow{Head: o.Head, Base: o.Base, Started: now, Discovery: now, Draft: pr.Draft}
+	}
+	if o.Window.Draft != pr.Draft {
+		o.Window.Discovery, o.Window.Draft = now, pr.Draft
+	}
+	if o.Window.Discovery.IsZero() {
+		o.Window.Discovery = o.Window.Started
 	}
 	var branch struct {
 		Protected bool `json:"protected"`
@@ -207,7 +215,7 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 			checks = append(checks, merged...)
 		}
 	}
-	o.CI, o.Reason, o.Notes = interpretChecks(checks, required, now.Sub(o.Window.Started))
+	o.CI, o.Reason, o.Notes = interpretChecks(checks, required, now.Sub(o.Window.Discovery))
 	var review struct {
 		ReviewDecision string `json:"reviewDecision"`
 		Head           string `json:"headRefOid"`

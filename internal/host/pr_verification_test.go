@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,7 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	start := time.Unix(100, 0)
 	now := start
 	calls := 0
+	draft := true
 	gh := &GitHub{Run: func(dir string, args ...string) ([]byte, error) {
 		calls++
 		command := strings.Join(args, " ")
@@ -47,7 +49,7 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 		case command == "repo view --json nameWithOwner":
 			return []byte(`{"nameWithOwner":"owner/repo"}`), nil
 		case strings.Contains(command, "pulls/1"):
-			return []byte(`{"number":1,"head":{"sha":"h","ref":"feature"},"base":{"sha":"b","ref":"main"},"state":"open","draft":true,"mergeable":true,"mergeable_state":"clean"}`), nil
+			return []byte(strings.ReplaceAll(`{"number":1,"head":{"sha":"h","ref":"feature"},"base":{"sha":"b","ref":"main"},"state":"open","draft":DRAFT,"mergeable":true,"mergeable_state":"clean"}`, "DRAFT", fmt.Sprint(draft))), nil
 		case strings.Contains(command, "rules/branches"):
 			return []byte(`[[]]`), nil
 		case strings.Contains(command, "branches/main"):
@@ -82,6 +84,15 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".heartbeat")); err != nil {
 		t.Fatal(err)
+	}
+	draft = false
+	ready := gh.Observe(dir, 1, observations[0].Window, now)
+	if ready.CI != "pending" || ready.Reason != "discovering_checks" || !ready.Window.Started.Equal(start) {
+		t.Fatal("ready transition reused empty-check evidence or reset the deadline", ready)
+	}
+	ready = gh.Observe(dir, 1, ready.Window, start.Add(CheckDeadline))
+	if ready.CI != "pass" {
+		t.Fatal(ready)
 	}
 	gh.Run = func(string, ...string) ([]byte, error) { return nil, errors.New("permission denied") }
 	failed := gh.Observe(dir, 1, saved.Window, now)
