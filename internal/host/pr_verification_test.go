@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +72,17 @@ func TestApprovalOnlyBlocksAreNotesAndUncomputedMergeabilityKeepsWaiting(t *test
 	}
 	if o := gh(blocked, strict, "false").Observe("", 1, CheckWindow{}, now); o.Policy != "fail" {
 		t.Fatal("an unresolved review thread passed as an approval-only block", o)
+	}
+	unreachable := gh(blocked, strict, "true")
+	answer := unreachable.Run
+	unreachable.Run = func(dir string, args ...string) ([]byte, error) {
+		if slices.Contains(args, "graphql") {
+			return nil, errors.New("graphql: rate limited")
+		}
+		return answer(dir, args...)
+	}
+	if o := unreachable.Observe("", 1, CheckWindow{}, now); o.Policy != "unknown" || o.Reason == "checks_passed" {
+		t.Fatal("a failed thread query still reported its checks as passed", o)
 	}
 	computing := gh(`"mergeable":null,"mergeable_state":"unknown"`, `[[]]`, "true")
 	dir := t.TempDir()

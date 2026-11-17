@@ -81,7 +81,7 @@ func (g *GitHub) Observe(dir string, number int, previous CheckWindow, now time.
 	o := PRObservation{PRVerification: state.PRVerification{Number: number, CI: "unknown", Policy: "unknown", At: state.Time{Time: now}}, Window: previous}
 	err := g.observe(dir, &o, now)
 	if err != nil {
-		o.CI, o.Policy, o.Problem = "unknown", "unknown", err.Error()
+		o.CI, o.Reason, o.Policy, o.Problem = "unknown", "verification_error", "unknown", err.Error()
 	}
 	return o
 }
