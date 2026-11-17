@@ -576,3 +576,36 @@ func TestKeepAwakeIsNotApplicableOnLinuxNodes(t *testing.T) {
 		t.Fatalf("a Linux node with active factories reports %q; want keep-awake not applied", a.Status().Detail)
 	}
 }
+
+func TestAHungPowerProbeCannotBlockNodeIdentityAndTimesOut(t *testing.T) {
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a := &Awake{Enabled: true, OnPower: func(ctx context.Context) (bool, error) {
+		close(started)
+		<-ctx.Done()
+		return false, ctx.Err()
+	}}
+	finished := make(chan struct{})
+	go func() { a.Set(ctx, 1); close(finished) }()
+	<-started
+	answer := make(chan struct{})
+	go func() {
+		api := &API{Awake: a}
+		api.me(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/me", nil), "owner")
+		close(answer)
+	}()
+	select {
+	case <-answer:
+	case <-time.After(200 * time.Millisecond):
+		t.Error("node identity waits for the power probe")
+	}
+	select {
+	case <-finished:
+		if !a.Status().Problem {
+			t.Error("a timed-out power probe must report a problem")
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("power probe has no bounded timeout")
+	}
+}

@@ -28,9 +28,10 @@ type Awake struct {
 	OnPower     func(context.Context) (bool, error)
 	Hold        func() (Assertion, error)
 
-	mu     sync.Mutex
-	held   *Assertion
-	status AwakeStatus
+	mu       sync.Mutex
+	statusMu sync.Mutex
+	held     *Assertion
+	status   AwakeStatus
 }
 
 func ActiveFactories(factories []host.LocalFactory) int {
@@ -64,7 +65,9 @@ func (a *Awake) Set(ctx context.Context, active int) {
 	if !holding {
 		a.releaseLocked()
 	}
+	a.statusMu.Lock()
 	a.status = status
+	a.statusMu.Unlock()
 }
 
 func (a *Awake) decide(ctx context.Context, active int) (AwakeStatus, bool) {
@@ -76,7 +79,9 @@ func (a *Awake) decide(ctx context.Context, active int) (AwakeStatus, bool) {
 	case active == 0:
 		return AwakeStatus{Detail: "not holding: no active factories"}, false
 	}
-	onPower, err := a.OnPower(ctx)
+	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	onPower, err := a.OnPower(probe)
 	switch {
 	case err != nil:
 		return AwakeStatus{Detail: "not holding: could not read the power source: " + err.Error(), Problem: true}, false
@@ -124,7 +129,7 @@ func (a *Awake) releaseLocked() {
 }
 
 func (a *Awake) Status() AwakeStatus {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
 	return a.status
 }
