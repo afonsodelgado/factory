@@ -622,7 +622,7 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 	case "ctrl+k":
 		m.deliver("handled")
 	case "ctrl+o":
-		return m.openCmd(itemURL(item, d)), true
+		return m.openCmd(m.reviewURL(itemURL(item, d))), true
 	case "ctrl+d":
 		m.discardDraft()
 	case "ctrl+u":
