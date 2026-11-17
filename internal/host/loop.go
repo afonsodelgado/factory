@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 )
 
 func (m *Runtime) Run(ctx context.Context, events <-chan Event) error {
@@ -136,11 +135,6 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.QueueAnswerFor(r)
 		}
-	case "put-claim":
-		var a Answer
-		if err = json.Unmarshal(request.Data, &a); err == nil {
-			m.PutClaim(a)
-		}
 	case "drop-claim":
 		var key string
 		if err = json.Unmarshal(request.Data, &key); err == nil {
@@ -151,48 +145,9 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &prefix); err == nil {
 			m.ForgetClaims(func(key string) bool { return strings.HasPrefix(key, prefix) })
 		}
-	case "settle-remote":
-		var o RemoteObservation
-		if err = json.Unmarshal(request.Data, &o); err == nil {
-			m.SettleRemote(o)
-		}
-	case "record-sent":
-		var r SentRecord
-		if err = json.Unmarshal(request.Data, &r); err == nil {
-			m.RecordSent(r.Answer, r.At)
-		}
-	case "link":
-		var r remote.LinkRequest
-		if err = json.Unmarshal(request.Data, &r); err == nil {
-			value, err = m.Link(r)
-		}
-	case "opened":
-		var ids []string
-		if err = json.Unmarshal(request.Data, &ids); err == nil {
-			err = m.Opened(ids)
-		}
-	case "events":
-		var cursor int64
-		if err = json.Unmarshal(request.Data, &cursor); err == nil {
-			value = m.Events(cursor)
-		}
-	case "push":
-		var settings remote.PushSettings
-		if err = json.Unmarshal(request.Data, &settings); err == nil {
-			value, err = m.configurePush(settings)
-		}
-	case "push-test":
-		err = m.testPush()
 	case "snapshot":
 		m.PollPRs(false)
 		value = m.Presentation()
-	case "view":
-		value = m.View()
-	case "answer":
-		var r AnswerRequest
-		if err = json.Unmarshal(request.Data, &r); err == nil {
-			value, err = m.TypeAnswer(r)
-		}
 	case "local":
 		value = m.Local()
 	case "act":

@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"html"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,7 +39,6 @@ type Server struct {
 	now       func() time.Time
 	act       func(Action) (any, error)
 	browser   *Browser
-	forwarded map[string]bool
 }
 
 type event struct {
@@ -62,7 +60,6 @@ func New(token string, overlay []byte) (*Server, error) {
 		watched:   map[string]bool{},
 		clients:   map[chan event]bool{},
 		stores:    map[string]*Store{},
-		forwarded: map[string]bool{},
 		now:       time.Now,
 	}
 	go s.forwardChanges()
@@ -147,22 +144,9 @@ func (s *Server) Handler() http.Handler {
 	return s.sameHost(mux)
 }
 
-func (s *Server) Allow(port int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, host := range []string{"127.0.0.1", "localhost"} {
-		s.forwarded[net.JoinHostPort(host, strconv.Itoa(port))] = true
-	}
-}
-
 func (s *Server) sameHost(next http.Handler) http.Handler {
-	allowed := func(host string) bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return host == SocketHost || s.forwarded[host]
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowed(r.Host) {
+		if r.Host != SocketHost {
 			http.Error(w, "unknown host", http.StatusForbidden)
 			return
 		}

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -516,5 +517,62 @@ func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	}
 	if len(runtime.calls) != 0 {
 		t.Fatalf("a review page script ran %v on the node", runtime.calls)
+	}
+}
+
+func TestKeepAwakeHoldsOnlyWhileFactoriesAreActiveOnExternalPowerAndReleasesOnShutdown(t *testing.T) {
+	onPower, holds, releases := true, 0, 0
+	a := &Awake{
+		Enabled: true,
+		OnPower: func(context.Context) (bool, error) { return onPower, nil },
+		Hold: func() (Assertion, error) {
+			holds++
+			return Assertion{Release: func() { releases++ }, Ended: make(chan struct{})}, nil
+		},
+	}
+	running, waiting := host.LocalFactory{Status: "running"}, host.LocalFactory{Status: "needs you"}
+	paused, done := host.LocalFactory{Status: "running", Paused: true}, host.LocalFactory{Status: "done"}
+	for _, step := range []struct {
+		name      string
+		power     bool
+		factories []host.LocalFactory
+		held      bool
+	}{
+		{"one factory waiting for the developer, on power", true, []host.LocalFactory{waiting}, true},
+		{"the same, polled again", true, []host.LocalFactory{waiting}, true},
+		{"on battery", false, []host.LocalFactory{running, waiting}, false},
+		{"back on power", true, []host.LocalFactory{running, waiting}, true},
+		{"only paused and done factories", true, []host.LocalFactory{paused, done}, false},
+		{"a factory active again", true, []host.LocalFactory{running, paused}, true},
+	} {
+		onPower = step.power
+		a.Set(context.Background(), ActiveFactories(step.factories))
+		if held := holds > releases; held != step.held {
+			t.Fatalf("%s: holding %v (%s); want %v", step.name, held, a.Status().Detail, step.held)
+		}
+	}
+	if holds != 3 {
+		t.Errorf("took the sleep assertion %d times over three holding spells; want one per spell, not one per poll", holds)
+	}
+	ctx, shutdown := context.WithCancel(context.Background())
+	shutdown()
+	a.Run(ctx, func() int { return 1 })
+	if holds != releases {
+		t.Error("the node stopped and left its sleep assertion held")
+	}
+	off := &Awake{OnPower: a.OnPower, Hold: a.Hold}
+	if off.Set(context.Background(), 2); holds != 3 {
+		t.Error("node.keep_awake: false still took the sleep assertion")
+	}
+}
+
+func TestKeepAwakeIsNotApplicableOnLinuxNodes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("this checks the Linux node; macOS holds the assertion")
+	}
+	a := NewAwake(true)
+	a.Set(context.Background(), 3)
+	if a.held != nil || a.Status().Detail != "not applicable on Linux nodes" {
+		t.Fatalf("a Linux node with active factories reports %q; want keep-awake not applied", a.Status().Detail)
 	}
 }

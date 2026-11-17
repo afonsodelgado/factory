@@ -9,7 +9,6 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -55,16 +54,9 @@ func (m *Runtime) openThreads() map[string]int {
 	return open
 }
 
-func Remote(factoryKey string) bool { return strings.HasPrefix(factoryKey, "remote:") }
-
 type QueuedAnswer struct {
 	Answer Answer
 	Text   string
-}
-
-type SentRecord struct {
-	Answer Answer
-	At     time.Time
 }
 
 func (m *Runtime) QueueAnswerFor(q QueuedAnswer) (Answer, error) {

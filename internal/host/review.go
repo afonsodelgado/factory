@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -38,7 +37,6 @@ type ReviewReply struct {
 	Gate    string          `json:"gate,omitempty"`
 	Owner   string          `json:"owner,omitempty"`
 	Threads []review.Thread `json:"threads,omitempty"`
-	Queued  bool            `json:"queued,omitempty"`
 	Stack   *StackStatus    `json:"stack,omitempty"`
 }
 
@@ -90,10 +88,8 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 		return m.ReplyToThread(it, store, r)
 	case "threads":
 		return ReviewReply{Threads: store.Threads(r.Page)}, nil
-	case "open":
-		return m.QueueOpen(it, remote.Open{URL: r.URL, Page: r.Page, Key: ReviewKey(it.Factory)})
-	case "link":
-		return m.QueueOpen(it, remote.Open{URL: r.URL})
+	case "open", "link":
+		return m.checkOpenable(r.URL)
 	case "stack":
 		return m.startStack(it, r.Page)
 	case "stack-status":

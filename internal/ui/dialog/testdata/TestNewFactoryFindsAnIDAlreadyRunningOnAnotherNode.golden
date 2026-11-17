@@ -3,7 +3,7 @@
      [38;2;115;122;162m+ add a repo…[m                                                                    
                                                                                       
  [1;38;2;192;202;245mRuns on[m                                                                              
-   [38;2;192;202;245m● this machine[m  [38;2;86;95;137mdefault[m   [38;2;169;177;214m○ homelab[m                                                
+   [38;2;192;202;245m● this machine[m  [38;2;86;95;137mdefault[m   [38;2;115;122;162m↮ homelab[m  [38;2;86;95;137munreachable[m                                   
    [38;2;86;95;137mRuns here, in a new worktree of ~/dev/cowork.[m                                      
                                                                                       
  [1;38;2;192;202;245mFactory id[m                                                                           

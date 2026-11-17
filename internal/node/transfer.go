@@ -191,7 +191,7 @@ func (ts *Transfers) Stage(ctx context.Context, operation, key, target string) (
 	if t, err = ts.record(t, PhaseRequested); err != nil {
 		return t, err
 	}
-	if t.GitURL, err = gitclone.RemoteURL(movable.Repo, ""); err != nil {
+	if t.GitURL, err = gitclone.RemoteURL(movable.Repo); err != nil {
 		return ts.refused(t, err)
 	}
 	if t, err = ts.preflight(ctx, t, peer, movable); err != nil {

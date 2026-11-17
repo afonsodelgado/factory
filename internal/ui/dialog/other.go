@@ -316,10 +316,8 @@ func (d *Delete) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return d, nil
 	}
-	confirmed := key.String() == "y" && !d.Context.Unreachable
+	confirmed := key.String() == "y"
 	switch {
-	case key.String() == "f" && d.Context.Remote != "":
-		d.result = &DeleteResult{Key: d.Context.Key, Forget: true}
 	case confirmed && d.step == 0 && d.Context.HasWork():
 		d.step = 1
 		return d, nil
@@ -331,37 +329,12 @@ func (d *Delete) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (d *Delete) View() tea.View {
 	c := theme.NewCanvas(d.width, d.height)
-	switch {
-	case d.Context.Unreachable:
-		d.drawUnreachable(c)
-	case d.step == 0:
+	if d.step == 0 {
 		d.drawWhatGoes(c)
-	default:
+	} else {
 		d.drawWork(c)
 	}
 	return view(c)
-}
-
-func (d *Delete) drawUnreachable(c *theme.Canvas) {
-	ctx := d.Context
-	c.PutMax(1, 0, ctx.Remote+" is unreachable, so "+ctx.Label+" can't be deleted now", theme.Bright.B(), c.W-2)
-	y := 2
-	for _, text := range []string{
-		"Nothing was deleted. Its panes, worktree and state stay on " + ctx.Remote + ", and it may still be running there. Delete it once " + ctx.Remote + " is back.",
-		"",
-		"Forget removes it from this hub only. " + ctx.Remote + " is not touched.",
-		"factory open " + ctx.Label + " --remote " + ctx.Remote + " lists it again.",
-	} {
-		for _, line := range theme.Wrap(text, c.W-2) {
-			c.Put(1, y, line, theme.Text)
-			y++
-		}
-		if text == "" {
-			y++
-		}
-	}
-	line := []theme.Span{{Text: "f", Ink: theme.Key}, {Text: "  forget " + ctx.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
-	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
 }
 
 func (d *Delete) drawWhatGoes(c *theme.Canvas) {
@@ -408,7 +381,7 @@ func (d *Delete) drawWhatGoes(c *theme.Canvas) {
 	}
 	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete " + ctx.Label + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
 	if ctx.Remote != "" {
-		line = []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete on " + ctx.Remote + "      ", Ink: theme.Text}, {Text: "f", Ink: theme.Key}, {Text: "  forget here only      ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+		line = []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  delete on " + ctx.Remote + "      ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
 	}
 	c.Spans(max((c.W-theme.SpansWidth(line))/2, 1), c.H-1, line)
 }
@@ -451,7 +424,6 @@ func (d *Delete) drawWork(c *theme.Canvas) {
 }
 
 type Keys struct {
-	Context KeysContext
 	size
 }
 
@@ -491,10 +463,6 @@ var answerKeys = [][2]string{
 func (k *Keys) View() tea.View {
 	c := theme.NewCanvas(k.width, k.height)
 	columns := keyColumns
-	if k.Context.Remotes {
-		columns = slices.Clone(keyColumns)
-		columns[0] = append(slices.Clone(columns[0]), [2]string{"R", "remotes"})
-	}
 	col := max((c.W-2)/len(columns), 20)
 	rows := 0
 	for i, column := range columns {

@@ -16,10 +16,8 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
-	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 )
@@ -71,7 +69,7 @@ func (m *Model) shownItems(it Item) (shown []panel.Item, settled []panel.Settled
 }
 
 func (m *Model) delivery(it Item, item panel.Item) (panel.Progress, bool) {
-	if it.Factory.OnNode() {
+	if it.Factory.Remote != nil {
 		return m.sentToNode(it, item)
 	}
 	mark, sent := m.claim(draftKey(it.Factory, item.ID))
@@ -123,7 +121,7 @@ func newPanelState() panelState {
 }
 
 func (m *Model) attentionItems(it Item, counter threadCounter) []panel.Item {
-	if it.Factory.OnNode() {
+	if it.Factory.Remote != nil {
 		return m.nodeAttention(it)
 	}
 	return host.AttentionItems(it, m.snap.At, counter)
@@ -230,9 +228,6 @@ func (m *Model) discardDraft() {
 }
 
 func (m *Model) target(it Item) Target {
-	if w := m.wires[it.Factory.Key()]; it.Factory.Remote != nil && w.Pane != nil {
-		return Target{Label: it.Factory.Label(), Pane: &tmux.Pane{ID: w.Pane.ID}, Hook: it.Hook}
-	}
 	return Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}
 }
 
@@ -311,17 +306,13 @@ func (m *Model) deliver(action string) {
 	delete(m.panel.refused, key)
 	m.saveDraft()
 	m.panel.press = lastPress{key: key, at: m.Now()}
-	if it.Factory.OnNode() {
+	if remote {
 		m.answerOnNode(it, m.answerBody(item, d, action))
 		return
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
 	mark := sentMark{ItemSince: item.Since, Factory: it.Factory.Key(), ItemID: item.ID, Head: state.PromptHead(text), Draft: m.draftPath(it.Factory, item.ID), Source: host.SourceHub, Action: hostAction(item, action)}
 	mark.LeavesOpen = item.Kind == "gate" && action == "changes"
-	if remote {
-		m.deliverRemote(it, mark, text)
-		return
-	}
 	m.queueAnswer(mark, text)
 }
 
@@ -373,9 +364,6 @@ func (m *Model) panelView() panel.View {
 	f := it.Factory
 	v.Label = f.Placed()
 	v.Items, v.Settled = m.shownItems(it)
-	if f.Remote != nil {
-		v.Served = m.servedBy(f)
-	}
 	if next, ok := m.nextElsewhere(); ok && len(v.Items) == 0 {
 		v.Next = next.Factory.Label()
 	}
@@ -411,13 +399,9 @@ func (m *Model) sendState(it Item, item panel.Item, d *panel.Draft) panel.Send {
 	}
 	t := m.target(it)
 	s.Preview = factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, "approve"))
-	if it.Factory.OnNode() {
+	if it.Factory.Remote != nil {
 		e := m.nodeSendable(it, item)
 		s.Ready, s.Reason = e.Ready, e.Reason
-		return s
-	}
-	if it.Factory.Remote != nil && unqueueable(t) == "" && Refusal(t) != "" {
-		s.Reason = Refusal(t) + " Send it once it is at its prompt."
 		return s
 	}
 	e := host.Eligible(t, "the answer")
@@ -448,24 +432,13 @@ func (m *Model) activity(it Item) []panel.ActivityRow {
 		items = m.snap.Items
 	}
 	var rows []panel.ActivityRow
-	remotes := map[string]bool{}
 	for _, i := range items {
 		var logged []state.ActivityEntry
-		switch {
-		case i.Factory.Remote != nil:
-			logged = m.wires[i.Factory.Key()].Activity
-		case m.Config.StateDir != "":
+		if i.Factory.Remote == nil && m.Config.StateDir != "" {
 			logged, _ = state.ReadActivity(state.ActivityPath(m.Config.ActivityDir(), i.Factory.Repo, i.Factory.Slug))
 		}
 		for _, a := range factory.Activity(i.Factory, logged) {
 			rows = append(rows, panel.ActivityRow{At: a.At, Factory: i.Factory.Label(), Key: i.Factory.Key(), Stage: a.Stage, Source: a.Source, Text: a.Text})
-		}
-		if i.Factory.Remote != nil && !remotes[i.Factory.Remote.Name] && m.Config.StateDir != "" {
-			remotes[i.Factory.Remote.Name] = true
-			logged, _ := state.ReadActivity(linkActivityPath(m.Config.StateDir, i.Factory.Remote.Name))
-			for _, a := range logged {
-				rows = append(rows, panel.ActivityRow{At: a.At, Factory: i.Factory.Remote.Name, Stage: a.Stage, Source: a.Source, Text: a.Text})
-			}
 		}
 	}
 	sort.SliceStable(rows, func(a, b int) bool { return rows[a].At.After(rows[b].At) })
@@ -521,7 +494,7 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 	case "q", "ctrl+c":
 		return m.quit()
 	case "?":
-		return m.openDialog("keys", m.keysContext())
+		return m.openDialog("keys", struct{}{})
 	}
 	if m.panel.tab != panel.Attention {
 		return m.listKey(key)
@@ -865,9 +838,9 @@ func (m *Model) openCmd(url string) tea.Cmd {
 	if url == "" || m.Open == nil {
 		return nil
 	}
-	if it, ok := m.selectedItem(); ok && it.Factory.Remote != nil {
-		page, _ := liveStageOf(it.Factory, url)
-		return m.openRemote(it.Factory.Remote.Name, remote.Open{Factory: it.Factory.Label(), URL: url, Page: page, Key: m.wires[it.Factory.Key()].ReviewKey})
+	if it, ok := m.selectedItem(); ok && it.Factory.Remote != nil && !host.WebLink(url) {
+		m.notice = problem(url + " is a page on " + it.Factory.Remote.Name + "; the factory's Pages tab in the phone app opens it.")
+		return nil
 	}
 	open := m.Open
 	return func() tea.Msg {
@@ -883,9 +856,8 @@ func (m *Model) alert(previous map[string]factory.Status) {
 	for _, it := range m.snap.Items {
 		key := it.Factory.Key()
 		was, known := previous[key]
-		legacyRemote := it.Factory.Remote != nil && !it.Factory.OnNode()
 		backFromOutage := was == factory.Unreachable
-		if !known || was == factory.NeedsYou || backFromOutage || it.Status != factory.NeedsYou || key == m.selected || legacyRemote {
+		if !known || was == factory.NeedsYou || backFromOutage || it.Status != factory.NeedsYou || key == m.selected {
 			continue
 		}
 		label := it.Factory.Placed()

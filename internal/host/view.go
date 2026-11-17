@@ -2,9 +2,7 @@ package host
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,15 +12,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 const (
-	viewPrefix   = "view-"
-	activityKept = 200
-	staleView    = time.Minute
+	viewPrefix = "view-"
+	staleView  = time.Minute
 )
 
 func Incarnation(f factory.Factory) string {
@@ -32,95 +28,12 @@ func Incarnation(f factory.Factory) string {
 	return f.Key()
 }
 
-func (m *Runtime) View() remote.View {
-	home, _ := os.UserHomeDir()
-	view := remote.View{Home: home, Now: m.Now(), Factories: []remote.Factory{}, Opens: m.Opens()}
-	if m.Pages != nil {
-		view.Review = remote.ReviewHome{Socket: m.Config.ReviewSocket(), Token: m.Pages.Token()}
-	}
-	names := map[string]string{}
-	for _, it := range m.snap.Items {
-		w := m.wire(it)
-		if _, known := names[w.Repo]; !known {
-			names[w.Repo] = repoName(w.Repo)
-		}
-		w.RepoName = names[w.Repo]
-		view.Factories = append(view.Factories, w)
-	}
-	return view
-}
-
 func repoName(repo string) string {
 	url, err := Git(repo, "config", "--get", "remote.origin.url")
 	if err != nil || url == "" {
 		return filepath.Base(repo)
 	}
 	return strings.TrimSuffix(filepath.Base(url), ".git")
-}
-
-func (m *Runtime) wire(it Item) remote.Factory {
-	f := it.Factory
-	w := remote.Factory{
-		ID: f.Label(), Slug: f.Slug, Incarnation: Incarnation(f), Repo: f.Repo, Worktree: f.Worktree, ReviewKey: ReviewKey(f),
-		State: f.State, StateMod: f.StateMod, Entry: f.Entry, Status: it.Status, Unblocked: it.Unblocked, Hook: it.Hook,
-		Pane: wirePane(it.Pane),
-	}
-	if f.StateErr != nil {
-		w.StateError = f.StateErr.Error()
-	}
-	if it.Stage != nil {
-		w.Stage = &remote.Stage{Run: it.Stage.Run, Pane: wirePane(it.Stage.Pane)}
-	}
-	if m.Config.StateDir != "" {
-		logged, _ := state.ReadActivity(state.ActivityPath(m.Config.ActivityDir(), f.Repo, f.Slug))
-		w.Activity = logged[max(0, len(logged)-activityKept):]
-	}
-	return w
-}
-
-func wirePane(p *tmux.Pane) *remote.Pane {
-	if p == nil || p.Dead {
-		return nil
-	}
-	return &remote.Pane{ID: p.ID, Token: p.Token, Path: p.Path}
-}
-
-type AnswerRequest struct {
-	Key        string
-	ItemID     string
-	ItemSince  time.Time
-	Text       string
-	LeavesOpen bool
-}
-
-type AnswerReply struct {
-	At time.Time
-}
-
-func (m *Runtime) TypeAnswer(r AnswerRequest) (AnswerReply, error) {
-	it, ok := m.snap.Find(r.Key)
-	if !ok {
-		return AnswerReply{}, fmt.Errorf("no factory %s", r.Key)
-	}
-	if err := m.unverified(r.Key); err != nil {
-		return AnswerReply{}, err
-	}
-	if !stillOpen(it.Factory.State, r.ItemID, r.ItemSince) {
-		return AnswerReply{}, fmt.Errorf("%s is no longer open in %s; nothing was sent", r.ItemID, it.Factory.Label())
-	}
-	at := m.Now()
-	reason, err := Deliver(m.Typist, Target{Label: it.Factory.Label(), Pane: it.Pane, Hook: it.Hook}, r.Text)
-	switch {
-	case err != nil:
-		return AnswerReply{}, err
-	case reason != "":
-		return AnswerReply{}, errors.New(reason)
-	}
-	m.typedAt[it.Pane.ID] = at
-	if m.Loader != nil {
-		m.Loader.Note(it.Factory, "answered "+r.ItemID+" from a laptop")
-	}
-	return AnswerReply{At: at}, nil
 }
 
 func stillOpen(st *state.State, id string, since time.Time) bool {

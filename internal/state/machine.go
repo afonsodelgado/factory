@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,25 +19,40 @@ import (
 	"github.com/goccy/go-yaml/parser"
 )
 
-const (
-	DefaultPushServer = "https://ntfy.sh"
-	DefaultPhonePort  = 7418
-)
+const DefaultPhonePort = 7418
 
 type Machine struct {
-	Remotes       map[string]Remote `yaml:"remotes,omitempty"`
-	DefaultRemote string            `yaml:"default_remote,omitempty"`
-	Push          Push              `yaml:"push,omitempty"`
-	Phone         Phone             `yaml:"phone,omitempty"`
-	Node          Node              `yaml:"node,omitempty"`
+	Phone Phone `yaml:"phone,omitempty"`
+	Node  Node  `yaml:"node,omitempty"`
 }
 
 type Node struct {
-	Owner    string `yaml:"owner,omitempty"`
-	Port     int    `yaml:"port,omitempty"`
-	Hostname string `yaml:"hostname,omitempty"`
-	Target   string `yaml:"target,omitempty"`
+	Owner     string    `yaml:"owner,omitempty"`
+	Port      int       `yaml:"port,omitempty"`
+	Hostname  string    `yaml:"hostname,omitempty"`
+	Target    string    `yaml:"target,omitempty"`
+	KeepAwake KeepAwake `yaml:"keep_awake,omitempty"`
 }
+
+type KeepAwake string
+
+const sleeps KeepAwake = "off"
+
+func (k *KeepAwake) UnmarshalYAML(data []byte) error {
+	var on bool
+	if err := yaml.Unmarshal(data, &on); err != nil {
+		return fmt.Errorf("node.keep_awake must be true or false: %w", err)
+	}
+	*k = ""
+	if !on {
+		*k = sleeps
+	}
+	return nil
+}
+
+func (k KeepAwake) MarshalYAML() (any, error) { return k != sleeps, nil }
+
+func (m Machine) KeepsAwake() bool { return m.Node.KeepAwake != sleeps }
 
 func (m Machine) NodePort() int {
 	if m.Node.Port != 0 {
@@ -79,34 +93,7 @@ func (p Phone) ListenPort() int {
 	return p.Port
 }
 
-type Remote struct {
-	Host     string `yaml:"host"`
-	User     string `yaml:"user,omitempty"`
-	Port     int    `yaml:"port,omitempty"`
-	Identity string `yaml:"identity,omitempty"`
-}
-
-type Push struct {
-	Server string `yaml:"server,omitempty"`
-	Topic  string `yaml:"topic,omitempty"`
-}
-
-func (p Push) On() bool { return p.Topic != "" }
-
-func (p Push) ServerURL() string {
-	if p.Server == "" {
-		return DefaultPushServer
-	}
-	return strings.TrimRight(p.Server, "/")
-}
-
-var (
-	remoteName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	sshHost    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
-	sshUser    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
-	pushTopic  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	tailnetDNS = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net$`)
-)
+var tailnetDNS = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net$`)
 
 func LoadMachine(configDir string) (Machine, error) {
 	var m Machine
@@ -123,27 +110,9 @@ func LoadMachine(configDir string) (Machine, error) {
 	return m, m.Validate()
 }
 
-func (m Machine) Equal(other Machine) bool {
-	return maps.Equal(m.Remotes, other.Remotes) && m.DefaultRemote == other.DefaultRemote && m.Push == other.Push && m.Phone == other.Phone && m.Node == other.Node
-}
+func (m Machine) Equal(other Machine) bool { return m == other }
 
 func (m Machine) Validate() error {
-	for name, r := range m.Remotes {
-		if err := r.validate(name); err != nil {
-			return err
-		}
-	}
-	if _, known := m.Remotes[m.DefaultRemote]; m.DefaultRemote != "" && !known {
-		return fmt.Errorf("default_remote %q names no remote; add it under remotes or remove default_remote to create factories here", m.DefaultRemote)
-	}
-	if m.Push.Server != "" {
-		if u, err := url.Parse(m.Push.Server); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return fmt.Errorf("push.server %q is not an http(s) URL such as %s", m.Push.Server, DefaultPushServer)
-		}
-	}
-	if m.Push.Topic != "" && !pushTopic.MatchString(m.Push.Topic) {
-		return errors.New("push.topic may hold only letters, digits, - and _; run factory remote push to generate one")
-	}
 	if m.Node.Port < 0 || m.Node.Port > 65535 {
 		return fmt.Errorf("node.port %d must be between 1 and 65535", m.Node.Port)
 	}
@@ -166,23 +135,62 @@ func (p Phone) validate() error {
 	return nil
 }
 
-func (r Remote) validate(name string) error {
-	switch {
-	case !remoteName.MatchString(name) || name == "local":
-		return fmt.Errorf("remote name %q must be lowercase letters, digits and -, and not local", name)
-	case !sshHost.MatchString(r.Host):
-		return fmt.Errorf("remotes.%s.host %q must be a host name or address", name, r.Host)
-	case r.User != "" && !sshUser.MatchString(r.User):
-		return fmt.Errorf("remotes.%s.user %q is not a user name", name, r.User)
-	case r.Port < 0 || r.Port > 65535:
-		return fmt.Errorf("remotes.%s.port %d must be between 1 and 65535", name, r.Port)
-	case strings.HasPrefix(r.Identity, "-"):
-		return fmt.Errorf("remotes.%s.identity %q must be a key file", name, r.Identity)
-	}
-	return nil
+func UpdateMachine(configDir string, change func(*Machine) error) error {
+	return rewriteConfig(configDir, func(path string, data []byte) ([]byte, error) {
+		var m Machine
+		if err := yaml.Unmarshal(data, &m); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if err := change(&m); err != nil {
+			return nil, err
+		}
+		if err := m.Validate(); err != nil {
+			return nil, err
+		}
+		updated, err := withMachine(data, m)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return updated, nil
+	})
 }
 
-func UpdateMachine(configDir string, change func(*Machine) error) error {
+var legacyRemoteKeys = []string{"remotes", "default_remote", "push"}
+
+func DropLegacyRemotes(configDir string) ([]string, error) {
+	if _, err := os.Stat(filepath.Join(configDir, "config.yml")); err != nil {
+		return nil, nil
+	}
+	var listed []string
+	err := rewriteConfig(configDir, func(path string, data []byte) ([]byte, error) {
+		file, err := parser.ParseBytes(data, parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if !slices.ContainsFunc(legacyRemoteKeys, func(key string) bool { return topLevelEntry(file, key) != nil }) {
+			return nil, nil
+		}
+		var old struct {
+			Remotes map[string]struct {
+				Host string `yaml:"host"`
+			} `yaml:"remotes"`
+		}
+		yaml.Unmarshal(data, &old)
+		for _, name := range slices.Sorted(maps.Keys(old.Remotes)) {
+			listed = append(listed, name+" ("+old.Remotes[name].Host+")")
+		}
+		for _, key := range legacyRemoteKeys {
+			removeKey(file, key)
+		}
+		if !slices.ContainsFunc(file.Docs, func(doc *ast.DocumentNode) bool { return len(entriesOf(doc.Body)) > 0 }) {
+			return []byte{}, nil
+		}
+		return []byte(file.String()), nil
+	})
+	return listed, err
+}
+
+func rewriteConfig(configDir string, rewrite func(path string, data []byte) ([]byte, error)) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
@@ -199,19 +207,9 @@ func UpdateMachine(configDir string, change func(*Machine) error) error {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	var m Machine
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	if err := change(&m); err != nil {
+	updated, err := rewrite(path, data)
+	if err != nil || updated == nil {
 		return err
-	}
-	if err := m.Validate(); err != nil {
-		return err
-	}
-	updated, err := withMachine(data, m)
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
 	}
 	return WriteFileAtomic(path, updated)
 }
@@ -227,18 +225,11 @@ func withMachine(data []byte, m Machine) ([]byte, error) {
 	if holdsOnlyComments(file) {
 		return afterComments(data, m)
 	}
-	remotes := m.Remotes
-	if remotes == nil {
-		remotes = map[string]Remote{}
-	}
 	keys := []struct {
 		name  string
 		value any
 		zero  bool
 	}{
-		{"remotes", remotes, len(m.Remotes) == 0},
-		{"default_remote", m.DefaultRemote, m.DefaultRemote == ""},
-		{"push", m.Push, m.Push == Push{}},
 		{"phone", m.Phone, m.Phone == Phone{}},
 		{"node", m.Node, m.Node == Node{}},
 	}
@@ -293,6 +284,19 @@ func setKey(file *ast.File, name string, value any, zero bool) error {
 		return err
 	}
 	return root.MergeFromNode(file, node)
+}
+
+func removeKey(file *ast.File, name string) {
+	for _, doc := range file.Docs {
+		switch body := doc.Body.(type) {
+		case *ast.MappingNode:
+			body.Values = slices.DeleteFunc(body.Values, func(entry *ast.MappingValueNode) bool { return entry.Key.GetToken().Value == name })
+		case *ast.MappingValueNode:
+			if body.Key.GetToken().Value == name {
+				doc.Body = nil
+			}
+		}
+	}
 }
 
 func topLevelEntry(file *ast.File, name string) *ast.MappingValueNode {

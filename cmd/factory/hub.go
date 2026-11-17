@@ -17,7 +17,6 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/node"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -85,19 +84,16 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	defer watch.Close()
-	tunnels := &remote.Tunnels{StateDir: cfg.StateDir}
-	defer tunnels.Close()
 
 	model := hub.NewModel(hub.Model{
-		Config:  cfg,
-		Engine:  engine,
-		Layout:  layout,
-		Server:  server,
-		Node:    runtime,
-		Events:  events,
-		Watch:   watch,
-		Open:    openURL,
-		Tunnels: tunnels,
+		Config: cfg,
+		Engine: engine,
+		Layout: layout,
+		Server: server,
+		Node:   runtime,
+		Events: events,
+		Watch:  watch,
+		Open:   openURL,
 		Roster: func(ctx context.Context) (node.Roster, error) {
 			var roster node.Roster
 			err := runtime.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster)

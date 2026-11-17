@@ -10,15 +10,14 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/google/uuid"
 )
 
 const resultPoll = 2 * time.Second
 
-const stageUsage = `usage: factory stage start --role <role> --task <file> [--factory id [--remote name]] [--wait]
-       factory stage send --role <role> --message <file> [--factory id [--remote name]] [--wait]
+const stageUsage = `usage: factory stage start --role <role> --task <file> [--factory id] [--wait]
+       factory stage send --role <role> --message <file> [--factory id] [--wait]
        factory stage ci <pr number>...`
 
 func runStage(args []string) int {
@@ -35,15 +34,10 @@ func runStage(args []string) int {
 	text := flags.String(map[string]string{"start": "task", "send": "message"}[action], "", "a file with the task or the follow-up message")
 	wait := flags.Bool("wait", false, "wait for the stage's result file, then print it")
 	id := flags.String("factory", "", "the factory, when this is not its supervisor's pane")
-	remoteFlag := flags.String("remote", "", "the remote the factory runs on")
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}
-	if *remoteFlag != "" && *id == "" {
-		fmt.Fprintln(os.Stderr, "factory stage: name the factory on "+*remoteFlag+" with --factory")
-		return 2
-	}
-	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id, Remote: *remoteFlag})
+	result, err := stage(stageCall{Action: action, Role: *role, TextFile: *text, Factory: *id})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory stage:", err)
 		return 1
@@ -52,33 +46,12 @@ func runStage(args []string) int {
 		fmt.Println(result)
 		return 0
 	}
-	data, err := waitForResult(*remoteFlag, result)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "factory stage:", err)
-		return 1
-	}
-	fmt.Printf("%s\n%s\n", result, data)
+	fmt.Printf("%s\n%s\n", result, waitForFile(result))
 	return 0
 }
 
 type stageCall struct {
-	Action, Role, TextFile, Factory, Remote string
-}
-
-func waitForResult(remoteName, path string) ([]byte, error) {
-	if remoteName == "" {
-		return waitForFile(path), nil
-	}
-	cfg, err := state.LoadConfig()
-	if err != nil {
-		return nil, err
-	}
-	client, err := remote.For(cfg, remoteName)
-	if err != nil {
-		return nil, err
-	}
-	var data json.RawMessage
-	return data, client.Read(context.Background(), "result", path, &data)
+	Action, Role, TextFile, Factory string
 }
 
 func runStageCI(prs []string) int {
@@ -103,20 +76,7 @@ func stage(c stageCall) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	r := host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory}
-	if c.Remote == "" {
-		return ask(r)
-	}
-	cfg, err := state.LoadConfig()
-	if err != nil {
-		return "", err
-	}
-	client, err := remote.For(cfg, c.Remote)
-	if err != nil {
-		return "", err
-	}
-	var reply host.StageReply
-	return reply.Result, client.MutateOnce(context.Background(), "stage", r, &reply)
+	return ask(host.StageRequest{Action: c.Action, Role: c.Role, Text: string(text), Factory: c.Factory})
 }
 
 func ask(r host.StageRequest) (string, error) {

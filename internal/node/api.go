@@ -42,6 +42,7 @@ type API struct {
 	Now       func() time.Time
 	Nodes     *Nodes
 	Transfers *Transfers
+	Awake     *Awake
 
 	mu        sync.Mutex
 	current   *Snapshot
@@ -106,7 +107,12 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 }
 
 func (a *API) me(w http.ResponseWriter, r *http.Request, caller string) {
-	reply(w, http.StatusOK, Me{Caller: caller, Node: a.Node, Version: a.Version, ServerTime: a.now()})
+	me := Me{Caller: caller, Node: a.Node, Version: a.Version, ServerTime: a.now()}
+	if a.Awake != nil {
+		status := a.Awake.Status()
+		me.Awake = &status
+	}
+	reply(w, http.StatusOK, me)
 }
 
 func (a *API) snapshot(w http.ResponseWriter, r *http.Request, _ string) {

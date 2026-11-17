@@ -28,7 +28,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -148,7 +147,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	if err != nil {
 		return nil, err
 	}
-	id, err := remote.ServerID(cfg.StateDir)
+	id, err := node.ID(cfg.StateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -179,19 +178,19 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	pages.SetActions(host.ReviewActions(queue.Sink()))
 	runtime := host.New(host.Runtime{
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
-		Pages: pages, Engine: panes, Typist: panes, Log: host.LoadEventLog(host.EventLogPath(cfg.StateDir)), Push: &host.Pusher{StateDir: cfg.StateDir, Now: time.Now},
+		Pages: pages, Engine: panes, Typist: panes,
 		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, Stacks: stacks, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
 	})
-	go runtime.Push.Run(ctx)
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
 	nodes, err := nodeRoster(ctx, cfg, id, owner, ts)
 	if err != nil {
 		n.close()
 		return nil, err
 	}
-	api := &node.API{Version: version, Node: id, Boot: uuid.NewString(), Nodes: nodes}
+	api := &node.API{Version: version, Node: id, Boot: uuid.NewString(), Nodes: nodes, Awake: node.NewAwake(cfg.KeepsAwake())}
 	api.Commands = node.Commands{Runtime: node.Activation{Caller: queue, Ready: nodes.Runnable, Exists: api.Holds}}
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
+	go api.Awake.Run(ctx, func() int { _, factories, _ := api.Factories(); return node.ActiveFactories(factories) })
 	nodes.Clone = cloneFor(cfg, queue)
 	transfers := &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation, Holders: &node.Holders{Dir: filepath.Join(cfg.StateDir, "holders.git")}, Ctx: ctx}
 	api.Transfers = transfers

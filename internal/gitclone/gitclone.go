@@ -27,25 +27,21 @@ func Origin(repo string) string {
 	return url
 }
 
-func RemoteURL(repo, choice string) (string, error) {
+func RemoteURL(repo string) (string, error) {
 	names, err := Git(context.Background(), repo, "remote")
 	if err != nil {
 		return "", err
 	}
 	remotes := strings.Fields(names)
-	name := choice
+	name := "origin"
 	switch {
-	case choice != "" && !slices.Contains(remotes, choice):
-		return "", fmt.Errorf("%s has no git remote named %s; git remote -v lists them", repo, choice)
-	case choice != "":
 	case slices.Contains(remotes, "origin"):
-		name = "origin"
 	case len(remotes) == 1:
 		name = remotes[0]
 	case len(remotes) == 0:
-		return "", fmt.Errorf("%s has no git remote, and a remote factory clones from one. Push it somewhere the server can read, add that with git remote add origin <url>, and try again", repo)
+		return "", fmt.Errorf("%s has no git remote, and another node clones from one. Push it somewhere that node can read, add that with git remote add origin <url>, and try again", repo)
 	default:
-		return "", fmt.Errorf("%s has the git remotes %s and none is origin; pick one with --git-remote", repo, strings.Join(remotes, ", "))
+		return "", fmt.Errorf("%s has the git remotes %s and none is origin; rename the one other nodes should clone to origin with git remote rename", repo, strings.Join(remotes, ", "))
 	}
 	raw, err := Git(context.Background(), repo, "config", "--get", "remote."+name+".url")
 	if err != nil {
@@ -77,10 +73,6 @@ func CheckURL(raw string) error {
 func Dir(stateDir, gitURL string) string {
 	sum := sha256.Sum256([]byte(gitURL))
 	return filepath.Join(resolved(stateDir), "repos", hex.EncodeToString(sum[:8]))
-}
-
-func IsClone(stateDir, repo string) bool {
-	return strings.HasPrefix(resolved(repo), filepath.Join(resolved(stateDir), "repos")+string(filepath.Separator))
 }
 
 func resolved(path string) string {

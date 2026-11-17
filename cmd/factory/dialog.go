@@ -18,7 +18,7 @@ import (
 
 func runDialog(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys|remotes|phone|nodes|move> [--socket path]")
+		fmt.Fprintln(os.Stderr, "usage: factory dialog <new|settings|switch|pause|archive|delete|keys|phone|nodes|move> [--socket path]")
 		return 2
 	}
 	flags := flag.NewFlagSet("dialog", flag.ContinueOnError)
@@ -112,20 +112,12 @@ func newDialog(kind string, context json.RawMessage) (dialog.Dialog, error) {
 		}
 		return dialog.NewPhone(status, actions.phoneActions), nil
 	}
-	if kind == "remotes" {
-		var c dialog.RemotesContext
-		if err := json.Unmarshal(context, &c); err != nil {
-			return nil, err
-		}
-		return dialog.NewRemotes(c, remoteActions{}), nil
-	}
 	if kind == "new" {
 		var c dialog.NewContext
 		if err := json.Unmarshal(context, &c); err != nil {
 			return nil, err
 		}
 		d := dialog.NewFactory(c)
-		d.Probe = probeRemote
 		d.ProbeNode = probeNode
 		return d, nil
 	}

@@ -135,7 +135,6 @@ type View struct {
 
 	PRs       []PR
 	Checked   time.Time
-	Served    string
 	Artifacts []ArtifactRow
 	Activity  []ActivityRow
 	All       bool

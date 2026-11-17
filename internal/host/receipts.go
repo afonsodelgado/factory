@@ -267,29 +267,11 @@ func (m *Runtime) SettleReceipts(items []Item, clock func(string) time.Time) []S
 	open := openSince(items)
 	var settled []Settlement
 	for _, key := range slices.Sorted(maps.Keys(m.receipts.Claims)) {
-		if Remote(m.receipts.Claims[key].Factory) {
-			continue
-		}
 		if s, done := m.settleClaim(m.receipts.Claims[key], open, items, clock); done {
 			settled = append(settled, s)
 		}
 	}
 	return settled
-}
-
-type RemoteObservation struct {
-	Items  []Item
-	Clocks map[string]time.Time
-}
-
-func (m *Runtime) SettleRemote(o RemoteObservation) {
-	open := openSince(o.Items)
-	clock := func(key string) time.Time { return o.Clocks[key] }
-	for _, key := range slices.Sorted(maps.Keys(m.receipts.Claims)) {
-		if Remote(key) {
-			m.settleClaim(m.receipts.Claims[key], open, o.Items, clock)
-		}
-	}
 }
 
 func openSince(items []Item) map[string]time.Time {

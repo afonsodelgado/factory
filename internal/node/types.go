@@ -22,10 +22,11 @@ type Snapshot struct {
 }
 
 type Me struct {
-	Caller     string    `json:"caller"`
-	Node       string    `json:"node"`
-	Version    string    `json:"version"`
-	ServerTime time.Time `json:"server_time"`
+	Caller     string       `json:"caller"`
+	Node       string       `json:"node"`
+	Version    string       `json:"version"`
+	ServerTime time.Time    `json:"server_time"`
+	Awake      *AwakeStatus `json:"awake,omitempty"`
 }
 
 type ActionBody struct {

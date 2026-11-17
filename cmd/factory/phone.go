@@ -177,6 +177,8 @@ func (a phoneActions) Test() (string, error) {
 	return outcome, err
 }
 
+var checkMarks = map[install.Mark]string{install.Pass: "ok", install.Fail: "fail", install.Skip: "skip", install.Warn: "warn"}
+
 func (a phoneActions) Check() []dialog.CheckRow {
 	var rows []dialog.CheckRow
 	for _, c := range phoneDoctor(a.cfg) {
