@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -108,9 +107,6 @@ func (m *Runtime) StackReady(s StackStatus) {
 		m.note(it.Factory, "the walkthrough stack failed at "+s.Failure+": "+s.Reason)
 	case StackReady:
 		m.note(it.Factory, "the walkthrough runs at "+s.URL)
-		if origin := m.Config.NodeOrigin(); origin != "" {
-			m.QueueOpen(it, remote.Open{URL: origin + s.Href})
-		}
 	}
 }
 
@@ -152,12 +148,6 @@ func stackItem(s StackStatus) AttentionItem {
 		Body:  s.Reason,
 		Since: s.At,
 	}
-}
-
-func WaitHealthy(url string, limit time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
-	defer cancel()
-	return WaitFor(ctx, url, func(status int) bool { return status < 500 })
 }
 
 func WaitFor(ctx context.Context, url string, healthy func(status int) bool) error {

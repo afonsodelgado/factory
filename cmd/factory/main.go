@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/state"
@@ -16,6 +17,7 @@ func main() {
 }
 
 func run(args []string) int {
+	listDroppedRemotes(args)
 	if len(args) == 0 {
 		return runOpen(nil)
 	}
@@ -60,20 +62,34 @@ func run(args []string) int {
 		return runReview(args[1:])
 	case "attention":
 		return runAttention(args[1:])
-	case "remote":
-		return runRemote(args[1:])
 	case "node":
 		return runNode(args[1:])
 	case "move":
 		return runMove(args[1:])
 	case "phone":
 		return runPhone(args[1:])
-	case "--remote", "--local":
-		return runOpen(args)
 	}
 	fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", args[0])
 	usage(os.Stderr)
 	return 2
+}
+
+var typedCommands = []string{"open", "delete", "init", "forget", "doctor", "bootstrap", "install-hooks", "update", "node", "move", "phone"}
+
+func listDroppedRemotes(args []string) {
+	typed := len(args) == 0 || slices.Contains(typedCommands, args[0]) && !slices.Equal(args[:min(2, len(args))], []string{"node", "run"})
+	if !typed {
+		return
+	}
+	remotes, err := state.DropLegacyRemotes(state.ConfigDir())
+	if err != nil || len(remotes) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "factory: ssh remotes are gone, so these were removed from config.yml with default_remote and push:")
+	for _, r := range remotes {
+		fmt.Fprintln(os.Stderr, "  "+r)
+	}
+	fmt.Fprintln(os.Stderr, "Run factory node install on each machine that should keep running factories, then add it here with factory node add <its Tailscale name>.")
 }
 
 func runHook(stdin io.Reader) int {
@@ -94,16 +110,7 @@ commands:
               [--supervisor tool/model:effort]
               select the factory with this id, or create it with the prompt
               as its spec (without one the supervisor asks), then attach
-  open … --remote <name> | --local [--git-remote name]
-              --remote creates a new factory on that remote, --local here;
-              without either, new factories go to default_remote
-  remote add <name> <host> [--user name] [--port n] [--identity file]
-  remote list | remove <name> | default <name | local>
-  remote push [--server url | --off | --test]
-              add, list and remove remotes, pick where new factories run,
-              and set up phone push through ntfy; --test sends a test push from
-              each server
-  delete <id> [--repo path] [--remote name | --local] [--yes]
+  delete <id> [--repo path] [--yes]
               delete a factory: its pane, worktree, local branches, state,
               activity log, drafts and registry entry, so the id can be used
               again; pushed PRs and remote branches stay. --yes skips the first
@@ -113,40 +120,36 @@ commands:
               in .git/info/exclude and list it in the hub; nothing is
               committed. factory and factory open do this by themselves
               in a repo the hub does not list yet
-  forget <path> | --remote <name> <id>
-              stop listing a repo in the hub; its files stay. With
-              --remote, hide a remote factory here; the remote keeps it
-  doctor [--remote name]
-              check what the factory needs and print the fix commands;
-              --remote checks only that remote, over ssh
+  forget <path>
+              stop listing a repo in the hub; its files stay
+  doctor      check what the factory needs and print the fix commands
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]
               add (or remove) only the factory hooks, in Claude's
               settings.json and Codex's hooks.json
-  stage start --role <role> --task <file> [--wait] [--factory id [--remote name]]
-  stage send --role <role> --message <file> [--wait] [--factory id [--remote name]]
+  stage start --role <role> --task <file> [--wait] [--factory id]
+  stage send --role <role> --message <file> [--wait] [--factory id]
               run a stage agent on its own tool in a pane beside the
               supervisor, or send it a follow-up; prints the result file
-              (run by the supervisor from its pane; --factory and --remote
-              reach a factory from outside its panes)
+              (run by the supervisor from its pane; --factory reaches a
+              factory from outside its panes)
   stage ci <pr number>...
               wait for CI and CodeRabbit on these PRs, then type the
               result into the supervisor (for Codex and OpenCode)
-  review reply --thread <id> [--resolve] [--factory id [--remote name]] [text…]
+  review reply --thread <id> [--resolve] [--factory id] [text…]
               answer a comment thread from the review page, and resolve it
               when the change is made (run by a stage agent)
-  review threads [--page path] [--open] [--factory id [--remote name]]
+  review threads [--page path] [--open] [--factory id]
               list this factory's comment threads
   review open [--factory id] [--for design|walkthrough] <url>
-              queue any page, such as the running app, for review and print
-              its URL to open in your browser
+              check that any page, such as the running app, belongs to the
+              factory and print its URL to open in your browser
   review stack [--for design|walkthrough]
               start the stack from the repo config on free ports, publish it
               on its own tailnet HTTPS port and print its URL
   review link <url>
-              print a link to open in your browser; a connected laptop hub
-              opens it through a tunnel
+              print a link to open in your browser
   attention resolve --dir <factory dir> [--waiting-on agent|ci|none] <id>
               check with the node that the item is open, then print the
               state.json edit that resolves it; the supervisor makes the edit
@@ -191,10 +194,10 @@ commands:
               its holder cannot be reached; prints the warning and asks first
               (--yes answers it for scripts)
   hub         show the node's factories in the factory tmux session
-  host request
-              answer one JSON request from another machine on stdin through
-              the running node (run over ssh by the factory on that machine)
-  view        run a viewer pane of the hub (started by the hub)
+  host attach <view>
+              show a pane the node prepared for another machine's hub (run
+              over ssh by that hub)
+  view       run a viewer pane of the hub (started by the hub)
   dialog      run a dialog popup of the hub (started by the hub)
   hook        record a hook event (run by Claude Code, Codex and OpenCode)
 `)

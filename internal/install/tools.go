@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -192,7 +193,21 @@ func NodeChecks(o Options) []Check {
 	defer cancel()
 	checks := tailnetChecks(ctx, o.Config, node.Tailscale{Run: run})
 	checks = append(checks, serviceChecks(ctx, o, node.NewService(o.Config, o.Binary, o.Home, run))...)
-	return append(checks, permissions(o.Config), pushReach(ctx, o.DialTLS))
+	return append(checks, keepAwake(ctx, o.Config), permissions(o.Config), pushReach(ctx, o.DialTLS))
+}
+
+func keepAwake(ctx context.Context, cfg *state.Config) Check {
+	if unsupported := node.NewAwake(cfg.KeepsAwake()).Unsupported; unsupported != "" {
+		return Check{Name: "keep awake", Mark: Skip, Detail: unsupported}
+	}
+	var me node.Me
+	if err := node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/me", nil, &me); err != nil || me.Awake == nil {
+		return Check{Name: "keep awake", Mark: Skip, Detail: "needs a running node"}
+	}
+	if me.Awake.Problem {
+		return Check{Name: "keep awake", Mark: Warn, Detail: me.Awake.Detail, Fix: "pmset -g ps  and  caffeinate -i true  must both run for the node's user"}
+	}
+	return Check{Name: "keep awake", Mark: Pass, Detail: me.Awake.Detail}
 }
 
 func tailnetChecks(ctx context.Context, cfg *state.Config, ts node.Tailscale) []Check {

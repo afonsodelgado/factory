@@ -5,24 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/remote"
-	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -249,18 +243,6 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 			t.Fatalf("first %+v, retry %+v, runs %+v", first, retry, runs)
 		}
 	})
-	t.Run("a create cut short resumes on retry and a finished one is not run again", func(t *testing.T) {
-		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"id":"csv"}`)
-		if err := SavePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "create", Data: data, Status: "accepted"}); err != nil {
-			t.Fatal(err)
-		}
-		runs := 0
-		effect := func() Message { runs++; return Message{T: "done"} }
-		first, retry := Journal(dir, op, "create", data, true, effect), Journal(dir, op, "create", data, true, effect)
-		if runs != 1 || first.T != "done" || retry.T != "done" {
-			t.Fatalf("ran the create %d times, replies %+v %+v", runs, first, retry)
-		}
-	})
 	t.Run("a delete accepted before a crash answers uncertain instead of deleting again", func(t *testing.T) {
 		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"Repo":"/r/app","Slug":"csv"}`)
 		if err := SavePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "delete", Data: data, Status: "accepted"}); err != nil {
@@ -316,30 +298,6 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 	})
 }
 
-func TestARemoteAnswerIsTypedOnceAndOnlyIntoTheItemItAnswers(t *testing.T) {
-	f := newFixture(t)
-	since := time.Date(2026, 11, 12, 14, 2, 0, 123456789, time.UTC)
-	withQuestion := `{"id":"csv","stage":"requirements","attention":[{"id":"q1","kind":"question","title":"Scope","created_at":"` + since.Format(time.RFC3339Nano) + `"}]}`
-	if err := WriteFile(filepath.Join(f.dir, "state.json"), withQuestion); err != nil {
-		t.Fatal(err)
-	}
-	calls := make(chan string, 8)
-	r := f.runtime(t, recordingTypist{calls})
-	r.Tick()
-	answer := func(item string, at time.Time) Message {
-		data, _ := json.Marshal(map[string]any{"Key": state.Key(f.cfg.Repos[0], "csv"), "ItemID": item, "ItemSince": at, "Text": "q1 answers: yes"})
-		return r.Handle(Message{T: "answer", Data: data})
-	}
-	if reply := answer("q1", since); reply.T != "done" || len(calls) != 1 {
-		t.Fatalf("an answer from a laptop gave %+v and typed %d times; want it typed once", reply, len(calls))
-	}
-	for name, reply := range map[string]Message{"a stale item": answer("q1", since.Add(time.Second)), "an unknown item": answer("q9", since)} {
-		if reply.T != "error" || len(calls) != 1 {
-			t.Errorf("%s gave %+v; want a refusal with nothing typed", name, reply)
-		}
-	}
-}
-
 type stuckPanes struct{ StageEngine }
 
 func (stuckPanes) Pause(string, string) error { return errors.New("tmux could not kill the window") }
@@ -368,105 +326,6 @@ func TestADeleteThatCouldNotClosePanesKeepsItsRecordAndFinishesOnRetry(t *testin
 	}
 	if _, err := os.Stat(activity); err == nil {
 		t.Fatal("the retry left the activity log behind")
-	}
-}
-
-func TestPushWithoutClientExcludesPrivateContent(t *testing.T) {
-	var mu sync.Mutex
-	var received []string
-	answers := []int{http.StatusBadGateway}
-	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		defer mu.Unlock()
-		received = append(received, r.URL.Path+" "+r.Header.Get("Title")+" "+string(body))
-		if len(answers) > 0 {
-			w.WriteHeader(answers[0])
-			answers = answers[1:]
-		}
-	}))
-	t.Cleanup(ntfy.Close)
-	dir := t.TempDir()
-	now := time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)
-	pusher := &Pusher{StateDir: dir, Now: func() time.Time { return now }}
-	settings := remote.PushSettings{Server: ntfy.URL, Topic: "factory-q7rk2m9x", Label: "homelab", Revision: 2}
-	if held, err := pusher.Configure(settings); err != nil || held.Revision != 2 {
-		t.Fatalf("configure: %+v %v", held, err)
-	}
-	if held, _ := pusher.Configure(remote.PushSettings{Server: ntfy.URL, Label: "homelab", Revision: 1}); held.Revision != 2 || held.Topic != settings.Topic {
-		t.Fatal("an older settings revision turned push off after a newer one")
-	}
-	secret := state.Attention{ID: "q-csv-1", Kind: "question", Title: "Paste the prod token sk-live-123?", Body: "sk-live-123", CreatedAt: state.Time{Time: now}}
-	m := New(Runtime{Config: &state.Config{StateDir: dir}, Log: LoadEventLog(EventLogPath(dir)), Push: pusher, Now: func() time.Time { return now }})
-	m.SetSnapshot(Snapshot{Items: []Item{{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv-export", ID: "csv-export", State: &state.State{ID: "csv-export", Attention: []state.Attention{secret}}}}}})
-
-	m.watch()
-	pusher.Flush()
-	now = now.Add(pushFirstGap)
-	pusher.Flush()
-	pusher.Flush()
-
-	mu.Lock()
-	defer mu.Unlock()
-	want := "/factory-q7rk2m9x factory csv-export on homelab: question"
-	if len(received) != 2 || received[0] != want || received[1] != want {
-		t.Fatalf("ntfy received %q; want the id, remote and kind only, retried once after the failure and then never again", received)
-	}
-	stored, _ := os.ReadFile(filepath.Join(dir, "push.json"))
-	journal, _ := os.ReadFile(EventLogPath(dir))
-	if bytes.Contains(stored, []byte("sk-live")) || bytes.Contains(journal, []byte("sk-live")) {
-		t.Fatal("the question's text reached the push outbox or the event journal")
-	}
-}
-
-func TestARestartedHostStillAcceptsTheLaptopsTunnelPorts(t *testing.T) {
-	cfg := &state.Config{StateDir: t.TempDir()}
-	listen := func() *review.Server {
-		pages, err := review.New("token", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { pages.Close() })
-		return pages
-	}
-	if _, err := New(Runtime{Config: cfg, Pages: listen()}).Link(remote.LinkRequest{Port: 52817}); err != nil {
-		t.Fatal(err)
-	}
-	restarted := listen()
-	if err := New(Runtime{Config: cfg, Pages: restarted}).Recover(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest("GET", "/favicon.ico", nil)
-	req.Host = "127.0.0.1:52817"
-	res := httptest.NewRecorder()
-	restarted.Handler().ServeHTTP(res, req)
-	if res.Code == http.StatusForbidden {
-		t.Fatal("a restarted host refused the laptop's forwarded port, so every open review tab would fail until a new link is opened")
-	}
-}
-
-func TestPushNamesAFactoryByAPlainIDOnly(t *testing.T) {
-	got := pushText("Paste the prod token sk-live-123?", "homelab", "question")
-	if strings.Contains(got, "sk-live") || got != "a factory on homelab: question" {
-		t.Fatalf("push text %q; an id an agent wrote into state.json must not carry text to a third-party server", got)
-	}
-	if got := pushText("csv-export", "homelab", "gate"); got != "csv-export on homelab: gate" {
-		t.Fatalf("push text %q for a plain id", got)
-	}
-}
-
-func TestAnUnreadStateFileNeitherResolvesNorReopensAnItem(t *testing.T) {
-	question := state.Attention{ID: "q-csv-1", Kind: "question", CreatedAt: state.Time{Time: time.Date(2026, 11, 12, 14, 0, 0, 0, time.UTC)}}
-	read := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", State: &state.State{ID: "csv", Attention: []state.Attention{question}}}}
-	unread := Item{Factory: factory.Factory{Repo: "/srv/app", Slug: "csv", ID: "csv", StateErr: errors.New("unexpected end of JSON input")}}
-	log := LoadEventLog(filepath.Join(t.TempDir(), "events.json"))
-
-	if opened := log.Record([]Item{read}); len(opened) != 1 {
-		t.Fatalf("first scan opened %d items; want 1", len(opened))
-	}
-	log.Record([]Item{unread})
-	if opened := log.Record([]Item{read}); len(opened) != 0 || log.Seq != 1 {
-		t.Fatalf("after a scan that caught state.json mid-write, %d items opened again and the journal is at %d; want none, or the phone and laptop alert again for a question already seen", len(opened), log.Seq)
 	}
 }
 
@@ -585,20 +444,6 @@ func TestMarkingADoneFactorysHandoffTestedWakesItsGoneSupervisorAndTypesItOnce(t
 	r.FlushTypeQueue()
 	if want := []string{"%9: handoff-csv tested: the developer tested the handoff"}; strings.Join(typist.typed, "\n") != want[0] {
 		t.Fatalf("typed %q into the woken supervisor; want %q once", typist.typed, want)
-	}
-}
-
-func TestALegacyRemoteAnswerItsSupervisorNeverReceivedComesBackAfterTheWait(t *testing.T) {
-	question := asked("q1", "question", "Which region?")
-	f := factory.Factory{Slug: "csv", State: &state.State{ID: "csv", Attention: []state.Attention{question}}, Remote: &factory.Location{Name: "homelab", Server: "s-1", Incarnation: "inc-csv"}}
-	idle := state.HookEvent{Event: "Stop", At: phoneNow.Add(-time.Minute)}
-	item := Item{Factory: f, Status: factory.NeedsYou, Hook: &state.HookFile{Main: &idle, Last: idle}}
-	r := phoneRuntime(t.TempDir(), &paneTypist{}, Snapshot{At: phoneNow})
-	r.PutClaim(Answer{Factory: f.Key(), ItemID: "q1", ItemSince: question.CreatedAt.Time, Head: "q1 answers:", At: phoneNow, Source: SourceHub, Action: ActAnswer})
-	data, _ := json.Marshal(RemoteObservation{Items: []Item{item}, Clocks: map[string]time.Time{f.Key(): phoneNow.Add(ReceiptWait + time.Second)}})
-	r.Handle(Message{T: "settle-remote", Data: data})
-	if receipt, ok := r.Claim(ClaimKey(f.Key(), "q1")); ok || len(r.receipts.Settled) != 1 || r.receipts.Settled[0].Reason != NotReceived {
-		t.Fatalf("a remote answer unreceived past the wait is still %+v, settled as %+v; want it refused as not received so the hub offers it again", receipt, r.receipts.Settled)
 	}
 }
 

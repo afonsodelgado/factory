@@ -20,6 +20,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/selector"
@@ -27,10 +28,72 @@ import (
 )
 
 const (
-	rosterWait = 5 * time.Second
-	nodeRetry  = 15 * time.Second
-	createWait = 10 * time.Minute
+	rosterWait       = 5 * time.Second
+	nodeRetry        = 15 * time.Second
+	createWait       = 10 * time.Minute
+	unreachableAfter = 15 * time.Second
+	remoteWait       = 15 * time.Second
+	attachRetry      = 10 * time.Second
+	proxyUI          = "proxy"
 )
+
+type linkState int
+
+const (
+	connecting linkState = iota
+	connected
+	unreachable
+)
+
+func (s linkState) String() string {
+	return [...]string{"connecting", "connected", "unreachable"}[s]
+}
+
+type attachedMsg struct {
+	key, role, token string
+	words            []string
+	err              error
+}
+
+type attempt struct {
+	at      time.Time
+	busy    bool
+	problem string
+}
+
+var pastTense = map[string]string{"wake": "woken", "pause": "paused", "archive": "archived", "unarchive": "unarchived", "delete": "deleted"}
+
+func withFullStop(sentence string) string {
+	if strings.HasSuffix(sentence, ".") {
+		return sentence
+	}
+	return sentence + "."
+}
+
+func localOnly(s Snapshot) Snapshot {
+	s.Items = slices.DeleteFunc(slices.Clone(s.Items), func(it Item) bool { return it.Factory.Remote != nil })
+	return s
+}
+
+func (m *Model) followMachine() {
+	if m.Config.ConfigDir == "" {
+		return
+	}
+	if fresh, err := state.LoadMachine(m.Config.ConfigDir); err == nil && !fresh.Equal(m.Config.Machine) {
+		m.Config.Machine = fresh
+		m.refresh()
+	}
+}
+
+func (m *Model) reloadMachine() {
+	fresh, err := state.LoadConfig()
+	if err != nil {
+		m.notice = problem(err.Error())
+		return
+	}
+	m.Config.Machine = fresh.Machine
+	m.refresh()
+}
 
 type nodeLink struct {
 	member   node.RosterMember
@@ -386,7 +449,7 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 	if l.state(m.Now()) != connected {
 		return fmt.Errorf("%s is unreachable, so %s was not created. Nothing changed.", short, r.Slug)
 	}
-	gitURL, err := gitclone.RemoteURL(r.Repo, "")
+	gitURL, err := gitclone.RemoteURL(r.Repo)
 	if err != nil {
 		return err
 	}
@@ -734,8 +797,7 @@ func (m *Model) moveContext(it Item) (dialog.MoveContext, error) {
 	f := it.Factory
 	c := dialog.MoveContext{Key: f.Key(), Label: f.Label(), Factory: f.Key(), HolderShort: m.Config.NodeName()}
 	holder := ""
-	switch {
-	case f.OnNode():
+	if f.Remote != nil {
 		l, ok := m.nodeOf(f)
 		if !ok {
 			return c, fmt.Errorf("%s is not in the node list any more, so %s can't move from there.", f.Remote.Name, f.Label())
@@ -744,8 +806,6 @@ func (m *Model) moveContext(it Item) (dialog.MoveContext, error) {
 		c.Factory, c.Incarnation, c.Holder, c.HolderShort = lf.Key, lf.Incarnation, l.member.Name, l.short()
 		c.Lost, holder = l.state(m.Now()) == unreachable, l.member.ID
 		c.Targets = append(c.Targets, dialog.NodeChoice{Name: m.selfName(), Here: true})
-	case f.Remote != nil:
-		return c, fmt.Errorf("%s runs on the legacy remote %s; only factories on nodes move.", f.Label(), f.Remote.Name)
 	}
 	now := m.Now()
 	for _, l := range m.sortedNodes() {
@@ -768,4 +828,141 @@ func (m *Model) selfName() string {
 		}
 	}
 	return m.Config.NodeHostname()
+}
+
+func (m *Model) groupOf(f factory.Factory) selector.Group {
+	if f.Remote != nil {
+		return m.nodeGroup(f)
+	}
+	return selector.Group{Name: f.RepoName(), Path: tilde(f.Repo)}
+}
+
+func besideLocal(groups []selector.Group) []selector.Group {
+	var local, others []selector.Group
+	for _, g := range groups {
+		if g.Remote == "" {
+			local = append(local, g)
+		} else {
+			others = append(others, g)
+		}
+	}
+	var ordered []selector.Group
+	for _, g := range local {
+		ordered = append(ordered, g)
+		for _, r := range others {
+			if r.Name == g.Name {
+				ordered = append(ordered, r)
+			}
+		}
+	}
+	for _, r := range others {
+		if !slices.ContainsFunc(local, func(g selector.Group) bool { return g.Name == r.Name }) {
+			ordered = append(ordered, r)
+		}
+	}
+	return ordered
+}
+
+func (m *Model) knownElsewhere() []dialog.Existing {
+	var known []dialog.Existing
+	for _, it := range m.snap.Items {
+		f := it.Factory
+		stage := ""
+		if f.State != nil {
+			stage = f.State.Stage
+		}
+		known = append(known, dialog.Existing{Key: f.Key(), Worktree: f.Slug, Label: f.Label(), Status: it.Status.String(), Stage: stage, Archived: f.Archived(), Retired: f.Remote == nil && retired(f), Remote: f.Where()})
+	}
+	return known
+}
+
+func (m *Model) field(c *theme.Canvas, x int, y *int, name, value string) {
+	c.Put(x, *y, name, theme.Quiet)
+	c.PutMax(x+14, *y, value, theme.Text, c.W-x-15)
+	*y++
+}
+
+func proxySlug(f factory.Factory) string { return f.Label() + "+" + f.Remote.Name }
+
+func (m *Model) proxyPane(key, role, token string) (tmux.Pane, bool) {
+	for _, p := range m.snap.Panes {
+		if p.Repo == key && p.Stage == role && p.Token == token && !p.Dead && (p.UI == proxyUI || p.UI == "stage") {
+			return p, true
+		}
+	}
+	return tmux.Pane{}, false
+}
+
+func (m *Model) attachSelected() tea.Cmd {
+	it, ok := m.snap.Find(m.selected)
+	if !ok || it.Factory.Remote == nil || m.Engine == nil {
+		return nil
+	}
+	return m.attachOnNode(it)
+}
+
+func (m *Model) mayAttach(key, role, token string) bool {
+	if _, ok := m.proxyPane(key, role, token); ok {
+		return false
+	}
+	if m.attempts == nil {
+		m.attempts = map[string]attempt{}
+	}
+	id := key + "|" + role + "|" + token
+	a := m.attempts[id]
+	if a.busy || m.Now().Sub(a.at) < attachRetry {
+		return false
+	}
+	m.attempts[id] = attempt{at: m.Now(), busy: true}
+	return true
+}
+
+func (m *Model) attached(msg attachedMsg) tea.Cmd {
+	id := msg.key + "|" + msg.role + "|" + msg.token
+	a := attempt{at: m.Now()}
+	it, ok := m.snap.Find(msg.key)
+	if msg.err == nil && ok && m.Engine != nil {
+		msg.err = m.openProxy(it, msg)
+	}
+	if msg.err != nil {
+		a.problem = msg.err.Error()
+	}
+	m.attempts[id] = a
+	return m.load()
+}
+
+func (m *Model) openProxy(it Item, msg attachedMsg) error {
+	quoted := make([]string, len(msg.words))
+	for i, w := range msg.words {
+		quoted[i] = factory.ShellQuote(w)
+	}
+	slug := proxySlug(it.Factory)
+	window, tags := host.ParkName(slug), [][2]string{{"@factory_ui", proxyUI}, {"@factory_repo", msg.key}, {"@factory_slug", slug}, {"@factory_token", msg.token}}
+	if msg.role != "" {
+		window, tags = host.StageParkName(slug, msg.role), [][2]string{{"@factory_ui", "stage"}, {"@factory_repo", msg.key}, {"@factory_stage_of", slug}, {"@factory_stage", msg.role}, {"@factory_token", msg.token}}
+	}
+	pane, err := m.Engine.TM.NewWindow(tmux.Window{Session: m.Engine.Session, Name: window, Env: m.Engine.Env, Command: "exec " + strings.Join(quoted, " ")})
+	if err != nil {
+		return err
+	}
+	for _, t := range tags {
+		if err := m.Engine.TM.SetPaneOption(pane, t[0], t[1]); err != nil {
+			return err
+		}
+	}
+	return m.Engine.FitParking(m.Layout)
+}
+
+func (m *Model) dropProxies() {
+	if m.Engine == nil {
+		return
+	}
+	for _, p := range m.snap.Panes {
+		if !strings.HasPrefix(p.Repo, "node:") {
+			continue
+		}
+		if _, listed := m.snap.Find(p.Repo); !listed {
+			m.Engine.TM.KillPane(p.ID)
+		}
+	}
 }

@@ -32,7 +32,6 @@ var kindLook = map[string]struct {
 	"failure":    {"failure", theme.FgInk(theme.Red), "failure"},
 	"handoff":    {"done", theme.FgInk(theme.Green), "ready to test"},
 	"permission": {"perm", theme.FgInk(theme.Orange), "permission"},
-	"qa":         {"remote", theme.FgInk(theme.Cyan), "laptop QA"},
 	"unreadable": {"warn", theme.FgInk(theme.Red), "unreadable"},
 }
 
@@ -547,14 +546,8 @@ func gateForm(v View, it Item, ic theme.Icons, w int) []line {
 	}
 	lines = append(lines, line{{Text: cursor, Ink: theme.Focused.B()}, {Text: "✓ Approve", Ink: theme.FgInk(theme.Green).B()}, {Text: "  sends /factory approve " + it.Stage + " with the notes", Ink: theme.Muted}})
 	checked := checkedAt(it.Artifacts)
-	if !checked.IsZero() || v.Served != "" {
-		lines = append(lines, blank())
-	}
 	if !checked.IsZero() {
-		lines = append(lines, line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})
-	}
-	if v.Served != "" {
-		lines = append(lines, line{{Text: "Served by     ", Ink: theme.Bright}, {Text: v.Served, Ink: theme.Muted}})
+		lines = append(lines, blank(), line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})
 	}
 	return lines
 }

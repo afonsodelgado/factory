@@ -28,10 +28,10 @@ const ReusedOperation = "operation id already belongs to a different request"
 const keptOperations = 30 * 24 * time.Hour
 
 func (m *Runtime) Execute(id, action string, data json.RawMessage, effect func() Message) Message {
-	return Journal(m.Config.StateDir, id, action, data, false, effect)
+	return journal(m.Config.StateDir, id, action, data, effect)
 }
 
-func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, effect func() Message) Message {
+func journal(stateDir, id, action string, data json.RawMessage, effect func() Message) Message {
 	if _, err := uuid.Parse(id); err != nil {
 		return Message{T: "error", Error: "operation id must be a UUID"}
 	}
@@ -46,12 +46,10 @@ func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, 
 		if op.Action != action || !sameJSON(op.Data, data) {
 			return Message{T: "error", Error: ReusedOperation}
 		}
-		if op.Status == "accepted" && !resumable {
+		if op.Status == "accepted" {
 			return Message{T: "uncertain", Error: "outcome unknown; inspect the accepted operation before retrying"}
 		}
-		if op.Status != "accepted" {
-			return op.Reply
-		}
+		return op.Reply
 	case !errors.Is(err, os.ErrNotExist):
 		return Message{T: "error", Error: err.Error()}
 	}
@@ -100,32 +98,11 @@ func acceptedFor(stateDir, key string) []string {
 	return blockers
 }
 
-func Finished(stateDir, id, action string) (Message, bool) {
-	if uuid.Validate(id) != nil {
-		return Message{}, false
-	}
-	data, err := os.ReadFile(filepath.Join(stateDir, "operations", id+".json"))
-	if err != nil {
-		return Message{}, false
-	}
-	var op Operation
-	if json.Unmarshal(data, &op) != nil || op.Action != action || op.Status == "accepted" {
-		return Message{}, false
-	}
-	return op.Reply, true
-}
-
 func sameJSON(a, b json.RawMessage) bool {
 	var x, y bytes.Buffer
 	json.Compact(&x, a)
 	json.Compact(&y, b)
 	return bytes.Equal(x.Bytes(), y.Bytes())
-}
-
-func saveOrReport(path string, value any) {
-	if err := SavePrivate(path, value); err != nil {
-		fmt.Fprintf(os.Stderr, "factory host: could not save %s, so a push or an alert may be lost: %v\n", filepath.Base(path), err)
-	}
 }
 
 func SavePrivate(path string, value any) error {
@@ -179,7 +156,6 @@ func pruneOperations(stateDir string, before time.Time) {
 }
 
 func (m *Runtime) Recover() error {
-	m.allowRememberedTunnels()
 	m.recoverBrowsers()
 	m.recoverStacks()
 	pruneOperations(m.Config.StateDir, m.Now().Add(-keptOperations))

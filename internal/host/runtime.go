@@ -48,8 +48,6 @@ type Runtime struct {
 	Typist   Typist
 	Now      func() time.Time
 	Console  Console
-	Log      *EventLog
-	Push     *Pusher
 	Jobs     Background
 	Browsers Browsers
 	Stacks   Stacks
@@ -121,7 +119,6 @@ func (m *Runtime) Tick() {
 	m.ReleaseFinishedBrowsers()
 	m.ReleaseFinishedStacks()
 	m.SyncReview()
-	m.watch()
 }
 
 func (m *Runtime) repoConfig(repo string) (*state.Config, state.Profile) {

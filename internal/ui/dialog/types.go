@@ -52,8 +52,6 @@ type NewContext struct {
 	Repo      int          `json:"repo"`
 	Here      bool         `json:"here,omitempty"`
 	Tools     []ToolOption `json:"tools,omitempty"`
-	Remotes   []string     `json:"remotes,omitempty"`
-	Default   string       `json:"default,omitempty"`
 	Elsewhere []Existing   `json:"elsewhere,omitempty"`
 	Nodes     []NodeChoice `json:"nodes,omitempty"`
 	Target    string       `json:"target,omitempty"`
@@ -83,7 +81,6 @@ type NewResult struct {
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
 	Select     string                        `json:"select,omitempty"`
 	Wake       bool                          `json:"wake,omitempty"`
-	Remote     string                        `json:"remote,omitempty"`
 	Node       string                        `json:"node,omitempty"`
 }
 
@@ -153,7 +150,6 @@ type DeleteContext struct {
 	Unpushed     map[string][]string `json:"unpushed"`
 	Remote       string              `json:"remote,omitempty"`
 	Repo         string              `json:"repo,omitempty"`
-	Unreachable  bool                `json:"unreachable,omitempty"`
 }
 
 func (c DeleteContext) HasWork() bool {
@@ -163,23 +159,6 @@ func (c DeleteContext) HasWork() bool {
 type DeleteResult struct {
 	Key       string `json:"key"`
 	Confirmed bool   `json:"confirmed"`
-	Forget    bool   `json:"forget,omitempty"`
-}
-
-type RemotesContext struct {
-	Remotes []RemoteRow `json:"remotes"`
-	Default string      `json:"default"`
-	Local   int         `json:"local"`
-	Push    state.Push  `json:"push"`
-}
-
-type RemoteRow struct {
-	Name        string `json:"name"`
-	Endpoint    string `json:"endpoint"`
-	Link        string `json:"link"`
-	Factories   int    `json:"factories"`
-	NeedsYou    int    `json:"needs_you"`
-	PushPending bool   `json:"push_pending,omitempty"`
 }
 
 type CheckRow struct {
@@ -191,20 +170,6 @@ type CheckRow struct {
 	Lines  []string `json:"lines,omitempty"`
 	ActKey string   `json:"act_key,omitempty"`
 	Act    string   `json:"act,omitempty"`
-}
-
-type RemoteActions interface {
-	Add(name, target, identity string) error
-	Check(name string) []CheckRow
-	SetDefault(name string) error
-	Remove(name string) error
-	SetPush(p state.Push) error
-	NewTopic() string
-	TestPush() string
-}
-
-type KeysContext struct {
-	Remotes bool `json:"remotes"`
 }
 
 type Dialog interface {
@@ -239,9 +204,7 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		json.Unmarshal(context, &c)
 		return &Delete{Context: c}, true
 	case "keys":
-		var c KeysContext
-		json.Unmarshal(context, &c)
-		return &Keys{Context: c}, true
+		return &Keys{}, true
 	}
 	return nil, false
 }

@@ -47,7 +47,7 @@ Tests, manual runs and QA never touch the real machine:
 - `FACTORY_CONFIG_DIR`, `FACTORY_STATE_DIR`, `FACTORY_TMUX_SOCKET` and `CLAUDE_CONFIG_DIR` point at temporary directories.
 - Chrome: tests and QA start it headless with a temporary profile, never the user's profile or `$FACTORY_STATE_DIR/chrome` of the real machine.
 - Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory` or `~/.local/state/factory`.
-- `factory node install`, `uninstall`, `status` and `run`, `factory doctor`, `factory bootstrap` and `factory phone check` call `tailscale`, `launchctl`, `systemctl` and `loginctl` by name. Run them only with a temporary `HOME` and fakes of those four first on `PATH`; tests inject a runner instead. Never let them reach the real service manager or tailnet.
+- `factory node install`, `uninstall`, `status` and `run`, `factory doctor`, `factory bootstrap` and `factory phone check` call `tailscale`, `launchctl`, `systemctl` and `loginctl` by name, and a running node also calls `pmset` and `caffeinate` unless `node.keep_awake` is false. Run them only with a temporary `HOME` and fakes of those commands first on `PATH`; tests inject a runner instead, and tests that start a node set `keep_awake: false`. Never let them reach the real service manager or tailnet.
 - `factory` and `factory open` set up the repo they run in, as `init` does. Run `init`, `factory` and `factory open` only in a temporary git repo, with `HOME`, `FACTORY_CONFIG_DIR` and `FACTORY_STATE_DIR` pointing at temporary directories, never in a real repo.
 
 Integration tests that need tmux start their own scratch server and kill it in `t.Cleanup`. They skip when `tmux` is missing only if `CI` is unset.

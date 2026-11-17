@@ -16,7 +16,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
@@ -31,17 +30,16 @@ const (
 )
 
 type Model struct {
-	Config  *state.Config
-	Engine  *Engine
-	Layout  Layout
-	Server  *Server
-	Node    Node
-	Events  chan Event
-	Watch   *Watcher
-	Open    func(url string)
-	Tunnels *remote.Tunnels
-	Roster  func(context.Context) (node.Roster, error)
-	Peers   func(name string) *node.Client
+	Config *state.Config
+	Engine *Engine
+	Layout Layout
+	Server *Server
+	Node   Node
+	Events chan Event
+	Watch  *Watcher
+	Open   func(url string)
+	Roster func(context.Context) (node.Roster, error)
+	Peers  func(name string) *node.Client
 
 	DialogCommand func(kind string) string
 	Bell          io.Writer
@@ -76,10 +74,7 @@ type Model struct {
 	toldReturnKey bool
 	here          string
 	local         Snapshot
-	links         map[string]*link
-	wires         map[string]remote.Factory
 	attempts      map[string]attempt
-	opening       map[string]bool
 	later         []tea.Cmd
 	claims        map[string]host.Answer
 	threads       map[string]int
@@ -150,7 +145,7 @@ func (m *Model) SetSnapshot(s Snapshot) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.refreshCatalog(), m.pollRemotes(), m.pollRoster(), m.waitNodes())
+	return tea.Batch(m.load(), m.poll(), m.focusPoll(), m.waitEvent(), m.waitChange(), m.refreshCatalog(), m.pollRoster(), m.waitNodes())
 }
 
 func (m *Model) load() tea.Cmd {
@@ -245,7 +240,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nodeLostMsg:
 		m.notice = problem("The factory node is not answering, so this list is not updating: " + msg.err.Error() + ". Check factory node run.")
 	case pollMsg:
-		cmd = tea.Batch(m.load(), m.poll(), m.pollRemotes(), m.pollRoster())
+		m.followMachine()
+		cmd = tea.Batch(m.load(), m.poll(), m.pollRoster())
 	case rosterMsg:
 		m.rosterArrived(msg)
 	case nodeMsg:
@@ -255,14 +251,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nodeAnswered(msg)
 	case nodeRemovalMsg:
 		cmd = m.nodeRemovalArrived(msg)
-	case remoteMsg:
-		cmd = m.remoteArrived(msg)
 	case attachedMsg:
 		cmd = m.attached(msg)
-	case answeredMsg:
-		m.answered(msg)
-	case removalMsg:
-		cmd = m.removalArrived(msg)
 	case changedMsg:
 		cmd = tea.Batch(m.load(), m.waitChange())
 	case dialogClosedMsg:
@@ -308,7 +298,7 @@ func (m *Model) apply(s Snapshot) {
 
 func (m *Model) refresh() {
 	s := m.local
-	s.Items = slices.Concat(s.Items, m.remoteItems(), m.nodeItems())
+	s.Items = slices.Concat(s.Items, m.nodeItems())
 	starting := m.selected == ""
 	shownBefore := m.itemsOf(m.selected)
 	m.snap = s
@@ -317,7 +307,6 @@ func (m *Model) refresh() {
 		m.loaded[it.Factory.Key()] = it.Status
 	}
 	m.clearRefusals()
-	m.settleRemoteClaims()
 	m.settleNodeSends()
 	m.settle()
 	m.alert(m.statuses)
@@ -468,11 +457,8 @@ func (m *Model) showSelected() {
 		target = it.Pane.ID
 	}
 	stage := m.shownStage(it, ok && target != m.slotViewer())
-	switch {
-	case ok && it.Factory.OnNode():
+	if ok && it.Factory.Remote != nil {
 		target, stage = m.nodeTargets(it)
-	case ok && it.Factory.Remote != nil:
-		target, stage = m.remoteTargets(it)
 	}
 	if target == m.Layout.Slot && stage == m.Layout.Stage {
 		return
@@ -571,9 +557,7 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 	case "/":
 		return m.openDialog("switch", m.switchContext())
 	case "?":
-		return m.openDialog("keys", m.keysContext())
-	case "R":
-		return m.openDialog("remotes", m.remotesContext())
+		return m.openDialog("keys", struct{}{})
 	case "P":
 		return m.openDialog("phone", struct{}{})
 	case "N":
@@ -647,7 +631,7 @@ func (m *Model) viewerKey(pane, key, text string) tea.Cmd {
 	case pane == "slot" && (key == "q" || key == "ctrl+c"):
 		return m.quit()
 	case pane == "slot" && key == "?":
-		return m.openDialog("keys", m.keysContext())
+		return m.openDialog("keys", struct{}{})
 	}
 	return nil
 }
@@ -668,7 +652,7 @@ func (m *Model) askPause() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
-	case it.Pane == nil && m.wires[it.Factory.Key()].Pane == nil && m.nodeFactories[it.Factory.Key()].Pane == "":
+	case it.Pane == nil && m.nodeFactories[it.Factory.Key()].Pane == "":
 		m.notice = problem(it.Factory.Label() + " has no pane to pause.")
 		return nil
 	case m.unverified(it) != "":
@@ -683,10 +667,8 @@ func (m *Model) askDelete() tea.Cmd {
 	switch {
 	case !ok:
 		return nil
-	case it.Factory.OnNode():
-		return m.askNodeDelete(it)
 	case it.Factory.Remote != nil:
-		return m.askRemoteDelete(it)
+		return m.askNodeDelete(it)
 	}
 	return m.openDialog("delete", m.deleteContext(it))
 }
@@ -925,9 +907,6 @@ func (m *Model) row(it Item) selector.Row {
 	if d, ok := factory.TimeInStage(f, m.snap.At); ok {
 		row.Time = theme.Age(d)
 	}
-	if f.Remote != nil && !f.Remote.Creating.IsZero() {
-		row.Stage, row.Time = "cloning…", theme.Age(m.snap.At.Sub(f.Remote.Creating))
-	}
 	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
 		_, settled := m.shownItems(it)
 		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
@@ -957,8 +936,8 @@ func (m *Model) pushFrame() {
 		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
 			path = tilde(it.Pane.Path)
 		}
-		if f := it.Factory; f.Remote != nil {
-			path = remotePath(f, f.Worktree)
+		if it.Factory.Remote != nil {
+			path = ""
 		}
 		if m.Layout.Stage != "" && it.Stage != nil {
 			stage = stageLabel(it.Stage.Run)
@@ -1015,7 +994,7 @@ func (m *Model) Header() (string, string) {
 	ic := m.Icons
 	left := appBadge(ic)
 	if len(m.snap.Items) == 0 {
-		return left + " #[fg=#737aa2]no factories yet", m.nodeLabels() + m.linkLabels() + m.machineLabel()
+		return left + " #[fg=#737aa2]no factories yet", m.nodeLabels() + m.machineLabel()
 	}
 	count := func(statuses ...factory.Status) int {
 		n := 0
@@ -1050,7 +1029,7 @@ func (m *Model) Header() (string, string) {
 			left += fmt.Sprintf(" #[fg=%s]%s%d %s#[default] ", p.color, ic.Icon(p.icon), n, p.word)
 		}
 	}
-	return left, m.nodeLabels() + m.linkLabels() + m.ghLabel() + m.machineLabel()
+	return left, m.nodeLabels() + m.ghLabel() + m.machineLabel()
 }
 
 func (m *Model) machineLabel() string {
@@ -1139,9 +1118,6 @@ func (m *Model) selectorHints() []footer.Hint {
 	case it.Status == factory.Done:
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
-	if len(m.Config.Remotes) > 0 {
-		return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "R", "remotes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
-	}
 	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
 }
 
@@ -1199,8 +1175,6 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("ctrl+k", "tested", "ctrl+n/p", "item", "esc", "back")
 	case item.Kind == "permission":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
-	case item.Kind == "qa":
-		return hints("⏎", "start on this laptop", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")
 }
@@ -1211,10 +1185,8 @@ func (m *Model) SlotView(width, height int) string {
 	switch {
 	case !ok:
 		m.drawIntro(c)
-	case it.Factory.OnNode():
-		m.drawNode(c, it)
 	case it.Factory.Remote != nil:
-		m.drawRemote(c, it)
+		m.drawNode(c, it)
 	default:
 		m.drawNoPane(c, it)
 	}

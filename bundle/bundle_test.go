@@ -80,6 +80,43 @@ func TestNoBundledInstructionAsksForVisibleChromeOrItsExtension(t *testing.T) {
 	})
 }
 
+func TestNoCommandConfigOrDocStillOffersTheOldSSHRemotes(t *testing.T) {
+	removed := regexp.MustCompile(`factory remote\b|host request|\bntfy\b|default_remote|--remote(\s|$)|\bRemotes\b|^\s*remotes:`)
+	migration := map[string]string{
+		"README.md":                       "Upgrading from a release with ssh remotes",
+		"cmd/factory/main.go":             "ssh remotes are gone",
+		"internal/state/machine.go":       "",
+		"internal/state/config_test.go":   "",
+		"bundle/skills/gh-stack/SKILL.md": "",
+	}
+	root := ".."
+	for _, top := range []string{"cmd", "internal", "bundle", "apps/pwa/src", "README.md", "CLAUDE.md"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(root, path)
+			switch {
+			case d.IsDir() && rel == filepath.Join("bundle", "pwa"):
+				return fs.SkipDir
+			case d.IsDir() || rel == filepath.Join("bundle", "bundle_test.go"):
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			for i, line := range strings.Split(string(data), "\n") {
+				context, allowed := migration[filepath.ToSlash(rel)]
+				if found := removed.FindString(line); found != "" && !(allowed && strings.Contains(line, context)) {
+					t.Errorf("%s:%d still says %q; the ssh remotes, their tunnels and ntfy push are gone", rel, i+1, found)
+				}
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestDefaultAgentsMatchTheBundledFrontmatter(t *testing.T) {
 	for _, role := range state.AgentRoles {
 		fm := readFrontmatter(t, "agents/factory-"+role+".md")

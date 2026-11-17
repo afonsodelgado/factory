@@ -15,7 +15,7 @@ function start(config) {
   const touch = matchMedia("(pointer: coarse)").matches;
   const viewport = window.visualViewport;
   const unreachable = "Can't reach the computer. This page is read-only until it is back. Trying again every 15s.";
-  const serveDown = "factory serve is not running on the computer, so this page is read-only and notifications have stopped. Start it with factory phone start.";
+  const serveDown = "The factory node is not answering, so this page is read-only and notifications have stopped. Start it with factory node run, or factory node install as a service.";
   const restarting = "factory is restarting. This page is read-only until it is back. Trying again every 15s.";
   const binding = typeof window.__factoryReview === "function" ? window.__factoryReview : null;
   const pendingCalls = new Map();

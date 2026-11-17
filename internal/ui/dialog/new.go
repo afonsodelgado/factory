@@ -37,7 +37,6 @@ type NewFactoryModel struct {
 	height         int
 	place          int
 	probes         map[string]probe
-	Probe          func(remote string) (string, error)
 	ProbeNode      func(name string) (string, error)
 }
 
@@ -50,9 +49,9 @@ type probe struct {
 }
 
 type probedMsg struct {
-	remote string
-	text   string
-	err    error
+	node string
+	text string
+	err  error
 }
 
 func NewFactory(c NewContext) *NewFactoryModel {
@@ -62,9 +61,6 @@ func NewFactory(c NewContext) *NewFactoryModel {
 func defaultPlace(c NewContext) int {
 	if i := slices.IndexFunc(c.Nodes, func(n NodeChoice) bool { return n.Name == c.Target }); i >= 0 {
 		return i + 1
-	}
-	if i := slices.Index(c.Remotes, c.Default); i >= 0 {
-		return len(c.Nodes) + 1 + i
 	}
 	return 0
 }
@@ -100,13 +96,6 @@ func (m *NewFactoryModel) stageAgents() map[string]state.AgentSetting {
 
 func (m *NewFactoryModel) Init() tea.Cmd { return m.probe() }
 
-func (m *NewFactoryModel) remote() string {
-	if m.place <= len(m.Context.Nodes) {
-		return ""
-	}
-	return m.Context.Remotes[m.place-1-len(m.Context.Nodes)]
-}
-
 func (m *NewFactoryModel) nodeChoice() (NodeChoice, bool) {
 	if m.place == 0 || m.place > len(m.Context.Nodes) {
 		return NodeChoice{}, false
@@ -123,35 +112,33 @@ func (m *NewFactoryModel) placeName() string {
 	if choice, ok := m.nodeChoice(); ok {
 		return shortName(choice.Name)
 	}
-	return m.remote()
+	return ""
 }
 
 func (m *NewFactoryModel) probe() tea.Cmd {
-	name, check := m.remote(), m.Probe
-	if choice, ok := m.nodeChoice(); ok {
-		name, check = choice.Name, m.ProbeNode
-		if choice.Unreachable {
-			return nil
-		}
+	choice, ok := m.nodeChoice()
+	if !ok || choice.Unreachable || m.ProbeNode == nil {
+		return nil
 	}
-	if _, started := m.probes[name]; name == "" || started || check == nil {
+	name, check := choice.Name, m.ProbeNode
+	if _, started := m.probes[name]; started {
 		return nil
 	}
 	m.probes[name] = probe{}
 	return func() tea.Msg {
 		text, err := check(name)
-		return probedMsg{remote: name, text: text, err: err}
+		return probedMsg{node: name, text: text, err: err}
 	}
 }
 
 func (m *NewFactoryModel) moveOn(delta int) tea.Cmd {
-	places := len(m.Context.Remotes) + len(m.Context.Nodes) + 1
+	places := len(m.Context.Nodes) + 1
 	m.place = (m.place + delta + places) % places
 	return m.probe()
 }
 
 func (m *NewFactoryModel) elsewhere() bool {
-	return len(m.Context.Remotes)+len(m.Context.Nodes) > 0
+	return len(m.Context.Nodes) > 0
 }
 
 func (m *NewFactoryModel) choosesPlace() bool {
@@ -171,18 +158,9 @@ func (m *NewFactoryModel) nodeProblem(choice NodeChoice) string {
 	return ""
 }
 
-func (m *NewFactoryModel) remoteProblem() string {
+func (m *NewFactoryModel) placeProblem() string {
 	if choice, ok := m.nodeChoice(); ok {
 		return m.nodeProblem(choice)
-	}
-	name, repo := m.remote(), m.selectedRepo()
-	switch p := m.probes[name]; {
-	case name == "":
-		return ""
-	case repo.NoGitRemote != "":
-		return repo.Name + " has no git remote, so " + name + " has nothing to clone. Push it to one first (git remote add origin <url>, then git push), or pick this machine with ←."
-	case p.done && p.err != nil:
-		return m.id() + " can't start on " + name + " while it is unreachable. Pick this machine with ←, or run factory doctor --remote " + name + " to see why."
 	}
 	return ""
 }
@@ -517,7 +495,7 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptEdited:
 		m.promptEdited(msg)
 	case probedMsg:
-		m.probes[msg.remote] = probe{done: true, text: msg.text, err: msg.err}
+		m.probes[msg.node] = probe{done: true, text: msg.text, err: msg.err}
 	case tea.KeyPressMsg:
 		m.Context.Notice = ""
 		switch m.step {
@@ -622,14 +600,14 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.problem = factory.ReservedIDRefusal(m.name)
 		return nil
 	}
-	if e, ok := m.existing(); ok && (e.Archived || e.Key == "") {
+	if e, ok := m.existing(); ok && e.Archived {
 		return nil
 	}
 	if e, ok := m.existing(); ok {
 		m.result = &NewResult{Select: e.Key}
 		return tea.Quit
 	}
-	if problem := m.remoteProblem(); problem != "" {
+	if problem := m.placeProblem(); problem != "" {
 		return nil
 	}
 	m.pipeline = m.pipelineName()
@@ -710,7 +688,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Remote: m.remote(), Node: m.node()}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Node: m.node()}
 	return tea.Quit
 }
 
@@ -802,7 +780,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	_, matched := m.existing()
 	problem := m.problem
 	if !matched && m.id() != "" {
-		problem = cmp.Or(problem, m.remoteProblem())
+		problem = cmp.Or(problem, m.placeProblem())
 	}
 	if problem != "" {
 		for _, l := range theme.Wrap("✗ "+problem, w) {
@@ -823,11 +801,11 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	}
 	e, _ := m.existing()
 	switch {
-	case matched && (e.Archived || e.Key == ""):
+	case matched && e.Archived:
 		hints = "ctrl+e settings   esc cancel"
 	case matched:
 		hints = "⏎ select it   ctrl+w select and wake it   ctrl+e settings   esc cancel"
-	case problem != "" && m.remoteProblem() != "":
+	case problem != "" && m.placeProblem() != "":
 		hints = "←→ runs on   ↑↓ repo   ctrl+e settings   esc cancel"
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
@@ -842,10 +820,6 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	}
 	if e, ok := m.existing(); ok && e.Archived {
 		add(fmt.Sprintf("%s already has a factory, archived: %s in %s. %s", e.Label, e.Status, e.Stage, UnarchiveAdvice), theme.FgInk(theme.Yellow))
-		return spans
-	}
-	if e, ok := m.existing(); ok && e.Key == "" {
-		add(fmt.Sprintf("%s already runs on %s, which this hub has not listed yet. Pick another id.", e.Label, e.Remote), theme.FgInk(theme.Yellow))
 		return spans
 	}
 	if e, ok := m.existing(); ok {
@@ -895,19 +869,8 @@ func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
 	y++
 	if choice, ok := m.nodeChoice(); ok {
 		m.drawNodeState(c, y, w, choice)
-		return y + 2
-	}
-	name := m.remote()
-	p := m.probes[name]
-	switch {
-	case name == "":
+	} else {
 		c.PutMax(3, y, "Runs here, in a new worktree of "+m.selectedRepo().Display+".", theme.Muted, w-3)
-	case !p.done:
-		c.PutMax(3, y, "◌ checking "+name+" over ssh…", theme.FgInk(theme.Cyan), w-3)
-	case p.err != nil:
-		c.PutMax(3, y, "✗ "+name+" is unreachable: "+p.err.Error(), theme.FgInk(theme.Red), w-3)
-	default:
-		c.PutMax(3, y, "↔ "+p.text, theme.FgInk(theme.Cyan), w-3)
 	}
 	return y + 2
 }
@@ -917,7 +880,7 @@ func (m *NewFactoryModel) placeNames() []string {
 	for _, n := range m.Context.Nodes {
 		names = append(names, shortName(n.Name))
 	}
-	return append(names, m.Context.Remotes...)
+	return names
 }
 
 func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeChoice) {
@@ -938,7 +901,7 @@ func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeCh
 func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	repo := m.selectedRepo()
 	if name := m.placeName(); name != "" {
-		m.drawRemotePreview(c, x, y, w, name)
+		m.drawNodePreview(c, x, y, w, name)
 		return
 	}
 	c.Put(x, y, "Will run, from "+theme.KeepTail(repo.Display, w-theme.Width("Will run, from ")), theme.Quiet)
@@ -962,7 +925,7 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 	c.Put(x, y, reason, theme.Muted)
 }
 
-func (m *NewFactoryModel) drawRemotePreview(c *theme.Canvas, x, y, w int, name string) {
+func (m *NewFactoryModel) drawNodePreview(c *theme.Canvas, x, y, w int, name string) {
 	repo := m.selectedRepo()
 	c.Put(x, y, "Will run on "+name+", from its clone of "+strings.TrimSuffix(filepath.Base(repo.GitURL), ".git"), theme.Quiet)
 	y++

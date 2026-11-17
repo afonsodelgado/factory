@@ -58,32 +58,16 @@ func doctorOptions() install.Options {
 }
 
 func runDoctor(args []string) int {
-	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	only := flags.String("remote", "", "check only this remote")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: factory doctor [--remote name]")
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "usage: factory doctor")
 		return 2
 	}
-	problems := 0
-	cfg, err := state.LoadConfig()
-	if *only == "" {
-		header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
-		checks := install.Doctor(doctorOptions())
-		if err == nil {
-			checks = append(checks, moveChecks(cfg)...)
-		}
-		problems += summarize(header, checks)
+	header := fmt.Sprintf("factory doctor · %s · %s/%s · checks only, changes nothing", version, runtime.GOOS, runtime.GOARCH)
+	checks := install.Doctor(doctorOptions())
+	if cfg, err := state.LoadConfig(); err == nil {
+		checks = append(checks, moveChecks(cfg)...)
 	}
-	if err != nil && *only != "" {
-		fmt.Fprintln(os.Stderr, "factory doctor:", err)
-		return 1
-	}
-	if err == nil {
-		for _, name := range remotesToCheck(cfg, *only) {
-			problems += summarize(remoteDoctor(cfg, name))
-		}
-	}
-	if problems > 0 {
+	if summarize(header, checks) > 0 {
 		return 1
 	}
 	return 0
@@ -632,17 +616,20 @@ func (s nodeSetup) status(ctx context.Context) {
 	case st.Installed:
 		service = s.service.Kind() + ", installed but not running; " + s.service.RestartCommand() + " starts it"
 	}
-	running := "not answering"
+	running, awake := "not answering", "unknown while the node is not answering"
 	if me, alive := runningMe(s.cfg); alive {
 		running = me.Version
+		if me.Awake != nil {
+			awake = me.Awake.Detail
+		}
 	}
 	tailnet, url := "unknown until factory node install or factory node run learns it", "unknown"
 	if host := s.cfg.NodeHostname(); host != "" {
 		_, tailnet, _ = strings.Cut(host, ".")
 		url = "https://" + host
 	}
-	fmt.Fprintf(s.out, "service     %s\nrunning     %s\nconfigured  %s\nport        127.0.0.1:%d\ntailnet     %s\nurl         %s\n",
-		service, running, s.configured(ctx, record), s.cfg.NodePort(), tailnet, url)
+	fmt.Fprintf(s.out, "service     %s\nrunning     %s\nconfigured  %s\nport        127.0.0.1:%d\ntailnet     %s\nurl         %s\nkeep awake  %s\n",
+		service, running, s.configured(ctx, record), s.cfg.NodePort(), tailnet, url, awake)
 }
 
 func (s nodeSetup) configured(ctx context.Context, record node.Install) string {

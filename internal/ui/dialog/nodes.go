@@ -1637,3 +1637,77 @@ func (n *Nodes) drawType(c *theme.Canvas) {
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
+
+func paragraph(c *theme.Canvas, y int, text string, ink theme.Ink) int {
+	for _, l := range theme.Wrap(text, c.W-2) {
+		c.Put(1, y, l, ink)
+		y++
+	}
+	return y
+}
+
+var markGlyphs = map[string]struct {
+	glyph string
+	ink   theme.Ink
+}{
+	"ok":   {"✓", theme.FgInk(theme.Green)},
+	"fail": {"✗", theme.FgInk(theme.Red)},
+	"skip": {"–", theme.Muted},
+	"warn": {"!", theme.FgInk(theme.Yellow)},
+	"wait": {"◌", theme.FgInk(theme.Yellow)},
+	"todo": {"·", theme.Muted},
+}
+
+const (
+	checkNameX   = 5
+	checkDetailX = 18
+	checkFixX    = 23
+	valueX       = 14
+)
+
+func drawChecks(c *theme.Canvas, y int, rows []CheckRow) int {
+	for _, row := range rows {
+		mark := markGlyphs[row.Mark]
+		detailInk, nameInk := theme.Text, theme.Text
+		if row.Mark == "skip" {
+			detailInk = theme.Muted
+		}
+		if row.Mark == "todo" {
+			nameInk = theme.Muted
+		}
+		c.Put(3, y, mark.glyph, mark.ink)
+		c.PutMax(checkNameX, y, row.Name, nameInk, checkDetailX-checkNameX-1)
+		c.PutMax(checkDetailX, y, row.Detail, detailInk, c.W-checkDetailX-1)
+		y++
+		for _, line := range row.Lines {
+			c.PutMax(checkDetailX, y, line, theme.Text, c.W-checkDetailX-1)
+			y++
+		}
+		if row.Fix != "" && row.Mark != "ok" {
+			y = drawFix(c, y, row)
+		}
+		if row.Act != "" {
+			c.Put(checkDetailX, y, row.ActKey, theme.Key)
+			c.PutMax(checkFixX, y, row.Act, theme.Text, c.W-checkFixX-1)
+			y++
+		}
+	}
+	return y
+}
+
+func drawFix(c *theme.Canvas, y int, row CheckRow) int {
+	c.Put(checkDetailX, y, "fix", theme.Muted)
+	x := checkFixX
+	if row.On != "" {
+		x = c.Put(x, y, "on "+row.On+"  ", theme.Muted)
+	}
+	c.PutMax(x, y, row.Fix, theme.Bright, c.W-x-1)
+	return y + 1
+}
+
+func passes(problems int) string {
+	if problems == 1 {
+		return "it passes"
+	}
+	return "they pass"
+}

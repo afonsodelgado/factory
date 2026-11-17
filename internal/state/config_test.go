@@ -163,33 +163,10 @@ func TestARepoConfigOverridesTheMachineDefaultsAndAnOldOneStillLoads(t *testing.
 	}
 }
 
-func TestRemoteConfigRefusesWhatSSHWouldMisread(t *testing.T) {
-	cases := map[string]string{
-		"a default naming no remote":     "default_remote: homelab\n",
-		"a host that ssh reads as flag":  "remotes:\n  homelab:\n    host: -oProxyCommand=sh\n",
-		"a host with shell syntax":       "remotes:\n  homelab:\n    host: \"homelab;rm -rf ~\"\n",
-		"a user with a space":            "remotes:\n  homelab:\n    host: homelab\n    user: \"a b\"\n",
-		"a port out of range":            "remotes:\n  homelab:\n    host: homelab\n    port: 70000\n",
-		"the reserved name local":        "remotes:\n  local:\n    host: homelab\n",
-		"a push server that is not http": "push:\n  server: file:///etc\n",
-	}
-	for name, config := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(config), 0o644)
-			t.Setenv("FACTORY_CONFIG_DIR", dir)
-			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
-			if _, err := LoadConfig(); err == nil {
-				t.Error("loaded; want it refused before any ssh command is built from it")
-			}
-		})
-	}
-}
-
-func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
+func TestMachineSettingsKeepTheRestOfTheConfig(t *testing.T) {
 	phone := Phone{Enabled: true, Port: 7419, Hostname: "devbox.tail1234.ts.net", VAPIDPublicKey: "BPublic"}
 	cases := []struct{ name, original, comment string }{
-		{"a config with settings", "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  old:\n    host: old\n", "# main repo"},
+		{"a config with settings", "# my settings\nrepos:\n  - ~/dev/a # main repo\n", "# main repo"},
 		{"a config that holds only comments", "# just a comment\n", "# just a comment"},
 	}
 	for _, c := range cases {
@@ -197,10 +174,8 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 			dir := t.TempDir()
 			os.WriteFile(filepath.Join(dir, "config.yml"), []byte(c.original), 0o644)
 			err := UpdateMachine(dir, func(m *Machine) error {
-				m.Remotes = map[string]Remote{}
-				m.Remotes["homelab"] = Remote{Host: "homelab", Port: 2222}
-				m.DefaultRemote = "homelab"
 				m.Phone = phone
+				m.Node.KeepAwake = sleeps
 				return nil
 			})
 			if err != nil {
@@ -210,8 +185,8 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 			t.Setenv("FACTORY_CONFIG_DIR", dir)
 			t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 			cfg, err := LoadConfig()
-			if err != nil || !strings.Contains(string(data), c.comment) || len(cfg.Remotes) != 1 || cfg.Remotes["homelab"].Port != 2222 || cfg.DefaultRemote != "homelab" || cfg.Phone != phone {
-				t.Fatalf("config after adding a remote and phone settings:\n%s\nerr %v; want the user's comments kept, only homelab listed and the phone settings read back", data, err)
+			if err != nil || !strings.Contains(string(data), c.comment) || cfg.Phone != phone || cfg.KeepsAwake() {
+				t.Fatalf("config after phone and keep-awake settings:\n%s\nerr %v; want the user's comments kept and both settings read back", data, err)
 			}
 			if info, _ := os.Stat(filepath.Join(dir, "config.yml")); info.Mode().Perm() != 0o600 {
 				t.Fatalf("config.yml mode %v; want 0600 because it now names the machine's tailnet", info.Mode().Perm())
@@ -225,6 +200,28 @@ func TestRemoteSetupKeepsTheRestOfTheConfig(t *testing.T) {
 				t.Fatalf("config after three more writes:\n%s\nwant it unchanged, not indented further on every write:\n%s", again, data)
 			}
 		})
+	}
+}
+
+func TestOldRemotesAreListedOnceForNodeEnrollmentAndTheirKeysDropped(t *testing.T) {
+	dir := t.TempDir()
+	original := "# my settings\nrepos:\n  - ~/dev/a # main repo\nremotes:\n  homelab:\n    host: afonso@homelab.lan\n  build:\n    host: 10.0.0.7\n    port: 2222\ndefault_remote: homelab\npush:\n  topic: factory-q7rk2m9x\nnode:\n  port: 7419\n"
+	os.WriteFile(filepath.Join(dir, "config.yml"), []byte(original), 0o644)
+	listed, err := DropLegacyRemotes(dir)
+	if err != nil || !slices.Equal(listed, []string{"build (10.0.0.7)", "homelab (afonso@homelab.lan)"}) {
+		t.Fatalf("listed %q, %v; want each old remote with its ssh host as written, never a guessed tailnet name", listed, err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "config.yml"))
+	for _, gone := range []string{"remotes", "default_remote", "push", "factory-q7rk2m9x"} {
+		if strings.Contains(string(data), gone) {
+			t.Fatalf("config after the migration:\n%s\nstill holds %s", data, gone)
+		}
+	}
+	if !strings.Contains(string(data), "# main repo") || !strings.Contains(string(data), "port: 7419") {
+		t.Fatalf("config after the migration:\n%s\nwant the user's comments and node settings kept", data)
+	}
+	if again, err := DropLegacyRemotes(dir); err != nil || len(again) > 0 {
+		t.Fatalf("a second run listed %q, %v; want the remotes listed only once", again, err)
 	}
 }
 

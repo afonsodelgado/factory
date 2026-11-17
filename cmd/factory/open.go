@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/google/uuid"
@@ -38,9 +36,6 @@ func runOpen(args []string) int {
 	agents := agentFlags{}
 	flags.Var(agents, "agent", "role=model:effort or role=tool/model:effort for one agent of this factory; repeatable")
 	supervisorFlag := flags.String("supervisor", "", "tool/model:effort the supervisor runs on, such as codex/gpt-6.1-sol:high")
-	remoteFlag := flags.String("remote", "", "create the factory on this remote; default: default_remote")
-	local := flags.Bool("local", false, "create the factory on this machine, whatever default_remote says")
-	gitRemote := flags.String("git-remote", "", "the git remote the server clones from; default: origin, or the only remote")
 	if err := flags.Parse(reorder(flags, args)); err != nil {
 		return 2
 	}
@@ -64,46 +59,12 @@ func runOpen(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 2
 	}
-	request := hub.OpenRequest{Name: id, Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}
-	if err := openWhere(request, *remoteFlag, *local, *gitRemote); err != nil {
+	request := hub.OpenRequest{Name: factory.Slugify(id), Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}
+	if err := openMain(request); err != nil {
 		fmt.Fprintln(os.Stderr, "factory open:", err)
 		return 1
 	}
 	return 0
-}
-
-func openWhere(r hub.OpenRequest, remoteFlag string, local bool, gitRemote string) error {
-	cfg, err := state.LoadConfig()
-	if err != nil {
-		return err
-	}
-	if r.Name != "" {
-		r.Name = factory.Slugify(r.Name)
-	}
-	if r.Name != "" {
-		remote.RefreshWhereListed(cfg, r.Name)
-	}
-	where, err := remote.Place(cfg, r.Name, remoteFlag, local)
-	if err != nil {
-		return err
-	}
-	if where != "" {
-		if cache, _ := remote.LoadCache(cfg.StateDir, where); cache.Lists(r.Name) {
-			fmt.Printf("%s runs on %s.\n", r.Name, where)
-			return remote.UpdateCache(cfg.StateDir, where, func(c *remote.Cache) error {
-				shown := slices.IndexFunc(c.Inventory, func(l remote.Listing) bool { return l.ID == r.Name })
-				c.Forgotten = slices.DeleteFunc(c.Forgotten, func(incarnation string) bool { return incarnation == c.Inventory[shown].Incarnation })
-				return nil
-			})
-		}
-		return createRemote(cfg, where, r, gitRemote)
-	}
-	if r.Name != "" && !remote.Local(cfg, r.Name) {
-		if err := remote.WithCreationLock(cfg, func() error { return remote.RefuseKnownID(cfg, r.Name) }); err != nil {
-			return err
-		}
-	}
-	return openMain(r)
 }
 
 func catalogRefusal(agents map[string]state.AgentSetting, supervisor state.AgentSetting) error {

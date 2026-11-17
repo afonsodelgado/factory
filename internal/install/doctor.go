@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -130,14 +129,6 @@ func nerdFontInstallCommand() string {
 
 func Doctor(o Options) []Check {
 	return doctor(o, append([]Check{browserQA(o, true), nerdFont(o)}, NodeChecks(o)...)...)
-}
-
-func ServerDoctor(o Options, gitURLs []string) []Check {
-	checks := []Check{claudeLogin(o)}
-	for _, url := range gitURLs {
-		checks = append(checks, gitAccess(context.Background(), url))
-	}
-	return slices.DeleteFunc(doctor(o, append(checks, forwarding())...), func(c Check) bool { return c.Name == "repos" })
 }
 
 func doctor(o Options, extra ...Check) []Check {
@@ -402,16 +393,6 @@ func gitAccess(ctx context.Context, url string) Check {
 func isNoHeads(err error) bool {
 	var exit *exec.ExitError
 	return errors.As(err, &exit) && exit.ExitCode() == 2
-}
-
-var forwardingRefused = regexp.MustCompile(`(?im)^\s*((AllowTcpForwarding|AllowStreamLocalForwarding)\s+(no|remote)|DisableForwarding\s+yes)\b`)
-
-func forwarding() Check {
-	data, err := os.ReadFile("/etc/ssh/sshd_config")
-	if err == nil && forwardingRefused.Match(data) {
-		return Check{Name: "forwarding", Mark: Fail, Detail: "sshd refuses local forwarding, so review pages and dev servers can't reach this laptop", Fix: "set AllowTcpForwarding local and AllowStreamLocalForwarding local in /etc/ssh/sshd_config  and restart sshd"}
-	}
-	return Check{Name: "forwarding", Mark: Pass, Detail: "sshd allows local forwarding, for review pages and dev servers"}
 }
 
 func nerdFont(o Options) Check {

@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"net/http"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -260,4 +261,13 @@ func TestCreatingOnANodeThatHasTheRepoUsesItsCheckoutAndClonesNothing(t *testing
 	if !strings.Contains(got.text, "csv started on homelab") || len(homelab.Clones()) > 0 || !slices.Contains(homelab.Runtime.Calls(), "create") {
 		t.Fatalf("creating on homelab said %q, cloned %v and called %v; want it started in homelab's own checkout with no clone", got.text, homelab.Clones(), homelab.Runtime.Calls())
 	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }

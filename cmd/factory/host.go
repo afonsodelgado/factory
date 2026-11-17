@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,10 +17,6 @@ import (
 )
 
 func runHost(args []string) int {
-	if len(args) == 1 && args[0] == "request" {
-		json.NewEncoder(os.Stdout).Encode(answerRequest(os.Stdin))
-		return 0
-	}
 	if len(args) == 2 && args[0] == "attach" {
 		err := attachView(args[1])
 		fmt.Fprintln(os.Stderr, "factory host attach:", err)
@@ -31,13 +26,13 @@ func runHost(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory host: host run is gone; the node runs this machine's factories. Start it with factory node run")
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "usage: factory host request | factory host attach <view>")
+	fmt.Fprintln(os.Stderr, "usage: factory host attach <view>")
 	return 2
 }
 
 func attachView(id string) error {
 	if _, err := uuid.Parse(id); err != nil {
-		return errors.New("a view id is a UUID from factory host request")
+		return errors.New("a view id is a UUID from the node's attach preparation")
 	}
 	cfg, err := state.LoadConfig()
 	if err != nil {
