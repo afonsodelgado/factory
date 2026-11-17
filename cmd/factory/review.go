@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/remote"
@@ -129,13 +131,24 @@ func runReviewStack(args []string) int {
 		fmt.Fprintln(os.Stderr, reviewUsage)
 		return 2
 	}
-	if _, err := askReview(host.ReviewRequest{Action: "stack", Page: page}); err != nil {
+	reply, err := askReview(host.ReviewRequest{Action: "stack", Page: page})
+	for err == nil && reply.Stack.State == host.StackStarting {
+		time.Sleep(stackPoll)
+		reply, err = askReview(host.ReviewRequest{Action: "stack-status"})
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory review:", err)
 		return 1
 	}
-	fmt.Println("Starting the stack in its own window; open its URL from review/stack.json in your browser once it answers. A connected laptop hub opens it through a tunnel.")
+	if s := reply.Stack; s.State == host.StackFailed {
+		fmt.Fprintf(os.Stderr, "factory review: the walkthrough stack failed at %s: %s\n", s.Failure, s.Reason)
+		return 1
+	}
+	fmt.Printf("The walkthrough runs at %s, for your tailnet only. The factory's Pages tab in the phone app opens it signed in; comments made on it come back here.\n", reply.Stack.URL)
 	return 0
 }
+
+const stackPoll = time.Second
 
 type reviewOwner struct{ id, remote *string }
 
@@ -180,7 +193,7 @@ func askReview(r host.ReviewRequest) (host.ReviewReply, error) {
 	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
 	r.Cwd, _ = os.Getwd()
 	op := ""
-	if r.Action != "threads" && r.Action != "status" {
+	if !slices.Contains([]string{"threads", "status", "stack-status"}, r.Action) {
 		op = uuid.NewString()
 	}
 	var answer host.ReviewReply

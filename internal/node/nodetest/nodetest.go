@@ -105,13 +105,15 @@ type Machine struct {
 	IP       string
 	LastSeen time.Time
 
-	net     *Tailnet
-	online  bool
-	funnel  bool
-	hang    bool
-	handler http.Handler
-	addr    string
-	node    *Node
+	net      *Tailnet
+	online   bool
+	funnel   bool
+	hang     bool
+	handler  http.Handler
+	addr     string
+	node     *Node
+	served   map[string]string
+	serveLog []string
 }
 
 func (tn *Tailnet) Machine(short string) *Machine {
@@ -159,14 +161,67 @@ func (m *Machine) Run(_ context.Context, name string, args ...string) ([]byte, e
 	case "tailscale status --json":
 		return m.net.status(m), nil
 	case "tailscale serve status --json":
-		m.net.mu.Lock()
-		defer m.net.mu.Unlock()
-		if m.funnel {
-			return []byte(`{"TCP":{"443":{"HTTPS":true}},"AllowFunnel":{"` + m.Name + `:443":true}}`), nil
-		}
-		return []byte(`{}`), nil
+		return m.serveStatus(), nil
+	}
+	if len(args) == 4 && args[0] == "serve" && args[1] == "--bg" {
+		return nil, m.serveChange(strings.TrimPrefix(args[2], "--https="), args[3])
+	}
+	if len(args) == 3 && args[0] == "serve" && args[2] == "off" {
+		return nil, m.serveChange(strings.TrimPrefix(args[1], "--https="), "")
 	}
 	return nil, fmt.Errorf("the fake tailnet does not run %s %v", name, args)
+}
+
+func (m *Machine) ServeOn(port, target string) { m.serveChange(port, target) }
+
+func (m *Machine) Served() map[string]string {
+	m.net.mu.Lock()
+	defer m.net.mu.Unlock()
+	return maps.Clone(m.served)
+}
+
+func (m *Machine) ServeLog() []string {
+	m.net.mu.Lock()
+	defer m.net.mu.Unlock()
+	return slices.Clone(m.serveLog)
+}
+
+func (m *Machine) serveChange(port, target string) error {
+	m.net.mu.Lock()
+	defer m.net.mu.Unlock()
+	if m.served == nil {
+		m.served = map[string]string{}
+	}
+	if target == "" {
+		m.serveLog = append(m.serveLog, "serve --https="+port+" off")
+		delete(m.served, port)
+		return nil
+	}
+	m.serveLog = append(m.serveLog, "serve --bg --https="+port+" "+target)
+	m.served[port] = target
+	return nil
+}
+
+func (m *Machine) serveStatus() []byte {
+	m.net.mu.Lock()
+	defer m.net.mu.Unlock()
+	type handler struct{ Proxy string }
+	type web struct{ Handlers map[string]handler }
+	sc := struct {
+		TCP         map[string]map[string]bool
+		Web         map[string]web
+		AllowFunnel map[string]bool `json:",omitempty"`
+	}{TCP: map[string]map[string]bool{}, Web: map[string]web{}}
+	for port, target := range m.served {
+		sc.TCP[port] = map[string]bool{"HTTPS": true}
+		sc.Web[m.Name+":"+port] = web{Handlers: map[string]handler{"/": {Proxy: target}}}
+	}
+	if m.funnel {
+		sc.TCP["443"] = map[string]bool{"HTTPS": true}
+		sc.AllowFunnel = map[string]bool{m.Name + ":443": true}
+	}
+	data, _ := json.Marshal(sc)
+	return data
 }
 
 type device struct {

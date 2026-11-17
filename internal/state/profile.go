@@ -26,6 +26,7 @@ type Profile struct {
 	QA struct {
 		Mode           string `yaml:"mode"`
 		Notes          string `yaml:"notes"`
+		URL            string `yaml:"url"`
 		APIPort        int    `yaml:"api_port"`
 		WebPort        int    `yaml:"web_port"`
 		Start          string `yaml:"start"`

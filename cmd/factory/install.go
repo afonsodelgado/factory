@@ -337,7 +337,7 @@ func (s nodeSetup) install(ctx context.Context) error {
 	}
 	target := node.Target(s.cfg.NodePort())
 	if mapping == node.Unmapped {
-		if _, err := s.tailscale.Run(ctx, "tailscale", node.ServeArgs(s.cfg.NodePort())...); err != nil {
+		if _, err := s.tailscale.Run(ctx, "tailscale", node.ServeArgs(node.HomeHTTPS, s.cfg.NodePort())...); err != nil {
 			return fmt.Errorf("the node runs, but Tailscale Serve did not take https://%s: %w.%s Then run factory node install again", self.DNSName, err, node.PrivilegeNote())
 		}
 	}
@@ -471,7 +471,7 @@ func (s nodeSetup) preflight(ctx context.Context) (node.Self, node.Mapping, erro
 	if funnels := sc.Funnels(); len(funnels) > 0 {
 		return self, 0, funnelError(funnels)
 	}
-	mapping, uses := sc.Mapping(self.DNSName, node.Target(s.cfg.NodePort()))
+	mapping, uses := sc.Mapping(self.DNSName, node.HomeHTTPS, node.Target(s.cfg.NodePort()))
 	if mapping == node.Foreign {
 		return self, 0, fmt.Errorf("https://%s already serves something else (%s), and the node never takes it over. Move that to another port with tailscale serve, then run factory node install again", self.DNSName, uses)
 	}
@@ -606,9 +606,9 @@ func (s nodeSetup) unserve(ctx context.Context, record node.Install) error {
 	if err != nil {
 		return fmt.Errorf("%w. Run factory node uninstall again to remove https://%s → %s", err, record.Host, record.Serve)
 	}
-	switch mapping, uses := sc.Mapping(record.Host, record.Serve); mapping {
+	switch mapping, uses := sc.Mapping(record.Host, node.HomeHTTPS, record.Serve); mapping {
 	case node.Ours:
-		if _, err := s.tailscale.Run(ctx, "tailscale", node.UnserveArgs...); err != nil {
+		if _, err := s.tailscale.Run(ctx, "tailscale", node.UnserveArgs(node.HomeHTTPS)...); err != nil {
 			return fmt.Errorf("could not remove https://%s → %s: %w.%s Then run factory node uninstall again", record.Host, record.Serve, err, node.PrivilegeNote())
 		}
 		fmt.Fprintf(s.out, "removed  https://%s → %s\n", record.Host, record.Serve)

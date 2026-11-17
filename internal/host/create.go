@@ -265,6 +265,7 @@ func (m *Runtime) Pause(key string) error {
 	}
 	prior := m.markPaused(it.Factory, true)
 	m.stopBrowser(it.Factory.Key())
+	m.stopStack(it.Factory.Key())
 	if err := m.Engine.Pause(it.Factory.Repo, it.Factory.Slug); err != nil {
 		m.markPaused(it.Factory, prior)
 		return err

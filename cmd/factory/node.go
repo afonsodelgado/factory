@@ -164,7 +164,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 		return nil, err
 	}
 	browsers := &node.Browsers{Chrome: cfg.Review.Chrome, Max: cfg.Review.Browsers, StateDir: cfg.StateDir, Ctx: ctx}
-	n := &runningNode{closers: []io.Closer{pages, browsers}, stopped: make(chan error, 1)}
+	exposure := &node.Exposure{Tailscale: ts}
+	refusal, exposed := phone.RefusalPage(cfg.NodeName()), phone.ExposedPage(cfg.NodeName())
+	stacks := &node.Stacks{Tailscale: ts, Gate: node.Gate{Owner: owner, RefusalPage: refusal, ExposedPage: exposed, Exposure: exposure}, Host: cfg.NodeHostname(), Origin: cfg.NodeOrigin(), Review: pages, StateDir: cfg.StateDir}
+	n := &runningNode{closers: []io.Closer{pages, browsers, stacks}, stopped: make(chan error, 1)}
 	reviewListener, err := node.ListenUnix(cfg.ReviewSocket())
 	if err != nil {
 		n.close()
@@ -176,7 +179,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	runtime := host.New(host.Runtime{
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
 		Pages: pages, Engine: panes, Typist: panes, Log: host.LoadEventLog(host.EventLogPath(cfg.StateDir)), Push: &host.Pusher{StateDir: cfg.StateDir, Now: time.Now},
-		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
+		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, Stacks: stacks, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
 	})
 	go runtime.Push.Run(ctx)
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
@@ -191,10 +194,11 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	nodes.Clone = cloneFor(cfg, queue)
 	go api.Poll(ctx)
 	go nodes.Replicate(ctx)
-	app := phoneApp(ctx, cfg, api, pages, nodes)
-	exposure := &node.Exposure{Tailscale: ts}
+	app := http.NewServeMux()
+	app.HandleFunc("GET /w/{route}", stacks.Open)
+	app.Handle("/", phoneApp(ctx, cfg, api, pages, nodes))
 	go exposure.Watch(ctx)
-	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage(cfg.NodeName()), ExposedPage: phone.ExposedPage(cfg.NodeName()), Exposure: exposure}
+	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: refusal, ExposedPage: exposed, Exposure: exposure}
 	unixListener, err := node.ListenUnix(cfg.NodeSocket())
 	if err != nil {
 		n.close()

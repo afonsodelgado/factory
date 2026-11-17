@@ -27,6 +27,15 @@ func page(w http.ResponseWriter, status int, t *template.Template, data any) {
 	t.Execute(w, data)
 }
 
+func Notice(w http.ResponseWriter, status int, title, body string) {
+	page(w, status, noticePage, map[string]string{"Title": title, "Body": body})
+}
+
+var noticePage = template.Must(template.New("notice").Parse(pageHead + `<h1>{{.Title}}</h1>
+<p>{{.Body}}</p>
+</body></html>
+`))
+
 func RefusalPage(machine string) func(w http.ResponseWriter, owner, login string) {
 	return func(w http.ResponseWriter, owner, login string) {
 		page(w, http.StatusForbidden, refusedPage, map[string]string{"Machine": machine, "Owner": owner, "Login": login, "Database": DatabaseName})

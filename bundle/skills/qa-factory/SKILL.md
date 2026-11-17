@@ -29,23 +29,13 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 
 - **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
 - **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing.
-- **Phase 2:** the environment must run this worktree's code. In browser mode, the factory node already did it before starting you: it ran `qa.start` in this worktree, waited for `qa.health`, ran `qa.seed` and `qa.sign_in`, and opened the app signed in in a headless Chrome on a temporary profile that only this stage uses. Do not start another stack or another browser. Check with `curl` that `qa.health` answers, then check that this worktree serves the web port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If another checkout holds the port, the node's stack could not bind it and the browser shows the wrong build: return `failed` naming the port and the other checkout, and test nothing. In terminal mode, build the binary from this worktree into a temporary directory.
+- **Phase 2:** the environment must run this worktree's code. In browser mode, the factory node already did it before starting you: it ran `qa.start` in this worktree, waited for `qa.health`, ran `qa.seed` and `qa.sign_in`, and opened the app signed in in a headless Chrome on a temporary profile that only this stage uses. Do not start another stack or another browser. When the repo config declares `qa.url`, the node picked a free port for this stage's stack; take it from the URL of the page the browser has open. Check with `curl` that `qa.health` answers, then check that this worktree serves the web port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If another checkout holds the port, the node's stack could not bind it and the browser shows the wrong build: return `failed` naming the port and the other checkout, and test nothing. In terminal mode, build the binary from this worktree into a temporary directory.
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
 
 ## Stack mode
 
-Applies when the prompt says **stack mode** (the factory's walkthrough, or a design stage with prototypes). Do not test, and ignore factory mode's Phase 2: the stack you write here is a second one for the developer, not the one the node started for you. Bring it up and hand it over:
-
-1. Follow the notes to find free ports (not `qa.web_port`, which the node's stack holds), run migrations and seed a test principal. Never reuse a stack another checkout runs.
-2. Write `<factory dir>/review/stack.sh`: a POSIX shell script that starts the whole stack in the foreground from the worktree, with every environment variable and port it needs, and stops all of it when its window closes or on Ctrl-C (`trap 'kill 0' HUP INT TERM EXIT`). Run it in the background, check that `qa.health` and the web port answer, then stop it. The factory app runs it again in a window of its own, where the developer can see its logs.
-3. Sign the test principal in the way the notes say, and record what the browser needs to be signed in: for a session cookie, its name and value.
-4. Write `<factory dir>/review/stack.json`:
-   ```json
-   {"url": "http://localhost:<web port>/<the page the change is on>", "script": "<abs path of stack.sh>", "health": "<health URL on the new port>", "cookies": [{"name": "<cookie>", "value": "<value>", "domain": "localhost", "path": "/"}]}
-   ```
-   Leave `cookies` empty when the app needs no sign-in.
-5. Make sure nothing you started is still running, then return `done` with the URL in `summary` and both paths in `outputs`.
+There is no stack mode any more: the factory node starts walkthrough and prototype stacks itself from the repo config, on free ports, when the supervisor runs `factory review stack`. If a prompt asks for stack mode, start nothing and return `done` with the summary "the node starts this stack from the repo config; run factory review stack".
 
 ## Ground rules
 

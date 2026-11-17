@@ -240,7 +240,16 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
   await server.set({ roster: roster("homelab", "build-box") });
   await server.factories([factory("csv-export", [question()])]);
   await server.node(peer("homelab"), {
-    factories: [factory("rate-limits", [])],
+    factories: [
+      factory("rate-limits", [], {
+        walkthrough: {
+          state: "ready",
+          at: new Date().toISOString(),
+          origin: "https://homelab.tail5e2c.ts.net:8443",
+          href: "/w/shop-1a2b-rate-limits",
+        },
+      }),
+    ],
   });
   await server.node(peer("build-box"), {
     factories: [factory("perf-budget", [gate()])],
@@ -277,6 +286,11 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
     timeout: 10_000,
   });
   await list.getByRole("link").filter({ hasText: "rate-limits" }).click();
+  await page.getByRole("link", { name: /Pages/ }).click();
+  await expect(page.getByRole("link", { name: /Walkthrough/ })).toHaveAttribute(
+    "href",
+    `http://${peer("homelab")}/w/shop-1a2b-rate-limits`,
+  );
   await page.getByRole("link", { name: /Message/ }).click();
   await page
     .getByLabel("Message to the rate-limits supervisor")

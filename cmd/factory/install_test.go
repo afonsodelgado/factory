@@ -80,13 +80,13 @@ func (f *fakeMachine) run(_ context.Context, name string, args ...string) ([]byt
 		return []byte(f.status), nil
 	case "tailscale serve status --json":
 		return []byte(f.serveConfig()), nil
-	case "tailscale " + strings.Join(node.ServeArgs(f.port), " "):
+	case "tailscale " + strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " "):
 		if f.serveFail > 0 {
 			f.serveFail--
 			return nil, errors.New("exit status 1: Access denied: serve config denied")
 		}
 		f.ours = true
-	case "tailscale " + strings.Join(node.UnserveArgs, " "):
+	case "tailscale " + strings.Join(node.UnserveArgs(node.HomeHTTPS), " "):
 		f.ours = false
 	case "launchctl print gui/" + strconv.Itoa(os.Getuid()) + "/" + node.ServiceLabel, "systemctl --user show " + node.ServiceLabel + " --property=LoadState,ActiveState,MainPID":
 		switch {
@@ -230,7 +230,7 @@ func TestNodeInstallStartsAPrivateServiceBeforeServeAndShowsOnlyTheAppURL(t *tes
 		t.Fatalf("install: %v\n%s", err, out)
 	}
 	want := append([]string{"tailscale status --json", "tailscale serve status --json"}, loadSequence(os.Getenv("HOME"))...)
-	want = append(want, "tailscale "+strings.Join(node.ServeArgs(f.port), " "))
+	want = append(want, "tailscale "+strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " "))
 	if got := f.take(); !slices.Equal(got, want) {
 		t.Fatalf("install ran\n  %s\nwant\n  %s\nso Serve is configured only after the service answers", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
@@ -261,7 +261,7 @@ func TestNodeInstallStartsAPrivateServiceBeforeServeAndShowsOnlyTheAppURL(t *tes
 	if err := setup.install(context.Background()); err != nil {
 		t.Fatalf("reinstall: %v", err)
 	}
-	if got := f.take(); slices.Contains(got, "tailscale "+strings.Join(node.ServeArgs(f.port), " ")) || strings.Contains(out.String(), "█") {
+	if got := f.take(); slices.Contains(got, "tailscale "+strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " ")) || strings.Contains(out.String(), "█") {
 		t.Errorf("a second install ran %v and printed\n%s\nwant the existing mapping adopted and no second QR", got, out)
 	}
 }
@@ -349,7 +349,7 @@ func TestUninstallRemovesOnlyItsUnitAndMappingAndStatusStillAnswers(t *testing.T
 			serveChanges = append(serveChanges, command)
 		}
 	}
-	if want := []string{"tailscale " + strings.Join(node.UnserveArgs, " ")}; !slices.Equal(serveChanges, want) {
+	if want := []string{"tailscale " + strings.Join(node.UnserveArgs(node.HomeHTTPS), " ")}; !slices.Equal(serveChanges, want) {
 		t.Errorf("uninstall changed Serve with %v; want only %v", serveChanges, want)
 	}
 	if !strings.Contains(f.serveConfig(), "/grafana") {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,11 +43,21 @@ type Recipe struct {
 	Startup      time.Duration
 	Seed         string
 	SignIn       string
+	Env          []string
+	portable     bool
+	webPort      int
+	apiPort      int
 }
+
+const (
+	WebPortEnv      = "FACTORY_WEB_PORT"
+	APIPortEnv      = "FACTORY_API_PORT"
+	PublicOriginEnv = "FACTORY_PUBLIC_ORIGIN"
+)
 
 func RecipeOf(profile state.Profile, worktree string) (Recipe, error) {
 	qa := profile.QA
-	r := Recipe{Dir: worktree, Start: qa.Start, Health: qa.Health, HealthStatus: qa.HealthStatus, Startup: defaultStartup, Seed: qa.Seed, SignIn: qa.SignIn}
+	r := Recipe{Dir: worktree, URL: qa.URL, Start: qa.Start, Health: qa.Health, HealthStatus: qa.HealthStatus, Startup: defaultStartup, Seed: qa.Seed, SignIn: qa.SignIn, portable: qa.URL != "", webPort: qa.WebPort, apiPort: qa.APIPort}
 	if r.HealthStatus == 0 {
 		r.HealthStatus = http.StatusOK
 	}
@@ -63,10 +74,15 @@ func RecipeOf(profile state.Profile, worktree string) (Recipe, error) {
 	if r.Health == "" {
 		undeclared("health", "the URL that answers once the stack is ready")
 	}
-	if qa.WebPort == 0 {
-		undeclared("web_port", "the port the app's web server listens on")
+	if !r.portable && qa.WebPort == 0 {
+		undeclared("web_port", "the port the app's web server listens on, or qa.url with ${"+WebPortEnv+"} so the node picks a free one")
 	}
-	r.URL = "http://localhost:" + strconv.Itoa(qa.WebPort)
+	if !r.portable {
+		r.URL = "http://localhost:" + strconv.Itoa(qa.WebPort)
+	}
+	if _, err := upstreamOf(expand(r.URL, map[string]string{WebPortEnv: "1", APIPortEnv: "1"})); err != nil {
+		problems = append(problems, err)
+	}
 	if qa.StartupTimeout != "" {
 		startup, err := time.ParseDuration(qa.StartupTimeout)
 		if err != nil || startup <= 0 {
@@ -77,13 +93,53 @@ func RecipeOf(profile state.Profile, worktree string) (Recipe, error) {
 	return r, errors.Join(problems...)
 }
 
+func (r Recipe) Bind(publicOrigin string) (Recipe, error) {
+	values := map[string]string{WebPortEnv: strconv.Itoa(r.webPort), APIPortEnv: strconv.Itoa(r.apiPort)}
+	if r.portable {
+		for _, name := range []string{WebPortEnv, APIPortEnv} {
+			port, err := FreePort()
+			if err != nil {
+				return r, failed(host.FailPorts, fmt.Errorf("no free loopback port for %s: %w", name, err))
+			}
+			values[name] = strconv.Itoa(port)
+		}
+	}
+	r.URL, r.Health = expand(r.URL, values), expand(r.Health, values)
+	upstream, err := upstreamOf(r.URL)
+	if err != nil {
+		return r, failed(host.FailRecipe, err)
+	}
+	values[PublicOriginEnv] = cmp.Or(publicOrigin, upstream.String())
+	for _, name := range []string{WebPortEnv, APIPortEnv, PublicOriginEnv} {
+		r.Env = append(r.Env, name+"="+values[name])
+	}
+	return r, nil
+}
+
+func expand(s string, values map[string]string) string {
+	return os.Expand(s, func(name string) string {
+		if value, ok := values[name]; ok {
+			return value
+		}
+		return "${" + name + "}"
+	})
+}
+
+func upstreamOf(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	loopback := err == nil && slices.Contains([]string{"localhost", "127.0.0.1", "::1"}, u.Hostname())
+	if !loopback || u.Scheme != "http" || u.Port() == "" {
+		return nil, fmt.Errorf("qa.url %q must be an http URL on localhost with a port, such as http://localhost:${%s}/", raw, WebPortEnv)
+	}
+	return &url.URL{Scheme: u.Scheme, Host: u.Host}, nil
+}
+
 type BrowserJob struct {
 	Dir       string
 	MCPConfig string
 	Evidence  string
 	Chrome    *review.Headless
-	stack     *exec.Cmd
-	stackProc *process
+	stack     *stackProcess
 	started   func(*BrowserJob)
 }
 
@@ -118,16 +174,9 @@ func (j *BrowserJob) prepare(ctx context.Context, r Recipe, chrome string, noSan
 	if _, err := exec.LookPath("npx"); err != nil {
 		return failed(host.FailTools, errors.New("npx is not installed on this node, so Chrome DevTools MCP cannot run; install Node.js"))
 	}
-	if err := j.startStack(r); err != nil {
-		return failed(host.FailStack, err)
-	}
-	ready, cancel := context.WithTimeout(ctx, r.Startup)
-	defer cancel()
-	if err := host.WaitFor(ready, r.Health, func(status int) bool { return status == r.HealthStatus }); err != nil {
-		return failed(host.FailHealth, fmt.Errorf("the stack did not answer %s with %d within %s: %w", r.Health, r.HealthStatus, r.Startup, err))
-	}
-	if _, err := step(ctx, "qa.seed", r.Seed, r.Dir); err != nil {
-		return failed(host.FailSeed, err)
+	if _, err := bringUp(ctx, r, func(p *stackProcess) { j.stack = p; j.journal() }); err != nil {
+		j.stack = nil
+		return err
 	}
 	cookies, err := signIn(ctx, r)
 	if err != nil {
@@ -153,26 +202,104 @@ func (j *BrowserJob) prepare(ctx context.Context, r Recipe, chrome string, noSan
 	return os.WriteFile(j.MCPConfig, MCPConfig(j.Chrome.URL), 0o600)
 }
 
-func (j *BrowserJob) startStack(r Recipe) error {
-	if r.Start == "" {
-		return nil
-	}
-	j.stack = shell(context.Background(), r.Start, r.Dir)
-	if err := j.stack.Start(); err != nil {
-		return fmt.Errorf("qa.start did not run: %w", err)
-	}
-	j.stackProc = processOf(j.stack.Process.Pid)
-	j.journal()
-	return nil
+type stackProcess struct {
+	cmd    *exec.Cmd
+	proc   *process
+	exited chan struct{}
+	err    error
 }
 
-func step(ctx context.Context, name, command, dir string) ([]byte, error) {
+func bringUp(ctx context.Context, r Recipe, started func(*stackProcess)) (*stackProcess, error) {
+	p, err := startProcess(r)
+	if err != nil {
+		return nil, failed(host.FailStack, err)
+	}
+	if p != nil {
+		started(p)
+	}
+	ready, cancel := context.WithTimeout(ctx, r.Startup)
+	defer cancel()
+	healthy := p.whileRunning(ready, func(c context.Context) error {
+		return host.WaitFor(c, r.Health, func(status int) bool { return status == r.HealthStatus })
+	})
+	switch {
+	case p.crashed():
+		p.stop()
+		return nil, failed(host.FailStack, fmt.Errorf("qa.start failed before %s answered: %w", r.Health, p.err))
+	case healthy != nil:
+		p.stop()
+		return nil, failed(host.FailHealth, fmt.Errorf("the stack did not answer %s with %d within %s: %w", r.Health, r.HealthStatus, r.Startup, healthy))
+	}
+	if _, err := step(ctx, "qa.seed", r.Seed, r); err != nil {
+		p.stop()
+		return nil, failed(host.FailSeed, err)
+	}
+	return p, nil
+}
+
+func startProcess(r Recipe) (*stackProcess, error) {
+	if r.Start == "" {
+		return nil, nil
+	}
+	p := &stackProcess{cmd: r.shell(context.Background(), r.Start), exited: make(chan struct{})}
+	if err := p.cmd.Start(); err != nil {
+		return nil, fmt.Errorf("qa.start did not run: %w", err)
+	}
+	p.proc = processOf(p.cmd.Process.Pid)
+	go func() {
+		p.err = p.cmd.Wait()
+		close(p.exited)
+	}()
+	return p, nil
+}
+
+func (p *stackProcess) whileRunning(ctx context.Context, work func(context.Context) error) error {
+	if p == nil {
+		return work(ctx)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-p.exited:
+			if p.err != nil {
+				cancel()
+			}
+		case <-ctx.Done():
+		}
+	}()
+	return work(ctx)
+}
+
+func (p *stackProcess) crashed() bool {
+	if p == nil {
+		return false
+	}
+	select {
+	case <-p.exited:
+		return p.err != nil
+	default:
+		return false
+	}
+}
+
+func (p *stackProcess) stop() {
+	if p == nil {
+		return
+	}
+	if p.proc == nil || p.proc.ours() {
+		killGroup(p.cmd.Process.Pid)
+	}
+	<-p.exited
+}
+
+func step(ctx context.Context, name, command string, r Recipe) ([]byte, error) {
 	if command == state.NotNeeded {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, stepWait)
 	defer cancel()
-	cmd := shell(ctx, command, dir)
+	cmd := r.shell(ctx, command)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -182,9 +309,10 @@ func step(ctx context.Context, name, command, dir string) ([]byte, error) {
 	return out, nil
 }
 
-func shell(ctx context.Context, command, dir string) *exec.Cmd {
+func (r Recipe) shell(ctx context.Context, command string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = dir
+	cmd.Dir = r.Dir
+	cmd.Env = append(os.Environ(), r.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = time.Second
@@ -194,7 +322,7 @@ func shell(ctx context.Context, command, dir string) *exec.Cmd {
 func killGroup(pgid int) error { return syscall.Kill(-pgid, syscall.SIGKILL) }
 
 func signIn(ctx context.Context, r Recipe) ([]review.Cookie, error) {
-	out, err := step(ctx, "qa.sign_in", r.SignIn, r.Dir)
+	out, err := step(ctx, "qa.sign_in", r.SignIn, r)
 	if err != nil {
 		return nil, fmt.Errorf("%w. qa.sign_in must finish unattended: nobody can answer a captcha, a 2FA prompt or a password prompt on a node", err)
 	}
@@ -222,10 +350,7 @@ func (j *BrowserJob) Close() error {
 	if j.Chrome != nil {
 		errs = append(errs, j.Chrome.Close())
 	}
-	if j.stack != nil && j.stack.Process != nil {
-		killGroup(j.stack.Process.Pid)
-		j.stack.Wait()
-	}
+	j.stack.stop()
 	return errors.Join(append(errs, os.RemoveAll(j.Dir))...)
 }
 
@@ -265,6 +390,9 @@ func (b *Browsers) Prepare(ctx context.Context, lease host.BrowserLease, profile
 	if err != nil {
 		return "", failed(host.FailRecipe, err)
 	}
+	if recipe, err = recipe.Bind(""); err != nil {
+		return "", err
+	}
 	record := jobRecord{BrowserLease: lease}
 	if err := b.journal(record); err != nil {
 		return "", err
@@ -288,7 +416,10 @@ func (b *Browsers) Prepare(ctx context.Context, lease host.BrowserLease, profile
 }
 
 func (r jobRecord) of(j *BrowserJob) jobRecord {
-	r.Dir, r.Stack = j.Dir, j.stackProc
+	r.Dir = j.Dir
+	if j.stack != nil {
+		r.Stack = j.stack.proc
+	}
 	if j.Chrome != nil {
 		r.Chrome = processOf(j.Chrome.PID)
 	}

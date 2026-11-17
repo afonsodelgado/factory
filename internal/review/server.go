@@ -225,7 +225,7 @@ func (s *Server) servePage(tag func(f Factory, rel, revision string) []byte) htt
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Factory-Revision", revision)
-		w.Write(inject(page, tag(f, filepath.ToSlash(rel), revision)))
+		w.Write(Inject(page, tag(f, filepath.ToSlash(rel), revision)))
 	}
 }
 
@@ -263,7 +263,7 @@ func (s *Server) scriptTag(f Factory, rel, revision string) []byte {
 		html.EscapeString(base+"/events"), html.EscapeString(base+"/"+url.PathEscape(f.Key)+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), revision)
 }
 
-func inject(page, tag []byte) []byte {
+func Inject(page, tag []byte) []byte {
 	at := bytes.LastIndex(bytes.ToLower(page), []byte("</body>"))
 	if at < 0 {
 		return append(page, tag...)

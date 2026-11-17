@@ -177,9 +177,26 @@ func repoChecks(o Options) []Check {
 			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": the repo config does not load, so factories there refuse to start", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		} else if err := state.CheckProfileKeys(repo); err != nil {
 			checks = append(checks, Check{Name: "repo config", Mark: Warn, Detail: tilde(repo) + ": the repo config sets a value the factory ignores there", Lines: []string{err.Error()}, Fix: "edit " + tilde(state.ProfilePath(repo))})
+		} else if problems := stackProblems(repo); len(problems) > 0 {
+			checks = append(checks, Check{Name: "repo stack", Mark: Warn, Detail: tilde(repo) + ": browser QA and walkthroughs cannot start its stack unattended on any node", Lines: problems, Fix: "edit " + tilde(state.ProfilePath(repo))})
 		}
 	}
 	return checks
+}
+
+func stackProblems(repo string) []string {
+	profile, err := state.ReadProfile(repo)
+	if err != nil || !profile.BrowserQA() {
+		return nil
+	}
+	var problems []string
+	if _, err := node.RecipeOf(profile, repo); err != nil {
+		problems = strings.Split(err.Error(), "\n")
+	}
+	if profile.QA.URL == "" {
+		problems = append(problems, "qa.url is not declared, so every stack binds the fixed qa.web_port and two walkthroughs on one node collide; declare qa.url with ${"+node.WebPortEnv+"} and start the app on that port")
+	}
+	return problems
 }
 
 func profileProblem(cfg *state.Config, repo string) error {

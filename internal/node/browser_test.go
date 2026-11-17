@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -67,6 +68,27 @@ func TestABrowserJobRunsItsRecipeInOrderAndNamesWhatIsMissing(t *testing.T) {
 		steps, _ := os.ReadFile(filepath.Join(dir, "steps"))
 		if job != nil || err == nil || !strings.Contains(err.Error(), "qa.sign_in") || string(steps) != "seed\nsign_in\n" {
 			t.Fatalf("the job gave %v after %q; want seed, then sign-in, then a failure naming qa.sign_in", err, steps)
+		}
+	})
+
+	t.Run("a start command that returns once the stack runs in the background is not a failed start", func(t *testing.T) {
+		dir, bin := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		var asked atomic.Int32
+		later := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if asked.Add(1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}))
+		t.Cleanup(later.Close)
+		r := recipe(dir)
+		r.Start, r.Health = "true", later.URL
+		_, err := (&Browsers{}).StartJob(context.Background(), r, "", nil)
+		if steps, _ := os.ReadFile(filepath.Join(dir, "steps")); string(steps) != "seed\nsign_in\n" {
+			t.Fatalf("a qa.start that exits 0 stopped the job with %v before seeding; want health, seed and sign-in to run", err)
 		}
 	})
 }

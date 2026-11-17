@@ -14,7 +14,7 @@ In `qa.mode: browser`, the factory node starts you in a pane of your own with a 
 
 ## Stack mode
 
-When the prompt says stack mode, follow the skill's **Stack mode** section instead of testing: write `review/stack.sh` and `review/stack.json`, check them, stop what you started, and return. `data.findings` stays zero.
+When the prompt says stack mode, follow the skill's **Stack mode** section: the node starts that stack itself, so start nothing and return. `data.findings` stays zero.
 
 ## Re-verification rounds
 

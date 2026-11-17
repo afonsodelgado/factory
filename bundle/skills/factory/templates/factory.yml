@@ -14,10 +14,11 @@ design:
 qa:
   mode: browser
   notes: ""
+  url: http://localhost:${FACTORY_WEB_PORT}/
   api_port: 3000
   web_port: 3001
-  start: npm run dev
-  health: http://localhost:3000/api/health
+  start: PORT=$FACTORY_WEB_PORT API_PORT=$FACTORY_API_PORT npm run dev
+  health: http://localhost:${FACTORY_API_PORT}/api/health
   health_status: 200
   startup_timeout: 2m
   seed: ""

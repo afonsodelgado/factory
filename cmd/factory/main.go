@@ -140,8 +140,8 @@ commands:
               queue any page, such as the running app, for review and print
               its URL to open in your browser
   review stack [--for design|walkthrough]
-              run the stack that factory-qa wrote to review/stack.json in a
-              window of its own for the walkthrough
+              start the stack from the repo config on free ports, publish it
+              on its own tailnet HTTPS port and print its URL
   review link <url>
               print a link to open in your browser; a connected laptop hub
               opens it through a tunnel

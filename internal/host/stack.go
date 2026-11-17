@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,63 +11,147 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/review"
-	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/remote"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const StackRole = "stack"
+const (
+	StackStarting = "starting"
+	StackReady    = "ready"
+	StackFailed   = "failed"
 
-type Stack struct {
-	URL     string          `json:"url"`
-	Script  string          `json:"script"`
-	Health  string          `json:"health,omitempty"`
-	Cookies []review.Cookie `json:"cookies,omitempty"`
+	FailPorts       = "port_exhaustion"
+	FailServe       = "serve_mapping"
+	FailPhoneSignIn = "phone_sign_in_unsupported"
+)
+
+type StackLease struct {
+	Factory  string `json:"factory"`
+	Route    string `json:"route"`
+	Label    string `json:"label"`
+	Repo     string `json:"repo"`
+	Slug     string `json:"slug"`
+	Worktree string `json:"worktree"`
+	Page     string `json:"page"`
 }
 
-func StackPath(factoryDir string) string {
+type StackStatus struct {
+	Factory string    `json:"factory"`
+	State   string    `json:"state"`
+	At      time.Time `json:"at"`
+	Origin  string    `json:"origin,omitempty"`
+	URL     string    `json:"url,omitempty"`
+	Href    string    `json:"href,omitempty"`
+	Failure string    `json:"failure,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
+}
+
+type Stacks interface {
+	Start(ctx context.Context, lease StackLease, profile state.Profile) StackStatus
+	Stop(key string)
+	Status(key string) (StackStatus, bool)
+	Keys() []string
+	Recover() []StackLease
+}
+
+func LegacyStackPath(factoryDir string) string {
 	return filepath.Join(factoryDir, "review", "stack.json")
 }
 
-func ReadStack(factoryDir string) (Stack, error) {
-	path := StackPath(factoryDir)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Stack{}, fmt.Errorf("no stack to start: %w; factory-qa writes it in stack mode", err)
+func stackJob(key string) string { return "stack " + key }
+
+func (m *Runtime) startStack(it Item, page string) (ReviewReply, error) {
+	f := it.Factory
+	switch {
+	case m.Stacks == nil || m.Jobs == nil:
+		return ReviewReply{}, errors.New("walkthrough stacks run only inside factory node run")
+	case f.Worktree == "":
+		return ReviewReply{}, errors.New("no factory owns this session")
+	case stackEnded(it):
+		return ReviewReply{}, fmt.Errorf("%s is paused, done, archived or has no supervisor pane, so its walkthrough would stop at once; wake it first", f.Label())
 	}
-	var s Stack
-	if err := json.Unmarshal(data, &s); err != nil {
-		return Stack{}, fmt.Errorf("%s: %w", path, err)
-	}
-	if s.URL == "" || s.Script == "" {
-		return Stack{}, fmt.Errorf("%s needs url and script", path)
-	}
-	if _, err := os.Stat(s.Script); err != nil {
-		return Stack{}, fmt.Errorf("the stack script: %w", err)
-	}
-	return s, nil
+	_, profile := m.repoConfig(f.Repo)
+	os.Remove(LegacyStackPath(f.Dir))
+	m.stopStack(f.Key())
+	lease := StackLease{Factory: f.Key(), Route: ReviewKey(f), Label: f.Label(), Repo: f.Repo, Slug: f.Slug, Worktree: f.Worktree, Page: page}
+	stacks := m.Stacks
+	m.Jobs.Start(stackJob(lease.Factory), func(ctx context.Context) Message {
+		data, _ := json.Marshal(stacks.Start(ctx, lease, profile))
+		return Message{T: "stack", Data: data}
+	})
+	return ReviewReply{Stack: &StackStatus{Factory: lease.Factory, State: StackStarting, At: m.Now()}}, nil
 }
 
-func (m *Runtime) RunStack(f factory.Factory, s Stack) error {
-	if err := m.Engine.KillStages(f.Repo, f.Slug, StackRole); err != nil {
-		return err
+func (m *Runtime) stackStatus(it Item) (ReviewReply, error) {
+	status, ok := m.walkthrough(it.Factory.Key())
+	if !ok {
+		return ReviewReply{}, errors.New("no walkthrough stack runs for " + it.Factory.Label() + "; start one with factory review stack")
 	}
-	pane, err := m.TM.NewWindow(tmux.Window{Session: m.Session, Name: "s-" + f.Slug, Dir: f.Worktree, Command: "sh " + factory.ShellQuote(s.Script)})
-	if err != nil {
-		return err
+	return ReviewReply{Stack: &status}, nil
+}
+
+func (m *Runtime) walkthrough(key string) (StackStatus, bool) {
+	if m.Stacks == nil {
+		return StackStatus{}, false
 	}
-	for _, o := range [][2]string{{"@factory_ui", StackRole}, {"@factory_repo", f.Repo}, {"@factory_stage_of", f.Slug}, {"@factory_stage", StackRole}} {
-		if err := m.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
-			return err
+	return m.Stacks.Status(key)
+}
+
+func (m *Runtime) StackReady(s StackStatus) {
+	it, found := m.snap.Find(s.Factory)
+	if !found || stackEnded(it) {
+		m.stopStack(s.Factory)
+		return
+	}
+	switch s.State {
+	case StackFailed:
+		m.note(it.Factory, "the walkthrough stack failed at "+s.Failure+": "+s.Reason)
+	case StackReady:
+		m.note(it.Factory, "the walkthrough runs at "+s.URL)
+		if origin := m.Config.NodeOrigin(); origin != "" {
+			m.QueueOpen(it, remote.Open{URL: origin + s.Href})
 		}
 	}
-	return nil
 }
 
-func (s Stack) HealthURL() string {
-	if s.Health != "" {
-		return s.Health
+func (m *Runtime) stopStack(key string) {
+	if m.Stacks == nil || m.Jobs == nil {
+		return
 	}
-	return s.URL
+	m.Jobs.Cancel(stackJob(key))
+	m.Stacks.Stop(key)
+}
+
+func (m *Runtime) ReleaseFinishedStacks() {
+	if m.Stacks == nil {
+		return
+	}
+	for _, key := range m.Stacks.Keys() {
+		if it, found := m.snap.Find(key); !found || stackEnded(it) {
+			m.stopStack(key)
+		}
+	}
+}
+
+func (m *Runtime) recoverStacks() {
+	if m.Stacks == nil {
+		return
+	}
+	for _, lease := range m.Stacks.Recover() {
+		m.note(factory.Factory{Repo: lease.Repo, Slug: lease.Slug}, "the node restarted, so the walkthrough stack stopped and its tailnet port closed; run factory review stack again")
+	}
+}
+
+func stackEnded(it Item) bool { return stagesEnded(it) || Paused(it.Factory) }
+
+func stackItem(s StackStatus) AttentionItem {
+	return AttentionItem{
+		ID:    "stack",
+		Kind:  "stack",
+		Title: "the walkthrough stack failed at " + s.Failure,
+		Body:  s.Reason,
+		Since: s.At,
+	}
 }
 
 func WaitHealthy(url string, limit time.Duration) error {

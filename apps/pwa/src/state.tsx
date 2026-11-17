@@ -550,4 +550,7 @@ const placed =
     pages: f.pages.map((page) =>
       page.href ? { ...page, href: node.origin + page.href } : page,
     ),
+    walkthrough: f.walkthrough?.href
+      ? { ...f.walkthrough, href: node.origin + f.walkthrough.href }
+      : f.walkthrough,
   });

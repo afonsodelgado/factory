@@ -290,6 +290,7 @@ type LocalFactory struct {
 	Items       []LocalItem  `json:"items"`
 	Resolved    []Resolution `json:"resolved,omitempty"`
 	Pages       []LocalPage  `json:"pages"`
+	Walkthrough *StackStatus `json:"walkthrough,omitempty"`
 	Message     Eligibility  `json:"message"`
 	CanPause    bool         `json:"can_pause"`
 	CanWake     bool         `json:"can_wake"`
@@ -313,7 +314,7 @@ func localPage(f review.Factory, row ArtifactRow) LocalPage {
 	case static:
 		page.Href = href
 	case strings.HasPrefix(row.URL, "http"):
-		page.Unavailable = "It runs on a dev server, so it opens only on the computer."
+		page.Unavailable = "It runs on the app's dev server; the walkthrough link opens the app once factory review stack has started it."
 	default:
 		page.Unavailable = "It is not an HTML page in this factory's folder."
 	}
@@ -391,6 +392,12 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	for _, item := range AttentionItems(it, m.snap.At, m.threadCounter()) {
 		lf.Items = append(lf.Items, m.localItem(it, item, target))
 	}
+	if s, ok := m.walkthrough(f.Key()); ok {
+		lf.Walkthrough = &s
+		if s.State == StackFailed {
+			lf.Items = append(lf.Items, m.localItem(it, stackItem(s), target))
+		}
+	}
 	lf.Resolved = m.resolutions(f)
 	return lf
 }
@@ -414,6 +421,9 @@ func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalIte
 	li := LocalItem{AttentionItem: item, Send: Eligible(target, "the answer")}
 	if item.Kind == "handoff" && !li.Send.Ready {
 		li.Send = Eligibility{Ready: true, Queues: true, Reason: "No supervisor is running, so this wakes a fresh one and sends it once that one is at its prompt."}
+	}
+	if item.Kind == "stack" {
+		li.Send = Eligibility{Reason: "Fix what it names, then run factory review stack again."}
 	}
 	if item.Kind == "permission" {
 		li.ID = PermissionID(item.Role)
