@@ -92,7 +92,7 @@ func apply(s *state.State, e Event) error {
 			return errors.New("missing command recipe")
 		}
 		if s.Recipe.Digest != e.Recipe.Digest {
-			invalidate(s)
+			invalidate(s, e.At)
 		}
 		s.Recipe = *e.Recipe
 		if len(s.Recipe.Unresolved) > 0 {
@@ -108,12 +108,13 @@ func apply(s *state.State, e Event) error {
 		}
 	case "observe":
 		wasDone := s.Done()
+		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
 		changed := !SameHeads(s.Stack, e.Stack)
 		if s.Workflow.ActiveRun != "" && !SameHeads(s.Stack, e.Stack) {
 			return errors.New("cannot replace heads while a run is active")
 		}
 		if !SameHeads(s.Stack, e.Stack) {
-			invalidate(s)
+			invalidate(s, e.At)
 			s.Stack = e.Stack
 		}
 		s.PRs, s.Evidence.PRs = e.PRs, e.Observations
@@ -127,7 +128,7 @@ func apply(s *state.State, e Event) error {
 		}
 		if len(Readiness(*s)) == 0 {
 			offerHandoff(s, e)
-		} else if wasDone && changed {
+		} else if changed && (wasDone || offered) {
 			return dispatch(s, e, "pr")
 		}
 	case "comments_preference":
@@ -207,13 +208,19 @@ func result(s *state.State, e Event) error {
 		}
 		i := slices.IndexFunc(s.Findings, func(old state.Finding) bool { return old.ID == f.ID })
 		if i < 0 {
+			if f.Stage == "" {
+				f.Stage = stage
+			}
 			s.Findings = append(s.Findings, f)
 		} else {
+			if f.Stage == "" {
+				f.Stage = s.Findings[i].Stage
+			}
 			s.Findings[i] = f
 		}
 	}
 	if !SameHeads(s.Stack, r.OutputHeads) {
-		invalidate(s)
+		invalidate(s, e.At)
 		s.Stack = r.OutputHeads
 	}
 	run.Outcome = r.Status
@@ -361,7 +368,7 @@ func correct(s *state.State, e Event, c state.Correction) error {
 	s.Loops.Used[c.Loop]++
 	s.Loops.Active, s.Workflow.ReturnTo = c.Loop, c.ReturnTo
 	s.Workflow.Correction = nil
-	invalidate(s)
+	invalidate(s, e.At)
 	return dispatch(s, e, c.Stage)
 }
 
@@ -379,7 +386,7 @@ func answer(s *state.State, e Event) error {
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
 		if e.Kind == "changes" {
 			s.Workflow.Gate = ""
-			invalidate(s)
+			invalidate(s, e.At)
 			if stage == "design" {
 				return correct(s, e, state.Correction{Loop: DesignLoop, Stage: "design", ReturnTo: "plan"})
 			}
@@ -392,7 +399,10 @@ func answer(s *state.State, e Event) error {
 		}
 		last := s.Workflow.Runs[len(s.Workflow.Runs)-1]
 		if last.Retries >= s.Limits.StageRetries {
-			return errors.New("stage retry allowance exhausted")
+			if e.Increment <= 0 || e.Increment > int(^uint(0)>>1)-s.Limits.StageRetries {
+				return errors.New("stage retries are exhausted: retry needs the developer's positive increment")
+			}
+			s.Limits.StageRetries += e.Increment
 		}
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
 		if s.Workflow.ActiveRun != "" {
@@ -448,7 +458,7 @@ func answer(s *state.State, e Event) error {
 				return errors.New("stale or unapproved completion")
 			}
 			s.Evidence.PRs = e.Observations
-			if len(e.Observations) == 0 || slices.ContainsFunc(e.Observations, func(v state.PRVerification) bool { return v.At.Before(e.At.Time) }) {
+			if len(e.Observations) == 0 || slices.ContainsFunc(e.Observations, func(v state.PRVerification) bool { return v.At.Before(a.CreatedAt.Time) }) {
 				return errors.New("completion needs refreshed PR evidence")
 			}
 			if reasons := Readiness(*s); len(reasons) > 0 {
@@ -462,7 +472,7 @@ func answer(s *state.State, e Event) error {
 			return nil
 		}
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
-		invalidate(s)
+		invalidate(s, e.At)
 		return dispatch(s, e, "implement")
 	}
 	if a.Kind != "gate" || e.Kind != "approval" {
@@ -491,7 +501,7 @@ func answer(s *state.State, e Event) error {
 	return errors.New("unknown approval gate")
 }
 
-func invalidate(s *state.State) {
+func invalidate(s *state.State, at state.Time) {
 	s.Evidence.Local, s.Evidence.Review, s.Evidence.QA = state.Verification{}, state.Verification{}, state.Verification{}
 	s.Evidence.PRs, s.Evidence.Comments = nil, state.Verification{}
 	s.Confirmation = nil
@@ -500,7 +510,7 @@ func invalidate(s *state.State) {
 	s.Stages["handoff"] = st
 	for i := range s.Attention {
 		if s.Attention[i].Kind == "handoff" && s.Attention[i].Open() {
-			s.Attention[i].ResolvedAt = s.UpdatedAt
+			s.Attention[i].ResolvedAt = at
 		}
 	}
 }

@@ -53,7 +53,7 @@ func TestNestedQACorrectionsReturnThroughReviewWithoutChargingQATwice(t *testing
 		t.Fatal(s)
 	}
 	s = complete(t, s)
-	review := state.Finding{ID: "review-bug", Stage: "review", Severity: "major", Disposition: "open", Description: "missing regression"}
+	review := state.Finding{ID: "review-bug", Severity: "major", Disposition: "open", Description: "missing regression"}
 	s = complete(t, s, review)
 	if s.Stage != "implement" || s.Loops.Used[QALoop] != 1 || s.Loops.Used[ReviewLoop] != 1 {
 		t.Fatal(s)
@@ -113,6 +113,7 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 	}
 	offerHandoff(&s, eventFor(s, "observe"))
 	e := eventFor(s, "handoff")
+	e.At = state.Time{Time: time.Unix(300, 0)}
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = s.Attention[0].ID, s.Attention[0].Revision, "done", "receipt"
 	e.Approved = true
 	e.Stack = []state.StackBranch{{Branch: "feature", Parent: "main", Head: "changed", Base: "b"}}
@@ -126,6 +127,11 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 		t.Fatal("unknown CI accepted")
 	}
 	e.Observations[0].CI = "pass"
+	e.Observations[0].At = state.Time{Time: time.Unix(50, 0)}
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("evidence older than the handoff offer accepted")
+	}
+	e.Observations[0].At = state.Time{Time: time.Unix(200, 0)}
 	s = step(t, s, e)
 	if !s.Done() || s.Confirmation.Heads[0].Head != "a" {
 		t.Fatal("confirmation missing")
@@ -154,6 +160,14 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 	s = step(t, s, e)
 	if s.Done() || s.Confirmation != nil || s.Stage != "pr" {
 		t.Fatal("changed completed factory did not restart verification")
+	}
+	offered := workflowState()
+	offerHandoff(&offered, eventFor(offered, "observe"))
+	e = eventFor(offered, "observe")
+	e.Stack = []state.StackBranch{{Branch: "feature", Parent: "main", Head: "new", Base: "b"}}
+	offered = step(t, offered, e)
+	if offered.Stage != "pr" || offered.Workflow.ActiveRun == "" || len(offered.OpenAttention()) != 0 {
+		t.Fatal("changed heads under an unconfirmed handoff stranded the factory", offered.Stage, offered.OpenAttention())
 	}
 	encoded, err := json.Marshal(s)
 	var persisted map[string]json.RawMessage
@@ -206,6 +220,32 @@ func TestInterviewAnswersDoNotConsumeTransportRetriesAndDesignRemainsConditional
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = a.ID, a.Revision, "old approval", "stale-receipt", true
 	if _, err := Next(s, e); err == nil {
 		t.Fatal("old design approval accepted")
+	}
+}
+
+func TestExhaustedRetriesResumeOnlyWithTheDevelopersIncrement(t *testing.T) {
+	s := workflowState()
+	s.Limits.StageRetries = 0
+	if err := dispatch(&s, eventFor(s, "start"), "qa"); err != nil {
+		t.Fatal(err)
+	}
+	s.Workflow.Pending = nil
+	e := eventFor(s, "lost_run")
+	e.Receipt = "pane-gone"
+	s = step(t, s, e)
+	a := s.Attention[len(s.Attention)-1]
+	if a.Kind != "failure" || s.Workflow.ActiveRun == "" {
+		t.Fatal("exhausted lost run did not ask the developer", s.Attention)
+	}
+	e = eventFor(s, "retry")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "retry", "conversation:1"
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("retry past the allowance without an increment accepted")
+	}
+	e.Increment = 1
+	s = step(t, s, e)
+	if s.Limits.StageRetries != 1 || s.Stage != "qa" || s.Workflow.Pending == nil || s.Attention[len(s.Attention)-1].Open() {
+		t.Fatal("approved retry did not redispatch the stage", s.Limits, s.Workflow)
 	}
 }
 
