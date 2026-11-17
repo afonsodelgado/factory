@@ -155,6 +155,11 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 	if s.Done() || s.Confirmation != nil || s.Stage != "pr" {
 		t.Fatal("changed completed factory did not restart verification")
 	}
+	encoded, err := json.Marshal(s)
+	var persisted map[string]json.RawMessage
+	if err != nil || json.Unmarshal(encoded, &persisted) != nil || string(persisted["confirmation"]) != "null" {
+		t.Fatal("commit proposal must explicitly clear the saved confirmation", string(encoded), err)
+	}
 }
 
 func TestInterviewAnswersDoNotConsumeTransportRetriesAndDesignRemainsConditional(t *testing.T) {

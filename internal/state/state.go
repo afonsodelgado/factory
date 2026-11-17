@@ -28,7 +28,7 @@ type State struct {
 	Recipe           Recipe                  `json:"recipe"`
 	Findings         []Finding               `json:"findings"`
 	Evidence         Evidence                `json:"evidence"`
-	Confirmation     *Confirmation           `json:"confirmation,omitempty"`
+	Confirmation     *Confirmation           `json:"confirmation"`
 	ID               string                  `json:"id"`
 	Title            string                  `json:"title"`
 	Repo             string                  `json:"repo"`
