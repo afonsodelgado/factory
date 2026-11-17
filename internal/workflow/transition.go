@@ -98,7 +98,7 @@ func apply(s *state.State, e Event) error {
 		}
 		if s.Recipe.Digest != e.Recipe.Digest {
 			if !recipeChangeable(s) {
-				return errors.New("changed commands wait until no run or developer item is pending after implementation")
+				return errors.New("changed commands wait until no run is active and no developer item resumes a stage other than implementation")
 			}
 			invalidate(s, e.At)
 		}
@@ -362,8 +362,14 @@ func recipeChangeable(s *state.State) bool {
 		return true
 	}
 	running := s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil
-	resumesAStage := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind != "handoff" && a.Kind != "commands" })
-	return !running && !resumesAStage
+	resumesAnotherStage := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool {
+		return a.Kind != "handoff" && a.Kind != "commands" && !resumesImplementation(a)
+	})
+	return !running && !resumesAnotherStage
+}
+
+func resumesImplementation(a state.Attention) bool {
+	return (a.Kind == "failure" || a.Kind == "question") && a.StageKey == "implement"
 }
 
 func stranded(s *state.State) bool {

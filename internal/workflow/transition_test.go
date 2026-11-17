@@ -176,6 +176,21 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	if _, err := Next(retrying, recipe(retrying, "new-recipe")); err == nil {
 		t.Fatal("a changed recipe under a review failure item stranded the retried review")
 	}
+	implementing := workflowState()
+	if err := dispatch(&implementing, eventFor(implementing, "result"), "implement"); err != nil {
+		t.Fatal(err)
+	}
+	failed = eventFor(implementing, "result")
+	failed.Stack = implementing.Stack
+	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack}
+	broken := step(t, implementing, failed)
+	corrected := step(t, broken, recipe(broken, "new-recipe"))
+	item := corrected.OpenAttention()[0]
+	again := eventFor(corrected, "retry")
+	again.ItemID, again.ArtifactRevision, again.Answer, again.Receipt = item.ID, item.Revision, "retry", "conversation:1"
+	if retried := complete(t, step(t, corrected, again)); retried.Stage != "review" || retried.Evidence.Local.RecipeDigest != "new-recipe" {
+		t.Fatal("the retried implementation did not run on the corrected recipe", retried.Stage, retried.Evidence.Local.RecipeDigest)
+	}
 }
 
 func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
