@@ -6,11 +6,14 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +36,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/node/nodetest"
@@ -1513,4 +1518,313 @@ func TestABrowserCommentsOnAWalkthroughPageThroughItsTailnetPortWithoutATunnel(t
 		threads := store.Threads(review.App)
 		return len(threads) == 1 && threads[0].Messages[0].Text == "Make Export primary."
 	})
+}
+
+const (
+	appRemote  = "https://git.example/acme/app.git"
+	goneRemote = "https://git.example/acme/gone.git"
+)
+
+type gitFixture struct {
+	t        *testing.T
+	repo     string
+	worktree string
+	dir      string
+}
+
+func (g gitFixture) run(dir string, args ...string) string {
+	g.t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		g.t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func (g gitFixture) commit(dir, file string) {
+	g.t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(file+"\n"), 0o644); err != nil {
+		g.t.Fatal(err)
+	}
+	g.run(dir, "add", file)
+	g.run(dir, "commit", "-qm", file)
+}
+
+func newGitFixture(t *testing.T) gitFixture {
+	t.Helper()
+	root := t.TempDir()
+	bare := filepath.Join(root, "remote.git")
+	gitconfig := filepath.Join(root, "gitconfig")
+	config := fmt.Sprintf("[user]\n\tname = factory\n\temail = factory@example.com\n[init]\n\tdefaultBranch = main\n[url %q]\n\tinsteadOf = %s\n[url %q]\n\tinsteadOf = %s\n", bare, appRemote, filepath.Join(root, "missing.git"), goneRemote)
+	if err := os.WriteFile(gitconfig, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", root)
+	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+	g := gitFixture{t: t, repo: filepath.Join(root, "app")}
+	g.run(root, "init", "-q", "--bare", bare)
+	g.run(root, "init", "-q", g.repo)
+	g.commit(g.repo, "README.md")
+	g.run(g.repo, "remote", "add", "origin", appRemote)
+	g.run(g.repo, "push", "-q", "origin", "main")
+	g.worktree = filepath.Join(factory.WorktreesDir(g.repo), "csv")
+	g.run(g.repo, "worktree", "add", "-q", "-b", "worktree-csv", g.worktree)
+	g.dir = filepath.Join(g.worktree, ".claude", "factory", "csv")
+	return g
+}
+
+func writeFiles(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type movableRuntime struct {
+	movable    host.Movable
+	supervisor atomic.Value
+}
+
+func (r *movableRuntime) Call(_ context.Context, m host.Message) (host.Message, error) {
+	var value any = host.Local{Factories: []host.LocalFactory{}}
+	if m.T == "movable" || m.T == "checkpoint" {
+		answer := r.movable
+		if m.T == "checkpoint" {
+			answer.Waiting, _ = r.supervisor.Load().(string)
+		}
+		value = answer
+	}
+	data, _ := json.Marshal(value)
+	return host.Message{T: "done", Data: data}, nil
+}
+
+func cloneWithOwnCredentials(stateDir string) func(context.Context, string) (string, error) {
+	return func(ctx context.Context, url string) (string, error) { return gitclone.Ensure(ctx, stateDir, url) }
+}
+
+func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConversation(t *testing.T) {
+	g := newGitFixture(t)
+	g.run(g.worktree, "checkout", "-q", "-b", "csv-1")
+	g.commit(g.worktree, "export.go")
+	g.run(g.worktree, "checkout", "-q", "-b", "csv-2")
+	g.commit(g.worktree, "export_test.go")
+	op := uuid.NewString()
+	stateJSON := fmt.Sprintf(`{"id":"csv","branch":"worktree-csv","session_id":"old-session","prs":[{"number":11,"branch":"csv-1"},{"number":12,"branch":"csv-2"}],"stages":{"design":{"artifacts":[{"url":"design/variant-a.html"}]}},"checkpoint":{"operation":%q,"status":"ready"}}`, op)
+	factoryFiles := map[string]string{
+		"state.json":            stateJSON,
+		"brief.md":              "Export contacts as CSV.",
+		"design/variant-a.html": "<h1>Export</h1>",
+		"review/threads.json":   `[{"id":"t1","page":"design/variant-a.html","messages":[{"text":"Make Export primary."}]}]`,
+		"review/shots/t1.png":   "png",
+		"review/stack.json":     `{"cookies":[{"name":"session","value":"secret"}]}`,
+		".heartbeat":            "",
+	}
+	writeFiles(t, g.dir, factoryFiles)
+	writeFiles(t, filepath.Join(g.worktree, ".claude", "qa", "csv"), map[string]string{"qa-1/console.txt": "no errors", "qa-1/export.png": "png"})
+	writeFiles(t, g.repo, map[string]string{".factory/config.yml": "qa:\n  mode: terminal\n"})
+	writeFiles(t, os.Getenv("CLAUDE_CONFIG_DIR"), map[string]string{"projects/csv/old-session.jsonl": `{"role":"user"}`})
+
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	homelab.Nodes.Clone = cloneWithOwnCredentials(homelab.Dir)
+	incarnation := uuid.NewString()
+	runtime := &movableRuntime{movable: host.Movable{
+		Key: g.repo + ":csv", Incarnation: incarnation, ID: "csv", Slug: "csv", Repo: g.repo, Worktree: g.worktree, Dir: g.dir,
+		Evidence: filepath.Join(g.worktree, ".claude", "qa", "csv"), Branch: "worktree-csv",
+		PRs: []state.PR{{Number: 11, Branch: "csv-1"}, {Number: 12, Branch: "csv-2"}},
+	}}
+	runtime.supervisor.Store("waiting for the supervisor of csv to write checkpoint " + op)
+	macbook.Runtime.Behind(runtime)
+
+	waiting, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if _, err := macbook.Transfers.Stage(waiting, op, g.repo+":csv", "homelab"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("staging while the supervisor had not checkpointed answered %v; want it to wait", err)
+	}
+	runtime.supervisor.Store("")
+	transfer, err := macbook.Transfers.Stage(context.Background(), op, g.repo+":csv", "homelab")
+	if err != nil || transfer.Phase != node.PhaseStaged {
+		t.Fatalf("staging csv on homelab answered %+v, %v", transfer, err)
+	}
+
+	staged := node.StagedDir(homelab.Dir, incarnation)
+	var manifest node.Manifest
+	data, err := os.ReadFile(filepath.Join(staged, "manifest.json"))
+	if err != nil || json.Unmarshal(data, &manifest) != nil {
+		t.Fatalf("homelab has no staged manifest: %v", err)
+	}
+	var got []string
+	for _, f := range manifest.Files {
+		got = append(got, f.Path)
+		if content, err := os.ReadFile(filepath.Join(staged, "files", filepath.FromSlash(f.Path))); err != nil || int64(len(content)) != f.Size {
+			t.Errorf("%s was not staged as listed: %v", f.Path, err)
+		}
+	}
+	slices.Sort(got)
+	want := []string{"config/config.yml", "evidence/qa-1/console.txt", "evidence/qa-1/export.png", "factory/brief.md", "factory/design/variant-a.html", "factory/review/shots/t1.png", "factory/review/threads.json", "factory/state.json"}
+	if !slices.Equal(got, want) {
+		t.Errorf("homelab staged %v; want only the factory's files, its QA evidence and the repo config, without generated cookies or a conversation", got)
+	}
+	if threads, _ := os.ReadFile(filepath.Join(staged, "files", "factory", "review", "threads.json")); string(threads) != factoryFiles["review/threads.json"] {
+		t.Errorf("the review threads arrived as %q", threads)
+	}
+	clone := gitclone.Dir(homelab.Dir, appRemote)
+	g.run(clone, "fetch", "-q", "origin")
+	wantStack := []node.StackBranch{
+		{Branch: "csv-1", PR: 11, SHA: g.run(g.worktree, "rev-parse", "csv-1")},
+		{Branch: "csv-2", PR: 12, Base: "csv-1", SHA: g.run(g.worktree, "rev-parse", "csv-2")},
+		{Branch: "worktree-csv", SHA: g.run(g.worktree, "rev-parse", "worktree-csv")},
+	}
+	if !slices.Equal(manifest.Stack, wantStack) {
+		t.Errorf("the manifest records the stack as %+v; want %+v", manifest.Stack, wantStack)
+	}
+	for _, b := range wantStack {
+		if sha := g.run(clone, "rev-parse", "origin/"+b.Branch); sha != b.SHA {
+			t.Errorf("homelab's own clone sees %s at %s, not %s", b.Branch, sha, b.SHA)
+		}
+	}
+	retained, err := os.Stat(node.CheckpointPath(macbook.Dir, incarnation))
+	if err != nil || retained.Mode().Perm() != 0o600 {
+		t.Errorf("macbook did not keep its last checkpoint privately: %v", err)
+	}
+}
+
+func TestACheckpointRefusesSecretBearingFilesAndLeavesGeneratedCookiesBehind(t *testing.T) {
+	op := uuid.NewString()
+	stateJSON := fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op)
+	for _, secret := range []string{".env", "review/cookies.json", "evidence:qa-1/profile/Default/Preferences", "notes/sessions/old.jsonl"} {
+		t.Run(secret, func(t *testing.T) {
+			root := t.TempDir()
+			movable := host.Movable{Dir: filepath.Join(root, "factory"), Evidence: filepath.Join(root, "qa"), Repo: root}
+			writeFiles(t, movable.Dir, map[string]string{"state.json": stateJSON})
+			place, name := movable.Dir, secret
+			if rest, inEvidence := strings.CutPrefix(secret, "evidence:"); inEvidence {
+				place, name = movable.Evidence, rest
+			}
+			writeFiles(t, place, map[string]string{name: "x"})
+			_, err := node.Capture(movable, node.Manifest{}, node.DefaultLimits)
+			if err == nil || !strings.Contains(err.Error(), filepath.FromSlash(name)) {
+				t.Errorf("a checkpoint holding %s answered %v; want a refusal naming it", secret, err)
+			}
+		})
+	}
+	linked := t.TempDir()
+	writeFiles(t, linked, map[string]string{"state.json": stateJSON})
+	if err := os.Symlink(filepath.Join(os.Getenv("HOME"), ".ssh", "id_ed25519"), filepath.Join(linked, "plan.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := node.Capture(host.Movable{Dir: linked, Repo: t.TempDir()}, node.Manifest{}, node.DefaultLimits); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("a checkpoint holding a symlink answered %v; want a refusal", err)
+	}
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{"state.json": stateJSON, "review/stack.json": `{"cookies":[]}`})
+	cp, err := node.Capture(host.Movable{Dir: root, Repo: t.TempDir()}, node.Manifest{}, node.DefaultLimits)
+	if err != nil || len(cp.Files) != 1 {
+		t.Errorf("a factory with a generated stack.json captured %d files, %v; want only state.json", len(cp.Files), err)
+	}
+}
+
+func forgedCheckpoint(source string, files map[string]string) node.Checkpoint {
+	op := uuid.NewString()
+	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Source: source, GitURL: appRemote}}
+	cp = withFile(cp, "factory/state.json", fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op))
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		cp = withFile(cp, name, files[name])
+	}
+	return cp
+}
+
+func withFile(cp node.Checkpoint, name, content string) node.Checkpoint {
+	sum := sha256.Sum256([]byte(content))
+	cp.Manifest.Files = append(slices.Clone(cp.Manifest.Files), node.ManifestFile{Path: name, Kind: "file", Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:])})
+	cp.Files = append(slices.Clone(cp.Files), node.Payload{Path: name, Data: []byte(content)})
+	return cp
+}
+
+func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	homelab.Transfers.Limits = node.Limits{File: 1 << 10, Total: 1 << 20, Files: 64}
+	symlink := forgedCheckpoint(macbook.ID, map[string]string{"factory/plan.md": "/etc/passwd"})
+	symlink.Manifest.Files[1].Kind = "symlink"
+	duplicate := withFile(forgedCheckpoint(macbook.ID, map[string]string{"factory/plan.md": "a"}), "factory/plan.md", "b")
+	otherFactory := forgedCheckpoint(macbook.ID, nil)
+	otherFactory.Manifest.Factory = "billing"
+	unknownSchema := forgedCheckpoint(macbook.ID, nil)
+	unknownSchema.Manifest.Schema = node.CheckpointSchema + 1
+	cases := []struct {
+		name   string
+		cp     node.Checkpoint
+		reason string
+	}{
+		{"symlink", symlink, "only regular files"},
+		{"traversal", forgedCheckpoint(macbook.ID, map[string]string{"factory/../../../.ssh/authorized_keys": "key"}), "outside the factory folder"},
+		{"oversize", forgedCheckpoint(macbook.ID, map[string]string{"evidence/qa-1/trace.bin": strings.Repeat("x", 2<<10)}), "larger than"},
+		{"duplicate", duplicate, "twice"},
+		{"conflicting identity", otherFactory, "its state.json is csv"},
+		{"unknown schema", unknownSchema, "schema"},
+	}
+	for _, c := range cases {
+		status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", c.cp)
+		if status == http.StatusOK || !strings.Contains(body, c.reason) {
+			t.Errorf("a %s checkpoint answered %d %s; want a refusal saying %q", c.name, status, body, c.reason)
+		}
+		if _, err := os.Stat(node.StagedDir(homelab.Dir, c.cp.Manifest.Incarnation)); err == nil {
+			t.Errorf("homelab staged the %s checkpoint", c.name)
+		}
+	}
+	honest := forgedCheckpoint(macbook.ID, map[string]string{"factory/plan.md": "plan"})
+	if status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", honest); status != http.StatusOK {
+		t.Fatalf("an honest checkpoint answered %d %s", status, body)
+	}
+	stranger := tn.Machine("stranger").Start()
+	if status, _, _ := tn.Request(stranger.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", forgedCheckpoint(stranger.ID, nil)); status == http.StatusOK {
+		t.Error("homelab staged a checkpoint from a node outside its node list")
+	}
+}
+
+func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
+	newGitFixture(t)
+	tn := nodetest.New(t)
+	homelab := tn.Machine("homelab").Start()
+	homelab.Nodes.Clone = cloneWithOwnCredentials(homelab.Dir)
+	browserConfig := "qa:\n  mode: browser\n  url: http://localhost:${FACTORY_WEB_PORT}/\n  health: http://localhost:${FACTORY_WEB_PORT}/health\n  start: exit 3\n  seed: none\n  sign_in: none\n"
+	failing := func(name, detail string) node.Probe {
+		return node.Probe{Name: name, Run: func(context.Context) node.Check { return node.Check{Name: name, Mark: node.MarkFail, Detail: detail} }}
+	}
+	cases := []struct {
+		name   string
+		probe  node.Probe
+		remote string
+		config string
+		reason string
+	}{
+		{"missing tool", failing("tools", "gh-stack is not installed"), appRemote, "", "gh-stack is not installed"},
+		{"missing agent login", failing("claude", "claude is not logged in"), appRemote, "", "claude is not logged in"},
+		{"unclonable repo", nodetest.Passing("tools", "ok"), goneRemote, "", "cannot clone " + goneRemote},
+		{"failing stack recipe", nodetest.Passing("tools", "ok"), appRemote, browserConfig, "stack_start"},
+	}
+	for _, c := range cases {
+		homelab.SetProbes(c.probe)
+		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
+		if report := homelab.Transfers.Preflight(context.Background(), request); !strings.Contains(report.Refusal, c.reason) {
+			t.Errorf("preflight with a %s answered %q; want a refusal naming %q", c.name, report.Refusal, c.reason)
+		}
+	}
 }

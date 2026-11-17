@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
@@ -102,7 +103,7 @@ func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
 func repoURLs(repos []string) []dialog.RepoURL {
 	var urls []dialog.RepoURL
 	for _, repo := range repos {
-		if url := originOf(repo); url != "" {
+		if url := gitclone.Origin(repo); url != "" {
 			urls = append(urls, dialog.RepoURL{Name: strings.TrimSuffix(path.Base(url), ".git"), URL: url})
 		}
 	}

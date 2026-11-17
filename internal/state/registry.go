@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Registry struct {
@@ -92,7 +94,18 @@ func (r *Registry) Observe(repo, slug string, seen time.Time) (*Entry, bool) {
 	if existing := r.Find(repo, slug); existing != nil {
 		return existing, false
 	}
-	return r.Upsert(Entry{Repo: repo, Slug: slug, CreatedAt: seen}), true
+	return r.Upsert(Entry{Repo: repo, Slug: slug, CreatedAt: seen, Incarnation: uuid.NewString()}), true
+}
+
+func (r *Registry) Incarnate() bool {
+	minted := false
+	for i := range r.Factories {
+		if r.Factories[i].Incarnation == "" {
+			r.Factories[i].Incarnation = uuid.NewString()
+			minted = true
+		}
+	}
+	return minted
 }
 
 func (r *Registry) Save() error {

@@ -36,11 +36,12 @@ type Commands struct{ Runtime Caller }
 
 type API struct {
 	Commands
-	Version string
-	Node    string
-	Boot    string
-	Now     func() time.Time
-	Nodes   *Nodes
+	Version   string
+	Node      string
+	Boot      string
+	Now       func() time.Time
+	Nodes     *Nodes
+	Transfers *Transfers
 
 	mu        sync.Mutex
 	current   *Snapshot
@@ -65,17 +66,20 @@ func (a *API) With(app http.Handler, principal Principal, kinds ...string) http.
 var NetworkKinds = []string{"create", "removal", "delete", "archive", "unarchive", "wake", "pause", "wake-all", "attach"}
 
 func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string) {
-	route := func(pattern string, serve func(http.ResponseWriter, *http.Request, string)) {
-		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			caller, ok := principal(r)
-			if !ok {
-				fail(w, http.StatusUnauthorized, "this request has no owner identity")
-				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-			serve(w, r, caller)
-		})
+	within := func(limit int64) func(string, func(http.ResponseWriter, *http.Request, string)) {
+		return func(pattern string, serve func(http.ResponseWriter, *http.Request, string)) {
+			mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+				caller, ok := principal(r)
+				if !ok {
+					fail(w, http.StatusUnauthorized, "this request has no owner identity")
+					return
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+				serve(w, r, caller)
+			})
+		}
 	}
+	route := within(maxBody)
 	route("GET /api/me", a.me)
 	route("GET /api/snapshot", a.snapshot)
 	route("GET /api/events", a.events)
@@ -84,6 +88,9 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 	route("POST /api/factories/{key}/preview", a.Preview)
 	if a.Nodes != nil {
 		a.Nodes.routes(route)
+	}
+	if a.Transfers != nil {
+		a.Transfers.routes(route, within(StageBody(a.Transfers.limits())))
 	}
 	mux.HandleFunc("POST /api/commands/{kind}", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := principal(r); !ok {
@@ -176,6 +183,11 @@ func (a *API) Factories() (int64, []host.LocalFactory, bool) {
 func (a *API) Holds(repo, slug string) bool {
 	_, factories, _ := a.Factories()
 	return slices.ContainsFunc(factories, func(f host.LocalFactory) bool { return f.ID == slug && (repo == "" || f.Repo == repo) })
+}
+
+func (a *API) HoldsIncarnation(incarnation string) bool {
+	_, factories, _ := a.Factories()
+	return slices.ContainsFunc(factories, func(f host.LocalFactory) bool { return f.Incarnation == incarnation })
 }
 
 func (a *API) Connected(installation string) bool {

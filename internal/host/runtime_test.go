@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -250,7 +251,7 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 	})
 	t.Run("a create cut short resumes on retry and a finished one is not run again", func(t *testing.T) {
 		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"id":"csv"}`)
-		if err := savePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "create", Data: data, Status: "accepted"}); err != nil {
+		if err := SavePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "create", Data: data, Status: "accepted"}); err != nil {
 			t.Fatal(err)
 		}
 		runs := 0
@@ -262,7 +263,7 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 	})
 	t.Run("a delete accepted before a crash answers uncertain instead of deleting again", func(t *testing.T) {
 		dir, op, data := t.TempDir(), uuid.NewString(), json.RawMessage(`{"Repo":"/r/app","Slug":"csv"}`)
-		if err := savePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "delete", Data: data, Status: "accepted"}); err != nil {
+		if err := SavePrivate(filepath.Join(dir, "operations", op+".json"), Operation{ID: op, Action: "delete", Data: data, Status: "accepted"}); err != nil {
 			t.Fatal(err)
 		}
 		if reply := New(Runtime{Config: &state.Config{StateDir: dir}}).Handle(Message{T: "delete", Op: op, Data: data}); reply.T != "uncertain" {
@@ -273,7 +274,7 @@ func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 		t.Helper()
 		calls := make(chan string, 8)
 		r := f.runtime(t, recordingTypist{calls})
-		if err := savePrivate(r.queuePath(), []QueuedType{entry}); err != nil {
+		if err := SavePrivate(r.queuePath(), []QueuedType{entry}); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.Recover(); err != nil {
@@ -816,5 +817,63 @@ func TestPRCIFollowsTheLatestRunOfEachCheck(t *testing.T) {
 				t.Fatalf("CI = %q, want %q", pr.CI, c.want)
 			}
 		})
+	}
+}
+
+func TestAnOldFactoryGetsItsIncarnationOnceAndKeepsItAcrossRestarts(t *testing.T) {
+	repo := t.TempDir()
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}
+	legacy, _ := state.LoadRegistry(cfg.RegistryPath())
+	legacy.Upsert(state.Entry{Repo: repo, Slug: "csv", Created: true, CreatedAt: phoneNow})
+	if err := legacy.Save(); err != nil {
+		t.Fatal(err)
+	}
+	incarnation := func() string {
+		registry, err := state.LoadRegistry(cfg.RegistryPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		it, _ := (&Loader{Config: cfg, Registry: registry, Now: time.Now}).Load().Find(state.Key(repo, "csv"))
+		return Incarnation(it.Factory)
+	}
+	first := incarnation()
+	if uuid.Validate(first) != nil {
+		t.Fatalf("an old factory kept %q as its incarnation; want a UUID from the registry", first)
+	}
+	if again := incarnation(); again != first {
+		t.Errorf("the incarnation changed from %s to %s on the next load", first, again)
+	}
+}
+
+func TestACheckpointIsAskedOfTheSupervisorOnceAndWaitsForUnsettledAnswers(t *testing.T) {
+	snap := phoneSnapshot("Stop", asked("q1", "question", "Which region?"))
+	snap.Items[0].Hook.Token = "sup"
+	snap.Hooks = []*state.HookFile{snap.Items[0].Hook}
+	f := &snap.Items[0].Factory
+	f.Worktree = t.TempDir()
+	f.Dir = filepath.Join(f.Worktree, ".claude", "factory", "csv")
+	typist := &paneTypist{}
+	r := phoneRuntime(t.TempDir(), typist, snap)
+	op := uuid.NewString()
+	request := CheckpointRequest{Key: f.Key(), Operation: op}
+	for range 2 {
+		movable, err := r.Checkpoint(request)
+		if err != nil || movable.Waiting == "" {
+			t.Fatalf("asking for a checkpoint answered %+v, %v; want it to wait for the supervisor", movable, err)
+		}
+	}
+	if want := []string{"%1: /factory checkpoint " + op}; !slices.Equal(typist.typed, want) {
+		t.Fatalf("typed %q; want the checkpoint asked once", typist.typed)
+	}
+	f.State.Checkpoint = &state.Checkpoint{Operation: op, Status: state.CheckpointReady}
+	r.SetSnapshot(snap)
+	answer := Answer{Factory: f.Key(), ItemID: "q1", ItemSince: phoneNow, At: phoneNow}
+	r.PutClaim(answer)
+	if _, err := r.Checkpoint(request); err == nil || !strings.Contains(err.Error(), "q1") {
+		t.Fatalf("a checkpoint with an unsettled answer answered %v; want it blocked until the answer settles", err)
+	}
+	r.DropClaim(answer.Key())
+	if movable, err := r.Checkpoint(request); err != nil || movable.Waiting != "" || movable.Dir != f.Dir {
+		t.Errorf("a ready checkpoint answered %+v, %v", movable, err)
 	}
 }

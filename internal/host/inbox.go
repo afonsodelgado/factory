@@ -2,13 +2,102 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 )
+
+type CheckpointRequest struct {
+	Key       string `json:"key"`
+	Operation string `json:"operation"`
+}
+
+type Movable struct {
+	Key         string     `json:"key"`
+	Incarnation string     `json:"incarnation"`
+	ID          string     `json:"id"`
+	Slug        string     `json:"slug"`
+	Repo        string     `json:"repo"`
+	Worktree    string     `json:"worktree"`
+	Dir         string     `json:"dir"`
+	Evidence    string     `json:"evidence"`
+	Branch      string     `json:"branch"`
+	PRs         []state.PR `json:"prs"`
+	Waiting     string     `json:"waiting,omitempty"`
+}
+
+func (m *Runtime) Movable(key string) (Movable, Item, error) {
+	it, ok := m.snap.Find(key)
+	f := it.Factory
+	switch {
+	case !ok:
+		return Movable{}, it, fmt.Errorf("no factory %s", key)
+	case f.Remote != nil:
+		return Movable{}, it, fmt.Errorf("%s runs on %s, not here", f.Label(), f.Where())
+	case f.State == nil || f.Dir == "" || f.Worktree == "":
+		return Movable{}, it, fmt.Errorf("%s has no state.json in a worktree yet, so it has nothing to checkpoint", f.Label())
+	case f.Archived():
+		return Movable{}, it, fmt.Errorf("%s is archived", f.Label())
+	}
+	return Movable{
+		Key: f.Key(), Incarnation: Incarnation(f), ID: f.Label(), Slug: f.Slug, Repo: f.Repo, Worktree: f.Worktree, Dir: f.Dir,
+		Evidence: QADir(f), Branch: f.State.Branch, PRs: f.State.PRs,
+	}, it, nil
+}
+
+func (m *Runtime) Checkpoint(r CheckpointRequest) (Movable, error) {
+	movable, it, err := m.Movable(r.Key)
+	if err != nil {
+		return Movable{}, err
+	}
+	written := it.Factory.State.Checkpoint
+	switch {
+	case written == nil || written.Operation != r.Operation:
+		movable.Waiting, err = m.requestCheckpoint(it, r.Operation)
+		return movable, err
+	case written.Status == state.CheckpointRefused:
+		return Movable{}, fmt.Errorf("the supervisor of %s cannot checkpoint: %s", it.Factory.Label(), written.Reason)
+	case written.Status != state.CheckpointReady:
+		return Movable{}, fmt.Errorf("the supervisor of %s wrote checkpoint status %q, which is neither ready nor refused", it.Factory.Label(), written.Status)
+	}
+	return movable, m.quiesce(it)
+}
+
+func (m *Runtime) requestCheckpoint(it Item, operation string) (string, error) {
+	if it.Pane == nil || it.Pane.Dead {
+		return "", errors.New(it.Factory.Label() + " has no running supervisor to write its checkpoint; wake it first")
+	}
+	asked := "checkpoint " + operation
+	if !m.inboxQueued[asked] {
+		m.inboxQueued[asked] = true
+		text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), "/factory checkpoint "+operation)
+		m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: text})
+	}
+	return "waiting for the supervisor of " + it.Factory.Label() + " to write checkpoint " + operation, nil
+}
+
+func (m *Runtime) undelivered(it Item) []string {
+	var blockers []string
+	for _, q := range m.typeQueue {
+		if pane, found := byID(m.snap.Panes, q.Pane); found && OfFactory(pane, it.Factory.Repo, it.Factory.Slug) {
+			blockers = append(blockers, "a message to "+q.Label+" is still waiting to be typed")
+		}
+	}
+	if it.Factory.Supervisor().OnClaude() {
+		return blockers
+	}
+	record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)
+	if pending := len(InboxMessages(m.Config.StateDir, it, ReadDelivered(record))); pending > 0 {
+		blockers = append(blockers, fmt.Sprintf("%d inbox messages have not reached the supervisor yet", pending))
+	}
+	return blockers
+}
 
 type InboxMessage struct {
 	Key  string

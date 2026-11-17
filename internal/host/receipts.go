@@ -144,7 +144,7 @@ func (m *Runtime) saveReceipts() {
 	if m.Config == nil || m.Config.StateDir == "" {
 		return
 	}
-	if err := savePrivate(m.receiptsPath(), m.receipts); err != nil {
+	if err := SavePrivate(m.receiptsPath(), m.receipts); err != nil {
 		m.notice = err.Error()
 	}
 }

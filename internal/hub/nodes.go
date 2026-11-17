@@ -16,9 +16,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
@@ -386,7 +386,7 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 	if l.state(m.Now()) != connected {
 		return fmt.Errorf("%s is unreachable, so %s was not created. Nothing changed.", short, r.Slug)
 	}
-	gitURL, err := remote.GitURL(r.Repo, "")
+	gitURL, err := gitclone.RemoteURL(r.Repo, "")
 	if err != nil {
 		return err
 	}

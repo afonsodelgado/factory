@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -137,7 +138,7 @@ func CreateOn(cfg *state.Config, name, repo, gitRemote string, create Create, sa
 	if err != nil {
 		return err
 	}
-	if create.GitURL, err = GitURL(repo, gitRemote); err != nil {
+	if create.GitURL, err = gitclone.RemoteURL(repo, gitRemote); err != nil {
 		return err
 	}
 	if create.Profile, err = readOptional(state.ProfilePath(repo)); err != nil {

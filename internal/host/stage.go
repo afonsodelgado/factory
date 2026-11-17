@@ -247,6 +247,13 @@ func (m *Runtime) CloseFinishedStages() {
 	}
 }
 
+func (m *Runtime) runningStages(it Item) []string {
+	if it.Stage == nil {
+		return nil
+	}
+	return []string{"its " + it.Stage.Run.Role + " stage is still running; checkpoint between stages"}
+}
+
 func HasStagePanes(panes []tmux.Pane, f factory.Factory) bool {
 	return slices.ContainsFunc(panes, func(p tmux.Pane) bool { return p.Repo == f.Repo && p.StageOf == f.Slug })
 }

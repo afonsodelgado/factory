@@ -266,6 +266,9 @@ func load(repo, path, real string) Factory {
 		f.Heartbeat = info.ModTime()
 	}
 	f.State, f.StateErr = readState(path)
+	if f.State != nil {
+		f.State.Anchor(dir)
+	}
 	f.Worktree = worktreeOf(repo, path, real, f)
 	f.Slug = strings.ToLower(f.ID)
 	if f.Worktree != "" {

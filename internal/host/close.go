@@ -12,6 +12,20 @@ import (
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
+func (m *Runtime) quiesce(it Item) error {
+	blockers := slices.Concat(m.runningStages(it), m.undelivered(it), m.uncertain(it.Factory.Key()))
+	if len(blockers) > 0 {
+		return fmt.Errorf("%s cannot be checkpointed yet: %s", it.Factory.Label(), strings.Join(blockers, "; "))
+	}
+	f := it.Factory
+	m.stopStack(f.Key())
+	m.stopBrowser(f.Key())
+	if m.Engine != nil && HasStagePanes(m.snap.Panes, f) {
+		return m.Engine.KillStages(f.Repo, f.Slug, "")
+	}
+	return nil
+}
+
 func OfFactory(p tmux.Pane, repo, slug string) bool {
 	return p.Repo == repo && (p.Slug == slug || p.StageOf == slug)
 }

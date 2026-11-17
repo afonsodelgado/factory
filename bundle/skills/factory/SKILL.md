@@ -7,7 +7,7 @@ description: |
   handoff. This session is the supervisor; every stage runs as a factory-* subagent that
   hands off through files. Use when the user says "/factory <id>", "/factory status",
   "/factory resume", "start the factory on csv-export" or "run the pipeline for this".
-argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan|walkthrough> [item id] [notes] | skip <stage>"
+argument-hint: "<id> [--pipeline <name> | --stages <a,b,c>] [--agent <role=model:effort>…] [prompt] | status | resume | approve <design|plan|walkthrough> [item id] [notes] | skip <stage> | checkpoint <operation>"
 ---
 
 # Factory supervisor
@@ -98,6 +98,7 @@ When it is missing everywhere, stop at preflight and ask the user to add the rep
 - `/factory status`: print stage, round counters, PRs, artifact URLs, open attention items and what you are waiting on. Change nothing.
 - `/factory approve <design|plan|walkthrough> [<item id>] [notes]`: the user's approval for a lit gate. The item id is optional; when it is there it names the gate's attention item (`gate-<id>-design`), and anything after it is notes. The user can also approve in an artifact comment thread or in plain words.
 - `/factory skip <stage>`: record `skipped` with the user's reason and move on.
+- `/factory checkpoint <operation>`: the factory node asks for a checkpoint before it moves this factory to another node. See "Checkpoint".
 
 ### The pipeline
 
@@ -292,6 +293,17 @@ The user tests, merges and deploys. Never merge. `handoff-<id> tested: the devel
 
 `state.limits` holds `coderabbit_rounds` (default 2), `qa_rounds` (default 3) and `stage_retries` (default 1). When a cap trips: stop, write a `cap` item and `waiting_on: "user"` with the reason, notify, and wait. Never raise a cap on your own. `<item id> continue: raise <limit> by one for this factory` from the user raises that limit by one in `state.limits` and resumes the stage.
 
+## Checkpoint
+
+The node types `/factory checkpoint <operation>` only while you wait at a prompt. Handle it in that turn, with one write to `state.json`:
+
+1. **Mid-stage.** If a stage agent you started has not handed back its result, or you are part-way through a stage's steps, do not checkpoint. Write `checkpoint` as `{"operation": "<operation>", "status": "refused", "reason": "<one sentence naming what still runs>", "at": "<time>"}` and stop. Waiting for the user, for CI or for comments on a page is between stages.
+2. **Uncommitted product files.** Run `git status --porcelain` in the worktree. Every changed tracked file counts; of the untracked ones, ignore only `.impeccable/`, `.revmux/` and the factory's own folders (`.factory/`, `.claude/worktrees/`, `.claude/factory/`, `.claude/factory-archive/`, `.claude/qa/`). Never commit, stash or discard changes to make a move possible. If any are left, refuse as in step 1 and name the files, so the developer can deal with them and move again. The same goes for commits on the worktree's `HEAD` that are on no branch in `prs` and not on `branch`.
+3. **Portable paths.** In the same write, change your own absolute paths into paths relative to the factory directory. An artifact `url` of `file://<factory dir>/design/variant-a.html` becomes `design/variant-a.html`. An entry in `outputs` inside the worktree becomes relative to the factory directory too, such as `plan.md` or `../../../.claude/qa/<id>/report.md`. Leave web URLs, `repo`, `worktree`, `session_id` and every existing `history` entry as they are.
+4. **Ready.** Write `checkpoint` as `{"operation": "<operation>", "status": "ready", "at": "<time>"}` and add a history entry with event `checkpoint` and the operation as its detail. `<time>` comes from `date -u` as in "Files". Then end your turn and start nothing.
+
+The node checks the worktree and pushes every branch itself, then copies the factory directory, its QA evidence and the repo config. It never copies a conversation. If the move goes ahead, the node stops this session, and another node starts a fresh supervisor there with `/factory resume`.
+
 ## Resume
 
-Read `state.json`, update `session_id`, and print a one-line status. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs. On a done factory nothing is left to run: wait for `handoff-<id> tested:` and resolve the item as stage 11 says.
+Read `state.json`, update `session_id`, and print a one-line status. When `checkpoint` is set and `repo` or `worktree` names a path that is not this machine's, the factory moved here: set `repo` to this main checkout, `worktree` to `git rev-parse --show-toplevel`, and read relative artifact and output paths against this factory directory. No agent id recorded before the move exists here, so start every stage again with a fresh agent from its input files. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs. On a done factory nothing is left to run: wait for `handoff-<id> tested:` and resolve the item as stage 11 says.

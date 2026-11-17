@@ -254,7 +254,7 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !first.ProfileWritten || len(first.Excluded) != len(IgnoredPaths) || !first.Remembered {
+	if !first.ProfileWritten || len(first.Excluded) != len(state.FactoryPaths) || !first.Remembered {
 		t.Fatalf("first init from a subdirectory = %+v; want the repo config, the exclude lines and the hub's entry written for the repo", first)
 	}
 	if _, err := os.Stat(state.ProfilePath(repo)); err != nil {

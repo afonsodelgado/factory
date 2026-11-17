@@ -19,10 +19,11 @@ One file per factory at `<worktree>/.claude/factory/<id>/state.json`. The superv
 | `updated_at` | ISO 8601 UTC time of the last write, from `date -u +%Y-%m-%dT%H:%M:%SZ` run just before it; never written by hand |
 | `limits` | `coderabbit_rounds`, `qa_rounds`, `stage_retries` |
 | `stages.<key>` | `status` (`pending`, `running`, `blocked`, `done`, `skipped`, `failed`), `agent_id`, `rounds`, `outputs`, `artifacts`, `notes` |
-| `stages.<key>.artifacts[]` | `{url, title, open_threads, threads_checked_at}`; `open_threads` is the count of unresolved comment threads, `threads_checked_at` when it was counted |
+| `stages.<key>.artifacts[]` | `{url, title, open_threads, threads_checked_at}`; `url` is `file://<absolute path>`, a web URL, or after a checkpoint a path relative to the factory directory; `open_threads` is the count of unresolved comment threads, `threads_checked_at` when it was counted |
 | `attention` | open and resolved items the user must act on; see `attention.md` |
 | `prs` | ordered bottom to top: `number`, `branch`, `title`, `qa_fixes` |
 | `history` | append-only list of `{at, stage, event, detail}`; `at` comes from `date -u` like `updated_at` |
+| `checkpoint` | absent until the node asks for one; then `{operation, status, reason, at}`, where `status` is `ready` or `refused` and `reason` says why a refused checkpoint cannot move (SKILL.md, "Checkpoint") |
 
 Stage keys, in order: `requirements`, `design`, `plan`, `implement`, `review`, `coderabbit`, `qa`, `qa_fixes`, `test_gaps`, `walkthrough`, `handoff`. Factories started before `walkthrough` existed have no entry for it; treat it as `skipped`.
 

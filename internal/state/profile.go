@@ -45,6 +45,8 @@ type Profile struct {
 	Codex           Codex                   `yaml:"codex"`
 }
 
+var FactoryPaths = []string{".factory/", ".claude/worktrees/", ".claude/factory/", ".claude/factory-archive/", ".claude/qa/"}
+
 var machineKeys = []string{"repos", "hub", "alerts", "icons", "tmux", "review"}
 
 func RepoDir(repo string) string {

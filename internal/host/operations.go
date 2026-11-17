@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,7 +56,7 @@ func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, 
 		return Message{T: "error", Error: err.Error()}
 	}
 	op = Operation{ID: id, Action: action, Data: data, Status: "accepted"}
-	if err := savePrivate(path, op); err != nil {
+	if err := SavePrivate(path, op); err != nil {
 		return Message{T: "error", Error: err.Error()}
 	}
 	op.Reply = effect()
@@ -63,10 +64,21 @@ func Journal(stateDir, id, action string, data json.RawMessage, resumable bool, 
 	if op.Reply.T == "error" {
 		op.Status = "failed"
 	}
-	if err := savePrivate(path, op); err != nil {
+	if err := SavePrivate(path, op); err != nil {
 		return Message{T: "uncertain", Error: fmt.Sprintf("outcome unknown; could not save receipt: %v", err)}
 	}
 	return op.Reply
+}
+
+func (m *Runtime) uncertain(factoryKey string) []string {
+	var blockers []string
+	for _, a := range m.receipts.Claims {
+		if a.Factory == factoryKey {
+			blockers = append(blockers, "the answer to "+a.ItemID+" is "+a.Status()+" and must settle first")
+		}
+	}
+	slices.Sort(blockers)
+	return blockers
 }
 
 func Finished(stateDir, id, action string) (Message, bool) {
@@ -92,12 +104,12 @@ func sameJSON(a, b json.RawMessage) bool {
 }
 
 func saveOrReport(path string, value any) {
-	if err := savePrivate(path, value); err != nil {
+	if err := SavePrivate(path, value); err != nil {
 		fmt.Fprintf(os.Stderr, "factory host: could not save %s, so a push or an alert may be lost: %v\n", filepath.Base(path), err)
 	}
 }
 
-func savePrivate(path string, value any) error {
+func SavePrivate(path string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -119,7 +131,7 @@ func (m *Runtime) saveQueue(queue []QueuedType) bool {
 	if m.Config.StateDir == "" {
 		return true
 	}
-	if err := savePrivate(m.queuePath(), queue); err != nil {
+	if err := SavePrivate(m.queuePath(), queue); err != nil {
 		m.notice = err.Error()
 		return false
 	}

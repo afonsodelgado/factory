@@ -18,8 +18,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/phone"
-	"github.com/afonsodelgado/factory/internal/remote"
 )
 
 const (
@@ -713,7 +713,7 @@ func (n *Nodes) removeRoute(w http.ResponseWriter, r *http.Request, _ string) {
 }
 
 func (n *Nodes) readiness(r *http.Request) Report {
-	wanted := slices.DeleteFunc(r.URL.Query()["repo"], func(url string) bool { return remote.CheckCloneURL(url) != nil })
+	wanted := slices.DeleteFunc(r.URL.Query()["repo"], func(url string) bool { return gitclone.CheckURL(url) != nil })
 	return n.Ready.Run(r.Context(), n.Self.Name, Scope{Wanted: wanted})
 }
 
@@ -736,7 +736,7 @@ func (n *Nodes) cloneRoute(w http.ResponseWriter, r *http.Request, _ string) {
 		fail(w, http.StatusBadRequest, "send {operation: a UUID, url}")
 		return
 	}
-	if err := remote.CheckCloneURL(body.URL); err != nil || n.Clone == nil {
+	if err := gitclone.CheckURL(body.URL); err != nil || n.Clone == nil {
 		fail(w, http.StatusBadRequest, fmt.Sprintf("this node clones only network git remotes: %v", err))
 		return
 	}

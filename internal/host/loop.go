@@ -205,6 +205,16 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			value, err = m.Preview(r)
 		}
+	case "movable":
+		var r CheckpointRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, _, err = m.Movable(r.Key)
+		}
+	case "checkpoint":
+		var r CheckpointRequest
+		if err = json.Unmarshal(request.Data, &r); err == nil {
+			value, err = m.Checkpoint(r)
+		}
 	case "receipt":
 		var r ReceiptRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
