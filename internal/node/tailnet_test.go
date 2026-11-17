@@ -2171,6 +2171,9 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 	background := context.Background()
 	clone := gitclone.Dir(f.homelab.Dir, appRemote)
 	away := filepath.Join(factory.WorktreesDir(clone), "csv")
+	if err := os.Remove(filepath.Join(away, ".claude", "factory", "csv", "brief.md")); err != nil {
+		t.Fatal(err)
+	}
 	f.g.commit(away, "made-on-homelab.go")
 	back := uuid.NewString()
 	request := node.MoveRequest{Operation: back, Factory: state.Key(clone, "csv"), Target: "macbook"}
@@ -2187,6 +2190,9 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 	}
 	if head, want := f.g.run(f.g.worktree, "rev-parse", "HEAD"), f.g.run(away, "rev-parse", "HEAD"); head != want {
 		t.Errorf("macbook's worktree is at %s after the move back; want homelab's commit %s", head, want)
+	}
+	if _, err := os.Stat(filepath.Join(f.g.dir, "brief.md")); !os.IsNotExist(err) {
+		t.Errorf("macbook kept the brief homelab deleted: %v; want the folder to match the checkpoint", err)
 	}
 
 	stranded := uuid.NewString()

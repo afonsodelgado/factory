@@ -330,12 +330,16 @@ func checkout(ctx context.Context, repo, worktree string, m Manifest) error {
 }
 
 func unpack(staged, worktree, repo, slug string) error {
+	if filepath.Base(slug) != slug || slug == "." || slug == ".." {
+		return fmt.Errorf("the checkpoint names %q, which is not a factory folder", slug)
+	}
 	files := filepath.Join(staged, "files")
 	places := map[string]string{
 		RootFactory:  filepath.Join(worktree, ".claude", "factory", slug),
 		RootEvidence: filepath.Join(worktree, ".claude", "qa", slug),
 	}
-	return filepath.WalkDir(files, func(full string, d fs.DirEntry, err error) error {
+	written := map[string]bool{}
+	err := filepath.WalkDir(files, func(full string, d fs.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return err
 		}
@@ -352,8 +356,31 @@ func unpack(staged, worktree, repo, slug string) error {
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
+		written[dest] = true
 		return os.WriteFile(dest, data, 0o644)
 	})
+	if err != nil {
+		return err
+	}
+	for _, place := range places {
+		if err := removeUnlisted(place, written); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeUnlisted(dir string, listed map[string]bool) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() || listed[path] {
+			return err
+		}
+		return os.Remove(path)
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (ts *Transfers) activateRoute(w http.ResponseWriter, r *http.Request, _ string) {
