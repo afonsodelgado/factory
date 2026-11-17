@@ -2,12 +2,14 @@ package review
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -90,5 +92,39 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestHeadlessChromeStartsWithoutAWindowExtensionsOrKeychainPromptsOnMacAndLinux(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			dir := t.TempDir()
+			argv, profile := filepath.Join(dir, "argv"), filepath.Join(dir, "profile")
+			fake := filepath.Join(dir, "chrome")
+			if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > '"+argv+"'\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), launchOptions(goos, profile, fake, false)...)
+			defer cancelAlloc()
+			ctx, cancel := chromedp.NewContext(alloc)
+			defer cancel()
+			chromedp.Do(ctx)
+			data, err := os.ReadFile(argv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(data)), "\n")
+			want := []string{"--headless", "--user-data-dir=" + profile, "--remote-debugging-port=0", "--disable-extensions", map[string]string{"darwin": "--use-mock-keychain", "linux": "--password-store=basic"}[goos]}
+			for _, arg := range want {
+				if !slices.Contains(args, arg) {
+					t.Errorf("Chrome on %s starts without %s:\n%s", goos, arg, data)
+				}
+			}
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "--load-extension") || strings.HasPrefix(arg, "--disable-extensions-except") || strings.HasPrefix(arg, "--start-") || strings.HasPrefix(arg, "--window-") || (arg == "--no-sandbox" && os.Getuid() != 0) {
+					t.Errorf("Chrome on %s starts with %s, which a headless, sandboxed QA browser never needs:\n%s", goos, arg, data)
+				}
+			}
+		})
 	}
 }

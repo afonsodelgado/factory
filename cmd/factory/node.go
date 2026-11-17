@@ -163,7 +163,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	if err != nil {
 		return nil, err
 	}
-	browsers := &node.Browsers{Chrome: cfg.Review.Chrome}
+	browsers := &node.Browsers{Chrome: cfg.Review.Chrome, Max: cfg.Review.Browsers, StateDir: cfg.StateDir, Ctx: ctx}
 	n := &runningNode{closers: []io.Closer{pages, browsers}, stopped: make(chan error, 1)}
 	reviewListener, err := node.ListenUnix(cfg.ReviewSocket())
 	if err != nil {

@@ -63,7 +63,8 @@ type Runtime struct {
 	notice      string
 	receipts    receiptFile
 	repoNames   map[string]string
-	leases      map[string]BrowserReady
+	leases      map[string]browserLease
+	preparing   map[string]string
 	prs         map[string][]PR
 	prsPolled   time.Time
 }
@@ -76,7 +77,8 @@ func New(r Runtime) *Runtime {
 	r.inboxQueued = map[string]bool{}
 	r.receipts = receiptFile{Claims: map[string]Answer{}}
 	r.repoNames = map[string]string{}
-	r.leases = map[string]BrowserReady{}
+	r.leases = map[string]browserLease{}
+	r.preparing = map[string]string{}
 	return &r
 }
 

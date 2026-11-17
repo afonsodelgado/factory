@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -9,11 +10,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,10 +26,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/node/nodetest"
 	"github.com/afonsodelgado/factory/internal/phone"
+	"github.com/afonsodelgado/factory/internal/review"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 func names(n ...string) []string { return n }
@@ -868,4 +876,179 @@ func TestSubscriptionChangesReachEveryNodeAndARemovedNodeCancelsItsQueuedSends(t
 	if got := endpoints(t, macbook); !slices.Equal(got, names("/iphone")) {
 		t.Errorf("macbook holds %v after removing homelab; want its own subscription untouched", got)
 	}
+}
+
+type qaEngine struct{}
+
+func (qaEngine) NewFactoryPane(host.NewPane) (string, error) { return "%1", nil }
+func (qaEngine) Pause(string, string) error                  { return nil }
+func (qaEngine) NewStagePane(host.StagePane) (string, error) { return "%2", nil }
+func (qaEngine) KillStages(string, string, string) error     { return nil }
+func (qaEngine) Type(string, string) error                   { return nil }
+
+type qaNode struct {
+	*nodetest.Node
+	f        factory.Factory
+	result   string
+	browsers *node.Browsers
+	stop     func()
+}
+
+func (q *qaNode) boot(t *testing.T) {
+	q.browsers = &node.Browsers{NoSandbox: goruntime.GOOS == "linux", StateDir: q.Dir}
+	queue := node.NewQueue()
+	ctx, cancel := context.WithCancel(context.Background())
+	r := host.New(host.Runtime{Config: &state.Config{StateDir: q.Dir}, Engine: qaEngine{}, Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: q.browsers})
+	r.SetSnapshot(host.Snapshot{At: time.Now(), Items: []host.Item{{Factory: q.f}}})
+	stopped := make(chan struct{})
+	go func() { r.Run(ctx, queue.Events()); close(stopped) }()
+	q.stop = func() { cancel(); <-stopped }
+	q.Runtime.Behind(queue)
+	browsers := q.browsers
+	t.Cleanup(func() { cancel(); <-stopped; browsers.Close() })
+}
+
+func (q *qaNode) job(t *testing.T) (dir, browserURL string, stack int) {
+	t.Helper()
+	launch := state.LaunchScriptPath(q.Dir, q.f.Repo, q.f.Slug, "qa")
+	until(t, "the QA pane on "+q.Short()+"'s browser", time.Minute, func() bool {
+		if failed, err := os.ReadFile(q.result); err == nil {
+			if os.Getenv("CI") == "" {
+				t.Skip("no Chrome here: ", string(failed))
+			}
+			t.Fatalf("QA on %s failed: %s", q.Short(), failed)
+		}
+		_, err := os.Stat(launch)
+		return err == nil
+	})
+	script, _ := os.ReadFile(launch)
+	_, config, _ := strings.Cut(string(script), "--mcp-config '")
+	config, _, _ = strings.Cut(config, "'")
+	data, _ := os.ReadFile(config)
+	_, browserURL, _ = strings.Cut(string(data), "--browser-url=")
+	browserURL, _, _ = strings.Cut(browserURL, `"`)
+	pid, _ := os.ReadFile(filepath.Join(q.f.Worktree, "stack.pid"))
+	stack, _ = strconv.Atoi(strings.TrimSpace(string(pid)))
+	return filepath.Dir(config), browserURL, stack
+}
+
+func until(t *testing.T, what string, wait time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(wait)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func browserAnswers(url string) bool {
+	resp, err := http.Get(url + "/json/version")
+	if err == nil {
+		resp.Body.Close()
+	}
+	return err == nil
+}
+
+func browserAnswersSoon(url string) bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for !browserAnswers(url) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return true
+}
+
+func running(pid int) bool {
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	stat := strings.TrimSpace(string(out))
+	return err == nil && stat != "" && !strings.HasPrefix(stat, "Z")
+}
+
+func cleanedUp(t *testing.T, who, dir, browserURL string, stack int) {
+	t.Helper()
+	until(t, who+"'s browser, stack and profile to go", 10*time.Second, func() bool {
+		_, err := os.Stat(dir)
+		return errors.Is(err, os.ErrNotExist) && !browserAnswers(browserURL) && !running(stack)
+	})
+}
+
+func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterACrash(t *testing.T) {
+	if _, found := review.ChromeBinary(""); !found && os.Getenv("CI") == "" {
+		t.Skip("no Chrome here")
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "npx"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Write([]byte(`<!doctype html><html><body><h1>Contacts</h1><script>console.error("export failed to load")</script></body></html>`))
+	}))
+	t.Cleanup(app.Close)
+	_, port, _ := net.SplitHostPort(app.Listener.Addr().String())
+	tn := nodetest.New(t)
+	start := func(machine, slug string) *qaNode {
+		repo := t.TempDir()
+		worktree := filepath.Join(repo, "wt")
+		config := "qa:\n  mode: browser\n  web_port: " + port + "\n  health: " + app.URL + "/health\n  health_status: 204\n  seed: none\n  sign_in: none\n  start: 'echo $$ > stack.pid; exec sleep 600'\n"
+		for _, err := range []error{os.MkdirAll(worktree, 0o755), os.MkdirAll(filepath.Join(repo, ".factory"), 0o755), os.WriteFile(state.RepoConfigPath(repo), []byte(config), 0o644)} {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		q := &qaNode{Node: tn.Machine(machine).Start(), f: factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{ID: slug}}}
+		q.boot(t)
+		var reply host.StageReply
+		if err := q.Local.Request(context.Background(), "stage", uuid.NewString(), host.StageRequest{Role: "qa", Factory: slug, Text: "Test the export."}, &reply); err != nil {
+			t.Fatal(err)
+		}
+		q.result = reply.Result
+		return q
+	}
+	alpha, beta := start("alpha", "csv"), start("beta", "pdf")
+	alphaDir, alphaBrowser, alphaStack := alpha.job(t)
+	betaDir, betaBrowser, betaStack := beta.job(t)
+	switch {
+	case alphaBrowser == betaBrowser || alphaDir == betaDir:
+		t.Fatalf("both nodes' QA share %s; want a browser and profile each", alphaBrowser)
+	case !browserAnswersSoon(alphaBrowser) || !browserAnswersSoon(betaBrowser):
+		t.Fatal("a node's QA browser does not answer after the stage command that started it returned")
+	}
+	if _, err := os.Stat(state.LaunchScriptPath(alpha.Dir, beta.f.Repo, beta.f.Slug, "qa")); err == nil {
+		t.Fatal("alpha opened a QA pane for beta's factory")
+	}
+
+	if err := alpha.Local.Request(context.Background(), "pause", uuid.NewString(), struct{ Key string }{alpha.f.Key()}, nil); err != nil {
+		t.Fatal(err)
+	}
+	cleanedUp(t, "paused alpha", alphaDir, alphaBrowser, alphaStack)
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(alpha.Dir, alpha.f.Repo, alpha.f.Slug))
+	run, _ := runs.Latest("qa")
+	evidence := host.EvidenceDir(alpha.f, run)
+	console, _ := os.ReadFile(filepath.Join(evidence, review.ConsoleLog))
+	shot, _ := os.ReadFile(filepath.Join(evidence, review.FinalShot))
+	if !strings.Contains(string(console), "export failed to load") || !bytes.HasPrefix(shot, []byte("\x89PNG")) {
+		t.Fatalf("the paused QA kept console %q and a %d-byte screenshot in %s; want the page's error and a PNG outside the removed profile", console, len(shot), evidence)
+	}
+	if !browserAnswersSoon(betaBrowser) {
+		t.Fatal("pausing alpha's factory closed beta's browser")
+	}
+
+	beta.stop()
+	beta.boot(t)
+	cleanedUp(t, "beta after its node restarted", betaDir, betaBrowser, betaStack)
+	until(t, "beta's QA result", 10*time.Second, func() bool {
+		result, _ := os.ReadFile(beta.result)
+		return strings.Contains(string(result), host.FailRestart)
+	})
 }

@@ -149,6 +149,7 @@ func pruneOperations(stateDir string, before time.Time) {
 
 func (m *Runtime) Recover() error {
 	m.allowRememberedTunnels()
+	m.recoverBrowsers()
 	pruneOperations(m.Config.StateDir, m.Now().Add(-keptOperations))
 	if err := m.loadReceipts(); err != nil {
 		return err
