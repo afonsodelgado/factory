@@ -19,6 +19,7 @@ type Item struct {
 	Hook      *state.HookFile
 	Pane      *tmux.Pane
 	Stage     *StageView
+	Revising  map[string]string
 }
 
 type Snapshot struct {
@@ -107,12 +108,13 @@ func (l *Loader) Load() Snapshot {
 		l.rememberSession(f, PaneHook(TokenOf(pane), hooks))
 		l.rememberBranches(f)
 		stage := RunningStage(f, runs[f.Key()], panes, hooks)
-		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.HookValue()}
+		revising := RevisingGates(f, runs[f.Key()], panes, hooks)
+		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.HookValue(), Revising: revising}
 		status := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		live.Answered = true
 		unblocked := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		l.logHook(f, hook)
-		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage})
+		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage, Revising: revising})
 	}
 	return snap
 }
@@ -144,6 +146,37 @@ func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, h
 		view.Pane = &p
 	}
 	return view
+}
+
+func RevisingGates(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile) map[string]string {
+	if f.State == nil || runs == nil {
+		return nil
+	}
+	revising := map[string]string{}
+	for _, a := range f.State.OpenAttention() {
+		role := state.RoleOf(a.Stage())
+		run, ran := runs.Latest(role)
+		if a.Kind == "gate" && ran && run.StartedAt.After(a.CreatedAt.Time) && stillWorking(f, run, panes, hooks) {
+			revising[a.ID] = role
+		}
+	}
+	return revising
+}
+
+func stillWorking(f factory.Factory, run state.StageRun, panes []tmux.Pane, hooks []*state.HookFile) bool {
+	if run.Finished() {
+		return false
+	}
+	if _, alive := LiveStagePane(stagePaneOf(panes, f, run.Role, run.Token)); !alive {
+		return false
+	}
+	hook := PaneHook(run.Token, hooks)
+	stoppedSinceStart := hook != nil && hook.Main != nil && hook.Main.At.After(run.StartedAt) && stopped(*hook.Main)
+	return !stoppedSinceStart
+}
+
+func stopped(event state.HookEvent) bool {
+	return event.Is("Stop") || event.Is("StopFailure") || event.Is("Notification", "idle_prompt")
 }
 
 func (v *StageView) HookValue() *state.HookFile {

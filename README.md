@@ -317,6 +317,7 @@ Designs and plans are HTML pages in the factory directory, listed in the panel's
 - `C`, then click anything, leaves a comment on that element: a fix, a change or a question. *Comment on the whole page* in the comments list covers the rest.
 - Comments are saved as you write them. **Send** delivers the ones not sent yet to the agent that owns the page: the designer or the architect, in its own pane.
 - The agent changes the page, which reloads by itself, and answers each thread. Reply on a thread to keep the conversation going; your reply goes out with the next Send.
+- While the agent works on what you sent, the factory leaves *needs you* and its phone notification is cleared. When the agent finishes, stops, or its pane dies, the factory needs you again and the phone is notified to review the page again.
 - **Approve** appears while the page's gate is open and sends the same approval as the panel.
 
 In a web repo, the design can instead be a working prototype built from the app's real components and stylesheet:

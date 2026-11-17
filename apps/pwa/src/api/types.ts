@@ -54,6 +54,7 @@ export type LocalItem = {
   since: string;
   detail?: string[];
   role?: string;
+  revising?: string;
   answer?: Receipt;
   send: Eligibility;
   permission?: PermissionMenu;

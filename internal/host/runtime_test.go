@@ -832,3 +832,48 @@ func TestANewFactoryTellsItsSupervisorEveryRoleAsTheAppResolvedIt(t *testing.T) 
 		}
 	}
 }
+
+func TestAGateWhoseCommentsTheDesignerIsWorkingOnDoesNotNeedYou(t *testing.T) {
+	gateOpened := time.Now().Add(-time.Hour)
+	sent := gateOpened.Add(30 * time.Minute)
+	gate := state.Attention{ID: "gate-csv-design", Kind: "gate", CreatedAt: state.Time{Time: gateOpened}}
+	question := state.Attention{ID: "q-csv-1", Kind: "question", CreatedAt: state.Time{Time: gateOpened}}
+	designer := tmux.Pane{ID: "%2", Command: "claude", Repo: "/r/app", StageOf: "csv", Stage: "designer", Token: "t-des"}
+	stopHook := func(at time.Time) *state.HookFile {
+		event := state.HookEvent{Event: "Stop", At: at}
+		return &state.HookFile{Token: "t-des", Main: &event, Last: event}
+	}
+	cases := []struct {
+		name      string
+		attention []state.Attention
+		finished  bool
+		pane      tmux.Pane
+		hook      *state.HookFile
+		want      factory.Status
+	}{
+		{"comments sent, the designer's last stop was before them", []state.Attention{gate}, false, designer, stopHook(sent.Add(-time.Minute)), factory.WaitingAgent},
+		{"the designer wrote its result", []state.Attention{gate}, true, designer, nil, factory.NeedsYou},
+		{"the designer stopped after the comments", []state.Attention{gate}, false, designer, stopHook(sent.Add(time.Minute)), factory.NeedsYou},
+		{"the designer's pane died", []state.Attention{gate}, false, tmux.Pane{ID: "%2", Dead: true, Repo: "/r/app", StageOf: "csv", Stage: "designer", Token: "t-des"}, nil, factory.NeedsYou},
+		{"a question is open too", []state.Attention{gate, question}, false, designer, nil, factory.NeedsYou},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			result := filepath.Join(dir, "designer-2.result.json")
+			if c.finished {
+				os.WriteFile(result, []byte("{}"), 0o644)
+			}
+			f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{ID: "csv", WaitingOn: "user", Attention: c.attention}}
+			runs := &state.StageRuns{Runs: []state.StageRun{{Role: "designer", Round: 2, Token: "t-des", Result: result, StartedAt: sent, Review: true}}}
+			var hooks []*state.HookFile
+			if c.hook != nil {
+				hooks = append(hooks, c.hook)
+			}
+			live := factory.Live{Pane: factory.Pane{Found: true}, Revising: RevisingGates(f, runs, []tmux.Pane{c.pane}, hooks)}
+			if got := factory.StatusOf(f, live, time.Now(), time.Hour); got != c.want {
+				t.Errorf("status %v; want %v", got, c.want)
+			}
+		})
+	}
+}

@@ -65,6 +65,7 @@ type Live struct {
 	Hook     *state.HookFile
 	Stage    *state.HookFile
 	Answered bool
+	Revising map[string]string
 }
 
 var shells = map[string]bool{"zsh": true, "bash": true, "sh": true, "fish": true, "dash": true, "ksh": true, "tcsh": true, "csh": true, "nu": true}
@@ -89,7 +90,7 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Stalled
 	case f.WaitingOn() == "ci":
 		return WaitingCI
-	case f.WaitingOn() == "agent":
+	case f.WaitingOn() == "agent" || len(live.Revising) > 0:
 		return WaitingAgent
 	}
 	return Running
@@ -111,7 +112,7 @@ func needsYou(f Factory, live Live) bool {
 		return true
 	}
 	if f.State != nil && f.State.HasAttentionField() {
-		return !live.Answered && len(f.State.OpenAttention()) > 0
+		return !live.Answered && len(f.State.OpenAttention()) > len(live.Revising)
 	}
 	waitingOnUser := f.WaitingOn() == "user" || f.WaitingOn() == ""
 	return idle(live.Hook) && waitingOnUser

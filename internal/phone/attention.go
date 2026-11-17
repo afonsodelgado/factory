@@ -18,6 +18,8 @@ const (
 	needsYou     = "Needs you. Tap to open it."
 	workDone     = "Work is done. Mark it done or continue working?"
 	resolvedBody = "Resolved elsewhere."
+	workingBody  = "Working on your comments. You are told when it is ready to review again."
+	revisedBody  = "Revised from your comments. Tap to review it again."
 )
 
 var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission", "handoff"}
@@ -69,21 +71,26 @@ type Payload struct {
 
 type alert struct {
 	tracked
-	active bool
+	active  bool
+	reopens bool
 }
 
-func alertsOf(factories []host.LocalFactory) (map[string]alert, map[string]bool) {
-	open, active := map[string]alert{}, map[string]bool{}
+func alertsOf(factories []host.LocalFactory) (open map[string]alert, active, working map[string]bool) {
+	open, active, working = map[string]alert{}, map[string]bool{}, map[string]bool{}
 	for _, f := range factories {
 		active[f.Incarnation] = !f.Paused
 		for _, item := range f.Items {
+			if item.Revising != "" {
+				working[item.Key] = true
+				continue
+			}
 			if slices.Contains(notifiable, item.Kind) {
 				link := Link{Route: f.Route, Item: item.ID, Incarnation: f.Incarnation, Open: true}
-				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused}
+				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused, reopens: item.Kind == "gate"}
 			}
 		}
 	}
-	return open, active
+	return open, active, working
 }
 
 func alertBody(kind string) string {
@@ -103,12 +110,18 @@ func (s Store) Reconcile(node string, factories []host.LocalFactory, connected f
 		if l.Items == nil {
 			l.Items = map[string]*tracked{}
 		}
-		open, active := alertsOf(factories)
+		open, active, working := alertsOf(factories)
 		for key, a := range open {
-			_, seen := l.Items[key]
+			known, seen := l.Items[key]
 			switch {
 			case seen && !a.active:
 				l.cancel(key)
+			case seen && !known.Open && a.reopens:
+				known.Open, known.Body, known.Revision, known.Changed = true, revisedBody, known.Revision+1, now
+				if l.Baseline {
+					known.Alerted = l.queue(node, subs, key, known, nil, now)
+					queued = known.Alerted || queued
+				}
 			case !seen:
 				item := a.tracked
 				item.Changed = now
@@ -123,7 +136,10 @@ func (s Store) Reconcile(node string, factories []host.LocalFactory, connected f
 			if _, still := open[key]; still || !item.Open {
 				continue
 			}
-			item.Open, item.Revision, item.Changed = false, item.Revision+1, now
+			item.Open, item.Body, item.Revision, item.Changed = false, resolvedBody, item.Revision+1, now
+			if working[key] {
+				item.Body = workingBody
+			}
 			unsent := l.cancel(key)
 			if active[item.Incarnation] && item.Alerted {
 				clearsItself := func(sub Subscription) bool { return unsent[sub.Endpoint] || connected(sub.Installation) }
@@ -149,9 +165,6 @@ func linkPath(node, key string) string {
 
 func (l *ledger) queue(node string, subs []Subscription, key string, item *tracked, skip func(Subscription) bool, now time.Time) bool {
 	payload := Payload{Node: node, Tag: notificationTag(node, key), Title: item.Title, Body: cmp.Or(item.Body, needsYou), URL: linkPath(node, key), Revision: item.Revision, Resolved: !item.Open}
-	if payload.Resolved {
-		payload.Body = resolvedBody
-	}
 	data, _ := json.Marshal(payload)
 	queued := false
 	for _, sub := range subs {
