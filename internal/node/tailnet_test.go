@@ -951,6 +951,17 @@ func browserAnswers(url string) bool {
 	return err == nil
 }
 
+func browserAnswersSoon(url string) bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for !browserAnswers(url) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return true
+}
+
 func running(pid int) bool {
 	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	stat := strings.TrimSpace(string(out))
@@ -1010,7 +1021,7 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 	switch {
 	case alphaBrowser == betaBrowser || alphaDir == betaDir:
 		t.Fatalf("both nodes' QA share %s; want a browser and profile each", alphaBrowser)
-	case !browserAnswers(alphaBrowser) || !browserAnswers(betaBrowser):
+	case !browserAnswersSoon(alphaBrowser) || !browserAnswersSoon(betaBrowser):
 		t.Fatal("a node's QA browser does not answer after the stage command that started it returned")
 	}
 	if _, err := os.Stat(state.LaunchScriptPath(alpha.Dir, beta.f.Repo, beta.f.Slug, "qa")); err == nil {
@@ -1029,7 +1040,7 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 	if !strings.Contains(string(console), "export failed to load") || !bytes.HasPrefix(shot, []byte("\x89PNG")) {
 		t.Fatalf("the paused QA kept console %q and a %d-byte screenshot in %s; want the page's error and a PNG outside the removed profile", console, len(shot), evidence)
 	}
-	if !browserAnswers(betaBrowser) {
+	if !browserAnswersSoon(betaBrowser) {
 		t.Fatal("pausing alpha's factory closed beta's browser")
 	}
 
