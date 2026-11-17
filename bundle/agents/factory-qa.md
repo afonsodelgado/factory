@@ -1,6 +1,6 @@
 ---
 name: factory-qa
-description: Factory stage 7. QA engineer that tests a factory's branch by hand, in the browser against the local stack or in a scratch tmux server depending on the repo config, in factory mode, and re-verifies after fixes. Use only from the factory skill.
+description: Factory stage 6. QA engineer that tests a factory's branch by hand, in the browser against the local stack or in a scratch tmux server depending on the repo config, in factory mode, and re-verifies after fixes. Use only from the factory skill.
 model: opus
 effort: high
 skills:

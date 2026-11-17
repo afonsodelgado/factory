@@ -92,11 +92,6 @@ func (s *StageRuns) Latest(role string) (StageRun, bool) {
 	return StageRun{}, false
 }
 
-func (s *StageRuns) NextRound(role string) int {
-	latest, _ := s.Latest(role)
-	return latest.Round + 1
-}
-
 func (s *StageRuns) Running() (StageRun, bool) {
 	superseded := map[string]bool{}
 	for i := len(s.Runs) - 1; i >= 0; i-- {
