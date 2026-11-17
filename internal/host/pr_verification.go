@@ -168,7 +168,7 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 			required = append(required, rule.Parameters.Required...)
 			approvals = approvals || rule.Parameters.Approvals > 0
 			threads = threads || rule.Parameters.Threads
-			if rule.Type != "required_status_checks" && rule.Type != "pull_request" && rule.Type != "non_fast_forward" && rule.Type != "deletion" {
+			if !slices.Contains([]string{"required_status_checks", "pull_request", "non_fast_forward", "deletion", "required_linear_history"}, rule.Type) {
 				otherPolicy = true
 			}
 		}
@@ -237,12 +237,23 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		return errors.New("heads changed during verification")
 	}
 	o.ApprovalNeeded = approvals && review.ReviewDecision != "APPROVED"
+	approvalOnly := pr.MergeState == "blocked" && o.ApprovalNeeded && !otherPolicy && o.CI == "pass"
+	if approvalOnly && threads {
+		unresolved, err := g.unresolvedThreads(dir, repo.Name, o.Number)
+		if err != nil {
+			return err
+		}
+		approvalOnly = unresolved == 0
+	}
 	o.Policy = "fail"
+	pastDeadline := now.Sub(o.Window.Started) >= CheckDeadline
 	switch {
 	case !o.Open:
 		o.Problem = "PR is not open"
+	case pr.Mergeable == nil && pastDeadline:
+		o.Policy, o.Problem = "unknown", "mergeability is unknown"
 	case pr.Mergeable == nil:
-		o.Problem = "mergeability is unknown"
+		o.Policy, o.Problem = "pending", "mergeability is still being computed"
 	case !*pr.Mergeable:
 		o.Problem = "merge conflicts"
 	case review.ReviewDecision == "CHANGES_REQUESTED":
@@ -251,17 +262,61 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		o.Problem = "base requires restacking"
 	case pr.MergeState == "clean" || pr.MergeState == "unstable":
 		o.Policy = "pass"
-	case pr.MergeState == "blocked" && o.ApprovalNeeded && !threads && !otherPolicy && o.CI == "pass":
+	case approvalOnly:
 		o.Policy = "pass"
 	case pr.Draft && pr.MergeState == "draft":
 		o.Policy = "pass"
 	default:
 		o.Problem = "repository policy is not satisfied: " + pr.MergeState
 	}
-	if now.Sub(o.Window.Started) >= CheckDeadline && o.CI == "pending" {
+	if pastDeadline && o.CI == "pending" {
 		o.CI, o.Reason = "timeout", "verification_deadline"
 	}
 	return nil
+}
+
+func (g *GitHub) unresolvedThreads(dir, repo string, number int) (int, error) {
+	owner, name, _ := strings.Cut(repo, "/")
+	query := `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{isResolved} pageInfo{hasNextPage endCursor}}}}}`
+	data, err := g.Run(dir, "api", "graphql", "--paginate", "--slurp", "-f", "query="+query, "-f", "owner="+owner, "-f", "repo="+name, "-F", fmt.Sprint("number=", number))
+	if err != nil {
+		return 0, err
+	}
+	var pages []struct {
+		Errors []json.RawMessage `json:"errors"`
+		Data   struct {
+			Repository struct {
+				PR struct {
+					Threads struct {
+						Nodes []struct {
+							Resolved bool `json:"isResolved"`
+						} `json:"nodes"`
+						PageInfo struct {
+							HasNext bool `json:"hasNextPage"`
+						} `json:"pageInfo"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &pages); err != nil {
+		return 0, err
+	}
+	if len(pages) == 0 || pages[len(pages)-1].Data.Repository.PR.Threads.PageInfo.HasNext {
+		return 0, errors.New("incomplete review thread pagination")
+	}
+	unresolved := 0
+	for _, page := range pages {
+		if len(page.Errors) > 0 || page.Data.Repository.PR.Threads.Nodes == nil {
+			return 0, errors.New("incomplete review threads")
+		}
+		for _, thread := range page.Data.Repository.PR.Threads.Nodes {
+			if !thread.Resolved {
+				unresolved++
+			}
+		}
+	}
+	return unresolved, nil
 }
 
 func (g *GitHub) checksAt(dir, prefix, sha string) ([]apiCheck, error) {
@@ -403,7 +458,7 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 				return nil, err
 			}
 			observations = append(observations, observation)
-			waiting = waiting || observation.CI == "pending"
+			waiting = waiting || observation.CI == "pending" || observation.Policy == "pending"
 			if observation.CI == "unknown" || observation.CI == "fail" || observation.CI == "timeout" {
 				waiting = false
 				break

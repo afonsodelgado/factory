@@ -37,6 +37,52 @@ func TestChecksNeverTurnUnknownRequiredOrSkippedWorkIntoAnEmptyPass(t *testing.T
 	}
 }
 
+func TestApprovalOnlyBlocksAreNotesAndUncomputedMergeabilityKeepsWaiting(t *testing.T) {
+	gh := func(merge, rules, resolved string) *GitHub {
+		return &GitHub{Run: func(dir string, args ...string) ([]byte, error) {
+			command := strings.Join(args, " ")
+			switch {
+			case strings.Contains(command, "graphql"):
+				return []byte(`[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":` + resolved + `}],"pageInfo":{"hasNextPage":false}}}}}}]`), nil
+			case command == "repo view --json nameWithOwner":
+				return []byte(`{"nameWithOwner":"owner/repo"}`), nil
+			case strings.Contains(command, "pulls/1"):
+				return []byte(`{"number":1,"head":{"sha":"h","ref":"feature"},"base":{"sha":"b","ref":"main"},"state":"open","draft":false,` + merge + `}`), nil
+			case strings.Contains(command, "rules/branches"):
+				return []byte(rules), nil
+			case strings.Contains(command, "branches/main"):
+				return []byte(`{"protected":false,"commit":{"sha":"b"}}`), nil
+			case strings.Contains(command, "check-runs"):
+				return []byte(`[{"total_count":1,"check_runs":[{"id":1,"name":"ci","status":"completed","conclusion":"success","head_sha":"h"}]}]`), nil
+			case strings.Contains(command, "statuses"):
+				return []byte(`[[]]`), nil
+			case strings.Contains(command, "reviewDecision"):
+				return []byte(`{"reviewDecision":"REVIEW_REQUIRED","headRefOid":"h","baseRefOid":"b"}`), nil
+			}
+			t.Fatalf("unexpected call: %s", command)
+			return nil, nil
+		}}
+	}
+	blocked := `"mergeable":true,"mergeable_state":"blocked"`
+	strict := `[[{"type":"pull_request","parameters":{"required_approving_review_count":1,"required_review_thread_resolution":true}},{"type":"required_linear_history","parameters":{}}]]`
+	now := time.Unix(100, 0)
+	if o := gh(blocked, strict, "true").Observe("", 1, CheckWindow{}, now); o.Policy != "pass" || !o.ApprovalNeeded {
+		t.Fatal("a missing approval under thread resolution and linear history became a policy failure", o)
+	}
+	if o := gh(blocked, strict, "false").Observe("", 1, CheckWindow{}, now); o.Policy != "fail" {
+		t.Fatal("an unresolved review thread passed as an approval-only block", o)
+	}
+	computing := gh(`"mergeable":null,"mergeable_state":"unknown"`, `[[]]`, "true")
+	dir := t.TempDir()
+	interrupted := errors.New("slept")
+	if _, err := WatchPRs(context.Background(), dir, dir, "run", []int{1}, computing, func() time.Time { return now }, func(context.Context, time.Duration) error { return interrupted }); !errors.Is(err, interrupted) {
+		t.Fatal("the watcher handed back mergeability GitHub had not computed yet", err)
+	}
+	if o := computing.Observe("", 1, CheckWindow{Head: "h", Base: "b", Started: now, Discovery: now}, now.Add(CheckDeadline)); o.Policy != "unknown" {
+		t.Fatal("uncomputed mergeability kept waiting past the deadline", o)
+	}
+}
+
 func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testing.T) {
 	start := time.Unix(100, 0)
 	now := start
