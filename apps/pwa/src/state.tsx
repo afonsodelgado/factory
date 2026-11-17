@@ -11,6 +11,7 @@ import {
 import {
   act as send,
   api,
+  exposureOf,
   HttpError,
   reachOf,
   refusalOf,
@@ -19,6 +20,7 @@ import {
 import { accountOf, cache, type Pending } from "./api/cache.ts";
 import type {
   ActionBody,
+  Exposure,
   LocalFactory,
   Me,
   Receipt,
@@ -38,6 +40,7 @@ export type App = {
   account?: string;
   installation?: string;
   refusal?: Refusal;
+  exposure?: Exposure;
   snapshot?: Snapshot;
   savedAt?: string;
   live: boolean;
@@ -62,6 +65,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<string>();
   const [installation, setInstallation] = useState<string>();
   const [refusal, setRefusal] = useState<Refusal>();
+  const [exposure, setExposure] = useState<Exposure>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [savedAt, setSavedAt] = useState<string>();
   const [route, setRoute] = useState<Route>(() => parse(location));
@@ -124,6 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const fail = async (error: unknown) => {
       const why = refusalOf(error);
       if (why) return refuse(why);
+      setExposure(exposureOf(error));
       setReach(reachOf(error));
       await showSaved(await cache.account().catch(() => undefined));
       timer.current = window.setTimeout(connect, RETRY);
@@ -141,6 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await cache.setAccount(id);
     const browser = await cache.installation();
     setRefusal(undefined);
+    setExposure(undefined);
     setMe(current);
     setAccount(id);
     setInstallation(browser);
@@ -217,9 +223,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await refuse(why);
           throw error;
         }
-        if (reachOf(error) === "online") {
+        const exposed = exposureOf(error);
+        if (exposed || reachOf(error) === "online") {
           await cache.settlePending(id, operation);
           await showPending();
+          if (exposed) connect();
           throw error;
         }
         setReach(reachOf(error));
@@ -235,7 +243,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
       }
     },
-    [account, refuse],
+    [account, refuse, connect],
   );
 
   const value = useMemo<App>(
@@ -245,6 +253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       account,
       installation,
       refusal,
+      exposure,
       snapshot,
       savedAt,
       live: reach === "online" && !savedAt,
@@ -260,6 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       account,
       installation,
       refusal,
+      exposure,
       snapshot,
       savedAt,
       route,

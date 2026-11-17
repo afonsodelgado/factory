@@ -2,6 +2,7 @@ import type {
   ActionBody,
   LocalFactory,
   Link,
+  Exposure,
   Me,
   PushState,
   Receipt,
@@ -9,7 +10,7 @@ import type {
 } from "./types.ts";
 
 export type Reach =
-  "online" | "offline" | "node-down" | "restarting" | "refused";
+  "online" | "offline" | "node-down" | "restarting" | "refused" | "funnel";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -30,8 +31,16 @@ export function refusalOf(error: unknown): Refusal | undefined {
   return undefined;
 }
 
+export function exposureOf(error: unknown): Exposure | undefined {
+  if (!(error instanceof HttpError) || error.status !== 403) return undefined;
+  const body = error.body as (Exposure & { funnel?: boolean }) | undefined;
+  if (body?.funnel !== true) return undefined;
+  return { error: body.error, fixes: body.fixes };
+}
+
 export function reachOf(error: unknown): Reach {
   if (refusalOf(error)) return "refused";
+  if (exposureOf(error)) return "funnel";
   if (!(error instanceof HttpError)) return "offline";
   switch (error.status) {
     case 0:

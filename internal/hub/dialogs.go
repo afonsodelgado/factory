@@ -34,6 +34,7 @@ var popupSizes = map[string][2]int{
 	"keys":     {124, 17},
 	"remotes":  {90, 26},
 	"phone":    {90, 32},
+	"nodes":    {90, 30},
 }
 
 var popupTitles = map[string]string{
@@ -46,6 +47,7 @@ var popupTitles = map[string]string{
 	"keys":     " Keys ",
 	"remotes":  " ↔ Remotes ",
 	"phone":    " Phone ",
+	"nodes":    " ↔ Nodes ",
 }
 
 type dialogClosedMsg struct {

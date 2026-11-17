@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"mime"
 	"net/http"
 	"net/netip"
@@ -17,6 +18,7 @@ type Gate struct {
 	Origin      string
 	OpaquePath  string
 	RefusalPage func(w http.ResponseWriter, owner, login string)
+	Exposure    *Exposure
 }
 
 func (g Gate) Wrap(next http.Handler) http.Handler {
@@ -26,18 +28,43 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 		case status == http.StatusForbidden && login != "":
 			g.refuseAccount(w, r, login, problem)
 			return
-		case problem == "":
+		case problem != "":
+		case g.exposed(w):
+			return
+		default:
 			status, problem = g.requestRefusal(r)
 		}
 		if problem != "" {
 			fail(w, status, problem)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(g.untilExposed(r.Context())))
 	})
 }
 
+func (g Gate) untilExposed(parent context.Context) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	unsafe := g.Exposure.Unsafe()
+	go func() {
+		select {
+		case <-unsafe:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx
+}
+
 func (g Gate) Principal(*http.Request) (string, bool) { return g.Owner, true }
+
+func (g Gate) exposed(w http.ResponseWriter) bool {
+	problem, fixes := g.Exposure.Refusal()
+	if problem == "" {
+		return false
+	}
+	reply(w, http.StatusForbidden, map[string]any{"error": problem, "funnel": true, "fixes": fixes})
+	return true
+}
 
 func (g Gate) refuseAccount(w http.ResponseWriter, r *http.Request, login, problem string) {
 	if g.RefusalPage != nil && opensPage(r) {

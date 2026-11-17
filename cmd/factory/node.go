@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	nodeUsage   = "usage: factory node run [--owner <tailscale login>]"
+	nodeUsage   = "usage: factory node run [--owner <tailscale login>] | install | uninstall | status"
 	ownerEnv    = "FACTORY_NODE_OWNER"
 	readTimeout = 10 * time.Second
 )
@@ -39,9 +39,12 @@ const (
 var errNoNode = errors.New("no factory node runs on this machine. Start one in the foreground with factory node run, or install it as a service with factory node install")
 
 func runNode(args []string) int {
-	if len(args) == 0 || args[0] != "run" {
+	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, nodeUsage)
 		return 2
+	}
+	if args[0] != "run" {
+		return runNodeSetup(args)
 	}
 	flags := flag.NewFlagSet("node run", flag.ContinueOnError)
 	owner := flags.String("owner", "", "the Tailscale login that owns this node, such as you@example.com")
@@ -51,7 +54,7 @@ func runNode(args []string) int {
 	}
 	cfg, err := state.LoadConfig()
 	if err == nil {
-		err = runNodeService(cfg, cmp.Or(*owner, os.Getenv(ownerEnv), cfg.Node.Owner))
+		err = runNodeService(cfg, cmp.Or(*owner, os.Getenv(ownerEnv), cfg.Node.Owner), node.Tailscale{Run: node.System})
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory node:", err)
@@ -60,10 +63,7 @@ func runNode(args []string) int {
 	return 0
 }
 
-func runNodeService(cfg *state.Config, owner string) error {
-	if owner == "" {
-		return errors.New("this node does not know its owner's Tailscale login. Give it with factory node run --owner you@example.com, " + ownerEnv + ", or node.owner in " + cfg.ConfigFile())
-	}
+func runNodeService(cfg *state.Config, owner string, ts node.Tailscale) error {
 	release, err := node.Lock(cfg.NodeLockPath(), cfg.LockPath(), hostLockPath(cfg), phone.ServeLockPath(cfg.StateDir))
 	if err != nil {
 		return err
@@ -71,13 +71,46 @@ func runNodeService(cfg *state.Config, owner string) error {
 	defer release()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
-	n, err := startNode(ctx, cfg, owner)
+	if owner, err = learnIdentity(ctx, cfg, owner, ts); err != nil {
+		return err
+	}
+	n, err := startNode(ctx, cfg, owner, ts)
 	if err != nil {
 		return err
 	}
 	defer n.close()
 	fmt.Printf("factory node: %s on %s and 127.0.0.1:%d\n", owner, cfg.NodeSocket(), cfg.NodePort())
 	return n.wait()
+}
+
+func learnIdentity(ctx context.Context, cfg *state.Config, owner string, ts node.Tailscale) (string, error) {
+	if owner != "" && cfg.NodeHostname() != "" {
+		return owner, nil
+	}
+	self, err := ts.Status(ctx)
+	switch {
+	case err != nil && owner == "":
+		return "", fmt.Errorf("this node does not know its owner's Tailscale login, and Tailscale cannot say: %w. Then run factory node run again, or give the login with --owner you@example.com, %s or node.owner in %s", err, ownerEnv, cfg.ConfigFile())
+	case err != nil:
+		return owner, nil
+	case self.Tagged && owner == "":
+		return "", errors.New("this machine is a tagged Tailscale device, so no user owns it and Serve passes no login to check. Run " + node.UntagFix + " and sign in as yourself, then factory node run again")
+	}
+	learned := state.Node{Hostname: self.DNSName}
+	if owner == "" {
+		learned.Owner = self.Login
+	}
+	err = state.UpdateMachine(cfg.ConfigDir, func(m *state.Machine) error {
+		m.Node.Owner = cmp.Or(m.Node.Owner, learned.Owner)
+		m.Node.Hostname = cmp.Or(m.NodeHostname(), learned.Hostname)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	cfg.Node.Owner = cmp.Or(cfg.Node.Owner, learned.Owner)
+	cfg.Node.Hostname = cmp.Or(cfg.NodeHostname(), learned.Hostname)
+	return cmp.Or(owner, learned.Owner), nil
 }
 
 type runningNode struct {
@@ -93,7 +126,7 @@ func (n *runningNode) close() {
 	}
 }
 
-func startNode(ctx context.Context, cfg *state.Config, owner string) (*runningNode, error) {
+func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tailscale) (*runningNode, error) {
 	if err := os.MkdirAll(cfg.SessionsDir(), 0o700); err != nil {
 		return nil, err
 	}
@@ -138,14 +171,16 @@ func startNode(ctx context.Context, cfg *state.Config, owner string) (*runningNo
 	runtime := host.New(host.Runtime{
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
 		Pages: pages, Engine: panes, Typist: panes, Log: host.LoadEventLog(host.EventLogPath(cfg.StateDir)), Push: &host.Pusher{StateDir: cfg.StateDir, Now: time.Now},
-		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH},
+		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
 	})
 	go runtime.Push.Run(ctx)
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
 	api := &node.API{Commands: node.Commands{Runtime: queue}, Version: version, Node: id, Boot: uuid.NewString()}
 	go api.Poll(ctx)
 	app := phoneApp(ctx, cfg, api, pages, vapidKey)
-	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage}
+	exposure := &node.Exposure{Tailscale: ts}
+	go exposure.Watch(ctx)
+	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), OpaquePath: phone.GrantPrefix, RefusalPage: phone.RefusalPage, Exposure: exposure}
 	unixListener, err := node.ListenUnix(cfg.NodeSocket())
 	if err != nil {
 		n.close()

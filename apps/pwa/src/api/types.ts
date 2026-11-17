@@ -117,6 +117,8 @@ export type Me = {
 
 export type Refusal = { owner?: string; login?: string };
 
+export type Exposure = { error: string; fixes: string[] | null };
+
 export type Link = {
   route: string;
   item: string;

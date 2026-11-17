@@ -16,20 +16,21 @@ import (
 )
 
 type Presentation struct {
-	Snapshot Snapshot
-	Claims   map[string]Answer
-	Settled  []Answer
-	Notice   string
-	Repos    []string
-	Threads  map[string]int
-	PRs      map[string][]PR
-	Checked  time.Time
+	Snapshot   Snapshot
+	Claims     map[string]Answer
+	Settled    []Answer
+	Notice     string
+	Repos      []string
+	Threads    map[string]int
+	PRs        map[string][]PR
+	Checked    time.Time
+	FirstStart string
 }
 
 func (m *Runtime) Presentation() Presentation {
 	return Presentation{
 		Snapshot: m.snap, Claims: m.receipts.Claims, Settled: m.receipts.Settled, Notice: m.TakeNotice(), Repos: m.Config.Repos,
-		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(),
+		Threads: m.openThreads(), PRs: m.prs, Checked: m.prsChecked(), FirstStart: m.takeFirstStart(),
 	}
 }
 

@@ -47,6 +47,7 @@ Tests, manual runs and QA never touch the real machine:
 - `FACTORY_CONFIG_DIR`, `FACTORY_STATE_DIR`, `FACTORY_TMUX_SOCKET` and `CLAUDE_CONFIG_DIR` point at temporary directories.
 - Chrome: tests and QA start it headless with a temporary profile, never the user's profile or `$FACTORY_STATE_DIR/chrome` of the real machine.
 - Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory` or `~/.local/state/factory`.
+- `factory node install`, `uninstall`, `status` and `run`, `factory doctor`, `factory bootstrap` and `factory phone check` call `tailscale`, `launchctl`, `systemctl` and `loginctl` by name. Run them only with a temporary `HOME` and fakes of those four first on `PATH`; tests inject a runner instead. Never let them reach the real service manager or tailnet.
 - `factory` and `factory open` set up the repo they run in, as `init` does. Run `init`, `factory` and `factory open` only in a temporary git repo, with `HOME`, `FACTORY_CONFIG_DIR` and `FACTORY_STATE_DIR` pointing at temporary directories, never in a real repo.
 
 Integration tests that need tmux start their own scratch server and kill it in `t.Cleanup`. They skip when `tmux` is missing only if `CI` is unset.
@@ -54,6 +55,8 @@ Integration tests that need tmux start their own scratch server and kill it in `
 ## tmux
 
 Address panes by id (`%12`) and windows by name. Never assume a window or pane index: `base-index` differs between machines.
+
+Hub popups such as `N` (Nodes) and `P` (Phone) are tmux client overlays, so `capture-pane` on the hub's server never shows them, and they run with that server's global environment. To see one by hand, start the inner scratch server from a shell whose `HOME`, `FACTORY_*` and `CLAUDE_CONFIG_DIR` are temporary and whose `PATH` puts the fakes first, run `factory node run` from the same environment, then run the hub in a second scratch server from a temporary repo with `TMUX` unset (`tmux -L <outer> -f /dev/null new -d -x 120 -y 40 factory`), send the key there and capture the outer pane.
 
 ## Code
 

@@ -53,7 +53,9 @@ type Runtime struct {
 	Jobs     Background
 	Browsers Browsers
 	GitHub   *GitHub
+	Machine  string
 
+	welcomed    bool
 	snap        Snapshot
 	typeQueue   []QueuedType
 	typedAt     map[string]time.Time
@@ -86,6 +88,21 @@ func (m *Runtime) TakeNotice() string {
 	notice := m.notice
 	m.notice = ""
 	return notice
+}
+
+func (m *Runtime) takeFirstStart() string {
+	if m.welcomed || m.Machine == "" {
+		return ""
+	}
+	m.welcomed = true
+	marker := filepath.Join(m.Config.StateDir, "node-welcomed")
+	if _, err := os.Lstat(marker); err == nil {
+		return ""
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		return ""
+	}
+	return m.Machine
 }
 
 func (m *Runtime) Tick() {

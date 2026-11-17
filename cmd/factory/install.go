@@ -1,16 +1,27 @@
 package main
 
 import (
+	"cmp"
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -209,4 +220,300 @@ func runInstallHooks(args []string) int {
 	}
 	fmt.Println("Restart running Claude Code and Codex sessions so they pick up the change.")
 	return 0
+}
+
+const (
+	setupUsage = "usage: factory node install | uninstall | status"
+	healthWait = 30 * time.Second
+)
+
+type nodeSetup struct {
+	cfg       *state.Config
+	tailscale node.Tailscale
+	service   node.Service
+	app       func() error
+	wait      time.Duration
+	out       io.Writer
+}
+
+func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
+	home, _ := os.UserHomeDir()
+	return nodeSetup{
+		cfg: cfg, tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
+		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out,
+	}
+}
+
+func runNodeSetup(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, setupUsage)
+		return 2
+	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory node:", err)
+		return 1
+	}
+	s, ctx := newNodeSetup(cfg, os.Stdout), context.Background()
+	switch args[0] {
+	case "install":
+		err = s.install(ctx)
+	case "uninstall":
+		err = s.uninstall(ctx)
+	case "status":
+		s.status(ctx)
+	default:
+		fmt.Fprintln(os.Stderr, setupUsage)
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory node:", err)
+		return 1
+	}
+	return 0
+}
+
+func (s nodeSetup) install(ctx context.Context) error {
+	record, err := node.LoadInstall(s.cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	if err := s.app(); err != nil {
+		return err
+	}
+	self, mapping, err := s.preflight(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "factory node install · %s\n\n", self.Short())
+	s.passed("tailscale", "logged in as "+self.Login+" on "+self.Tailnet)
+	s.passed("https", "certificates on for the tailnet")
+	s.passed("funnel", "off")
+	if err := s.saveIdentity(self); err != nil {
+		return err
+	}
+	record.Binary = s.service.Binary
+	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
+		return err
+	}
+	if err := s.startService(ctx); err != nil {
+		return err
+	}
+	target := node.Target(s.cfg.NodePort())
+	if mapping == node.Unmapped {
+		if _, err := s.tailscale.Run(ctx, "tailscale", node.ServeArgs(s.cfg.NodePort())...); err != nil {
+			return fmt.Errorf("the node runs, but Tailscale Serve did not take https://%s: %w.%s Then run factory node install again", self.DNSName, err, node.PrivilegeNote())
+		}
+	}
+	s.passed("serve", fmt.Sprintf("https://%s → 127.0.0.1:%d, tailnet only", self.DNSName, s.cfg.NodePort()))
+	firstInstall := !record.Complete
+	record.Host, record.Serve, record.Complete = self.DNSName, target, true
+	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
+		return err
+	}
+	return s.welcome(self, firstInstall)
+}
+
+func (s nodeSetup) passed(name, detail string) {
+	install.WriteCheck(s.out, install.Check{Name: name, Mark: install.Pass, Detail: detail})
+}
+
+func (s nodeSetup) preflight(ctx context.Context) (node.Self, node.Mapping, error) {
+	self, err := s.tailscale.Status(ctx)
+	if err != nil {
+		return self, 0, err
+	}
+	saved := s.cfg.Node.Owner
+	switch {
+	case self.Tagged:
+		return self, 0, errors.New("this machine is a tagged Tailscale device, so Serve passes no user login and your phone could never prove it is you. Run " + node.UntagFix + ", sign in as yourself, then factory node install again")
+	case saved != "" && !strings.EqualFold(saved, self.Login):
+		return self, 0, fmt.Errorf("node.owner in %s is %s, but Tailscale is logged in as %s. Log Tailscale in as %s, or change node.owner, then run factory node install again", s.cfg.ConfigFile(), saved, self.Login, saved)
+	case !self.HTTPS():
+		return self, 0, errors.New("HTTPS certificates are off for this tailnet, so your phone cannot open the node; " + node.HTTPSFix + ", then run factory node install again")
+	}
+	sc, err := s.tailscale.Serve(ctx)
+	if err != nil {
+		return self, 0, fmt.Errorf("%w; nothing is installed while the node cannot tell whether Funnel is off", err)
+	}
+	if funnels := sc.Funnels(); len(funnels) > 0 {
+		return self, 0, funnelError(funnels)
+	}
+	mapping, uses := sc.Mapping(self.DNSName, node.Target(s.cfg.NodePort()))
+	if mapping == node.Foreign {
+		return self, 0, fmt.Errorf("https://%s already serves something else (%s), and the node never takes it over. Move that to another port with tailscale serve, then run factory node install again", self.DNSName, uses)
+	}
+	return self, mapping, nil
+}
+
+func funnelError(funnels []node.Funnel) error {
+	var b strings.Builder
+	b.WriteString("Funnel puts this machine on the public internet, and the node never runs beside it. Turn off each entry, then run factory node install again:")
+	for _, f := range funnels {
+		fmt.Fprintf(&b, "\n  %s\n    %s", f.Where, f.Fix)
+	}
+	if note := node.PrivilegeNote(); note != "" {
+		b.WriteString("\n" + strings.TrimSpace(note))
+	}
+	return errors.New(b.String())
+}
+
+func (s nodeSetup) saveIdentity(self node.Self) error {
+	err := state.UpdateMachine(s.cfg.ConfigDir, func(m *state.Machine) error {
+		m.Node.Owner = cmp.Or(m.Node.Owner, self.Login)
+		m.Node.Hostname = self.DNSName
+		return nil
+	})
+	s.cfg.Node.Owner, s.cfg.Node.Hostname = cmp.Or(s.cfg.Node.Owner, self.Login), self.DNSName
+	return err
+}
+
+func (s nodeSetup) startService(ctx context.Context) error {
+	if _, alive := runningMe(s.cfg); alive && !s.service.State(ctx).Running {
+		return errors.New("a factory node already runs in the foreground (factory node run). Stop it, then run factory node install again so the service takes over")
+	}
+	if err := s.service.Write(); err != nil {
+		return err
+	}
+	detail, fix, persists := s.service.Boot(ctx, true)
+	if err := s.service.Load(ctx); err != nil {
+		return fmt.Errorf("could not load the %s: %w", s.service.Kind(), err)
+	}
+	me, answered := s.awaitNode()
+	if !answered {
+		s.service.Unload(ctx)
+		return fmt.Errorf("the %s started, but the node did not answer within %s, so it is stopped again. Its log is %s; fix what it says, then run factory node install again", s.service.Kind(), s.wait, s.service.Log)
+	}
+	s.passed("service", s.service.Loaded(persists))
+	if !persists {
+		install.WriteCheck(s.out, install.Check{Name: "at boot", Mark: install.Warn, Detail: detail, Fix: fix})
+	}
+	s.passed("node", fmt.Sprintf("%s, answering on 127.0.0.1:%d and its local socket", me.Version, s.cfg.NodePort()))
+	return nil
+}
+
+func (s nodeSetup) awaitNode() (node.Me, bool) {
+	deadline := time.Now().Add(s.wait)
+	for {
+		me, alive := runningMe(s.cfg)
+		if alive && listening(s.cfg.NodePort()) {
+			return me, true
+		}
+		if time.Now().After(deadline) {
+			return me, false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func runningMe(cfg *state.Config) (node.Me, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var me node.Me
+	err := node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/me", nil, &me)
+	return me, err == nil
+}
+
+func listening(port int) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
+	if err == nil {
+		conn.Close()
+	}
+	return err == nil
+}
+
+func (s nodeSetup) welcome(self node.Self, firstInstall bool) error {
+	url := "https://" + self.DNSName
+	fmt.Fprintf(s.out, "\n%s is a factory node. It keeps running with the hub closed.\n\n", self.Short())
+	fmt.Fprintf(s.out, "Next\n  hub      factory\n  phone    open %s with Tailscale on, then add it to\n           the Home Screen. Tailscale already says it's you: no code, no pairing.\n", url)
+	if !firstInstall {
+		return nil
+	}
+	code, err := phone.QR(url)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(s.out)
+	for _, line := range code {
+		fmt.Fprintln(s.out, "  "+line)
+	}
+	fmt.Fprintln(s.out, "\n  That is the same URL as a QR, not a code. It opens only for you, on your tailnet.")
+	return nil
+}
+
+func (s nodeSetup) uninstall(ctx context.Context) error {
+	record, err := node.LoadInstall(s.cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	if err := s.service.Uninstall(ctx); err != nil {
+		return fmt.Errorf("could not unload the %s: %w", s.service.Kind(), err)
+	}
+	fmt.Fprintf(s.out, "removed  the %s\n", s.service.Kind())
+	record.Binary, record.Complete = "", false
+	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
+		return err
+	}
+	if record.Serve != "" {
+		if err := s.unserve(ctx, record); err != nil {
+			return err
+		}
+	}
+	if err := node.SaveInstall(s.cfg.StateDir, node.Install{}); err != nil {
+		return err
+	}
+	fmt.Fprintln(s.out, "Factories, their panes and phone notifications stay. factory node install brings the node back.")
+	return nil
+}
+
+func (s nodeSetup) unserve(ctx context.Context, record node.Install) error {
+	sc, err := s.tailscale.Serve(ctx)
+	if err != nil {
+		return fmt.Errorf("%w. Run factory node uninstall again to remove https://%s → %s", err, record.Host, record.Serve)
+	}
+	switch mapping, uses := sc.Mapping(record.Host, record.Serve); mapping {
+	case node.Ours:
+		if _, err := s.tailscale.Run(ctx, "tailscale", node.UnserveArgs...); err != nil {
+			return fmt.Errorf("could not remove https://%s → %s: %w.%s Then run factory node uninstall again", record.Host, record.Serve, err, node.PrivilegeNote())
+		}
+		fmt.Fprintf(s.out, "removed  https://%s → %s\n", record.Host, record.Serve)
+	case node.Foreign:
+		fmt.Fprintf(s.out, "kept     https://%s: it now serves %s, not the node\n", record.Host, uses)
+	}
+	return nil
+}
+
+func (s nodeSetup) status(ctx context.Context) {
+	st := s.service.State(ctx)
+	record, _ := node.LoadInstall(s.cfg.StateDir)
+	service := "not installed; factory node install installs it"
+	switch {
+	case st.Running:
+		service = s.service.Kind() + ", running as pid " + st.PID
+	case st.Installed:
+		service = s.service.Kind() + ", installed but not running; " + s.service.RestartCommand() + " starts it"
+	}
+	running := "not answering"
+	if me, alive := runningMe(s.cfg); alive {
+		running = me.Version
+	}
+	tailnet, url := "unknown until factory node install or factory node run learns it", "unknown"
+	if host := s.cfg.NodeHostname(); host != "" {
+		_, tailnet, _ = strings.Cut(host, ".")
+		url = "https://" + host
+	}
+	fmt.Fprintf(s.out, "service     %s\nrunning     %s\nconfigured  %s\nport        127.0.0.1:%d\ntailnet     %s\nurl         %s\n",
+		service, running, s.configured(ctx, record), s.cfg.NodePort(), tailnet, url)
+}
+
+func (s nodeSetup) configured(ctx context.Context, record node.Install) string {
+	if record.Binary == "" {
+		return "not installed"
+	}
+	out, err := s.service.Run(ctx, record.Binary, "--version")
+	fields := strings.Fields(string(out))
+	if err != nil || len(fields) < 2 {
+		return record.Binary + " does not run; factory node install points the service at this binary"
+	}
+	return fields[1] + " at " + record.Binary
 }

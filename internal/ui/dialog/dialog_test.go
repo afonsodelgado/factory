@@ -3,6 +3,7 @@ package dialog
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -253,13 +254,19 @@ func TestRemotesPopupFirstSetupAddsTheRemoteEvenWhenItsCheckFails(t *testing.T) 
 	}
 }
 
-type fakePhoneActions struct{ status PhoneContext }
+type fakePhoneActions struct {
+	status PhoneContext
+	checks []CheckRow
+}
 
 func (f *fakePhoneActions) Status() (PhoneContext, error) { return f.status, nil }
 func (f *fakePhoneActions) Test() (string, error) {
 	return "", errors.New("3f2a9c1d: the push service could not be reached: Post \"https://push.invalid/qa-sub\": dial tcp: lookup push.invalid: no such host (end)")
 }
 func (f *fakePhoneActions) Check() []CheckRow {
+	if f.checks != nil {
+		return f.checks
+	}
 	return []CheckRow{{Name: "serve", Mark: "fail", Detail: "https://devbox.tail1234.ts.net/ does not forward to http://127.0.0.1:7418", Fix: "tailscale serve --bg --https=443 http://127.0.0.1:7418"}}
 }
 
@@ -280,6 +287,26 @@ func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *tes
 	press("h")
 	if screen := p.View().Content; !strings.Contains(screen, "✗") || !strings.Contains(screen, "tailscale serve --bg --https=443") {
 		t.Fatalf("checks show:\n%s\nwant the failing serve mapping with its fix", screen)
+	}
+}
+
+func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(t *testing.T) {
+	actions := &fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}
+	n := NewNodes(NodesContext{Machine: "macbook", Tailnet: "tail5e2c.ts.net", Version: "0.9.4", Factories: 2, NeedsYou: 1, Phone: actions.status}, actions)
+	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
+	golden.RequireEqual(t, n.View().Content)
+
+	for i := range 10 {
+		actions.checks = append(actions.checks, CheckRow{Name: fmt.Sprintf("check %d", i), Mark: "fail", Detail: "failing", Fix: fmt.Sprintf("fix number %d", i)})
+	}
+	n.Update(tea.WindowSizeMsg{Width: 74, Height: 18})
+	_, check := n.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	n.Update(check())
+	for range 30 {
+		n.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   esc back") {
+		t.Fatalf("⏎ on this machine in an 80×24 terminal, scrolled down, shows:\n%s\nwant the last fix, the summary and every key", details)
 	}
 }
 

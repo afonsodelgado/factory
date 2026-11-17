@@ -3,7 +3,7 @@ import { api } from "./api/client.ts";
 import { FactoryDetail } from "./components/FactoryDetail.tsx";
 import { FactoryList } from "./components/FactoryList.tsx";
 import { AttentionItem } from "./components/AttentionItem.tsx";
-import { Setup } from "./components/Setup.tsx";
+import { Exposed, Setup } from "./components/Setup.tsx";
 import { ThisPhone } from "./components/ThisPhone.tsx";
 import { AppShell, Refused } from "./components/AppShell.tsx";
 import { paths, type Route } from "./route.ts";
@@ -26,6 +26,7 @@ export function App() {
   const { route, reach, snapshot } = useApp();
   const wide = useWide();
   if (reach === "refused") return <Refused />;
+  if (reach === "funnel") return <Exposed />;
   if (route.screen === "setup") return <Setup />;
   if (route.screen === "phone") return <ThisPhone />;
   if (route.screen === "link") return <LinkResolver notification={route.key} />;

@@ -2,6 +2,7 @@ package install
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/catalog"
-	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -116,51 +116,60 @@ func TestDoctorReportsWhatIsMissingWithTheFix(t *testing.T) {
 	}
 }
 
-func TestDoctorNamesEachPhoneSetupGapAndItsFix(t *testing.T) {
+func TestDoctorNamesEachNodeSetupGapAndItsFix(t *testing.T) {
 	const host = "devbox.tail1234.ts.net"
-	running := `{"BackendState":"Running","CertDomains":["` + host + `"],"Self":{"DNSName":"` + host + `."}}`
-	served := `{"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}}}}`
+	running := `{"BackendState":"Running","CertDomains":["` + host + `"],"Self":{"DNSName":"` + host + `.","UserID":7},"User":{"7":{"LoginName":"alice@example.com"}},"CurrentTailnet":{"MagicDNSSuffix":"tail1234.ts.net"}}`
+	tagged := `{"BackendState":"Running","CertDomains":["` + host + `"],"Self":{"DNSName":"` + host + `.","UserID":9,"Tags":["tag:server"]},"User":{"9":{"LoginName":"tagged-devices"}}}`
+	served := `{"TCP":{"443":{"HTTPS":true}},"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}}}}`
+	funnels := `{"TCP":{"443":{"HTTPS":true},"8443":{"HTTPS":true},"10000":{"TCPForward":"127.0.0.1:5432"}},"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}},"` + host + `:8443":{"Handlers":{"/grafana":{"Proxy":"http://127.0.0.1:3000"}}}},"AllowFunnel":{"` + host + `:443":true,"` + host + `:8443":true,"` + host + `:10000":true}}`
 	cases := []struct {
-		name, status, serve string
-		missing, offline    bool
-		failing             []string
+		name, status, serve, owner string
+		missing, offline           bool
+		failing                    []string
+		fix                        string
 	}{
 		{name: "everything set up", status: running, serve: served},
 		{name: "no tailscale", missing: true, failing: []string{"tailscale"}},
 		{name: "logged out", status: `{"BackendState":"NeedsLogin"}`, failing: []string{"tailscale"}},
+		{name: "a tagged device", status: tagged, serve: served, failing: []string{"owner"}, fix: "sudo tailscale up --advertise-tags= --force-reauth"},
+		{name: "another owner", status: running, serve: served, owner: "bob@example.com", failing: []string{"owner"}},
 		{name: "HTTPS off", status: strings.Replace(running, `"CertDomains":["`+host+`"],`, "", 1), serve: served, failing: []string{"https cert"}},
 		{name: "no serve mapping", status: running, serve: `{}`, failing: []string{"serve"}},
+		{name: "a foreign 443 mapping", status: running, serve: strings.Replace(served, "7418", "3000", 1), failing: []string{"serve"}},
 		{name: "serve status unreadable", status: running, serve: `not json`, failing: []string{"serve", "funnel"}},
-		{name: "funnel on", status: running, serve: strings.TrimSuffix(served, "}") + `,"AllowFunnel":{"` + host + `:443":true}}`, failing: []string{"funnel"}},
+		{name: "funnel on for several entries", status: running, serve: funnels, failing: []string{"funnel"},
+			fix: "tailscale funnel --tcp=10000 off  &&  tailscale funnel --https=443 off  &&  tailscale funnel --https=8443 --set-path=/grafana off"},
 		{name: "push services unreachable", status: running, serve: served, offline: true, failing: []string{"push reach"}},
 	}
+	tailnet := []string{"tailscale", "owner", "ts.net name", "https cert", "serve", "funnel", "push reach"}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			probe := phone.Probe{
-				Tailscale: func(_ context.Context, args ...string) ([]byte, error) {
-					switch {
-					case c.missing:
-						return nil, &exec.Error{Name: "tailscale", Err: exec.ErrNotFound}
-					case args[0] == "serve":
-						return []byte(c.serve), nil
-					}
-					return []byte(c.status), nil
-				},
-				DialTLS: func(context.Context, string) error {
-					if c.offline {
-						return errors.New("dial tcp: no route to host")
-					}
-					return nil
-				},
+			run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+				switch {
+				case name != "tailscale":
+					return nil, errors.New("not loaded")
+				case c.missing:
+					return nil, &exec.Error{Name: "tailscale", Err: exec.ErrNotFound}
+				case args[0] == "serve":
+					return []byte(c.serve), nil
+				}
+				return []byte(c.status), nil
 			}
-			cfg := &state.Config{Machine: state.Machine{Node: state.Node{Hostname: host}}}
+			dial := func(context.Context, string) error {
+				if c.offline {
+					return errors.New("dial tcp: no route to host")
+				}
+				return nil
+			}
+			cfg := &state.Config{StateDir: t.TempDir(), Machine: state.Machine{Node: state.Node{Hostname: host, Owner: cmp.Or(c.owner, "alice@example.com")}}}
 			var failing []string
-			for _, check := range PhoneChecks(Options{Config: cfg, PhoneProbe: probe}) {
-				if check.Mark == Fail {
-					failing = append(failing, check.Name)
-					if check.Fix == "" {
-						t.Errorf("%s fails with no fix", check.Name)
-					}
+			for _, check := range NodeChecks(Options{Config: cfg, Home: t.TempDir(), Run: run, DialTLS: dial}) {
+				if check.Mark != Fail || !slices.Contains(tailnet, check.Name) {
+					continue
+				}
+				failing = append(failing, check.Name)
+				if check.Fix == "" || (c.fix != "" && check.Fix != c.fix) {
+					t.Errorf("%s fails with fix %q; want %q", check.Name, check.Fix, c.fix)
 				}
 			}
 			if !slices.Equal(failing, c.failing) {

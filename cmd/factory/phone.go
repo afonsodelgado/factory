@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
@@ -16,7 +17,10 @@ import (
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
 )
 
-const phoneUsage = "usage: factory phone status | test | check"
+const (
+	phoneUsage = "usage: factory phone status | test | check"
+	nodeAsk    = 2 * time.Second
+)
 
 func runPhone(args []string) int {
 	if len(args) != 1 {
@@ -51,6 +55,24 @@ func runPhone(args []string) int {
 func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
 	subs, err := phone.Open(cfg.StateDir).Subscriptions()
 	return dialog.PhoneContext{Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
+}
+
+func nodesContext(cfg *state.Config, phone dialog.PhoneContext) dialog.NodesContext {
+	_, tailnet, _ := strings.Cut(cfg.NodeHostname(), ".")
+	c := dialog.NodesContext{Machine: cfg.NodeName(), Tailnet: tailnet, Phone: phone}
+	ctx, cancel := context.WithTimeout(context.Background(), nodeAsk)
+	defer cancel()
+	var snap node.Snapshot
+	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) != nil {
+		return c
+	}
+	c.Version, c.Factories = snap.Version, len(snap.Factories)
+	for _, f := range snap.Factories {
+		if !f.NeedsSince.IsZero() {
+			c.NeedsYou++
+		}
+	}
+	return c
 }
 
 func printPhoneStatus(w io.Writer, cfg *state.Config) error {
@@ -99,7 +121,7 @@ func printTestPush(w io.Writer, cfg *state.Config) error {
 func phoneDoctor(cfg *state.Config) []install.Check {
 	o := doctorOptions()
 	o.Config = cfg
-	return install.PhoneChecks(o)
+	return install.NodeChecks(o)
 }
 
 type phoneActions struct{ cfg *state.Config }

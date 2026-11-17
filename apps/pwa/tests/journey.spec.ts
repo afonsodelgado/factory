@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { controlled, factory, fake, gate, question } from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
@@ -103,8 +103,59 @@ test("the shell has no sideways scroll at phone and desktop widths", async ({
     await expect(
       page.getByRole("navigation", { name: "csv-export" }),
     ).toBeVisible();
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBeLessThanOrEqual(width);
+    await fitsWidth(page, width);
+  }
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/setup");
+      await expect(
+        page.getByRole("heading", { name: "Set up this phone" }),
+      ).toBeVisible();
+      await fitsWidth(page, width);
+    }
   }
 });
+
+test("with Funnel on, the installed app names each fix, shows no factory data and recovers once it is off", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  await server.factories([factory("csv-export", [question()])]);
+  await page.goto("/");
+  const row = page
+    .getByRole("navigation", { name: "Factories" })
+    .getByRole("link")
+    .filter({ hasText: "csv-export" });
+  await expect(row).toBeVisible();
+  await controlled(page);
+
+  const fix =
+    "tailscale funnel --https=443 --set-path=/a/very/long/path/that/a/narrow/phone/must/wrap off";
+  await server.set({ mode: "funnel", fixes: [fix] });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: /Funnel is on for/ }),
+      ).toBeVisible();
+      await expect(page.getByText(fix)).toBeVisible();
+      await expect(page.getByText("csv-export")).toHaveCount(0);
+      await expect(page.getByText(/answers .* only/)).toHaveCount(0);
+      await fitsWidth(page, width);
+    }
+  }
+
+  await server.set({ mode: "up" });
+  await page.evaluate(() => dispatchEvent(new Event("online")));
+  await expect(row).toBeVisible();
+});
+
+async function fitsWidth(page: Page, width: number) {
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(width);
+}
