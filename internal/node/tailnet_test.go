@@ -158,27 +158,96 @@ func TestARemovalBeatsAConcurrentStaleAddAndAReturningNodeCannotResurrectItself(
 	}
 }
 
-func TestARejoinWhoseHistoryRemovesTheAddingNodeIsRefused(t *testing.T) {
+func TestExplicitReenrollmentAfterMutualRemovalPreservesTheAppHome(t *testing.T) {
+	for _, door := range []string{"add", "join", "third node"} {
+		t.Run(door, func(t *testing.T) {
+			tn := nodetest.New(t)
+			macbook := tn.Machine("macbook").Start()
+			homelab := tn.Machine("homelab").Start()
+			if _, err := macbook.Add("homelab"); err != nil {
+				t.Fatal(err)
+			}
+			members := []*nodetest.Node{macbook, homelab}
+			coordinator := macbook
+			want := names("homelab", "macbook")
+			if door == "third node" {
+				coordinator = tn.Machine("studio").Start()
+				if _, err := macbook.Add("studio"); err != nil {
+					t.Fatal(err)
+				}
+				members = append(members, coordinator)
+				want = names("homelab", "macbook", "studio")
+			}
+			tn.Settle(members...)
+			home := macbook.Roster().Home
+			homelab.SetOnline(false)
+			if err := macbook.Remove(homelab.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := homelab.Remove(macbook.ID); err != nil {
+				t.Fatal(err)
+			}
+			tn.Settle(macbook, coordinator)
+			homelab.SetOnline(true)
+			var err error
+			if door == "join" {
+				_, err = homelab.Join("macbook")
+			} else {
+				_, err = coordinator.Add("homelab")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			tn.Settle(members...)
+			for _, n := range members {
+				if got := n.Names(); !slices.Equal(got, want) || n.Roster().Removed || n.Roster().Home != home {
+					t.Errorf("explicit re-enrollment left %s with %v and roster %+v", n.Short(), got, n.Roster())
+				}
+			}
+		})
+	}
+}
+
+func TestReenrollmentNamesEveryMemberRestoredFromTheReturningHistory(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
-	if _, err := macbook.Add("homelab"); err != nil {
-		t.Fatal(err)
+	studio := tn.Machine("studio").Start()
+	for _, name := range []string{"homelab", "studio"} {
+		if _, err := macbook.Add(name); err != nil {
+			t.Fatal(err)
+		}
 	}
-	tn.Settle(macbook, homelab)
+	tn.Settle(macbook, homelab, studio)
 	homelab.SetOnline(false)
 	if err := macbook.Remove(homelab.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := homelab.Remove(macbook.ID); err != nil {
+	if err := homelab.Remove(studio.ID); err != nil {
 		t.Fatal(err)
 	}
+	tn.Settle(macbook, studio)
 	homelab.SetOnline(true)
-	if _, err := macbook.Add("homelab"); err == nil || !strings.Contains(err.Error(), "removes this node") {
-		t.Errorf("re-adding homelab, whose history removes macbook, answered %v", err)
+	var preview node.CheckReport
+	if err := macbook.Local.Do(context.Background(), http.MethodPost, "/api/nodes/check", map[string]string{"name": "homelab"}, &preview); err != nil {
+		t.Fatal(err)
 	}
-	if got := macbook.Names(); !slices.Equal(got, names("macbook")) {
-		t.Errorf("macbook lists %v after the refused rejoin; want itself", got)
+	result, err := macbook.Add("homelab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range []node.CheckReport{preview, result.Report} {
+		if !slices.ContainsFunc(report.Checks, func(c node.Check) bool {
+			return c.Name == "re-enroll" && strings.Contains(c.Detail, "studio") && strings.Contains(c.Detail, "homelab") && strings.Contains(c.Detail, "remove it again")
+		}) {
+			t.Errorf("re-enrollment did not explain studio's restoration: %+v", report.Checks)
+		}
+	}
+	tn.Settle(macbook, homelab, studio)
+	for _, n := range []*nodetest.Node{macbook, homelab, studio} {
+		if !slices.Equal(n.Names(), names("homelab", "macbook", "studio")) || n.Roster().Removed {
+			t.Errorf("%s lost a member after re-enrollment: %+v", n.Short(), n.Roster())
+		}
 	}
 }
 
@@ -1738,7 +1807,7 @@ func TestACheckpointRefusesSecretBearingFilesAndLeavesGeneratedCookiesBehind(t *
 
 func forgedCheckpoint(source string, files map[string]string) node.Checkpoint {
 	op := uuid.NewString()
-	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Source: source, GitURL: appRemote}}
+	cp := node.Checkpoint{Manifest: node.Manifest{Schema: node.CheckpointSchema, Operation: op, Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", Source: source, GitURL: appRemote}}
 	cp = withFile(cp, "factory/state.json", fmt.Sprintf(`{"id":"csv","checkpoint":{"operation":%q,"status":"ready"}}`, op))
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		cp = withFile(cp, name, files[name])
@@ -1780,6 +1849,16 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 		{"conflicting identity", otherFactory, "its state.json is csv"},
 		{"unknown schema", unknownSchema, "schema"},
 	}
+	unsafeSlugs := []string{"", ".", "..", "../../escaped", "a/b", `a\b`, "/tmp/escaped", strings.Repeat("a", 256), strings.Repeat("é", 128), ".git", "-rf", "csv\n", "csv\x00x", "csv\t", "csv\x7f", "csv\u0085"}
+	for _, slug := range unsafeSlugs {
+		cp := forgedCheckpoint(macbook.ID, nil)
+		cp.Manifest.Slug = slug
+		cases = append(cases, struct {
+			name   string
+			cp     node.Checkpoint
+			reason string
+		}{"slug " + slug, cp, "factory folder"})
+	}
 	for _, c := range cases {
 		status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", c.cp)
 		if status == http.StatusOK || !strings.Contains(body, c.reason) {
@@ -1797,6 +1876,27 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 	if status, _, _ := tn.Request(stranger.Machine, homelab.Machine, "POST", "/api/node/transfer/stage", "", forgedCheckpoint(stranger.ID, nil)); status == http.StatusOK {
 		t.Error("homelab staged a checkpoint from a node outside its node list")
 	}
+	safeSlugs := []string{"Fix_Bug", "CSV", "a--b", "csv-", "café", "with space", strings.Repeat("é", 127)}
+	for _, length := range []int{200, 250, 254, 255} {
+		safeSlugs = append(safeSlugs, strings.Repeat("a", length))
+	}
+	for _, slug := range append(slices.Clone(safeSlugs), unsafeSlugs...) {
+		t.Run(fmt.Sprintf("slug %q preserves the source until safe", slug), func(t *testing.T) {
+			f := newMoveFixture(t)
+			f.csv.Slug = slug
+			f.mac = newMoveHost("macbook", f.log, f.csv)
+			f.macbook.Runtime.Behind(f.mac)
+			moved, err := f.macbook.Transfers.Move(context.Background(), uuid.NewString(), f.csv.Key, "homelab")
+			if slices.Contains(safeSlugs, slug) {
+				if err != nil || moved.Phase != node.PhaseActive {
+					t.Fatalf("safe folder failed to move: %+v, %v", moved, err)
+				}
+			} else if err == nil || moved.Phase != node.PhasePreflight || !f.mac.runs(f.csv.Key) || len(f.log.all()) != 0 || len(f.lab.adopted) != 0 {
+				t.Fatalf("unsafe slug changed execution: %+v, %v, log=%v", moved, err, f.log.all())
+			}
+		})
+	}
+
 }
 
 func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
@@ -1822,7 +1922,7 @@ func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
 	}
 	for _, c := range cases {
 		homelab.SetProbes(c.probe)
-		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
+		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
 		if report := homelab.Transfers.Preflight(context.Background(), request); !strings.Contains(report.Refusal, c.reason) {
 			t.Errorf("preflight with a %s answered %q; want a refusal naming %q", c.name, report.Refusal, c.reason)
 		}
@@ -2101,8 +2201,10 @@ func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *t
 	f := newMoveFixture(t)
 	bare := f.g.run(f.g.repo, "ls-remote", "--get-url", "origin")
 	away := bare + ".away"
-	f.lab.set(func(h *moveHost) {
-		h.onAdopt = func() { os.Rename(bare, away) }
+	f.mac.set(func(h *moveHost) {
+		h.onRelease = func() {
+			f.lab.set(func(target *moveHost) { target.onAdopt = func() { os.Rename(bare, away) } })
+		}
 	})
 	op, key, background := uuid.NewString(), f.csv.Key, context.Background()
 	if _, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err == nil {
@@ -2111,6 +2213,7 @@ func TestATargetThatLosesGitMidTakeoverStaysRetryableAndNeverRefusesTheMove(t *t
 	if err := os.Rename(away, bare); err != nil {
 		t.Fatal(err)
 	}
+	f.mac.set(func(h *moveHost) { h.onRelease = nil })
 	f.lab.set(func(h *moveHost) { h.onAdopt = nil })
 	if moved, err := f.macbook.Transfers.Move(background, op, key, "homelab"); err != nil || moved.Phase != node.PhaseActive {
 		t.Fatalf("retrying once git was back answered %+v, %v; want the move finished", moved, err)
@@ -2218,6 +2321,22 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 }
 
 func TestAForcedTakeoverWarnsNeedsACheckpointAndTheReturningHolderLearnsItLost(t *testing.T) {
+	t.Run("a normal move operation cannot authorize a takeover", func(t *testing.T) {
+		f := newMoveFixture(t)
+		op := uuid.NewString()
+		if _, err := restarted(f.macbook).Stage(context.Background(), op, f.csv.Key, "homelab"); err != nil {
+			t.Fatal(err)
+		}
+		for _, confirm := range []bool{false, true} {
+			status, _, body := f.tn.Request(f.macbook.Machine, f.homelab.Machine, "POST", "/api/node/transfer/takeover", "", node.TakeoverRequest{Operation: op, Factory: "csv", Confirm: confirm})
+			if status != http.StatusConflict || !strings.Contains(body, "new operation") {
+				t.Errorf("reused move operation: %d %s", status, body)
+			}
+			if _, err := f.homelab.Transfers.Takeover(context.Background(), node.TakeoverRequest{Operation: op, Factory: "csv", Confirm: confirm}); err == nil {
+				t.Error("direct takeover reused a normal move")
+			}
+		}
+	})
 	f := newMoveFixture(t)
 	f.moveToHomelab(t)
 	background := context.Background()
@@ -2344,5 +2463,166 @@ func TestMoveAllReportsEachFactorysOutcomeWithoutUndoingTheOthers(t *testing.T) 
 	}
 	if h := holderOf(t, f.csv.Incarnation); h.Node != f.homelab.ID {
 		t.Errorf("csv's holder is %+v after move all; want homelab despite the other refusals", h)
+	}
+}
+
+type registeredMoveHost struct {
+	inner   *moveHost
+	runtime *host.Runtime
+}
+
+func (h registeredMoveHost) Call(ctx context.Context, m host.Message) (host.Message, error) {
+	if m.T == "can-adopt" || m.T == "adopt" {
+		var r host.AdoptRequest
+		if err := json.Unmarshal(m.Data, &r); err != nil {
+			return host.Message{}, err
+		}
+		err := h.runtime.CanAdopt(r)
+		if err == nil && m.T == "adopt" {
+			_, err = h.runtime.Adopt(r)
+		}
+		if err != nil {
+			return host.Message{T: "error", Error: err.Error()}, nil
+		}
+	}
+	return h.inner.Call(ctx, m)
+}
+
+func assertOccupiedMovePreserved(t *testing.T, existing, incoming string, alias bool) {
+	t.Helper()
+	f := newMoveFixture(t)
+	ctx := context.Background()
+	clone, err := gitclone.Ensure(ctx, t.TempDir(), appRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.homelab.SetRepos(map[string]string{appRemote: clone})
+	worktree := filepath.Join(factory.WorktreesDir(clone), existing)
+	f.g.run(clone, "worktree", "add", "-q", "-b", "occupied", worktree)
+	files := map[string]string{
+		filepath.Join(".claude", "factory", "csv", "state.json"):  `{"id":"csv","waiting_on":"keep this state"}`,
+		filepath.Join(".claude", "factory", "csv", "progress.md"): "keep this progress",
+		filepath.Join(".claude", "qa", existing, "evidence.txt"):  "keep this evidence",
+	}
+	writeFiles(t, worktree, files)
+	writeFiles(t, filepath.Join(clone, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{clone}}
+	reg, err := state.LoadRegistry(cfg.RegistryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := host.New(host.Runtime{Config: cfg, Loader: &host.Loader{Config: cfg, Registry: reg, Now: time.Now}, Now: time.Now})
+	if _, err := r.Adopt(host.AdoptRequest{Repo: clone, Slug: existing, Incarnation: uuid.NewString()}); err != nil {
+		t.Fatal(err)
+	}
+	f.homelab.Runtime.Behind(registeredMoveHost{inner: f.lab, runtime: r})
+	destination := filepath.Join(factory.WorktreesDir(clone), incoming)
+	if alias {
+		if err := os.Symlink(worktree, destination); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := os.Stat(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, statErr := os.Stat(destination)
+	same := statErr == nil && os.SameFile(a, b)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		t.Fatal(statErr)
+	}
+	f.csv.Slug, f.csv.Key = incoming, state.Key(f.g.repo, incoming)
+	f.mac = newMoveHost("macbook", f.log, f.csv)
+	f.macbook.Runtime.Behind(f.mac)
+	if err := r.CanAdopt(host.AdoptRequest{Repo: clone, Slug: incoming, Incarnation: f.csv.Incarnation}); same && err == nil {
+		t.Error("the runtime accepted another factory's filesystem folder")
+	} else if !same && err != nil {
+		t.Errorf("distinct filesystem folders were refused: %v", err)
+	}
+	moved, err := f.macbook.Transfers.Move(ctx, uuid.NewString(), f.csv.Key, "homelab")
+	if same {
+		if err == nil || moved.Phase != node.PhasePreflight || !f.mac.runs(f.csv.Key) || len(f.log.all()) != 0 || len(f.lab.adopted) != 0 {
+			t.Errorf("occupied folder was not refused before release: phase=%s err=%v log=%v", moved.Phase, err, f.log.all())
+		}
+	} else if err != nil || moved.Phase != node.PhaseActive {
+		t.Errorf("distinct folder could not move: %+v, %v", moved, err)
+	}
+	for path, want := range files {
+		data, err := os.ReadFile(filepath.Join(worktree, path))
+		if err != nil || string(data) != want {
+			t.Errorf("occupied factory's %s changed: %q, %v", path, data, err)
+		}
+	}
+	if branch := f.g.run(worktree, "branch", "--show-current"); branch != "occupied" {
+		t.Errorf("occupied worktree changed branch to %s", branch)
+	}
+}
+
+func TestAMoveRefusesFilesystemAliasesOfAnotherFactoryBeforeRelease(t *testing.T) {
+	for _, c := range []struct {
+		existing, incoming string
+		alias              bool
+	}{
+		{"csv", "CSV", false}, {"café", "cafe\u0301", false}, {"csv", "linked", true},
+	} {
+		t.Run(c.incoming, func(t *testing.T) { assertOccupiedMovePreserved(t, c.existing, c.incoming, c.alias) })
+	}
+}
+
+func TestAMoveRefusesAnOccupiedSlugBeforeReleasingTheSource(t *testing.T) {
+	assertOccupiedMovePreserved(t, "csv", "csv", false)
+}
+
+func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *testing.T) {
+	f := newMoveFixture(t)
+	worktree := filepath.Join(factory.WorktreesDir(f.g.repo), "zeta")
+	f.g.run(f.g.repo, "worktree", "move", f.g.worktree, worktree)
+	f.csv.Key, f.csv.Slug, f.csv.Worktree = state.Key(f.g.repo, "zeta"), "zeta", worktree
+	f.csv.Dir = filepath.Join(worktree, ".claude", "factory", "csv")
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"before the move"}`})
+	writeFiles(t, filepath.Join(f.g.repo, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	f.mac = newMoveHost("macbook", f.log, f.csv)
+	f.macbook.Runtime.Behind(f.mac)
+	f.moveToHomelab(t)
+	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	writeFiles(t, filepath.Join(clone, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
+	found := factory.Discover([]string{clone}, &state.Registry{})
+	if len(found) != 1 || found[0].State == nil {
+		t.Fatalf("target discovery: %+v", found)
+	}
+	current := found[0]
+	if current.ID != "csv" {
+		t.Errorf("the factory id became its folder name: %s", current.ID)
+	}
+	writeFiles(t, current.Dir, map[string]string{"state.json": `{"id":"csv","branch":"worktree-csv","waiting_on":"after work on homelab"}`})
+	f.lab.set(func(h *moveHost) {
+		m := h.factories[current.Key()]
+		m.ID, m.Dir, m.Branch = "csv", current.Dir, "worktree-csv"
+		h.factories[current.Key()] = m
+	})
+	f.homelab.SetRepos(map[string]string{appRemote: clone})
+	moved, err := f.homelab.Transfers.Move(context.Background(), uuid.NewString(), current.Key(), "macbook")
+	if err != nil || moved.Phase != node.PhaseActive {
+		t.Fatalf("return move: %+v, %v", moved, err)
+	}
+	found = factory.Discover([]string{f.g.repo}, &state.Registry{})
+	if len(found) != 1 || found[0].State == nil || found[0].State.WaitingOn != "after work on homelab" || found[0].Dir != f.csv.Dir {
+		t.Fatalf("returned checkpoint was shadowed by stale state: %+v", found)
+	}
+}
+
+func TestAMovedLegacyFactoryUsesTheTargetsWorktree(t *testing.T) {
+	f := newMoveFixture(t)
+	writeFiles(t, f.csv.Dir, map[string]string{"state.json": fmt.Sprintf(`{"id":"csv","branch":"worktree-csv","worktree":%q,"unknown_future_field":{"keep":true}}`, f.csv.Worktree)})
+	f.moveToHomelab(t)
+	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	found := factory.Discover([]string{clone}, &state.Registry{})
+	want := filepath.Join(factory.WorktreesDir(clone), "csv")
+	if len(found) != 1 || found[0].Worktree != want || found[0].State.Worktree != want {
+		t.Fatalf("legacy state points outside target worktree: %+v; want %s", found, want)
+	}
+	data, err := os.ReadFile(filepath.Join(found[0].Dir, "state.json"))
+	if err != nil || !strings.Contains(string(data), "unknown_future_field") {
+		t.Fatalf("rewriting the path lost state: %s, %v", data, err)
 	}
 }

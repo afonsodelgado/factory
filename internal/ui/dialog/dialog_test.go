@@ -286,9 +286,9 @@ func (f *fakeNodeActions) Add(_ context.Context, _, name string, replaceKey bool
 	return f.result, nil
 }
 
-func (f *fakeNodeActions) Remove(_, id string) error {
+func (f *fakeNodeActions) Remove(_, id string) (node.Roster, error) {
 	f.removed = append(f.removed, id)
-	return nil
+	return node.Roster{Leaving: []node.RosterMember{{Member: node.Member{ID: id, Name: "build-box.tail5e2c.ts.net"}, Pending: 1}}}, nil
 }
 
 func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
@@ -509,8 +509,14 @@ func TestNodesPopupRemovesAnotherNodeOnlyAfterYesAndNeverThisMachine(t *testing.
 	pressNodes(n, "j", "j", "x")
 	golden.RequireEqual(t, n.View().Content)
 	pressNodes(n, "y")
-	if !slices.Equal(actions.removed, []string{"n-build-box"}) || strings.Contains(n.View().Content, "build-box") {
+	if !slices.Equal(actions.removed, []string{"n-build-box"}) || !strings.Contains(n.View().Content, "build-box: removal pending") {
 		t.Errorf("y removed %v and the list shows:\n%s\nwant build-box gone, by its node id", actions.removed, n.View().Content)
+	}
+	reopened := NewNodes(n.Context, actions)
+	reopened.Context.Others = nil
+	reopened.Update(tea.WindowSizeMsg{Width: 78, Height: 22})
+	if screen := reopened.View().Content; !strings.Contains(screen, "build-box: removal pending") || strings.Contains(screen, "Every factory runs on this machine") {
+		t.Errorf("reopening the last node's pending removal shows:\n%s", screen)
 	}
 }
 

@@ -153,6 +153,9 @@ func finished(p node.Progress, out io.Writer) (bool, error) {
 		printChecks(out, slices.DeleteFunc(slices.Clone(p.Checks), func(c node.Check) bool { return c.Mark == node.MarkOK }))
 		return true, fmt.Errorf("%s; %s still runs here", p.Refusal, p.Factory)
 	case node.StateRefused, node.StateCancelled:
+		if p.Factory == "" {
+			return true, errors.New(p.Refusal)
+		}
 		return true, fmt.Errorf("%s; %s still runs here", p.Refusal, p.Factory)
 	case node.StateRecoveryNeeded, node.StateInterrupted:
 		return true, errors.New(strings.Join(p.Recovery, "\n"))

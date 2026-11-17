@@ -3,6 +3,8 @@ package host
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/google/uuid"
@@ -92,8 +94,42 @@ func (m *Runtime) CanAdopt(r AdoptRequest) error {
 	if m.Loader == nil {
 		return errors.New("the node is not attached to tmux")
 	}
-	if e, ok := m.Loader.Entry(state.Key(r.Repo, r.Slug)); ok && e.Incarnation != "" && e.Incarnation != r.Incarnation {
-		return fmt.Errorf("another factory named %s already lives in %s on this node", r.Slug, r.Repo)
+	l := m.Loader
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	worktree := filepath.Join(factory.WorktreesDir(r.Repo), r.Slug)
+	incoming, err := os.Stat(worktree)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	known := map[string]string{}
+	for _, f := range factory.Discover(l.Config.Repos, l.Registry) {
+		known[f.Key()] = f.Worktree
+	}
+	for _, e := range l.Registry.Factories {
+		if e.Incarnation != "" && e.Incarnation == r.Incarnation {
+			continue
+		}
+		if e.Repo == r.Repo && e.Slug == r.Slug {
+			return fmt.Errorf("another factory named %s already lives in %s on this node", e.Slug, e.Repo)
+		}
+		if incoming == nil {
+			continue
+		}
+		existingPath := known[e.Key()]
+		if existingPath == "" {
+			existingPath = filepath.Join(factory.WorktreesDir(e.Repo), e.Slug)
+		}
+		existing, err := os.Stat(existingPath)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if os.SameFile(incoming, existing) {
+			return fmt.Errorf("the folder %s is already used by factory %s in %s on this node", worktree, e.Slug, e.Repo)
+		}
 	}
 	return nil
 }

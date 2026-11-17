@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 )
 
 func NewAwake(enabled bool) *Awake {
@@ -13,7 +14,9 @@ func NewAwake(enabled bool) *Awake {
 }
 
 func onExternalPower(ctx context.Context) (bool, error) {
-	out, err := System(ctx, "pmset", "-g", "ps")
+	cmd := exec.CommandContext(ctx, "pmset", "-g", "ps")
+	cmd.WaitDelay = 100 * time.Millisecond
+	out, err := cmd.Output()
 	if err != nil {
 		return false, err
 	}

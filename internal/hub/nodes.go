@@ -315,6 +315,9 @@ func (m *Model) nodeLabels() string {
 
 func (m *Model) nodesContext() dialog.NodesContext {
 	var c dialog.NodesContext
+	if m.roster != nil {
+		c.Leaving = m.roster.Leaving
+	}
 	for _, l := range m.sortedNodes() {
 		row := dialog.NodeRow{ID: l.member.ID, Name: l.member.Name, OS: l.member.OS, Version: l.snap.Version, Factories: len(l.snap.Factories), Contact: l.contact, Since: l.since}
 		for _, f := range l.snap.Factories {

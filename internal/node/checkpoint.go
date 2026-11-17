@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -212,6 +213,15 @@ func (cp Checkpoint) File(rel string) ([]byte, bool) {
 	return cp.Files[i].Data, true
 }
 
+func validateSlug(slug string) error {
+	unsafePrefix := strings.HasPrefix(slug, ".") || strings.HasPrefix(slug, "-")
+	unsafeCharacters := strings.ContainsAny(slug, "/\\") || strings.ContainsFunc(slug, unicode.IsControl)
+	if slug == "" || len(slug) > 255 || unsafePrefix || unsafeCharacters {
+		return fmt.Errorf("checkpoint slug %q is not a factory folder", slug)
+	}
+	return nil
+}
+
 func (cp Checkpoint) Validate(limits Limits) error {
 	m := cp.Manifest
 	if m.Schema != CheckpointSchema {
@@ -224,6 +234,9 @@ func (cp Checkpoint) Validate(limits Limits) error {
 	}
 	if factory.Slugify(m.Factory) != strings.ToLower(m.Factory) || m.Factory == "" {
 		return fmt.Errorf("checkpoint factory %q is not a factory id", m.Factory)
+	}
+	if err := validateSlug(m.Slug); err != nil {
+		return err
 	}
 	if err := gitclone.CheckURL(m.GitURL); err != nil {
 		return err

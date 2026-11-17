@@ -23,6 +23,7 @@ type PreflightRequest struct {
 	Source      string `json:"source"`
 	Incarnation string `json:"incarnation"`
 	Factory     string `json:"factory"`
+	Slug        string `json:"slug"`
 	GitURL      string `json:"git_url"`
 	Branch      string `json:"branch"`
 	Config      string `json:"config"`
@@ -60,6 +61,10 @@ func (ts *Transfers) Preflight(ctx context.Context, r PreflightRequest) Prefligh
 	if !ok {
 		return p
 	}
+	if err := ts.host(ctx, "can-adopt", host.AdoptRequest{Repo: clone, Slug: r.Slug, Incarnation: r.Incarnation}, nil); err != nil {
+		p.refuse(n, "factory", err.Error(), "")
+		return p
+	}
 	report := n.Ready.Run(ctx, n.Self.Name, Scope{Repo: clone})
 	p.Checks = append(p.Checks, report.Checks...)
 	if err := report.Runnable(cmp.Or(n.Self.short(), "this node")); err != nil {
@@ -81,6 +86,10 @@ func (ts *Transfers) checkVersion(_ context.Context, r PreflightRequest, p *Pref
 }
 
 func (ts *Transfers) checkIdentity(_ context.Context, r PreflightRequest, p *Preflight) {
+	if err := validateSlug(r.Slug); err != nil {
+		p.refuse(ts.Nodes, "factory", err.Error(), "")
+		return
+	}
 	if ts.Holds != nil && ts.Holds(r.Incarnation) {
 		p.refuse(ts.Nodes, "factory", r.Factory+" already runs on this node", "")
 	}
@@ -119,13 +128,13 @@ func freeBytes(dir string) (uint64, error) {
 
 func (ts *Transfers) checkClone(ctx context.Context, r PreflightRequest, p *Preflight) (string, bool) {
 	n := ts.Nodes
-	if err := gitclone.CheckURL(r.GitURL); err != nil || n.Clone == nil {
+	if err := gitclone.CheckURL(r.GitURL); err != nil {
 		p.refuse(n, "clone", fmt.Sprintf("this node clones only network git remotes: %v", err), "")
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitclone.Timeout)
 	defer cancel()
-	clone, err := n.Clone(ctx, r.GitURL)
+	clone, err := ts.repoFor(ctx, r.GitURL)
 	if err != nil {
 		p.refuse(n, "clone", fmt.Sprintf("this node cannot clone %s with its own git credentials: %v", r.GitURL, err), "git clone "+r.GitURL)
 		return "", false

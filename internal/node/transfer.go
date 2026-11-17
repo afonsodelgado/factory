@@ -252,7 +252,7 @@ func (ts *Transfers) preflight(ctx context.Context, t Transfer, peer Member, m h
 		return t, err
 	}
 	config, _ := os.ReadFile(state.ProfilePath(m.Repo))
-	request := PreflightRequest{Operation: t.Operation, Source: ts.Nodes.Self.ID, Incarnation: m.Incarnation, Factory: m.ID, GitURL: t.GitURL, Branch: m.Branch, Config: string(config), Protocol: Protocol}
+	request := PreflightRequest{Operation: t.Operation, Source: ts.Nodes.Self.ID, Incarnation: m.Incarnation, Factory: m.ID, Slug: m.Slug, GitURL: t.GitURL, Branch: m.Branch, Config: string(config), Protocol: Protocol}
 	var report Preflight
 	if err := Remote(peer.Name, ts.Nodes.HTTP).Do(ctx, http.MethodPost, routePath(PreflightRoute), request, &report); err != nil {
 		return ts.refused(t, fmt.Errorf("%s did not answer its preflight: %w", peer.short(), err))
@@ -441,7 +441,7 @@ func StageBody(limits Limits) int64 { return limits.Total*4/3 + maxBody + int64(
 func (ts *Transfers) preflightRoute(w http.ResponseWriter, r *http.Request, _ string) {
 	var body PreflightRequest
 	if err := decode(r, &body); err != nil || uuid.Validate(body.Operation) != nil || uuid.Validate(body.Incarnation) != nil {
-		fail(w, http.StatusBadRequest, "send {operation and incarnation as UUIDs, source, factory, git_url, branch, config, protocol}")
+		fail(w, http.StatusBadRequest, "send {operation and incarnation as UUIDs, source, factory, slug, git_url, branch, config, protocol}")
 		return
 	}
 	if err := ts.verifiedSource(r.Context(), body.Source); err != nil {
