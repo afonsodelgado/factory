@@ -189,7 +189,7 @@ func (n *Nodes) check(ctx context.Context, typed string, d direction) (checked, 
 		return n.refuse(c, "node", Refusal{Check: "node", Problem: peer.Short() + " is already in the node list"}), nil
 	}
 	if !peer.Online {
-		return n.refuse(c, "tailscale", Refusal{Check: "tailscale", Problem: peer.Short() + " is offline; Tailscale last saw it at " + peer.LastSeen.Format(time.DateTime)}), nil
+		return n.refuse(c, "tailscale", Refusal{Check: "tailscale", Problem: peer.Short() + " is offline; Tailscale last saw it at " + peer.LastSeen.Local().Format(time.DateTime+" MST")}), nil
 	}
 	c = n.pass(c, "tailscale", peer.Short()+" is online, logged in as "+peer.Login)
 	candidate := n.probe(ctx, peer)
@@ -204,6 +204,9 @@ func (n *Nodes) check(ctx context.Context, typed string, d direction) (checked, 
 	c = n.pass(c, "node", c.hello.Version+" · "+peer.OS)
 	c = n.pass(c, "owner", c.hello.Owner+", same as you")
 	c = n.pass(c, "funnel", "off")
+	if len(n.Dir.Ledger().removals(c.hello.ID)) > 0 {
+		c.report.Checks = append(c.report.Checks, Check{Name: "re-enroll", Mark: MarkWarn, Detail: "Adding this node again observes its removal and restores it while keeping the current members and app home."})
+	}
 	switch d {
 	case joining:
 		return c, nil

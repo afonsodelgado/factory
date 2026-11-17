@@ -158,27 +158,53 @@ func TestARemovalBeatsAConcurrentStaleAddAndAReturningNodeCannotResurrectItself(
 	}
 }
 
-func TestARejoinWhoseHistoryRemovesTheAddingNodeIsRefused(t *testing.T) {
-	tn := nodetest.New(t)
-	macbook := tn.Machine("macbook").Start()
-	homelab := tn.Machine("homelab").Start()
-	if _, err := macbook.Add("homelab"); err != nil {
-		t.Fatal(err)
-	}
-	tn.Settle(macbook, homelab)
-	homelab.SetOnline(false)
-	if err := macbook.Remove(homelab.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := homelab.Remove(macbook.ID); err != nil {
-		t.Fatal(err)
-	}
-	homelab.SetOnline(true)
-	if _, err := macbook.Add("homelab"); err == nil || !strings.Contains(err.Error(), "removes this node") {
-		t.Errorf("re-adding homelab, whose history removes macbook, answered %v", err)
-	}
-	if got := macbook.Names(); !slices.Equal(got, names("macbook")) {
-		t.Errorf("macbook lists %v after the refused rejoin; want itself", got)
+func TestExplicitReenrollmentAfterMutualRemovalPreservesTheAppHome(t *testing.T) {
+	for _, door := range []string{"add", "join", "third node"} {
+		t.Run(door, func(t *testing.T) {
+			tn := nodetest.New(t)
+			macbook := tn.Machine("macbook").Start()
+			homelab := tn.Machine("homelab").Start()
+			if _, err := macbook.Add("homelab"); err != nil {
+				t.Fatal(err)
+			}
+			members := []*nodetest.Node{macbook, homelab}
+			coordinator := macbook
+			want := names("homelab", "macbook")
+			if door == "third node" {
+				coordinator = tn.Machine("studio").Start()
+				if _, err := macbook.Add("studio"); err != nil {
+					t.Fatal(err)
+				}
+				members = append(members, coordinator)
+				want = names("homelab", "macbook", "studio")
+			}
+			tn.Settle(members...)
+			home := macbook.Roster().Home
+			homelab.SetOnline(false)
+			if err := macbook.Remove(homelab.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := homelab.Remove(macbook.ID); err != nil {
+				t.Fatal(err)
+			}
+			tn.Settle(macbook, coordinator)
+			homelab.SetOnline(true)
+			var err error
+			if door == "join" {
+				_, err = homelab.Join("macbook")
+			} else {
+				_, err = coordinator.Add("homelab")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			tn.Settle(members...)
+			for _, n := range members {
+				if got := n.Names(); !slices.Equal(got, want) || n.Roster().Removed || n.Roster().Home != home {
+					t.Errorf("explicit re-enrollment left %s with %v and roster %+v", n.Short(), got, n.Roster())
+				}
+			}
+		})
 	}
 }
 

@@ -334,6 +334,12 @@ func (d *Directory) Draft(m Member, op string, theirs Ledger) Ledger {
 	if theirs.Roster == l.Roster {
 		l = l.with(theirs.Ops...)
 	}
+	present, current := l.present(), d.book.present()
+	for _, id := range slices.Sorted(maps.Keys(current)) {
+		if _, kept := present[id]; !kept && id != m.ID {
+			l = l.with(l.author(d.self, opAdd, uuid.NewString(), current[id], d.now()))
+		}
+	}
 	return l.with(l.author(d.self, opAdd, op, m, d.now()))
 }
 
