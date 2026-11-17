@@ -146,10 +146,10 @@ func TestWaitForReviewDelegatesToTheStructuredWatcher(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "skills/factory/scripts/wait-for-review.sh", "--dir", "factory dir", "--run", "run", "--inbox", "7")
+	cmd := exec.Command("bash", "skills/factory/scripts/wait-for-review.sh", "--dir", "factory dir", "--run", "run", "7")
 	cmd.Env = append(os.Environ(), "FACTORY_BIN="+bin)
 	out, err := cmd.CombinedOutput()
-	if err != nil || string(out) != "workflow\nwatch\n--dir\nfactory dir\n--run\nrun\n--inbox\n7\n" {
+	if err != nil || string(out) != "workflow\nwatch\n--dir\nfactory dir\n--run\nrun\n7\n" {
 		t.Fatalf("%s: %v", out, err)
 	}
 }

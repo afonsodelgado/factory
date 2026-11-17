@@ -88,7 +88,6 @@ func watchWorkflow(args []string) int {
 	flags := flag.NewFlagSet("workflow watch", flag.ContinueOnError)
 	dir := flags.String("dir", "", "factory directory")
 	runID := flags.String("run", "", "active run id")
-	flags.Bool("inbox", false, "write structured completion to the inbox")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -96,6 +95,7 @@ func watchWorkflow(args []string) int {
 	for _, arg := range flags.Args() {
 		n, err := strconv.Atoi(arg)
 		if err != nil || n <= 0 {
+			fmt.Fprintln(os.Stderr, "usage: factory workflow watch --dir <factory dir> --run <run id> <pr number>...")
 			return 2
 		}
 		numbers = append(numbers, n)
@@ -120,6 +120,9 @@ func watchWorkflow(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	json.NewEncoder(os.Stdout).Encode(observations)
+	if err := json.NewEncoder(os.Stdout).Encode(observations); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return 0
 }

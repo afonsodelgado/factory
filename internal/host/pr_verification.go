@@ -20,6 +20,8 @@ import (
 const CheckDiscovery = 15 * time.Minute
 const CheckDeadline = 2 * time.Hour
 
+const ReadyDiscovery = 2 * time.Minute
+
 type CheckWindow struct {
 	Head      string    `json:"head"`
 	Base      string    `json:"base"`
@@ -216,6 +218,9 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		}
 	}
 	o.CI, o.Reason, o.Notes = interpretChecks(checks, required, now.Sub(o.Window.Discovery))
+	if o.CI == "pass" && awaitingReadyChecks(o.Window, checks, now) {
+		o.CI, o.Reason = "pending", "discovering_checks"
+	}
 	var review struct {
 		ReviewDecision string `json:"reviewDecision"`
 		Head           string `json:"headRefOid"`
@@ -353,6 +358,14 @@ func interpretChecks(checks []apiCheck, required []requiredCheck, elapsed time.D
 		return "fail", "all_checks_skipped", notes
 	}
 	return "pass", "checks_passed", notes
+}
+
+func awaitingReadyChecks(w CheckWindow, checks []apiCheck, now time.Time) bool {
+	markedReady := !w.Draft && w.Discovery.After(w.Started)
+	startedSinceReady := slices.ContainsFunc(checks, func(c apiCheck) bool {
+		return !c.CreatedAt.Before(w.Discovery) || !c.StartedAt.Before(w.Discovery)
+	})
+	return markedReady && now.Sub(w.Discovery) < ReadyDiscovery && !startedSinceReady
 }
 
 func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g *GitHub, now func() time.Time, sleep func(context.Context, time.Duration) error) ([]PRObservation, error) {

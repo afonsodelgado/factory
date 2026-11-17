@@ -42,6 +42,7 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	now := start
 	calls := 0
 	draft := true
+	checkRuns := "[]"
 	gh := &GitHub{Run: func(dir string, args ...string) ([]byte, error) {
 		calls++
 		command := strings.Join(args, " ")
@@ -55,7 +56,7 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 		case strings.Contains(command, "branches/main"):
 			return []byte(`{"protected":false,"commit":{"sha":"b"}}`), nil
 		case strings.Contains(command, "check-runs"):
-			return []byte(`[{"total_count":0,"check_runs":[]}]`), nil
+			return []byte(`[{"total_count":0,"check_runs":` + checkRuns + `}]`), nil
 		case strings.Contains(command, "statuses"):
 			return []byte(`[[]]`), nil
 		case strings.Contains(command, "reviewDecision"):
@@ -93,6 +94,19 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	ready = gh.Observe(dir, 1, ready.Window, start.Add(CheckDeadline))
 	if ready.CI != "pass" {
 		t.Fatal(ready)
+	}
+	draft = true
+	checkRuns = `[{"id":1,"name":"ci","status":"completed","conclusion":"success","head_sha":"h","started_at":"1970-01-01T00:01:40Z"}]`
+	green := gh.Observe(dir, 1, CheckWindow{}, now)
+	draft = false
+	readyAt := now.Add(time.Second)
+	if stale := gh.Observe(dir, 1, green.Window, readyAt); green.CI != "pass" || stale.CI != "pending" {
+		t.Fatal("a check from before the PR was marked ready passed it", green, stale)
+	}
+	marked := gh.Observe(dir, 1, green.Window, readyAt)
+	checkRuns = `[{"id":2,"name":"ci","status":"completed","conclusion":"success","head_sha":"h","started_at":"` + readyAt.Add(time.Second).UTC().Format(time.RFC3339) + `"}]`
+	if fresh := gh.Observe(dir, 1, marked.Window, readyAt.Add(2*time.Second)); fresh.CI != "pass" {
+		t.Fatal("a check started after the PR was marked ready did not pass it", fresh)
 	}
 	gh.Run = func(string, ...string) ([]byte, error) { return nil, errors.New("permission denied") }
 	failed := gh.Observe(dir, 1, saved.Window, now)

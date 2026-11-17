@@ -695,6 +695,9 @@ func TestPRCIFollowsTheLatestRunOfEachCheck(t *testing.T) {
 		{"pass superseded by a failure", `[
 			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-04T15:04:48Z"},
 			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SUCCESS","startedAt":"2026-11-04T14:41:24Z"}]`, "fail"},
+		{"no checks at all", `[]`, "none"},
+		{"only skipped checks", `[
+			{"workflowName":"CI","name":"ci","status":"COMPLETED","conclusion":"SKIPPED","startedAt":"2026-11-04T15:04:48Z"}]`, "pass"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

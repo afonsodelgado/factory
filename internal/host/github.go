@@ -161,7 +161,14 @@ func (g *GitHub) fetch(dir string, n int, now time.Time) PR {
 			pr.Done++
 		}
 	}
-	pr.CI, _, _ = interpretChecks(apiChecks, nil, 0)
+	pr.CI = "none"
+	if len(apiChecks) > 0 {
+		var reason string
+		pr.CI, reason, _ = interpretChecks(apiChecks, nil, CheckDiscovery)
+		if reason == "all_checks_skipped" {
+			pr.CI = "pass"
+		}
+	}
 
 	return pr
 }
