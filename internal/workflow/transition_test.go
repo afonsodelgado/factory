@@ -131,3 +131,28 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 		t.Fatal("confirmation missing")
 	}
 }
+
+func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerification(t *testing.T) {
+	s := workflowState()
+	s.Stage = "design"
+	gate(&s, eventFor(s, "result"), "design")
+	old := s.Attention[0]
+	e := eventFor(s, "design_comments")
+	e.Receipt, e.Answer = "batch:1", "revise spacing"
+	s = step(t, s, e)
+	s = complete(t, s)
+	e = eventFor(s, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = old.ID, old.Revision, "approved", "old-answer", true
+	if _, err := Next(s, e); err == nil {
+		t.Fatal("old design approval accepted")
+	}
+	s = workflowState()
+	s.Stages["handoff"] = state.Stage{Status: "done"}
+	s.Confirmation = &state.Confirmation{Heads: s.Stack}
+	e = eventFor(s, "observe")
+	e.Stack = []state.StackBranch{{Branch: "feature", Parent: "main", Head: "new", Base: "b"}}
+	s = step(t, s, e)
+	if s.Done() || s.Confirmation != nil || s.Stage != "pr" {
+		t.Fatal("changed completed factory did not restart verification")
+	}
+}

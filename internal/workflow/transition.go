@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -14,7 +15,7 @@ func Next(snapshot state.State, event Event) (Proposal, error) {
 	if err := state.ValidateState(snapshot); err != nil {
 		return Proposal{}, err
 	}
-	if event.ID == "" || event.Incarnation == "" || event.Incarnation != snapshot.Incarnation || event.HolderGeneration != snapshot.HolderGeneration {
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(event.ID) || event.Incarnation == "" || event.Incarnation != snapshot.Incarnation || event.HolderGeneration != snapshot.HolderGeneration {
 		return Proposal{}, errors.New("event identity does not match the factory holder")
 	}
 	proposal := Proposal{ExpectedRevision: snapshot.Revision, Incarnation: snapshot.Incarnation, HolderGeneration: snapshot.HolderGeneration, Snapshot: snapshot}
@@ -62,8 +63,13 @@ func apply(s *state.State, e Event) error {
 		s.Workflow.Pending = nil
 	case "result":
 		return result(s, e)
-	case "approval", "cap", "handoff", "continue", "design_return":
+	case "approval", "cap", "handoff", "continue", "design_return", "retry":
 		return answer(s, e)
+	case "design_comments":
+		if e.Receipt == "" || e.Answer == "" {
+			return errors.New("design comments require their batch receipt")
+		}
+		return dispatch(s, e, "design")
 	case "commands":
 		if e.Recipe == nil || e.Recipe.Digest == "" {
 			return errors.New("missing command recipe")
@@ -84,6 +90,8 @@ func apply(s *state.State, e Event) error {
 			}
 		}
 	case "observe":
+		wasDone := s.Done()
+		changed := !SameHeads(s.Stack, e.Stack)
 		if s.Workflow.ActiveRun != "" && !SameHeads(s.Stack, e.Stack) {
 			return errors.New("cannot replace heads while a run is active")
 		}
@@ -92,17 +100,18 @@ func apply(s *state.State, e Event) error {
 			s.Stack = e.Stack
 		}
 		s.PRs, s.Evidence.PRs = e.PRs, e.Observations
-		s.Evidence.Pending = false
+		s.Evidence.Pending = slices.ContainsFunc(e.Observations, func(v state.PRVerification) bool { return v.CI == "unknown" })
 		if e.Comments != nil {
 			if !s.WatchComments {
 				return errors.New("comment watching is disabled")
 			}
 			s.Evidence.Comments = *e.Comments
+			s.Evidence.CommentDispositions = e.CommentDispositions
 		}
 		if len(Readiness(*s)) == 0 {
 			offerHandoff(s, e)
-		} else if s.Done() {
-			invalidate(s)
+		} else if wasDone && changed {
+			return dispatch(s, e, "pr")
 		}
 	case "comments_preference":
 		if s.Workflow.CommentsAsked || e.Receipt == "" || e.Answer == "" {
@@ -151,7 +160,7 @@ func dispatch(s *state.State, e Event, stage string) error {
 	s.Workflow.Runs = append(s.Workflow.Runs, run)
 	s.Workflow.ActiveRun = id
 	s.Workflow.Pending = &state.Effect{ID: id, Kind: "stage", RunID: id, Stage: stage, Role: role}
-	s.Stage, s.WaitingOn, s.WaitingReason = stage, "", ""
+	s.Stage, s.WaitingOn, s.WaitingReason = stage, "agent", ""
 	s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: stage, Event: "dispatch", RunID: id, Role: role, Round: st.Rounds, Loop: s.Loops.Active})
 	return nil
 }
@@ -191,7 +200,7 @@ func result(s *state.State, e Event) error {
 	run.Outcome = r.Status
 	s.Workflow.ActiveRun, s.Workflow.Pending = "", nil
 	st := s.Stages[stage]
-	st.Status, st.Outputs = r.Status, r.Outputs
+	st.Status, st.Outputs, st.Artifacts = r.Status, r.Outputs, r.Artifacts
 	s.Stages[stage] = st
 	if r.Status != "done" {
 		attention(s, e, "failure", "Stage needs attention", stage+": "+r.Status)
@@ -247,7 +256,7 @@ func result(s *state.State, e Event) error {
 		if slices.ContainsFunc(s.Findings, Gating) {
 			return correct(s, e, state.Correction{Loop: CILoop, Stage: "pr", ReturnTo: "pr"})
 		}
-		if !SameHeads(r.InputHeads, r.OutputHeads) {
+		if !SameHeads(r.InputHeads, r.OutputHeads) || !Current(*s, s.Evidence.Review) {
 			if !LocalChecks(*s, r.Evidence) {
 				return errors.New("CI fixes need current local checks")
 			}
@@ -267,6 +276,11 @@ func result(s *state.State, e Event) error {
 }
 
 func gate(s *state.State, e Event, stage string) error {
+	for i := range s.Attention {
+		if s.Attention[i].Kind == "gate" && s.Attention[i].StageKey == stage && s.Attention[i].Open() {
+			s.Attention[i].ResolvedAt = e.At
+		}
+	}
 	attention(s, e, "gate", "Approve "+stage, "Approval applies to this artifact revision only.")
 	s.Workflow.Gate = stage
 	return nil
@@ -274,7 +288,7 @@ func gate(s *state.State, e Event, stage string) error {
 
 func attention(s *state.State, e Event, kind, title, body string) {
 	s.Attention = append(s.Attention, state.Attention{ID: e.ID + "-" + kind, Revision: s.Revision + 1, Kind: kind, Title: title, Body: body, StageKey: s.Stage, CreatedAt: e.At})
-	s.WaitingOn, s.WaitingReason = "developer", title
+	s.WaitingOn, s.WaitingReason = "user", title
 }
 
 func allowance(s *state.State, loop string) *int {
@@ -321,6 +335,25 @@ func answer(s *state.State, e Event) error {
 		return errors.New("answer needs the current item, artifact revision and developer receipt")
 	}
 	a := &s.Attention[i]
+	if e.Kind == "retry" {
+		if a.Kind != "failure" || len(s.Workflow.Runs) == 0 {
+			return errors.New("retry needs a failed run")
+		}
+		last := s.Workflow.Runs[len(s.Workflow.Runs)-1]
+		if last.Retries >= s.Limits.StageRetries {
+			return errors.New("stage retry allowance exhausted")
+		}
+		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		if s.Workflow.ActiveRun != "" {
+			s.Workflow.ActiveRun = ""
+			s.Workflow.Pending = nil
+		}
+		if err := dispatch(s, e, last.Stage); err != nil {
+			return err
+		}
+		s.Workflow.Runs[len(s.Workflow.Runs)-1].Retries = last.Retries + 1
+		return nil
+	}
 	if e.Kind == "cap" {
 		if a.Kind != "cap" || s.Workflow.Correction == nil {
 			return errors.New("not a pending cap")

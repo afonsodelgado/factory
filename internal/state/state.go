@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -232,12 +233,23 @@ func ValidateState(s State) error {
 	}
 	for _, run := range s.Workflow.Runs {
 		stages = append(stages, run.Stage)
+		if !slices.Contains(AgentRoles, run.Role) {
+			return fmt.Errorf("unsupported workflow role %q", run.Role)
+		}
+		if run.ReturnTo != "" {
+			stages = append(stages, run.ReturnTo)
+		}
 	}
 	if err := checkStages("state.json", stages); err != nil {
 		return err
 	}
 	if err := ValidateAgents("state.json", s.Agents); err != nil {
 		return err
+	}
+	if len(s.PipelineStages) > 0 {
+		if err := checkPipeline("state.json pipeline", s.PipelineStages); err != nil {
+			return err
+		}
 	}
 	if s.SchemaVersion != 2 {
 		return fmt.Errorf("unsupported state schema %d; finish or restart the factory with schema 2", s.SchemaVersion)
