@@ -12,19 +12,17 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/goccy/go-yaml"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 )
-
-const cloneTimeout = 10 * time.Minute
 
 func answerRequest(in io.Reader) remote.Reply {
 	reply := remote.Reply{Protocol: remote.Protocol, Status: remote.Rejected}
@@ -168,7 +166,7 @@ func forward(cfg *state.Config, kind, op string, data json.RawMessage) (json.Raw
 	if err != nil {
 		return nil, remote.Failed, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), gitclone.Timeout)
 	defer cancel()
 	reply, err := runtime.Call(ctx, host.Message{T: kind, Op: op, Data: data})
 	switch {
@@ -199,19 +197,11 @@ func inventory(cfg *state.Config) ([]remote.Listing, error) {
 	listings := []remote.Listing{}
 	for _, e := range registry.Factories {
 		if _, known := origins[e.Repo]; !known {
-			origins[e.Repo] = originOf(e.Repo)
+			origins[e.Repo] = gitclone.Origin(e.Repo)
 		}
 		listings = append(listings, remote.Listing{ID: e.Slug, GitURL: origins[e.Repo], Incarnation: cmp.Or(e.Incarnation, e.Key())})
 	}
 	return listings, nil
-}
-
-func originOf(repo string) string {
-	url, err := host.Git(repo, "config", "--get", "remote.origin.url")
-	if err != nil {
-		return ""
-	}
-	return url
 }
 
 func createHere(cfg *state.Config, c remote.Create) (remote.Listing, error) {
@@ -228,9 +218,9 @@ func createHere(cfg *state.Config, c remote.Create) (remote.Listing, error) {
 		}
 		return listings[i], nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), gitclone.Timeout)
 	defer cancel()
-	clone, err := remote.EnsureClone(ctx, cfg.StateDir, c.GitURL)
+	clone, err := gitclone.Ensure(ctx, cfg.StateDir, c.GitURL)
 	if err != nil {
 		return remote.Listing{}, err
 	}
@@ -302,7 +292,7 @@ func keyedFor(f factory.Factory, data json.RawMessage) (json.RawMessage, error) 
 
 func withClones(cfg *state.Config, urls []string) []string {
 	for _, repo := range cfg.Repos {
-		if url := originOf(repo); url != "" && remote.IsClone(cfg.StateDir, repo) {
+		if url := gitclone.Origin(repo); url != "" && gitclone.IsClone(cfg.StateDir, repo) {
 			urls = append(urls, url)
 		}
 	}

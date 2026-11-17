@@ -3,7 +3,9 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -32,6 +34,19 @@ type State struct {
 	Attention      []Attention             `json:"attention"`
 	PRs            []PR                    `json:"prs"`
 	History        []HistoryEntry          `json:"history"`
+	Checkpoint     *Checkpoint             `json:"checkpoint,omitempty"`
+}
+
+const (
+	CheckpointReady   = "ready"
+	CheckpointRefused = "refused"
+)
+
+type Checkpoint struct {
+	Operation string `json:"operation"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+	At        Time   `json:"at"`
 }
 
 type Limits struct {
@@ -146,6 +161,23 @@ func (s *State) Artifacts() []Artifact {
 		all = append(all, s.Stages[key].Artifacts...)
 	}
 	return all
+}
+
+func (s *State) Anchor(dir string) {
+	for _, stage := range s.Stages {
+		for i, a := range stage.Artifacts {
+			stage.Artifacts[i].URL = Anchored(dir, a.URL)
+		}
+	}
+}
+
+func Anchored(dir, ref string) string {
+	u, err := url.Parse(ref)
+	portable := err == nil && u.Scheme == "" && ref != "" && filepath.IsLocal(filepath.FromSlash(ref))
+	if !portable {
+		return ref
+	}
+	return "file://" + filepath.Join(dir, filepath.FromSlash(ref))
 }
 
 func ReadState(path string) (*State, error) {

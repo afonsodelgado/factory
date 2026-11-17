@@ -74,7 +74,7 @@ func (p *Pusher) Configure(s remote.PushSettings) (remote.PushSettings, error) {
 	if s.Topic == "" {
 		f.Queue = nil
 	}
-	return s, savePrivate(p.path(), f)
+	return s, SavePrivate(p.path(), f)
 }
 
 func (p *Pusher) Enqueue(a remote.Attention) {

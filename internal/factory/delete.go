@@ -44,7 +44,7 @@ func PlanRemoval(f Factory, cfg *state.Config) Removal {
 	}
 	branch := worktreeBranch(f)
 	others := otherFactoriesBranches(cfg, f)
-	r.Branches = slices.DeleteFunc(localBranches(f.Repo, withStacks(f.Repo, knownBranches(f, branch))), func(b string) bool {
+	r.Branches = slices.DeleteFunc(FactoryBranches(f.Repo, knownBranches(f, branch)), func(b string) bool {
 		return slices.Contains(others, b)
 	})
 	r.StateDirs = stateDirs(f, branch)
@@ -92,6 +92,10 @@ func knownBranches(f Factory, branch string) []string {
 		names = append(names, f.Entry.Branches...)
 	}
 	return names
+}
+
+func FactoryBranches(repo string, names []string) []string {
+	return localBranches(repo, withStacks(repo, names))
 }
 
 func withStacks(repo string, names []string) []string {

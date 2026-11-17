@@ -3,6 +3,7 @@ package factory
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/afonsodelgado/factory/internal/state"
@@ -44,5 +45,23 @@ func TestDiscoverDeduplicatesSymlinkedStateAndReadsOldTicketFiles(t *testing.T) 
 		if labels[key] != label {
 			t.Errorf("%s is labelled %q, want %q: a state.json written with ticket, or ticket null, must still name its factory", key, labels[key], label)
 		}
+	}
+}
+
+func TestDiscoverOpensAPortableArtifactInItsOwnFactoryFolder(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(WorktreesDir(repo), "csv", ".claude", "factory", "csv")
+	writeState(t, dir, `{"id":"csv","stages":{"design":{"artifacts":[{"url":"design/variant-a.html"},{"url":"../../../../etc/passwd"},{"url":"https://example.com/page"}]}}}`)
+	found := Discover([]string{repo}, &state.Registry{})
+	if len(found) != 1 {
+		t.Fatalf("found %d factories", len(found))
+	}
+	var urls []string
+	for _, a := range found[0].State.Artifacts() {
+		urls = append(urls, a.URL)
+	}
+	want := []string{"file://" + filepath.Join(dir, "design", "variant-a.html"), "../../../../etc/passwd", "https://example.com/page"}
+	if !slices.Equal(urls, want) {
+		t.Errorf("artifacts read as %v; want a checkpointed relative page under its factory folder and nothing else rewritten", urls)
 	}
 }

@@ -17,8 +17,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-var IgnoredPaths = []string{".factory/", ".claude/worktrees/", ".claude/factory/", ".claude/factory-archive/", ".claude/qa/"}
-
 type InitResult struct {
 	Repo           string
 	Profile        string
@@ -154,7 +152,7 @@ func excludeFactoryFiles(repo, excludeFile string) ([]string, error) {
 		listed[strings.TrimSpace(line)] = true
 	}
 	var added []string
-	for _, p := range IgnoredPaths {
+	for _, p := range state.FactoryPaths {
 		if listed[p] {
 			continue
 		}

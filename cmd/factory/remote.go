@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/remote"
@@ -334,7 +335,7 @@ func remoteDoctor(cfg *state.Config, name string) (string, []install.Check) {
 	}
 	var urls []string
 	if repo, err := factoryRepo(""); err == nil {
-		if url, err := remote.GitURL(repo, ""); err == nil {
+		if url, err := gitclone.RemoteURL(repo, ""); err == nil {
 			urls = append(urls, url)
 		}
 	}

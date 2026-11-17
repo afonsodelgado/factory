@@ -79,8 +79,12 @@ type browserLease struct {
 
 var errBrowserGone = errors.New("QA's headless browser closed when its run ended; start a fresh QA stage with factory stage start --role qa")
 
+func QADir(f factory.Factory) string {
+	return filepath.Join(f.Worktree, ".claude", "qa", f.Slug)
+}
+
 func EvidenceDir(f factory.Factory, run state.StageRun) string {
-	return filepath.Join(f.Worktree, ".claude", "qa", f.Slug, fmt.Sprintf("%s-%d", run.Role, run.Round))
+	return filepath.Join(QADir(f), fmt.Sprintf("%s-%d", run.Role, run.Round))
 }
 
 func browserJob(key string) string { return "browser " + key }

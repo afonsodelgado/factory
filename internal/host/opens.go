@@ -37,7 +37,7 @@ func (m *Runtime) allowForwarded(port int) error {
 		return nil
 	}
 	ports = append(ports, port)
-	return savePrivate(m.tunnelsPath(), ports[max(0, len(ports)-rememberedTunnels):])
+	return SavePrivate(m.tunnelsPath(), ports[max(0, len(ports)-rememberedTunnels):])
 }
 
 func (m *Runtime) allowRememberedTunnels() {
@@ -62,7 +62,7 @@ func (m *Runtime) QueueOpen(it Item, o remote.Open) (ReviewReply, error) {
 		return ReviewReply{}, fmt.Errorf("only web links and factory pages open on the laptop, and %q is neither", o.URL)
 	}
 	o.ID, o.Factory, o.At = uuid.NewString(), it.Factory.Label(), m.Now()
-	if err := savePrivate(m.opensPath(), append(m.Opens(), o)); err != nil {
+	if err := SavePrivate(m.opensPath(), append(m.Opens(), o)); err != nil {
 		return ReviewReply{}, err
 	}
 	return ReviewReply{Target: "the laptop", Queued: true}, nil
@@ -85,7 +85,7 @@ func (m *Runtime) Opened(ids []string) error {
 	if len(kept) == len(opens) {
 		return nil
 	}
-	return savePrivate(m.opensPath(), kept)
+	return SavePrivate(m.opensPath(), kept)
 }
 
 func (m *Runtime) Link(r remote.LinkRequest) (string, error) {

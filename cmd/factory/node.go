@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
@@ -192,6 +193,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	api.Commands = node.Commands{Runtime: node.Activation{Caller: queue, Ready: nodes.Runnable, Exists: api.Holds}}
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
 	nodes.Clone = cloneFor(cfg, queue)
+	api.Transfers = &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation}
 	go api.Poll(ctx)
 	go nodes.Replicate(ctx)
 	app := http.NewServeMux()
@@ -244,7 +246,7 @@ func repoOrigins() map[string]string {
 func originsOf(repos []string) map[string]string {
 	origins := map[string]string{}
 	for _, repo := range repos {
-		if url := originOf(repo); url != "" {
+		if url := gitclone.Origin(repo); url != "" {
 			origins[url] = repo
 		}
 	}
@@ -253,9 +255,9 @@ func originsOf(repos []string) map[string]string {
 
 func cloneFor(cfg *state.Config, queue node.Caller) func(context.Context, string) (string, error) {
 	return func(ctx context.Context, url string) (string, error) {
-		ctx, cancel := context.WithTimeout(ctx, cloneTimeout)
+		ctx, cancel := context.WithTimeout(ctx, gitclone.Timeout)
 		defer cancel()
-		clone, err := remote.EnsureClone(ctx, cfg.StateDir, url)
+		clone, err := gitclone.Ensure(ctx, cfg.StateDir, url)
 		if err != nil {
 			return "", err
 		}

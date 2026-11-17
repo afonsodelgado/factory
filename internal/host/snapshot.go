@@ -192,7 +192,7 @@ func (l *Loader) observe(found []factory.Factory, now time.Time) {
 			changed = true
 		}
 	}
-	if changed {
+	if l.Registry.Incarnate() || changed {
 		l.Registry.Save()
 	}
 }

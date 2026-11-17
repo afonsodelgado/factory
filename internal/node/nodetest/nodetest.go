@@ -374,15 +374,16 @@ func (r *Runtime) Call(ctx context.Context, m host.Message) (host.Message, error
 
 type Node struct {
 	*Machine
-	ID       string
-	Dir      string
-	Nodes    *node.Nodes
-	API      *node.API
-	Exposure *node.Exposure
-	Runtime  *Runtime
-	Local    *node.Client
-	Phone    phone.Store
-	Pusher   *phone.Pusher
+	ID        string
+	Dir       string
+	Nodes     *node.Nodes
+	API       *node.API
+	Transfers *node.Transfers
+	Exposure  *node.Exposure
+	Runtime   *Runtime
+	Local     *node.Client
+	Phone     phone.Store
+	Pusher    *phone.Pusher
 
 	mu     sync.Mutex
 	probes []node.Probe
@@ -464,6 +465,8 @@ func (m *Machine) Start() *Node {
 	}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}
 	n.API.Nodes = n.Nodes
+	n.Transfers = &node.Transfers{Commands: node.Commands{Runtime: n.Runtime}, Nodes: n.Nodes, StateDir: dir, Holds: n.API.HoldsIncarnation, Poll: 20 * time.Millisecond}
+	n.API.Transfers = n.Transfers
 	n.Exposure = &node.Exposure{Tailscale: ts}
 	n.Exposure.Check(ctx)
 	gate := node.Gate{Owner: m.Login, Hosts: []string{m.Name}, Origin: "https://" + m.Name, Home: directory.Home, Exposure: n.Exposure}

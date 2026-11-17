@@ -14,8 +14,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/remote"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/dialog"
@@ -214,7 +214,7 @@ func (m *Model) newContext() dialog.NewContext {
 				option.Agents = append(option.Agents, dialog.AgentOption{Role: role, AgentSetting: agents[role]})
 			}
 		}
-		if url, err := remote.GitURL(repo, ""); err != nil {
+		if url, err := gitclone.RemoteURL(repo, ""); err != nil {
 			option.NoGitRemote = err.Error()
 		} else {
 			option.GitURL = url

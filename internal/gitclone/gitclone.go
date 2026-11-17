@@ -1,6 +1,7 @@
-package remote
+package gitclone
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,10 +14,21 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 )
 
-func GitURL(repo, choice string) (string, error) {
-	names, err := git(context.Background(), repo, "remote")
+const Timeout = 10 * time.Minute
+
+func Origin(repo string) string {
+	url, err := Git(context.Background(), repo, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return ""
+	}
+	return url
+}
+
+func RemoteURL(repo, choice string) (string, error) {
+	names, err := Git(context.Background(), repo, "remote")
 	if err != nil {
 		return "", err
 	}
@@ -35,14 +47,14 @@ func GitURL(repo, choice string) (string, error) {
 	default:
 		return "", fmt.Errorf("%s has the git remotes %s and none is origin; pick one with --git-remote", repo, strings.Join(remotes, ", "))
 	}
-	raw, err := git(context.Background(), repo, "config", "--get", "remote."+name+".url")
+	raw, err := Git(context.Background(), repo, "config", "--get", "remote."+name+".url")
 	if err != nil {
 		return "", err
 	}
-	return raw, CheckCloneURL(raw)
+	return raw, CheckURL(raw)
 }
 
-func CheckCloneURL(raw string) error {
+func CheckURL(raw string) error {
 	if strings.HasPrefix(raw, "-") {
 		return fmt.Errorf("%q is not a git URL", raw)
 	}
@@ -62,7 +74,7 @@ func CheckCloneURL(raw string) error {
 	return nil
 }
 
-func CloneDir(stateDir, gitURL string) string {
+func Dir(stateDir, gitURL string) string {
 	sum := sha256.Sum256([]byte(gitURL))
 	return filepath.Join(resolved(stateDir), "repos", hex.EncodeToString(sum[:8]))
 }
@@ -78,11 +90,11 @@ func resolved(path string) string {
 	return filepath.Clean(path)
 }
 
-func EnsureClone(ctx context.Context, stateDir, gitURL string) (string, error) {
-	if err := CheckCloneURL(gitURL); err != nil {
+func Ensure(ctx context.Context, stateDir, gitURL string) (string, error) {
+	if err := CheckURL(gitURL); err != nil {
 		return "", err
 	}
-	dir := CloneDir(stateDir, gitURL)
+	dir := Dir(stateDir, gitURL)
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return "", err
 	}
@@ -95,28 +107,31 @@ func EnsureClone(ctx context.Context, stateDir, gitURL string) (string, error) {
 		return "", err
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if _, err := git(ctx, dir, "fetch", "--prune", "origin"); err != nil {
+		if _, err := Git(ctx, dir, "fetch", "--prune", "origin"); err != nil {
 			return "", err
 		}
-		_, err := git(ctx, dir, "merge", "--ff-only", "@{upstream}")
+		_, err := Git(ctx, dir, "merge", "--ff-only", "@{upstream}")
 		return dir, err
 	}
 	partial := dir + ".partial"
 	os.RemoveAll(partial)
-	if _, err := git(ctx, filepath.Dir(dir), "clone", "--", gitURL, partial); err != nil {
+	if _, err := Git(ctx, filepath.Dir(dir), "clone", "--", gitURL, partial); err != nil {
 		return "", err
 	}
 	return dir, os.Rename(partial, dir)
 }
 
-func git(ctx context.Context, dir string, args ...string) (string, error) {
+func Git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	text := strings.TrimSpace(string(out))
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return text, fmt.Errorf("git %s: %w", args[0], ctxErr)
+	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return text, fmt.Errorf("git %s: %s", args[0], text)
+		return text, fmt.Errorf("git %s: %s", args[0], cmp.Or(strings.TrimSpace(string(exit.Stderr)), text))
 	}
 	return text, err
 }
