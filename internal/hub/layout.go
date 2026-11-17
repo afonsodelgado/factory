@@ -14,7 +14,6 @@ import (
 const (
 	HubWindow           = "hub"
 	SlotParking         = "hub-slot"
-	KeepAlive           = "hub-keep"
 	StageParking        = "s-"
 	SelectorWidth       = 35
 	NarrowSelectorWidth = 5
@@ -36,15 +35,10 @@ type Engine struct {
 	Env         []string
 	ViewCommand func(kind string) string
 	home        tmux.Pane
-	borrowed    map[string]string
-}
-
-func (e *Engine) InPlace() bool {
-	return e.home.ID != "" && e.home.Session != e.Session
 }
 
 func (e *Engine) Owns(p tmux.Pane) bool {
-	return p.Session == e.Session || (e.home.WindowID != "" && p.WindowID == e.home.WindowID)
+	return p.Session == e.Session
 }
 
 type Layout struct {
@@ -143,17 +137,6 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		return Layout{}, err
 	}
 	e.home = me
-	if e.InPlace() {
-		if err := e.retireStaleHubs(panes, self); err != nil {
-			return Layout{}, err
-		}
-		if err := e.ensureParking(); err != nil {
-			return Layout{}, err
-		}
-		if panes, err = e.TM.Panes(); err != nil {
-			return Layout{}, err
-		}
-	}
 	l := Layout{Window: me.WindowID, Selector: self}
 	for _, p := range panes {
 		if p.WindowID != me.WindowID || p.ID == self {
@@ -194,7 +177,7 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 		return l, err
 	}
 	if l.Footer == "" {
-		if l.Footer, err = e.uiPane("footer", tmux.Split{Target: self, Full: !e.InPlace(), Size: 1}); err != nil {
+		if l.Footer, err = e.uiPane("footer", tmux.Split{Target: self, Full: true, Size: 1}); err != nil {
 			return l, err
 		}
 	}
@@ -221,96 +204,11 @@ func (e *Engine) Build(self string, shape Shape) (Layout, error) {
 			return l, err
 		}
 	}
-	if e.InPlace() {
-		return l, nil
-	}
 	return l, e.styleSession()
 }
 
 func (e *Engine) Measure(self string) (int, int, error) {
-	panes, err := e.TM.Panes()
-	if err != nil {
-		return 0, 0, err
-	}
-	me, ok := byID(panes, self)
-	if !ok {
-		return 0, 0, fmt.Errorf("pane %s not found", self)
-	}
-	if me.Session == e.Session {
-		return e.TM.WindowSize(self)
-	}
-	for _, p := range panes {
-		if p.WindowID == me.WindowID && p.UI == "footer" {
-			return p.Width, me.Height + 1 + p.Height, nil
-		}
-	}
-	return me.Width, me.Height, nil
-}
-
-func (e *Engine) ensureParking() error {
-	if e.TM.HasSession(e.Session) {
-		return nil
-	}
-	_, err := e.TM.NewDetachedSession(tmux.Window{Session: e.Session, Name: KeepAlive, Env: e.Env, Command: "exec tail -f /dev/null"})
-	return err
-}
-
-func (e *Engine) retireStaleHubs(panes []tmux.Pane, self string) error {
-	for _, p := range panes {
-		if p.UI != "selector" || p.ID == self {
-			continue
-		}
-		if p.Session != e.Session {
-			e.releaseWindow(p.WindowID, p.ID)
-			continue
-		}
-		if err := e.park(panes, p.WindowID); err != nil {
-			return err
-		}
-		if err := e.TM.KillWindow(p.WindowID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Engine) park(panes []tmux.Pane, window string) error {
-	for _, p := range panes {
-		if p.WindowID != window {
-			continue
-		}
-		name := ""
-		switch {
-		case p.Slug != "":
-			name = host.ParkName(p.Slug)
-		case p.UI == "stage":
-			name = host.StageParkName(p.StageOf, p.Stage)
-		}
-		if name == "" {
-			continue
-		}
-		if err := e.TM.Break(p.ID, e.Session, name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *Engine) Release(l Layout) {
-	if !e.InPlace() {
-		return
-	}
-	if viewer, found := e.SlotViewer(); found {
-		e.Select(&l, viewer)
-	}
-	e.releaseWindow(l.Window, l.Selector)
-	for name, saved := range e.borrowed {
-		if saved == "" {
-			e.TM.UnsetWindowOption(l.Window, name)
-			continue
-		}
-		e.TM.SetWindowOption(l.Window, name, saved)
-	}
+	return e.TM.WindowSize(self)
 }
 
 func (e *Engine) removeFrame(l *Layout) error {
@@ -400,19 +298,12 @@ func (e *Engine) styleSession() error {
 }
 
 func (e *Engine) SetHeader(left, right string) {
-	if e.InPlace() {
-		return
-	}
 	e.TM.SetSessionOption(e.Session, "status-left", left)
 	e.TM.SetSessionOption(e.Session, "status-right", right)
 }
 
 func (e *Engine) claimWindow(window string) error {
-	if e.InPlace() {
-		if err := e.borrow(window, "pane-border-lines", "pane-border-status"); err != nil {
-			return err
-		}
-	} else if err := e.TM.RenameWindow(window, HubWindow); err != nil {
+	if err := e.TM.RenameWindow(window, HubWindow); err != nil {
 		return err
 	}
 	if e.TM.SetWindowOption(window, "pane-border-lines", "spaces") != nil {
@@ -420,10 +311,7 @@ func (e *Engine) claimWindow(window string) error {
 			return err
 		}
 	}
-	options := [][2]string{{"pane-border-status", "off"}}
-	if !e.InPlace() {
-		options = append(options, [2]string{"window-status-format", ""}, [2]string{"window-status-current-format", ""})
-	}
+	options := [][2]string{{"pane-border-status", "off"}, {"window-status-format", ""}, {"window-status-current-format", ""}}
 	for _, o := range options {
 		if err := e.TM.SetWindowOption(window, o[0], o[1]); err != nil {
 			return err
@@ -432,71 +320,10 @@ func (e *Engine) claimWindow(window string) error {
 	return nil
 }
 
-func (e *Engine) releaseWindow(window, selector string) {
-	if panes, err := e.TM.Panes(); err == nil {
-		e.park(panes, window)
-	}
-	if panes, err := e.TM.Panes(); err == nil {
-		for _, p := range panes {
-			if p.WindowID == window && p.UI != "" && p.ID != selector {
-				e.TM.KillPane(p.ID)
-			}
-		}
-	}
-	e.TM.UnsetPaneOption(selector, "@factory_ui")
-}
-
-func (e *Engine) borrow(window string, names ...string) error {
-	if e.borrowed != nil {
-		return nil
-	}
-	e.borrowed = map[string]string{}
-	for _, name := range names {
-		saved, err := e.TM.LocalWindowOption(window, name)
-		if err != nil {
-			return err
-		}
-		e.borrowed[name] = saved
-	}
-	return nil
-}
-
 func (e *Engine) BindReturn(key string, l Layout) func() {
-	table, binding, fallback := "root", key, "send-keys "+key
-	if key == "prefix" {
-		table, binding, fallback = "prefix", "f", `command-prompt "find-window -Z -- '%%'"`
-	}
-	saved := e.binding(table, binding)
 	guard := fmt.Sprintf("#{==:#{session_name},%s}", e.Session)
-	if e.InPlace() {
-		guard = fmt.Sprintf("#{==:#{window_id},%s}", l.Window)
-	}
-	if strings.Contains(saved, "session_name},"+e.Session) || strings.Contains(saved, "#{window_id},@") {
-		saved = ""
-	}
-	e.TM.Run("bind-key", "-T", table, binding, "if-shell", "-F", guard, "select-pane -t "+l.Selector, fallback)
-	return func() {
-		e.TM.Run("unbind-key", "-T", table, binding)
-		if saved != "" {
-			e.TM.RunInput(saved+"\n", "source-file", "-")
-		}
-	}
-}
-
-func (e *Engine) binding(table, key string) string {
-	out, err := e.TM.Run("list-keys", "-T", table)
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		for i := 0; i+2 < len(fields); i++ {
-			if fields[i] == "-T" && fields[i+1] == table && fields[i+2] == key {
-				return line
-			}
-		}
-	}
-	return ""
+	e.TM.Run("bind-key", "-T", "root", key, "if-shell", "-F", guard, "select-pane -t "+l.Selector, "send-keys "+key)
+	return func() { e.TM.Run("unbind-key", "-T", "root", key) }
 }
 
 func (e *Engine) Arrange(l Layout, shape Shape) error {
@@ -675,7 +502,7 @@ func (e *Engine) fit(window string, width, height int) error {
 }
 
 func parked(p tmux.Pane) bool {
-	return p.WindowName == SlotParking || p.WindowName == KeepAlive || strings.HasPrefix(p.WindowName, "p-") || strings.HasPrefix(p.WindowName, StageParking)
+	return p.WindowName == SlotParking || strings.HasPrefix(p.WindowName, "p-") || strings.HasPrefix(p.WindowName, StageParking)
 }
 
 func byID(panes []tmux.Pane, id string) (tmux.Pane, bool) {

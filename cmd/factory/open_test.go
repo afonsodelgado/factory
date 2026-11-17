@@ -43,7 +43,7 @@ func TestOpenAndTheHubRefuseWithoutANodeAndCreateNothing(t *testing.T) {
 	if err := openMain(hub.OpenRequest{Name: "csv", Prompt: "Export contacts."}); !errors.Is(err, errNoNode) {
 		t.Fatalf("open without a node = %v; want the node guidance", err)
 	}
-	if err := hubMain(nil, false); !errors.Is(err, errNoNode) {
+	if err := hubMain(); !errors.Is(err, errNoNode) {
 		t.Fatalf("the hub without a node = %v; want the node guidance, never a runtime of its own", err)
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".factory")); err == nil {

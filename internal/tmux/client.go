@@ -260,20 +260,6 @@ func (c Client) SetWindowOption(window, name, value string) error {
 	return err
 }
 
-func (c Client) UnsetPaneOption(pane, name string) error {
-	_, err := c.Run("set-option", "-p", "-u", "-t", pane, name)
-	return err
-}
-
-func (c Client) LocalWindowOption(window, name string) (string, error) {
-	return c.Run("show-options", "-w", "-q", "-v", "-t", window, name)
-}
-
-func (c Client) UnsetWindowOption(window, name string) error {
-	_, err := c.Run("set-option", "-w", "-u", "-t", window, name)
-	return err
-}
-
 func (c Client) SetSessionOption(session, name, value string) error {
 	_, err := c.Run("set-option", "-t", session, name, value)
 	return err

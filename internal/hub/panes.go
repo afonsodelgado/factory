@@ -74,7 +74,7 @@ func (e *Engine) Adopt(l Layout, repos []string) ([]string, error) {
 	var adopted []string
 	for _, session := range sessions {
 		candidates, legacy := worktrees[session]
-		if !legacy || session == e.Session || session == e.home.Session {
+		if !legacy || session == e.Session {
 			continue
 		}
 		pane, ok := firstPane(panes, session)

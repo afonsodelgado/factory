@@ -139,7 +139,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	if err := node.Migrate(cfg); err != nil {
 		return nil, err
 	}
-	tm := tmux.Client{Socket: cfg.Tmux.Socket}
+	tm, err := factoryTmux(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if err := adoptSession(cfg, tm); err != nil {
 		return nil, err
 	}

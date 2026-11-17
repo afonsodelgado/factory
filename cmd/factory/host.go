@@ -13,7 +13,6 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
-	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 func runHost(args []string) int {
@@ -38,7 +37,11 @@ func attachView(id string) error {
 	if err != nil {
 		return err
 	}
-	cmd := tmux.Client{Socket: cfg.Tmux.Socket}.Command("attach-session", "-t", "="+host.ViewSession(id))
+	tm, err := factoryTmux(cfg)
+	if err != nil {
+		return err
+	}
+	cmd := tm.Command("attach-session", "-t", "="+host.ViewSession(id))
 	path, err := exec.LookPath(cmd.Path)
 	if err != nil {
 		return err

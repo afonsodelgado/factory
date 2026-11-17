@@ -18,19 +18,18 @@ import (
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
-	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
 func runHub(args []string) int {
-	if err := hubMain(nil, true); err != nil {
+	if err := hubMain(); err != nil {
 		fmt.Fprintln(os.Stderr, "factory hub:", err)
 		return 1
 	}
 	return 0
 }
 
-func hubMain(startup []hub.Event, detachOnQuit bool) error {
+func hubMain() error {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return err
@@ -49,7 +48,11 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 	}
 	defer unlock()
 
-	tm := tmux.Client{Socket: cfg.Tmux.Socket}
+	tm, err := factoryTmux(cfg)
+	if err != nil {
+		return err
+	}
+	tm.Run("source-file", cfg.TmuxConfPath())
 	bin, err := os.Executable()
 	if err != nil {
 		return err
@@ -62,14 +65,10 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		return err
 	}
 	layout, err := engine.Build(self, hub.Shape{Width: width, Height: height})
-	defer func() { engine.Release(layout) }()
 	if err != nil {
 		return err
 	}
 	events := make(chan hub.Event, 64)
-	for _, e := range startup {
-		events <- e
-	}
 	server, err := hub.Listen(cfg.SocketPath(), func(e hub.Event) { events <- e })
 	if err != nil {
 		return err
@@ -114,14 +113,11 @@ func hubMain(startup []hub.Event, detachOnQuit bool) error {
 		<-hangup
 		program.Quit()
 	}()
-	final, err := program.Run()
-	if m, ok := final.(*hub.Model); ok {
-		layout = m.Layout
+	if _, err := program.Run(); err != nil {
+		return err
 	}
-	if err == nil && detachOnQuit {
-		tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
-	}
-	return err
+	tm.Run("detach-client", "-s", "="+cfg.Hub.Session)
+	return nil
 }
 
 func lockHub(path string) (func(), error) {
