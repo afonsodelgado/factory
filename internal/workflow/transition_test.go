@@ -184,6 +184,11 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	if _, err := Next(layered, someOf); err == nil {
 		t.Fatal("an observation with only some published PRs dropped the others")
 	}
+	removed := eventFor(layered, "observe")
+	removed.Stack, removed.PRs, removed.Observations = layered.Stack[:1], layered.PRs[:1], layered.Evidence.PRs
+	if _, err := Next(layered, removed); err != nil {
+		t.Fatal("a factory whose top layer was removed could no longer be observed:", err)
+	}
 	implementing := workflowState()
 	if err := dispatch(&implementing, eventFor(implementing, "result"), "implement"); err != nil {
 		t.Fatal(err)
