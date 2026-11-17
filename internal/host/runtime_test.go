@@ -357,7 +357,7 @@ func asked(id, kind string, questions ...string) state.Attention {
 }
 
 func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
-	items := []state.Attention{asked("q1", "question", "Which region?", "Which tier?"), asked("gate-csv-plan", "gate"), asked("c1", "comment"), asked("cap-csv-qa", "cap"), asked("fail-csv-qa", "failure")}
+	items := []state.Attention{asked("q1", "question", "Which region?", "Which tier?"), asked("gate-csv-plan", "gate"), asked("c1", "comment"), asked("cap-csv-qa", "cap"), asked("fail-csv-qa", "failure"), asked("handoff-csv-1", "handoff")}
 	since := phoneNow.Add(-2 * time.Minute)
 	act := func(action, item string, answers []string, text string) ActionRequest {
 		return ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: action, Item: item, Since: since, Answers: answers, Text: text}
@@ -375,6 +375,7 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"retry a failure", act(ActRetry, "fail-csv-qa", nil, ""), "%1: /factory resume"},
 		{"skip a failure", act(ActSkip, "fail-csv-qa", nil, ""), "%1: /factory skip qa"},
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
+		{"mark a handoff done", act(ActHandled, "handoff-csv-1", nil, ""), "%1: handoff-csv-1 done: the developer marked this factory done"},
 		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
 		{"another incarnation is stale", func() ActionRequest { r := act(ActRetry, "fail-csv-qa", nil, ""); r.Incarnation = "old"; return r }(), ""},
 		{"a replaced item is stale", func() ActionRequest {
@@ -414,14 +415,15 @@ func (e *wakingEngine) Type(pane, text string) error {
 	return nil
 }
 
-func TestMarkingADoneFactorysHandoffTestedWakesItsGoneSupervisorAndTypesItOnce(t *testing.T) {
-	handoff := asked("handoff-csv", "handoff")
-	doneWith := func(pane *tmux.Pane) Snapshot {
+func TestContinuingAFinishedFactoryFromThePhoneWakesItsGoneSupervisorAndTypesItOnce(t *testing.T) {
+	handoff := asked("handoff-csv-1", "handoff")
+	waitingWith := func(pane *tmux.Pane) Snapshot {
 		snap := phoneSnapshot("Stop", handoff)
 		it := &snap.Items[0]
-		it.Factory.State.Stages = map[string]state.Stage{"handoff": {Status: "done"}}
+		it.Factory.State.Stage = "handoff"
+		it.Factory.State.Stages = map[string]state.Stage{"handoff": {Status: "running"}}
 		it.Factory.Worktree = t.TempDir()
-		it.Status, it.Pane = factory.Done, pane
+		it.Status, it.Pane = factory.Gone, pane
 		snap.Panes = nil
 		if pane != nil {
 			snap.Panes = []tmux.Pane{*pane}
@@ -429,20 +431,21 @@ func TestMarkingADoneFactorysHandoffTestedWakesItsGoneSupervisorAndTypesItOnce(t
 		return snap
 	}
 	engine, typist := &wakingEngine{}, &paneTypist{}
-	r := phoneRuntime(t.TempDir(), typist, doneWith(nil))
+	r := phoneRuntime(t.TempDir(), typist, waitingWith(nil))
 	r.Engine = engine
-	if items := r.Local().Factories[0].Items; len(items) != 1 || items[0].ID != "handoff-csv" {
-		t.Fatalf("a done factory shows %+v; want its handoff item until the developer marks it tested", items)
+	keepGoing := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActContinue, Item: "handoff-csv-1", Since: handoff.CreatedAt.Time}
+	if _, err := r.Act(keepGoing); err == nil || len(engine.created) != 0 {
+		t.Fatalf("continuing with nothing to do woke %v, %v; want it refused until the developer says what to do next", engine.created, err)
 	}
-	tested := ActionRequest{Operation: uuid.NewString(), Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActHandled, Item: "handoff-csv", Since: handoff.CreatedAt.Time}
-	if receipt, err := r.Act(tested); err != nil || receipt.Status != StatusQueued || len(engine.created) != 1 {
-		t.Fatalf("marking the handoff tested with no supervisor running gave %+v, %v and woke %v; want a fresh supervisor and the message queued for it", receipt, err, engine.created)
+	keepGoing.Text = "Also cap the export at 10,000 rows."
+	if receipt, err := r.Act(keepGoing); err != nil || receipt.Status != StatusQueued || len(engine.created) != 1 {
+		t.Fatalf("continuing a finished factory with no supervisor running gave %+v, %v and woke %v; want a fresh supervisor and the message queued for it", receipt, err, engine.created)
 	}
 	r.Engine, r.Now = nil, func() time.Time { return phoneNow.Add(time.Minute) }
-	r.SetSnapshot(doneWith(&tmux.Pane{ID: "%9", Command: "claude"}))
+	r.SetSnapshot(waitingWith(&tmux.Pane{ID: "%9", Command: "claude"}))
 	r.FlushTypeQueue()
 	r.FlushTypeQueue()
-	if want := []string{"%9: handoff-csv tested: the developer tested the handoff"}; strings.Join(typist.typed, "\n") != want[0] {
+	if want := "%9: handoff-csv-1 continue: Also cap the export at 10,000 rows."; strings.Join(typist.typed, "\n") != want {
 		t.Fatalf("typed %q into the woken supervisor; want %q once", typist.typed, want)
 	}
 }

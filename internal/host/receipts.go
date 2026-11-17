@@ -511,7 +511,8 @@ func (m *Runtime) Preview(r ActionRequest) (Preview, error) {
 }
 
 func missingInput(item AttentionItem, r ActionRequest) string {
-	needsText := r.Action == ActChanges || r.Action == ActReply || (r.Action == ActAnswer && !item.AsksQuestions())
+	keepsWorking := r.Action == ActContinue && item.Kind == "handoff"
+	needsText := r.Action == ActChanges || r.Action == ActReply || keepsWorking || (r.Action == ActAnswer && !item.AsksQuestions())
 	switch {
 	case r.Action == ActAnswer && item.AsksQuestions() && !everyAnswered(r.Answers, len(item.Questions)):
 		return fmt.Sprintf("answer all %d questions", len(item.Questions))

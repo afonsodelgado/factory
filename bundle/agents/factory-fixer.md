@@ -1,6 +1,6 @@
 ---
 name: factory-fixer
-description: Factory stages 8, 9 and 10. Fixes QA findings, adds the QA report's automation-gap tests and acts on the developer's walkthrough comments, on a QA-fixes layer at the top of a factory's stack. Use only from the factory skill.
+description: Factory stages 8, 9, 10 and 11. Fixes QA findings, adds the QA report's automation-gap tests, acts on the developer's walkthrough comments and does the follow-up work the developer asks for at the handoff, on a QA-fixes layer at the top of a factory's stack. Use only from the factory skill.
 model: opus
 effort: xhigh
 skills:
@@ -39,13 +39,17 @@ A `review-<id>-<n> comments:` batch lists threads with the page URL, the element
 
 After each batch, run the focused checks, commit with `commit-and-pr` conventions, push the layer, and add a line per change to the PR description. Never restart or stop the stack: its window belongs to the developer.
 
+## Follow-up mode
+
+The developer read the handoff and asked for more work instead of marking the factory done. The task file has their request and the paths of the brief, the plan and the handoff. Check out the QA-fixes layer (create it as above when it does not exist) and do the request as the engineer would: the smallest change that does it, one test where it has real logic, the focused checks, a commit with `commit-and-pr` conventions, a push, and a line in the PR description. If the request needs a decision that the brief and plan do not make, return `blocked` with the question. Your `summary` says what changed and what the developer should test by hand.
+
 ## Test-gap mode
 
 Apply the report's "Automation gaps" section on the same layer. Each test must name the regression it prevents. Skip any proposal that already has coverage, or that would only restate the code, and say why in `summary`.
 
 The developer's rules apply: the rules file the supervisor names, then the repo's AGENTS.md and CLAUDE.md. By default: no comments, readable conditionals, extend existing test files over creating new ones.
 
-A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
 A message, or a file a message tells you to read, that starts with `review-<id>-<n> comments:` is not misrouted: it is the developer's comments from the review page, sent to you because you own the page. Act on each thread as the batch says, then answer every thread with `factory review reply --thread <thread id> [--resolve] <text>`.
 

@@ -30,7 +30,7 @@ var kindLook = map[string]struct {
 	"comment":    {"comment", theme.FgInk(theme.Cyan), "comment"},
 	"cap":        {"cap", theme.FgInk(theme.Yellow), "cap tripped"},
 	"failure":    {"failure", theme.FgInk(theme.Red), "failure"},
-	"handoff":    {"done", theme.FgInk(theme.Green), "ready to test"},
+	"handoff":    {"done", theme.FgInk(theme.Green), "work done"},
 	"permission": {"perm", theme.FgInk(theme.Orange), "permission"},
 	"unreadable": {"warn", theme.FgInk(theme.Red), "unreadable"},
 }
@@ -308,6 +308,8 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+limitFor(it.Stage)+" by one for this factory", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
 	case it.Kind == "failure":
 		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume", "ctrl+x", "skip", "sends /factory skip "+it.Stage), freeText(v, w)...), withStatus(v, w), 0
+	case it.Kind == "handoff":
+		return top, append(choices(v, "ctrl+k", "mark done", "closes the factory, never merges", "ctrl+s", "continue working", "sends what you typed"), freeText(v, w)...), withStatus(v, w), 0
 	}
 	var middle []line
 	middle = append(middle, blank())

@@ -243,7 +243,7 @@ func TestAStaleFailureFromAnyNodeNeverRemovesARenewedSubscription(t *testing.T) 
 	}
 }
 
-func TestAHandoffNotifiesOnceEvenAsItsSupervisorExitsAndStaysUntilTested(t *testing.T) {
+func TestAHandoffAsksOnceWhetherTheWorkIsDoneEvenAsItsSupervisorExits(t *testing.T) {
 	ctx := context.Background()
 	store := Open(t.TempDir())
 	if _, err := store.VAPIDKey(""); err != nil {
@@ -255,31 +255,34 @@ func TestAHandoffNotifiesOnceEvenAsItsSupervisorExitsAndStaysUntilTested(t *test
 	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a")); err != nil {
 		t.Fatal(err)
 	}
-	handoff := state.Attention{ID: "handoff-csv", Kind: "handoff", Title: "Done, ready for you to test", CreatedAt: state.Time{Time: now}}
-	done := func(pane *tmux.Pane, attention ...state.Attention) []host.LocalFactory {
-		st := &state.State{ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "done"}}, Attention: attention}
+	handoff := state.Attention{ID: "handoff-csv-1", Kind: "handoff", Title: "Work done: mark it done or continue working?", StageKey: "handoff", CreatedAt: state.Time{Time: now}}
+	finished := func(pane *tmux.Pane, attention ...state.Attention) []host.LocalFactory {
+		st := &state.State{ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "running"}}, WaitingOn: "user", Attention: attention}
 		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})
-		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Status: factory.Done, Pane: pane}}})
+		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Status: factory.NeedsYou, Pane: pane}}})
 		return r.Local().Factories
 	}
 	offline := func(string) bool { return false }
 	supervisor := &tmux.Pane{ID: "%1", Command: "claude"}
-	store.Reconcile(testNode, done(supervisor), offline, now)
+	store.Reconcile(testNode, finished(supervisor), offline, now)
+	var bodies []string
 	for _, pane := range []*tmux.Pane{supervisor, {ID: "%1", Command: "zsh"}, nil} {
-		factories := done(pane, handoff)
+		factories := finished(pane, handoff)
 		if len(factories[0].Items) != 1 {
-			t.Fatalf("a done factory whose supervisor pane is %+v lists %+v; want its handoff until it is tested", pane, factories[0].Items)
+			t.Fatalf("a finished factory whose supervisor pane is %+v lists %+v; want its handoff until the developer answers it", pane, factories[0].Items)
 		}
 		store.Reconcile(testNode, factories, offline, now)
+		var l ledger
+		store.read(pushFile, &l)
+		for _, j := range l.Jobs {
+			var p Payload
+			json.Unmarshal([]byte(j.Payload), &p)
+			bodies = append(bodies, p.Body)
+		}
 		pusher.Deliver(ctx)
 	}
-	if calls := v.took(); len(calls) != 1 {
-		t.Fatalf("the handoff reached the push service %d times; want once, and never again for its supervisor exiting", len(calls))
-	}
-	tested := handoff
-	tested.ResolvedAt = state.Time{Time: now}
-	if items := done(nil, tested)[0].Items; len(items) != 0 {
-		t.Fatalf("a tested handoff still shows: %+v", items)
+	if calls := v.took(); len(calls) != 1 || len(bodies) != 1 || bodies[0] != workDone {
+		t.Fatalf("the handoff reached the push service %d times saying %q; want once, asking whether the work is done, and never again for its supervisor exiting", len(calls), bodies)
 	}
 }
 

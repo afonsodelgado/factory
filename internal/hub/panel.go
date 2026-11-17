@@ -283,8 +283,8 @@ func (m *Model) gateNotes(item panel.Item, d *panel.Draft) string {
 
 func (m *Model) deliver(action string) {
 	it, item, ok := m.currentAttention()
-	onlyTested := item.Kind == "handoff" && action != "handled"
-	if !ok || !item.Answerable() || onlyTested {
+	handoffAction := action == "handled" || action == "continue"
+	if !ok || !item.Answerable() || (item.Kind == "handoff" && !handoffAction) {
 		return
 	}
 	key := draftKey(it.Factory, item.ID)
@@ -665,6 +665,8 @@ func textAction(kind string) string {
 		return "changes"
 	case "comment":
 		return "reply"
+	case "handoff":
+		return "continue"
 	}
 	return ""
 }
@@ -679,6 +681,8 @@ func nothingTyped(kind string) string {
 		return "Type an instruction first, or ctrl+r for one more round, ctrl+x to skip"
 	case "failure":
 		return "Type an instruction first, or ctrl+r to retry, ctrl+x to skip"
+	case "handoff":
+		return "Type what to do next first, or ctrl+k to mark it done"
 	}
 	return "Type an answer first: ctrl+s sends it"
 }

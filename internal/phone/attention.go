@@ -1,6 +1,7 @@
 package phone
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/url"
 	"slices"
@@ -15,6 +16,7 @@ const (
 	pushFile     = "push.json"
 	resolvedKept = 30 * 24 * time.Hour
 	needsYou     = "Needs you. Tap to open it."
+	workDone     = "Work is done. Mark it done or continue working?"
 	resolvedBody = "Resolved elsewhere."
 )
 
@@ -30,6 +32,7 @@ type Link struct {
 type tracked struct {
 	Link
 	Title    string    `json:"title"`
+	Body     string    `json:"body,omitempty"`
 	Alerted  bool      `json:"alerted,omitempty"`
 	Revision int64     `json:"revision"`
 	Changed  time.Time `json:"changed"`
@@ -76,11 +79,18 @@ func alertsOf(factories []host.LocalFactory) (map[string]alert, map[string]bool)
 		for _, item := range f.Items {
 			if slices.Contains(notifiable, item.Kind) {
 				link := Link{Route: f.Route, Item: item.ID, Incarnation: f.Incarnation, Open: true}
-				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Revision: 1}, active: !f.Paused}
+				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused}
 			}
 		}
 	}
 	return open, active
+}
+
+func alertBody(kind string) string {
+	if kind == "handoff" {
+		return workDone
+	}
+	return needsYou
 }
 
 func (s Store) Reconcile(node string, factories []host.LocalFactory, connected func(installation string) bool, now time.Time) (bool, error) {
@@ -138,7 +148,7 @@ func linkPath(node, key string) string {
 }
 
 func (l *ledger) queue(node string, subs []Subscription, key string, item *tracked, skip func(Subscription) bool, now time.Time) bool {
-	payload := Payload{Node: node, Tag: notificationTag(node, key), Title: item.Title, Body: needsYou, URL: linkPath(node, key), Revision: item.Revision, Resolved: !item.Open}
+	payload := Payload{Node: node, Tag: notificationTag(node, key), Title: item.Title, Body: cmp.Or(item.Body, needsYou), URL: linkPath(node, key), Revision: item.Revision, Resolved: !item.Open}
 	if payload.Resolved {
 		payload.Body = resolvedBody
 	}

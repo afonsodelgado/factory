@@ -610,22 +610,48 @@ function CommentForm(props: FormProps) {
 }
 
 function HandoffForm(props: FormProps) {
+  const text = props.draft.text ?? "";
   return (
     <>
       {props.factory.pages.length > 0 ? (
         <PageList pages={props.factory.pages} />
       ) : null}
+      <Field
+        legend="or tell it what to do next"
+        label="What to do next"
+        value={text}
+        readOnly={props.locked}
+        onChange={(value) => props.setDraft({ ...props.draft, text: value })}
+      />
       <SendLine send={props.item.send} />
+      <Preview
+        factory={props.factory}
+        body={
+          text.trim()
+            ? bodyFor(props.item, { action: "continue", text })
+            : undefined
+        }
+      />
       {props.outcome}
       <Actions why={props.why}>
-        <button
-          type="button"
-          className="btn ok"
-          disabled={props.disabled}
-          onClick={() => props.submit({ action: "handled" })}
-        >
-          <span aria-hidden="true">✓ </span>Tested
-        </button>
+        <div className="row2">
+          <button
+            type="button"
+            className="btn"
+            disabled={props.disabled || !text.trim()}
+            onClick={() => props.submit({ action: "continue", text })}
+          >
+            Continue working
+          </button>
+          <button
+            type="button"
+            className="btn ok"
+            disabled={props.disabled}
+            onClick={() => props.submit({ action: "handled" })}
+          >
+            <span aria-hidden="true">✓ </span>Mark done
+          </button>
+        </div>
       </Actions>
     </>
   );

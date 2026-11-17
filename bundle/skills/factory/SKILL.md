@@ -282,12 +282,19 @@ Write `handoff.md` and post it to the user. Include:
 - every item under the QA report's "Not tested", plus `no-checks` PRs and anything left open in `coderabbit.md` or `review.md`, written as a manual test checklist
 - the walkthrough's threads still open, each with its page and the fixer's last answer; when the pipeline skipped `walkthrough`, say so
 
-Then raise the handoff item, in this order, each a separate write to `state.json`:
+Then ask the user whether the factory is done. Never decide it yourself. Append the `handoff-<id>-<n>` item (`references/attention.md`), where `n` is one more than the number of `handoff` items already in `attention`: kind `handoff`, title `Work done: mark it done or continue working?`, a body naming the PRs in merge order and the path of `handoff.md`, stage `handoff`, and `created_at` set now. In the same write, set `waiting_on` to `"user"`. This write is what notifies the user's phone. Leave `stages.handoff.status` as it is, and wait.
 
-1. Append the `handoff-<id>` item (`references/attention.md`): kind `handoff`, title `Done, ready for you to test`, a body naming the PRs in merge order and the path of `handoff.md`, stage `handoff`, and `created_at` set now. This write is what notifies the user's phone, so it must land before the factory reads as done.
-2. Mark `stages.handoff.status` done and set `waiting_on` to null, which is how the factory app knows the factory is done. It keeps showing the handoff item, and nothing else, until the user marks it tested.
+- **`<item id> done: the developer marked this factory done`.** Resolve the item with `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> --waiting-on none <item id>`. In the same write, make the edit it prints and mark `stages.handoff.status` done. This is how the factory app knows the factory is done. Then stop. Do not merge, push or start anything: the user tests, merges and deploys. The factory app may have woken a fresh session just for this message.
+- **`<item id> continue: <text>`.** The text is the next piece of work. Resolve the item with `--waiting-on agent`. In the same write, set `stages.handoff.status` to `running`, set `waiting_reason` to "follow-up <n>", and add a history entry with event `continue` and the text as its detail. Then:
+  1. Write the text to `<factory dir>/stages/fixer-followup-<n>.md`, with the paths of `brief.md`, `plan.md` and `handoff.md`.
+  2. Spawn `factory-fixer` in follow-up mode with that file. If the walkthrough fixer still runs in its pane, send the file to it with `stage send` instead. Relay its `blocked` questions as usual.
+  3. When it is done, record its PR in `state.prs` with `qa_fixes: true` if it is new.
+  4. Add a `Follow-up <n>` section to `handoff.md` with the request, what changed, and what to test by hand.
+  5. Raise the next handoff item as above, and wait again.
 
-The user tests, merges and deploys. Never merge. `handoff-<id> tested: the developer tested the handoff` means the user has finished testing: resolve the item with `"${FACTORY_BIN:-factory}" attention resolve --dir <factory dir> --waiting-on none handoff-<id>`, make the edit it prints, and stop. Merge, push or start nothing; the factory app may have woken a fresh session just for this message. A factory that was done before handoff items existed never gets one.
+The follow-up gets no review, CodeRabbit or QA pass; the user tests it from the handoff checklist.
+
+An older factory app sends `handoff-<id> tested: the developer tested the handoff` for an item a factory raised when it marked itself done. Resolve that item with `--waiting-on none`, make the edit it prints, and stop.
 
 ## Limits
 
@@ -306,4 +313,4 @@ The node checks the worktree and pushes every branch itself, then copies the fac
 
 ## Resume
 
-Read `state.json`, update `session_id`, and print a one-line status. When `checkpoint` is set and `repo` or `worktree` names a path that is not this machine's, the factory moved here: set `repo` to this main checkout, `worktree` to `git rev-parse --show-toplevel`, and read relative artifact and output paths against this factory directory. No agent id recorded before the move exists here, so start every stage again with a fresh agent from its input files. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs. On a done factory nothing is left to run: wait for `handoff-<id> tested:` and resolve the item as stage 11 says.
+Read `state.json`, update `session_id`, and print a one-line status. When `checkpoint` is set and `repo` or `worktree` names a path that is not this machine's, the factory moved here: set `repo` to this main checkout, `worktree` to `git rev-parse --show-toplevel`, and read relative artifact and output paths against this factory directory. No agent id recorded before the move exists here, so start every stage again with a fresh agent from its input files. If an attention item is still open, ask it again in the same form. Then continue the current stage from its recorded agent id, or re-run it from its inputs. A factory waiting at its handoff item waits for `done:` or `continue:`, as stage 11 says. A factory at `handoff` with `waiting_on: "agent"` was doing a follow-up: start the fixer again in follow-up mode with the newest `stages/fixer-followup-<n>.md`, and go on from stage 11's step 3. A done factory has nothing left to run.
