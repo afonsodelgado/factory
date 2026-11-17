@@ -157,9 +157,22 @@ func (t Tailscale) Serve(ctx context.Context) (ServeConfig, error) {
 
 func Target(port int) string { return "http://127.0.0.1:" + strconv.Itoa(port) }
 
-func ServeArgs(port int) []string { return []string{"serve", "--bg", "--https=443", Target(port)} }
+const HomeHTTPS = 443
 
-var UnserveArgs = []string{"serve", "--https=443", "off"}
+func ServeArgs(https, port int) []string {
+	return []string{"serve", "--bg", "--https=" + strconv.Itoa(https), Target(port)}
+}
+
+func HTTPSOrigin(host string, https int) string {
+	if https == HomeHTTPS {
+		return "https://" + host
+	}
+	return "https://" + host + ":" + strconv.Itoa(https)
+}
+
+func UnserveArgs(https int) []string {
+	return []string{"serve", "--https=" + strconv.Itoa(https), "off"}
+}
 
 type Mapping int
 
@@ -169,12 +182,13 @@ const (
 	Foreign
 )
 
-func (sc ServeConfig) Mapping(host, target string) (Mapping, string) {
-	web, served := sc.Web[host+":443"]
-	forward := sc.TCP["443"].TCPForward
+func (sc ServeConfig) Mapping(host string, https int, target string) (Mapping, string) {
+	port := strconv.Itoa(https)
+	web, served := sc.Web[host+":"+port]
+	forward := sc.TCP[port].TCPForward
 	switch {
 	case forward != "":
-		return Foreign, "port 443 forwards raw TCP to " + forward
+		return Foreign, "port " + port + " forwards raw TCP to " + forward
 	case !served || len(web.Handlers) == 0:
 		return Unmapped, ""
 	}
@@ -186,7 +200,7 @@ func (sc ServeConfig) Mapping(host, target string) (Mapping, string) {
 	var uses []string
 	for _, path := range slices.Sorted(maps.Keys(web.Handlers)) {
 		h := web.Handlers[path]
-		uses = append(uses, "https://"+host+path+" → "+cmp.Or(h.Proxy, h.Path, "text"))
+		uses = append(uses, HTTPSOrigin(host, https)+path+" → "+cmp.Or(h.Proxy, h.Path, "text"))
 	}
 	return Foreign, strings.Join(uses, ", ")
 }

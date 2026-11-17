@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -29,14 +28,13 @@ type ReviewHome struct {
 }
 
 type Open struct {
-	ID      string          `json:"id"`
-	Factory string          `json:"factory"`
-	URL     string          `json:"url"`
-	Health  string          `json:"health,omitempty"`
-	Page    string          `json:"page,omitempty"`
-	Key     string          `json:"key,omitempty"`
-	Cookies []review.Cookie `json:"cookies,omitempty"`
-	At      time.Time       `json:"at"`
+	ID      string    `json:"id"`
+	Factory string    `json:"factory"`
+	URL     string    `json:"url"`
+	Health  string    `json:"health,omitempty"`
+	Page    string    `json:"page,omitempty"`
+	Key     string    `json:"key,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 type Attention struct {

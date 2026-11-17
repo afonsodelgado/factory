@@ -39,6 +39,7 @@ type ReviewReply struct {
 	Owner   string          `json:"owner,omitempty"`
 	Threads []review.Thread `json:"threads,omitempty"`
 	Queued  bool            `json:"queued,omitempty"`
+	Stack   *StackStatus    `json:"stack,omitempty"`
 }
 
 func ReviewActions(events chan<- Event) func(review.Action) (any, error) {
@@ -94,23 +95,11 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 	case "link":
 		return m.QueueOpen(it, remote.Open{URL: r.URL})
 	case "stack":
-		return m.queueStack(it, r.Page)
+		return m.startStack(it, r.Page)
+	case "stack-status":
+		return m.stackStatus(it)
 	}
 	return ReviewReply{}, fmt.Errorf("unknown review action %q", r.Action)
-}
-
-func (m *Runtime) queueStack(it Item, page string) (ReviewReply, error) {
-	if it.Factory.Worktree == "" {
-		return ReviewReply{}, errors.New("no factory owns this session")
-	}
-	stack, err := ReadStack(it.Factory.Dir)
-	if err != nil {
-		return ReviewReply{}, err
-	}
-	if err := m.RunStack(it.Factory, stack); err != nil {
-		return ReviewReply{}, err
-	}
-	return m.QueueOpen(it, remote.Open{URL: stack.URL, Health: stack.HealthURL(), Page: page, Key: ReviewKey(it.Factory), Cookies: stack.Cookies})
 }
 
 func (m *Runtime) ReviewItem(r ReviewRequest) (Item, bool) {

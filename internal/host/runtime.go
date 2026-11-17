@@ -52,6 +52,7 @@ type Runtime struct {
 	Push     *Pusher
 	Jobs     Background
 	Browsers Browsers
+	Stacks   Stacks
 	GitHub   *GitHub
 	Machine  string
 
@@ -116,6 +117,7 @@ func (m *Runtime) Tick() {
 	m.FlushTypeQueue()
 	m.CloseFinishedStages()
 	m.ReleaseFinishedBrowsers()
+	m.ReleaseFinishedStacks()
 	m.SyncReview()
 	m.watch()
 }

@@ -9,10 +9,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/chromedp"
+	cdp "github.com/chromedp/chromedp/remote"
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -1050,5 +1055,462 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 	until(t, "beta's QA result", 10*time.Second, func() bool {
 		result, _ := os.ReadFile(beta.result)
 		return strings.Contains(string(result), host.FailRestart)
+	})
+}
+
+type walkthroughs struct {
+	t         *testing.T
+	machine   *nodetest.Machine
+	stacks    *node.Stacks
+	exposure  *node.Exposure
+	pages     *review.Server
+	dir       string
+	factories []review.Factory
+}
+
+func newWalkthroughs(t *testing.T) *walkthroughs {
+	m := nodetest.New(t).Machine("alpha")
+	m.ServeOn("443", "http://127.0.0.1:7418")
+	m.ServeOn("8443", "http://127.0.0.1:3000")
+	overlay, err := os.ReadFile("../../bundle/review/overlay.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := review.New("tok", overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	w := &walkthroughs{t: t, machine: m, pages: pages, dir: t.TempDir()}
+	w.stacks = w.boot()
+	return w
+}
+
+func (w *walkthroughs) boot() *node.Stacks {
+	ts := node.Tailscale{Run: w.machine.Run}
+	w.exposure = &node.Exposure{Tailscale: ts}
+	w.exposure.Check(context.Background())
+	stacks := &node.Stacks{Tailscale: ts, Gate: node.Gate{Owner: nodetest.Owner, Exposure: w.exposure}, Host: w.machine.Name, Origin: "https://" + w.machine.Name, Review: w.pages, StateDir: w.dir}
+	w.t.Cleanup(func() { stacks.Close() })
+	return stacks
+}
+
+const stackApp = "qa:\n  mode: browser\n  url: http://127.0.0.1:${FACTORY_WEB_PORT}/contacts?tab=all\n  health: http://127.0.0.1:${FACTORY_WEB_PORT}/health\n  health_status: 204\n  seed: none\n  sign_in: cat cookies.json\n  start: 'env > stack.env.tmp && mv stack.env.tmp stack.env; exec sleep 600'\n"
+
+func (w *walkthroughs) factory(slug, config string) factory.Factory {
+	repo := w.t.TempDir()
+	worktree := filepath.Join(repo, "wt")
+	f := factory.Factory{Repo: repo, Slug: slug, Dir: filepath.Join(worktree, ".claude", "factory", slug), Worktree: worktree, State: &state.State{ID: slug}}
+	cookies := `[{"name":"session","value":"s3cret-` + slug + `","domain":"localhost"}]`
+	for _, err := range []error{os.MkdirAll(f.Dir, 0o755), os.MkdirAll(state.RepoDir(repo), 0o755), os.WriteFile(state.RepoConfigPath(repo), []byte(config), 0o644), os.WriteFile(filepath.Join(worktree, "cookies.json"), []byte(cookies), 0o644)} {
+		if err != nil {
+			w.t.Fatal(err)
+		}
+	}
+	w.factories = append(w.factories, host.ReviewFactory(host.Item{Factory: f}))
+	w.pages.SetFactories(w.factories)
+	return f
+}
+
+func leaseOf(f factory.Factory) host.StackLease {
+	return host.StackLease{Factory: f.Key(), Route: host.ReviewKey(f), Label: f.Label(), Repo: f.Repo, Slug: f.Slug, Worktree: f.Worktree, Page: review.App}
+}
+
+func (w *walkthroughs) launch(f factory.Factory) (host.StackStatus, map[string]string) {
+	w.t.Helper()
+	profile, err := state.ReadProfile(f.Repo)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	os.Remove(filepath.Join(f.Worktree, "stack.env"))
+	done := make(chan host.StackStatus, 1)
+	go func() { done <- w.stacks.Start(context.Background(), leaseOf(f), profile) }()
+	env := serveApp(w.t, f.Worktree)
+	return <-done, env
+}
+
+func (w *walkthroughs) start(f factory.Factory) (host.StackStatus, map[string]string) {
+	w.t.Helper()
+	status, env := w.launch(f)
+	if status.State != host.StackReady {
+		w.t.Fatalf("%s's stack is %s at %s: %s", f.Slug, status.State, status.Failure, status.Reason)
+	}
+	return status, env
+}
+
+func serveApp(t *testing.T, worktree string) map[string]string {
+	t.Helper()
+	var data []byte
+	until(t, "the stack's start command", 10*time.Second, func() bool {
+		var err error
+		data, err = os.ReadFile(filepath.Join(worktree, "stack.env"))
+		return err == nil
+	})
+	env := map[string]string{}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if name, value, ok := strings.Cut(line, "="); ok {
+			env[name] = value
+		}
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:"+env[node.WebPortEnv])
+	if err != nil {
+		t.Fatalf("the app cannot listen on the port the node gave it: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusNoContent)
+		case "/headers":
+			json.NewEncoder(w).Encode(r.Header)
+		case "/login":
+			http.Redirect(w, r, "http://localhost:"+env[node.WebPortEnv]+"/home", http.StatusFound)
+		case "/ws":
+			conn, buf, _ := http.NewResponseController(w).Hijack()
+			defer conn.Close()
+			buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+			buf.Flush()
+			line, _ := buf.ReadString('\n')
+			conn.Write([]byte("echo " + line))
+		case "/contacts":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(`<!doctype html><html><body><h1>Contacts</h1><button id="export">Export</button></body></html>`))
+		default:
+			w.Write([]byte("app:" + r.URL.Path))
+		}
+	})}
+	go server.Serve(ln)
+	t.Cleanup(func() { server.Close() })
+	return env
+}
+
+func (w *walkthroughs) proxyOf(s host.StackStatus) string {
+	_, port, _ := strings.Cut(strings.TrimPrefix(s.Origin, "https://"), ":")
+	return w.machine.Served()[port]
+}
+
+func (w *walkthroughs) ask(s host.StackStatus, method, path, login string, header ...string) *http.Response {
+	w.t.Helper()
+	req, _ := http.NewRequest(method, w.proxyOf(s)+path, nil)
+	req.Host = strings.TrimPrefix(s.Origin, "https://")
+	if login != "" {
+		req.Header.Set(node.LoginHeader, login)
+	}
+	for i := 0; i+1 < len(header); i += 2 {
+		req.Header.Set(header[i], header[i+1])
+	}
+	client := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	w.t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func text(resp *http.Response) string {
+	data, _ := io.ReadAll(resp.Body)
+	return string(data)
+}
+
+func TestTwoWalkthroughsGetTheirOwnTailnetPortsAndTheProxyPassesOnlyTheOwnerWithoutIdentityHeaders(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv, pdf := w.factory("csv", stackApp), w.factory("pdf", stackApp)
+	type started struct {
+		status host.StackStatus
+		env    map[string]string
+	}
+	both := make(chan started, 2)
+	for _, f := range []factory.Factory{csv, pdf} {
+		go func() {
+			var result started
+			defer func() { both <- result }()
+			result.status, result.env = w.start(f)
+		}()
+	}
+	a, b := <-both, <-both
+	if t.Failed() {
+		return
+	}
+	switch {
+	case a.status.Origin == b.status.Origin || a.env[node.WebPortEnv] == b.env[node.WebPortEnv]:
+		t.Fatalf("both walkthroughs share %s on app port %s; want a tailnet port and an app port each", a.status.Origin, a.env[node.WebPortEnv])
+	case a.env[node.PublicOriginEnv] != a.status.Origin || !strings.HasSuffix(a.status.URL, "/contacts?tab=all"):
+		t.Fatalf("the stack was told its public origin is %q and links %q; want %s and qa.url's page", a.env[node.PublicOriginEnv], a.status.URL, a.status.Origin)
+	}
+	for _, s := range []host.StackStatus{a.status, b.status} {
+		port := strings.TrimPrefix(s.Origin, "https://"+w.machine.Name+":")
+		if !slices.Contains(w.machine.ServeLog(), "serve --bg --https="+port+" "+w.proxyOf(s)) || port == "8443" {
+			t.Fatalf("Serve log %v; want --https=%s mapped to the walkthrough's own loopback proxy, never the 8443 another tool holds", w.machine.ServeLog(), port)
+		}
+	}
+
+	resp := w.ask(a.status, "GET", "/headers", nodetest.Owner, "Tailscale-User-Name", "Alice", "X-Factory-Pane-Token", "secret")
+	var seen http.Header
+	json.NewDecoder(resp.Body).Decode(&seen)
+	for name := range seen {
+		if strings.HasPrefix(name, "Tailscale-") || strings.HasPrefix(name, "X-Factory-") {
+			t.Errorf("the app saw %s: %v; the proxy must strip identity and internal headers", name, seen[name])
+		}
+	}
+	if got := seen.Get("X-Forwarded-Host"); got != strings.TrimPrefix(a.status.Origin, "https://") {
+		t.Errorf("the app saw X-Forwarded-Host %q; want the walkthrough's tailnet host", got)
+	}
+	if resp := w.ask(a.status, "GET", "/headers", "bob@example.com"); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("another tailnet user got %d; want 403", resp.StatusCode)
+	}
+	if resp := w.ask(a.status, "GET", "/headers", ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a request without a Tailscale login got %d; want 401", resp.StatusCode)
+	}
+	if resp := w.ask(a.status, "GET", "/api/snapshot", nodetest.Owner); text(resp) != "app:/api/snapshot" {
+		t.Error("the walkthrough's origin reached something other than its own app for /api/snapshot; the control API must not live there")
+	}
+	if got := w.ask(a.status, "GET", "/login", nodetest.Owner).Header.Get("Location"); got != a.status.Origin+"/home" {
+		t.Errorf("the app's redirect reached the browser as %q; want it on the walkthrough's origin", got)
+	}
+	if page := text(w.ask(a.status, "GET", "/contacts", nodetest.Owner)); !strings.Contains(page, review.AppPrefix+"/overlay.js") {
+		t.Errorf("the app page came through without the review overlay:\n%s", page)
+	}
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(w.proxyOf(a.status), "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: %s\r\n%s: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", strings.TrimPrefix(a.status.Origin, "https://"), node.LoginHeader, nodetest.Owner)
+	upgraded, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil || upgraded.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("a WebSocket through the proxy got %v, %v; want the app's upgrade", upgraded, err)
+	}
+	conn.Write([]byte("ping\n"))
+	if echo, _ := io.ReadAll(conn); string(echo) != "echo ping\n" {
+		t.Errorf("the upgraded connection carried back %q; want the app's echo", echo)
+	}
+
+	w.machine.SetFunnel(true)
+	w.exposure.Check(context.Background())
+	if resp := w.ask(a.status, "GET", "/headers", nodetest.Owner); resp.StatusCode != http.StatusForbidden || !strings.Contains(text(resp), "Funnel") {
+		t.Errorf("with Funnel on the walkthrough answered %d; want the node's Funnel refusal", resp.StatusCode)
+	}
+}
+
+func TestThePhoneSignInLinkWorksOnceAndRefusesCookiesItCannotHold(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv := w.factory("csv", stackApp)
+	status, _ := w.start(csv)
+	opener := http.NewServeMux()
+	opener.HandleFunc("GET /w/{route}", w.stacks.Open)
+	open := func() string {
+		rec := httptest.NewRecorder()
+		opener.ServeHTTP(rec, httptest.NewRequest("GET", status.Href, nil))
+		next := rec.Header().Get("Location")
+		if rec.Code != http.StatusSeeOther || !strings.HasPrefix(next, status.Origin+review.AppPrefix+"/sign-in?ticket=") {
+			t.Fatalf("the walkthrough link answered %d to %q; want a one-use sign-in on %s", rec.Code, next, status.Origin)
+		}
+		return strings.TrimPrefix(next, status.Origin)
+	}
+
+	signIn := open()
+	resp := w.ask(status, "GET", signIn, nodetest.Owner)
+	cookies := resp.Cookies()
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/contacts?tab=all" || len(cookies) != 1 || cookies[0].Value != "s3cret-csv" || !cookies[0].Secure {
+		t.Fatalf("the sign-in answered %d to %q with %v; want a secure session cookie from qa.sign_in and the app page", resp.StatusCode, resp.Header.Get("Location"), cookies)
+	}
+	if again := w.ask(status, "GET", signIn, nodetest.Owner); again.StatusCode != http.StatusGone || len(again.Cookies()) > 0 {
+		t.Errorf("the same sign-in link answered %d with %v the second time; want it refused", again.StatusCode, again.Cookies())
+	}
+
+	sso := `[{"name":"sso","value":"x","domain":".example.com"}]`
+	os.WriteFile(filepath.Join(csv.Worktree, "cookies.json"), []byte(sso), 0o644)
+	refused := w.ask(status, "GET", open(), nodetest.Owner)
+	if body := text(refused); refused.StatusCode != http.StatusConflict || !strings.Contains(body, host.FailPhoneSignIn) || len(refused.Cookies()) > 0 {
+		t.Errorf("a sign-in for another site answered %d with %v: %s; want the named refusal and no cookie", refused.StatusCode, refused.Cookies(), body)
+	}
+
+	pdf := w.factory("pdf", stackApp)
+	os.WriteFile(filepath.Join(pdf.Worktree, "cookies.json"), []byte(sso), 0o644)
+	if failed, _ := w.launch(pdf); failed.Failure != host.FailPhoneSignIn || w.proxyOf(failed) != "" {
+		t.Errorf("a stack whose sign-in no phone can hold became %s at %q; want it refused by name before Serve publishes it", failed.State, failed.Failure)
+	}
+}
+
+func TestACommentFromAnotherFactorysWalkthroughIsRefused(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv, pdf := w.factory("csv", stackApp), w.factory("pdf", stackApp)
+	a, _ := w.start(csv)
+	b, _ := w.start(pdf)
+	comment := func(origin string) int {
+		req, _ := http.NewRequest("POST", w.proxyOf(a)+review.AppPrefix+"/api/threads", strings.NewReader(`{"page":"app","intent":"fix","text":"Make Export primary.","anchor":{"url":"`+a.URL+`"}}`))
+		req.Host = strings.TrimPrefix(a.Origin, "https://")
+		req.Header.Set(node.LoginHeader, nodetest.Owner)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if status := comment(b.Origin); status != http.StatusForbidden {
+		t.Fatalf("pdf's walkthrough page commented on csv with %d; want 403", status)
+	}
+	if status := comment(a.Origin); status != http.StatusOK {
+		t.Fatalf("csv's own walkthrough page could not comment: %d", status)
+	}
+	pdfStore, _ := w.pages.Store(w.factories[1])
+	pdfStore.Create(review.NewThread{Page: review.App, Intent: "fix", Text: "pdf only"})
+	if resp := w.ask(a, "GET", review.AppPrefix+"/api/%2e%2e/%2e%2e/r/"+host.ReviewKey(pdf)+"/_api/threads?page=app", nodetest.Owner); strings.Contains(text(resp), "pdf only") {
+		t.Fatal("csv's walkthrough origin read pdf's threads through a dot-segment path")
+	}
+	pdfStore.Delete(pdfStore.Threads(review.App)[0].ID)
+	csvStore, _ := w.pages.Store(w.factories[0])
+	if got := csvStore.Threads(review.App); len(got) != 1 || len(pdfStore.Threads(review.App)) != 0 {
+		t.Errorf("csv holds %d app threads and pdf %d; want the one comment on csv only", len(got), len(pdfStore.Threads(review.App)))
+	}
+}
+
+type stackRuntime struct{ queue node.Queue }
+
+func (w *walkthroughs) runtime(fs ...factory.Factory) *stackRuntime {
+	queue := node.NewQueue()
+	ctx, cancel := context.WithCancel(context.Background())
+	r := host.New(host.Runtime{Config: &state.Config{StateDir: w.t.TempDir()}, Engine: qaEngine{}, Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Stacks: w.stacks, Pages: w.pages})
+	var items []host.Item
+	for _, f := range fs {
+		items = append(items, host.Item{Factory: f})
+	}
+	r.SetSnapshot(host.Snapshot{At: time.Now(), Items: items})
+	stopped := make(chan struct{})
+	go func() { r.Run(ctx, queue.Events()); close(stopped) }()
+	w.t.Cleanup(func() { cancel(); <-stopped })
+	return &stackRuntime{queue: queue}
+}
+
+func (s *stackRuntime) call(t *testing.T, kind string, request, into any) {
+	t.Helper()
+	data, _ := json.Marshal(request)
+	answer, err := s.queue.Call(context.Background(), host.Message{T: kind, Data: data})
+	if err == nil && answer.T == "error" {
+		err = errors.New(answer.Error)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if into != nil {
+		json.Unmarshal(answer.Data, into)
+	}
+}
+
+func (s *stackRuntime) walkthrough(t *testing.T, key string) (host.LocalFactory, bool) {
+	var local host.Local
+	s.call(t, "local", nil, &local)
+	for _, f := range local.Factories {
+		if f.Key == key && f.Walkthrough != nil && f.Walkthrough.State != host.StackStarting {
+			return f, true
+		}
+	}
+	return host.LocalFactory{}, false
+}
+
+func TestAStackThatExitsBeforeItAnswersIsNamedOnTheFactory(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv := w.factory("csv", strings.Replace(stackApp, "exec sleep 600", "exit 3", 1))
+	rt := w.runtime(csv)
+	rt.call(t, "review", host.ReviewRequest{Action: "stack", Factory: host.ReviewKey(csv), Page: review.App}, nil)
+	var f host.LocalFactory
+	until(t, "the stack's outcome in the snapshot", 10*time.Second, func() (ok bool) {
+		f, ok = rt.walkthrough(t, csv.Key())
+		return ok
+	})
+	item := slices.IndexFunc(f.Items, func(i host.LocalItem) bool { return i.Kind == "stack" })
+	if f.Walkthrough.Failure != host.FailStack || item < 0 || !strings.Contains(f.Items[item].Title, host.FailStack) {
+		t.Fatalf("the snapshot shows walkthrough %+v and items %+v; want the stack_start failure on the factory", f.Walkthrough, f.Items)
+	}
+	if served := w.machine.Served(); len(served) != 2 {
+		t.Errorf("a failed stack left Serve mappings %v; want only the two that were there before", served)
+	}
+}
+
+func TestPauseDoneAndARestartRemoveOnlyTheWalkthroughsOwnServeMappings(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv, pdf, xls := w.factory("csv", stackApp), w.factory("pdf", stackApp), w.factory("xls", stackApp)
+	rt := w.runtime(csv, pdf, xls)
+	port := func(s host.StackStatus) string { return strings.TrimPrefix(s.Origin, "https://"+w.machine.Name+":") }
+	paused, _ := w.start(csv)
+	rt.call(t, "pause", struct{ Key string }{csv.Key()}, nil)
+	if _, still := w.machine.Served()[port(paused)]; still {
+		t.Fatalf("pausing csv left its mapping: %v", w.machine.Served())
+	}
+
+	finished, _ := w.start(pdf)
+	done := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}, Jobs: &node.Jobs{Queue: node.NewQueue(), Ctx: context.Background()}, Stacks: w.stacks})
+	done.SetSnapshot(host.Snapshot{Items: []host.Item{{Factory: pdf, Status: factory.Done}, {Factory: xls}}})
+	done.ReleaseFinishedStacks()
+	if _, still := w.machine.Served()[port(finished)]; still {
+		t.Fatalf("a done factory kept its walkthrough mapping: %v", w.machine.Served())
+	}
+
+	ours, _ := w.start(xls)
+	taken, _ := w.start(pdf)
+	w.machine.ServeOn(port(taken), "http://127.0.0.1:9999")
+	recovered := w.boot().Recover()
+	served := w.machine.Served()
+	if _, still := served[port(ours)]; still || served[port(taken)] != "http://127.0.0.1:9999" || served["443"] == "" || served["8443"] == "" {
+		t.Fatalf("after the restart Serve holds %v; want xls's mapping gone and everything the node does not own untouched", served)
+	}
+	if len(recovered) != 2 {
+		t.Errorf("the restart reported %d stopped walkthroughs; want 2", len(recovered))
+	}
+}
+
+func TestABrowserCommentsOnAWalkthroughPageThroughItsTailnetPortWithoutATunnel(t *testing.T) {
+	w := newWalkthroughs(t)
+	csv := w.factory("csv", stackApp)
+	status, _ := w.start(csv)
+	proxy, _ := url.Parse(w.proxyOf(status))
+	var serve *httptest.Server
+	serve = httptest.NewServer(&httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(proxy)
+		pr.Out.Host = strings.TrimPrefix(status.Origin, "https://")
+		pr.Out.Header.Set(node.LoginHeader, nodetest.Owner)
+		if pr.In.Header.Get("Origin") == serve.URL {
+			pr.Out.Header.Set("Origin", status.Origin)
+		}
+	}})
+	t.Cleanup(serve.Close)
+	chrome, err := review.LaunchHeadless(filepath.Join(t.TempDir(), "profile"), "", goruntime.GOOS == "linux")
+	if err != nil {
+		if os.Getenv("CI") == "" {
+			t.Skip("no Chrome here: ", err)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { chrome.Close() })
+	alloc, cancelAlloc := cdp.NewAllocator(context.Background(), chrome.URL)
+	defer cancelAlloc()
+	tab, cancelTab := chromedp.NewContext(alloc)
+	defer cancelTab()
+	ctx, cancel := context.WithTimeout(tab, 30*time.Second)
+	defer cancel()
+	if err := chromedp.Do(ctx, chromedp.Navigate(serve.URL+"/contacts")); err != nil {
+		t.Fatal(err)
+	}
+	overlay := `document.querySelector("factory-review")?.shadowRoot`
+	run := func(what, js string) {
+		t.Helper()
+		until(t, what, 10*time.Second, func() bool {
+			done, err := chromedp.Run(ctx, chromedp.Evaluate[bool](js))
+			return err == nil && done
+		})
+	}
+	run("the overlay's comment panel", `(() => { const b = `+overlay+`?.querySelector('[data-action="panel"]'); b?.click(); return !!b })()`)
+	run("a page comment", `(() => { const b = `+overlay+`.querySelector('[data-action="page-comment"]'); b?.click(); return !!b })()`)
+	run("the saved comment", `(() => { const f = `+overlay+`.querySelector(".composer"); if (!f || f.hidden) return false; f.querySelector("textarea").value = "Make Export primary."; f.requestSubmit(); return true })()`)
+
+	store, _ := w.pages.Store(w.factories[0])
+	until(t, "the comment in csv's review threads", 10*time.Second, func() bool {
+		threads := store.Threads(review.App)
+		return len(threads) == 1 && threads[0].Messages[0].Text == "Make Export primary."
 	})
 }

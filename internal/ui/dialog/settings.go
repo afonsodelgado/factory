@@ -140,6 +140,8 @@ func (m *Settings) help() string {
 	switch key {
 	case "qa.mode":
 		return "browser: QA drives Chrome against the local stack. terminal: QA runs the app in a scratch tmux server."
+	case "qa.url":
+		return "The app's local URL. ${FACTORY_WEB_PORT} in it lets every node pick a free port for each stack."
 	case "qa.start":
 		return "The command QA runs to start the local browser stack."
 	case "qa.health":
@@ -253,7 +255,7 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 	c.Put(1, c.H-1, hints, theme.Text)
 }
 
-var browserOnlyKeys = []string{"qa.start", "qa.health", "qa.seed", "qa.sign_in"}
+var browserOnlyKeys = []string{"qa.start", "qa.health", "qa.seed", "qa.sign_in", "qa.url"}
 
 func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edited bool) {
 	title := strings.TrimPrefix(strings.TrimPrefix(key, "commands."), "qa.")

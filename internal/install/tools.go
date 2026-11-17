@@ -252,11 +252,11 @@ func certificate(self node.Self, host string) Check {
 
 func mapping(sc node.ServeConfig, err error, host string, port int) Check {
 	target := node.Target(port)
-	fix := "tailscale " + strings.Join(node.ServeArgs(port), " ")
+	fix := "tailscale " + strings.Join(node.ServeArgs(node.HomeHTTPS, port), " ")
 	if err != nil {
 		return Check{Name: "serve", Mark: Fail, Detail: err.Error(), Fix: fix}
 	}
-	switch found, uses := sc.Mapping(host, target); found {
+	switch found, uses := sc.Mapping(host, node.HomeHTTPS, target); found {
 	case node.Foreign:
 		return Check{Name: "serve", Mark: Fail, Detail: fmt.Sprintf("https://%s serves %s, not the node", host, uses), Fix: "move that to another port, then " + fix}
 	case node.Unmapped:

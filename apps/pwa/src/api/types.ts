@@ -64,6 +64,16 @@ export type LocalPage = {
   unavailable?: string;
 };
 
+export type Walkthrough = {
+  state: "starting" | "ready" | "failed";
+  at: string;
+  origin?: string;
+  url?: string;
+  href?: string;
+  failure?: string;
+  reason?: string;
+};
+
 export type Resolution = {
   id: string;
   kind: string;
@@ -88,6 +98,7 @@ export type LocalFactory = {
   items: LocalItem[];
   resolved?: Resolution[];
   pages: LocalPage[];
+  walkthrough?: Walkthrough;
   message: Eligibility;
   can_pause: boolean;
   can_wake: boolean;
