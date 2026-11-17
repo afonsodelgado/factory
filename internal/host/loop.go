@@ -86,6 +86,9 @@ func (m *Runtime) handle(request Message) Message {
 		}
 	case "prs":
 		err = json.Unmarshal(request.Data, &m.prs)
+		if err == nil {
+			m.wakeChangedHeads()
+		}
 	case "refresh-prs":
 		m.PollPRs(true)
 	case "browser":

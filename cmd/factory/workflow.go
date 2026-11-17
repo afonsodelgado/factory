@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"github.com/afonsodelgado/factory/internal/host"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -11,6 +16,9 @@ import (
 )
 
 func runWorkflow(args []string) int {
+	if len(args) > 0 && args[0] == "watch" {
+		return watchWorkflow(args[1:])
+	}
 	if len(args) == 2 && args[0] == "commands" {
 		resolved, err := recipe.Resolve(args[1])
 		if err != nil {
@@ -51,5 +59,45 @@ func runWorkflow(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	return 0
+}
+
+func watchWorkflow(args []string) int {
+	flags := flag.NewFlagSet("workflow watch", flag.ContinueOnError)
+	dir := flags.String("dir", "", "factory directory")
+	runID := flags.String("run", "", "active run id")
+	flags.Bool("inbox", false, "write structured completion to the inbox")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	var numbers []int
+	for _, arg := range flags.Args() {
+		n, err := strconv.Atoi(arg)
+		if err != nil || n <= 0 {
+			return 2
+		}
+		numbers = append(numbers, n)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	sleep := func(ctx context.Context, d time.Duration) error {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	observations, err := host.WatchPRs(context.Background(), *dir, cwd, *runID, numbers, &host.GitHub{Run: host.RunGH}, time.Now, sleep)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	json.NewEncoder(os.Stdout).Encode(observations)
 	return 0
 }

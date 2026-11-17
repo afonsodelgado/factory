@@ -144,7 +144,10 @@ func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
 	if err != nil {
 		return StageReply{}, err
 	}
-	command := factory.ShellQuote(script) + " --dir " + factory.ShellQuote(it.Factory.Dir) + " --inbox"
+	if it.Factory.State == nil || it.Factory.State.Workflow.ActiveRun == "" {
+		return StageReply{}, errors.New("CI watcher requires an active run")
+	}
+	command := factory.ShellQuote(script) + " --dir " + factory.ShellQuote(it.Factory.Dir) + " --run " + factory.ShellQuote(it.Factory.State.Workflow.ActiveRun) + " --inbox"
 	for _, pr := range r.PRs {
 		command += " " + factory.ShellQuote(pr)
 	}
