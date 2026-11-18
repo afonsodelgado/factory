@@ -84,9 +84,22 @@ func newSetupSession(home string, yes bool) *setup.Session {
 }
 
 func interact(ctx context.Context, name string, args ...string) error {
+	if os.Getuid() == 0 {
+		name, args = withoutSudo(name, args)
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+func withoutSudo(name string, args []string) (string, []string) {
+	switch {
+	case name == "sudo" && len(args) > 0:
+		return args[0], args[1:]
+	case name == "sh" && len(args) == 2 && args[0] == "-c":
+		return name, []string{"-c", "sudo() { \"$@\"; }\n" + args[1]}
+	}
+	return name, args
 }
 
 func canSudo(ctx context.Context) bool {
