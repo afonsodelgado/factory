@@ -44,12 +44,23 @@ requirements → design ↔ plan → implement ↔ review → qa → pr → hand
 
 ## Before you start
 
-You need:
+Each guide needs only what it lists.
 
-- a Mac or a Linux machine;
-- a [Tailscale](https://tailscale.com) account (free), which connects your machines and your phone privately;
+[Set up your machine](#1-set-up-your-machine):
+
+- a Mac or a Linux machine (on a Mac, with [Homebrew](https://brew.sh));
 - a GitHub account;
 - a Claude subscription, for Claude Code.
+
+[Add a remote server](#2-add-a-remote-server), in addition:
+
+- a Linux server where an admin account can use `sudo`;
+- a [Tailscale](https://tailscale.com) account (free), which connects your machines privately.
+
+[Set up your phone](#3-set-up-your-phone), in addition:
+
+- a Tailscale account, the same one your machines use;
+- a phone with the Tailscale app.
 
 ## 1. Set up your machine
 
@@ -59,17 +70,15 @@ You need:
 curl -fsSL https://raw.githubusercontent.com/afonsodelgado/factory/main/install.sh | sh
 ```
 
-It installs `factory` in `~/.local/bin` and starts `factory setup`. On a Mac, install [Homebrew](https://brew.sh) and the [Tailscale app](https://tailscale.com/download/mac) first, and log in to Tailscale.
+It installs `factory` in `~/.local/bin` and starts `factory setup`.
 
 **2. Answer setup.** Setup lists what it will install and asks once. Then it walks you through the logins:
 
-- **Tailscale:** open the link it prints and log in.
-- **HTTPS for your tailnet:** the first time only, turn on HTTPS Certificates at [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns), then press Enter.
-- **GitHub:** open the link it prints and enter the code.
+- **GitHub:** open the link it prints and enter the code. Setup adds this machine's SSH key, `~/.ssh/id_ed25519`, to GitHub. If that key has a passphrase, setup says so and offers to remove it, because the node clones and pushes with nobody at the keyboard.
 - **Git:** confirm your name and email for commits.
 - **Claude Code:** it opens Claude. Type `/login`, finish in the browser, then type `/exit`.
 
-At the end, setup prints this machine's node URL. If it stops with a problem, fix what it says and run `factory setup` again: it skips everything already done.
+At the end, setup says that this machine runs factories on its own. If it stops with a problem, fix what it says and run `factory setup` again: it skips everything already done.
 
 **3. Open the hub.**
 
@@ -79,40 +88,51 @@ factory
 
 **4. Add a repo.** In the hub, press `n`, choose `+ add a repo…`, type the path to a git repo and press Enter. Fill in its build, lint and test commands, or leave them blank and the factory finds them. Press `ctrl+s` to save.
 
-**5. Start a factory.** Press `n` again, pick the repo, type an id such as `csv-export`, choose the stages, and write what you want. Or, from the shell:
+**5. Start a factory.** Press `n` again, pick the repo, type an id such as `csv-export`, choose the stages, and write what you want. Or start from the repo itself:
 
 ```sh
-factory open csv-export "Let ops export contacts as CSV from the contacts page."
+cd ~/dev/my-app
+factory
 ```
 
-The factory starts on its own. When it needs you, its row is marked and `g` takes you to the question. Press `?` in the hub to see every key, and `q` to close the hub. Factories keep running when the hub is closed.
+This sets the repo up, opens the hub on it, and `n` creates the factory there.
+
+The factory starts on its own. When it needs you, its row is marked and `g` takes you to the question. When a design or a plan waits for your approval, `ctrl+o` opens it in this machine's browser, where you can comment on it. Press `?` in the hub to see every key, and `q` to close the hub. Factories keep running when the hub is closed.
 
 ## 2. Add a remote server
 
-A home server or a VPS can run factories while your laptop sleeps. It becomes a second node: you start and answer its factories from your laptop's hub or your phone, as if they ran locally.
+A home server or a VPS can run factories while your laptop sleeps. It becomes a second node: you start and answer its factories from your laptop's hub or your phone, as if they ran locally. Your machines connect over Tailscale.
 
-**1. Prepare the server.** Use Ubuntu Server 24.04 or another recent Linux. A separate user for the agents keeps them away from the rest of the server. From your admin account:
+**1. Add Tailscale to your machine.** On the machine from part 1, run:
+
+```sh
+factory setup --tailscale
+```
+
+It installs Tailscale (on a Mac, it asks you to install the [Tailscale app](https://tailscale.com/download/mac) and waits), logs you in, and asks you once to turn on HTTPS Certificates for your tailnet at [login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns). Then it serves this machine's node on your tailnet. Every factory, setting and repo stays as it was.
+
+**2. Prepare the server.** Use Ubuntu Server 24.04 or another recent Linux. A separate user for the agents keeps them away from the rest of the server. From your admin account:
 
 ```sh
 sudo adduser factory
 ```
 
-**2. Install factory as that user.**
+**3. Install factory as that user, with Tailscale.**
 
 ```sh
 sudo -iu factory
-curl -fsSL https://raw.githubusercontent.com/afonsodelgado/factory/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/afonsodelgado/factory/main/install.sh | sh -s -- --tailscale
 ```
 
 The `factory` user can't use `sudo`, so setup prints the few commands that need root (system packages, Tailscale and starting the node at boot) and stops. Copy them, run them from your admin account, then go back to the `factory` user and run:
 
 ```sh
-factory setup
+factory setup --tailscale
 ```
 
-Log in to Tailscale, GitHub and Claude Code as in part 1. Use the same Tailscale account as your laptop.
+Log in to Tailscale as in step 1, and to GitHub and Claude Code as in part 1. Use the same Tailscale account as your laptop.
 
-**3. It joins your other nodes by itself.** Setup finds the node on your laptop and joins its list, so keep your laptop on with its node running. The server then copies your shared settings from it:
+**4. It joins your other nodes by itself.** Setup finds the node on your laptop and joins its list, so keep your laptop on with its node running. The server then copies your shared settings from it:
 
 - your coding rules;
 - your agent, model and pipeline settings;
@@ -120,23 +140,32 @@ Log in to Tailscale, GitHub and Claude Code as in part 1. Use the same Tailscale
 
 Nothing else is copied: no credentials, `.env` files or logins. From then on, a change to these settings on any node reaches the others within seconds.
 
-**4. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`.
+Because the server runs Linux, setup then asks whether it stays on all the time, to make it the phone app's home. Answer `y` for a server that does; see [the home node](#the-home-node). The default is no.
+
+**5. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`. `⏎` on one of the server's factories opens its live session in the hub, streamed over the same connection the hub already uses for the node. You need no ssh, Remote Login or keys for it.
 
 ## 3. Set up your phone
 
 The phone app shows every factory on every node, notifies you when one needs you, and lets you answer, approve and review from anywhere.
 
-1. Install the Tailscale app on your phone and log in with the same account.
-2. In your phone's browser, open the URL of your first node, the machine you set up in part 1: `https://<machine>.<tailnet>.ts.net`. In the hub, `N` shows it. There is nothing to pair: Tailscale already tells the node it's you.
-3. Add it to your Home Screen. On iPhone, use Share → Add to Home Screen, and open it from there.
-4. In the app, turn on notifications.
-5. To check that notifications arrive, run this on the node's machine:
+1. If you skipped part 2, run `factory setup --tailscale` on your machine first. The phone app reaches your nodes over Tailscale.
+2. Install the Tailscale app on your phone and log in with the same account.
+3. In your phone's browser, open the phone app's address: `https://<machine>.<tailnet>.ts.net`, where `<machine>` is its [home node](#the-home-node). In the hub, `N` shows it, and so does `factory phone status`. There is nothing to pair: Tailscale already tells the node it's you.
+4. Add it to your Home Screen. On iPhone, use Share → Add to Home Screen, and open it from there.
+5. In the app, turn on notifications.
+6. To check that notifications arrive, run this on the node's machine:
 
    ```sh
    factory phone test
    ```
 
-The app lives on that first node and reaches your other nodes from there.
+### The home node
+
+The app lives on one node, its home, and reaches your other nodes from there. At first the home is the first machine you added Tailscale to, usually your laptop. While the home sleeps, an installed app still reads and answers your other nodes, but a new phone can't install the app, a phone with nothing saved can't open it, and no phone can add a node.
+
+So move the home to a server that stays on. When a Linux server joins, its setup asks "Does homebox stay on all the time? Only then make it the phone app's home." Answer `y` only if it does. Answering no, or running setup with `--yes`, keeps the home where it is. To move it at any time, press `N` in the hub, select the node, press `h`, then `y`.
+
+After a move, each phone opens the new address once, adds it to the Home Screen again and turns notifications on again. Until it does, the app at the old address says where the app moved and links there, and every node keeps notifying that phone.
 
 ## Keep it up to date
 
