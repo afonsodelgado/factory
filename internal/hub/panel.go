@@ -99,6 +99,15 @@ func (m *Model) everyItemAnswered(it Item) bool {
 	return len(open) > 0
 }
 
+func (m *Model) anAnswerIsQueued(it Item) bool {
+	for _, a := range it.Factory.State.OpenAttention() {
+		if mark, sent := m.claim(draftKey(it.Factory, a.ID)); sent && progress(mark) == panel.Queued {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) settle() {
 	for i := range m.snap.Items {
 		it := &m.snap.Items[i]
@@ -109,6 +118,9 @@ func (m *Model) settle() {
 		it.Status = loaded
 		if loaded == factory.NeedsYou && m.everyItemAnswered(*it) {
 			it.Status = it.Unblocked
+			if m.anAnswerIsQueued(*it) {
+				it.Status = factory.AnswerQueued
+			}
 		}
 	}
 }
