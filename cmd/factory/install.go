@@ -512,6 +512,10 @@ func (s nodeSetup) restartService(ctx context.Context) (node.Me, error) {
 	if err := s.service.Write(); err != nil {
 		return node.Me{}, err
 	}
+	return s.loadService(ctx)
+}
+
+func (s nodeSetup) loadService(ctx context.Context) (node.Me, error) {
 	if err := s.service.Load(ctx); err != nil {
 		return node.Me{}, fmt.Errorf("could not load the %s: %w", s.service.Kind(), err)
 	}
@@ -532,7 +536,7 @@ func (s nodeSetup) reconcile(ctx context.Context) {
 	if alive && before.Version == version {
 		return
 	}
-	me, err := s.restartService(ctx)
+	me, err := s.loadService(ctx)
 	if err != nil {
 		install.WriteCheck(s.out, install.Check{Name: "node", Mark: install.Fail, Detail: err.Error(), Fix: "factory node install"})
 		return

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,7 +62,20 @@ func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) nod
 		}
 		return "", errors.New("unknown setting " + key)
 	}
-	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write}
+	reload := func(key string) {
+		if key == "config" {
+			queue.Call(context.Background(), host.Message{T: "settings"})
+		}
+	}
+	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write, Cloned: clonedHere(cfg), Authored: reload}
+}
+
+func clonedHere(cfg *state.Config) func(string) bool {
+	clones := filepath.Join(cfg.StateDir, "repos") + string(filepath.Separator)
+	return func(key string) bool {
+		origin, repo := strings.CutPrefix(key, repoSetting)
+		return repo && strings.HasPrefix(repoOrigins()[origin], clones)
+	}
 }
 
 func replaceFile(path, content string) error {

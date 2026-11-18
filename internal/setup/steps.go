@@ -240,8 +240,8 @@ func (s *Session) keyPath() string { return filepath.Join(s.Home, ".ssh", "id_ed
 func sshKey() Step {
 	return Step{
 		Name: "ssh key",
-		Needed: func(_ context.Context, s *Session) string {
-			if _, err := os.Stat(s.keyPath()); err == nil {
+		Needed: func(ctx context.Context, s *Session) string {
+			if _, err := os.Stat(s.keyPath()); err == nil || sshAuthenticated(ctx, s) {
 				return ""
 			}
 			return "creates the SSH key this machine's node clones and pushes with"
@@ -284,9 +284,14 @@ func publicKey(s *Session) string {
 	return fields[0] + " " + fields[1]
 }
 
-func sshAuthenticated(ctx context.Context, s *Session) bool {
-	out, _ := s.Run(ctx, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-T", "git@github.com")
-	return strings.Contains(string(out), "successfully authenticated")
+func sshAuthenticated(ctx context.Context, s *Session, options ...string) bool {
+	args := append(append([]string{"-o", "BatchMode=yes"}, options...), "-T", "git@github.com")
+	out, err := s.Run(ctx, "ssh", args...)
+	said := string(out)
+	if err != nil {
+		said += err.Error()
+	}
+	return strings.Contains(said, "successfully authenticated")
 }
 
 func githubKey() Step {
@@ -305,7 +310,7 @@ func githubKey() Step {
 					return err
 				}
 			}
-			if !sshAuthenticated(ctx, s) {
+			if !sshAuthenticated(ctx, s, "-o", "StrictHostKeyChecking=accept-new") {
 				fmt.Fprintln(s.Out, "If your organisation uses SSO, open github.com/settings/keys and authorise this key with Configure SSO.")
 			}
 			return nil

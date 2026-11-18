@@ -204,6 +204,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	go transfers.Watch(ctx)
 	go api.Poll(ctx)
 	go nodes.Replicate(ctx)
+	go nodes.Settings.Run(ctx)
 	app := http.NewServeMux()
 	app.HandleFunc("GET /w/{route}", stacks.Open)
 	app.Handle("/", phoneApp(ctx, cfg, api, pages, nodes))
@@ -272,8 +273,8 @@ func cloneFor(cfg *state.Config, queue node.Caller, settings *node.Settings) fun
 		if _, err := install.Init(clone, cfg.StateDir); err != nil {
 			return "", err
 		}
-		if profile, err := os.ReadFile(state.ProfilePath(clone)); err == nil {
-			settings.Settle(repoSetting+url, string(profile))
+		if content, ok := settings.Recorded(repoSetting + url); ok && replaceFile(state.ProfilePath(clone), content) == nil {
+			settings.Applied(repoSetting+url, content)
 		}
 		answer, err := queue.Call(ctx, host.Message{T: "repo", Data: mustJSON(host.RepoRequest{Repo: clone})})
 		if err == nil && answer.T != "done" {

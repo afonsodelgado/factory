@@ -608,6 +608,7 @@ func TestSharedSettingsReachEveryNodeAndAJoinerTakesTheListsOverItsOwn(t *testin
 	homelab := tn.Machine("homelab").Start()
 	macbook.SetSetting("rules", "be terse")
 	macbook.SetSetting(repo, "qa: {mode: browser}")
+	homelab.SetCloneTime(3 * tn.ProbeWait)
 	for _, draft := range []string{"homelab's first draft", "homelab's own draft"} {
 		homelab.SetSetting("rules", draft)
 		tn.Settle(homelab)

@@ -458,7 +458,7 @@ func (n *Nodes) Replicate(ctx context.Context) {
 
 func (n *Nodes) Sync(ctx context.Context) {
 	if n.Settings != nil {
-		n.Settings.Reconcile(ctx)
+		n.Settings.Author()
 	}
 	roster := n.Dir.Roster()
 	if roster.Removed {

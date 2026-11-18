@@ -42,8 +42,10 @@ type SettingsPush struct {
 }
 
 type Sources struct {
-	Read  func() map[string]string
-	Write func(ctx context.Context, key, content string) (string, error)
+	Read     func() map[string]string
+	Write    func(ctx context.Context, key, content string) (string, error)
+	Cloned   func(key string) bool
+	Authored func(key string)
 }
 
 type Settings struct {
@@ -52,11 +54,12 @@ type Settings struct {
 	Sources Sources
 	Now     func() time.Time
 
-	mu          sync.Mutex
-	book        settingsBook
-	load        sync.Once
-	reconciling sync.Mutex
-	failed      map[string]time.Time
+	mu       sync.Mutex
+	book     settingsBook
+	load     sync.Once
+	applying sync.Mutex
+	failed   map[string]time.Time
+	wake     chan struct{}
 }
 
 type SettingsStatus struct {
@@ -115,13 +118,65 @@ func (s *Settings) Records() []Setting {
 
 func (s *Settings) Merge(records []Setting) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.opened()
+	changed := false
 	for _, r := range records {
 		if current, ok := s.book.Records[r.Key]; !ok || r.newer(current) {
 			s.book.Records[r.Key] = r
+			changed = true
 		}
 	}
+	s.save()
+	s.mu.Unlock()
+	if changed {
+		s.Wake()
+	}
+}
+
+func (s *Settings) wakes() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.wake == nil {
+		s.wake = make(chan struct{}, 1)
+	}
+	return s.wake
+}
+
+func (s *Settings) Wake() {
+	select {
+	case s.wakes() <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Settings) Run(ctx context.Context) {
+	wake := s.wakes()
+	ticker := time.NewTicker(SyncEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-wake:
+		}
+		s.Apply(ctx)
+	}
+}
+
+func (s *Settings) Recorded(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opened()
+	record, ok := s.book.Records[key]
+	return record.Content, ok
+}
+
+func (s *Settings) Applied(key, written string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opened()
+	s.book.Seen[key] = digest(written)
 	s.save()
 }
 
@@ -131,16 +186,6 @@ func (s *Settings) Join() {
 	s.opened()
 	s.book = settingsBook{Records: map[string]Setting{}, Seen: map[string]string{}}
 	s.save()
-}
-
-func (s *Settings) Settle(key, content string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.opened()
-	if _, ok := s.book.Records[key]; !ok {
-		s.book.Seen[key] = digest(content)
-		s.save()
-	}
 }
 
 type apply struct {
@@ -162,36 +207,48 @@ func (s *Settings) Status() SettingsStatus {
 	return status
 }
 
-func (s *Settings) Reconcile(ctx context.Context) bool {
-	s.reconciling.Lock()
-	defer s.reconciling.Unlock()
-	authored, applies := s.plan(s.Sources.Read())
+func (s *Settings) Author() {
+	authored, _ := s.plan(s.Sources.Read(), true)
+	for _, key := range authored {
+		if s.Sources.Authored != nil {
+			s.Sources.Authored(key)
+		}
+	}
+}
+
+func (s *Settings) Apply(ctx context.Context) {
+	s.applying.Lock()
+	defer s.applying.Unlock()
+	_, applies := s.plan(s.Sources.Read(), false)
 	for _, a := range applies {
 		if at, ok := s.failed[a.key]; ok && s.now().Sub(at) < retryWrite {
 			continue
 		}
 		written, err := s.Sources.Write(ctx, a.key, a.content)
-		s.mu.Lock()
-		if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			return
+		case err != nil:
 			if s.failed == nil {
 				s.failed = map[string]time.Time{}
 			}
 			s.failed[a.key] = s.now()
-		} else {
+		default:
 			delete(s.failed, a.key)
-			s.book.Seen[a.key] = digest(written)
-			s.save()
+			s.Applied(a.key, written)
 		}
-		s.mu.Unlock()
 	}
-	return authored
 }
 
-func (s *Settings) plan(local map[string]string) (bool, []apply) {
+func (s *Settings) cloned(key string) bool {
+	return s.Sources.Cloned != nil && s.Sources.Cloned(key)
+}
+
+func (s *Settings) plan(local map[string]string, author bool) ([]string, []apply) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.opened()
-	authored := false
+	var authored []string
 	var applies []apply
 	keys := slices.Sorted(maps.Keys(local))
 	for key := range s.book.Records {
@@ -205,14 +262,15 @@ func (s *Settings) plan(local map[string]string) (bool, []apply) {
 		seen := s.book.Seen[key]
 		h := digest(content)
 		editedHere := present && h != seen && (seen != "" || !known)
+		firstFromAClone := editedHere && seen == "" && s.cloned(key)
 		switch {
-		case editedHere && known && digest(record.Content) == h:
+		case editedHere && known && digest(record.Content) == h, firstFromAClone:
 			s.book.Seen[key] = h
-		case editedHere:
+		case editedHere && author:
 			s.book.Records[key] = Setting{Key: key, Content: content, Revision: record.Revision + 1, Author: s.Self, At: s.now()}
 			s.book.Seen[key] = h
-			authored = true
-		case known && digest(record.Content) != seen:
+			authored = append(authored, key)
+		case !editedHere && known && digest(record.Content) != seen:
 			applies = append(applies, apply{key: key, content: record.Content})
 		}
 	}
@@ -229,7 +287,6 @@ func (n *Nodes) sendSettings(ctx context.Context, m Member) {
 		return
 	}
 	n.Settings.Merge(theirs.Settings)
-	n.Settings.Reconcile(ctx)
 }
 
 func (n *Nodes) settingsRoute(w http.ResponseWriter, r *http.Request, _ string) {
@@ -247,7 +304,6 @@ func (n *Nodes) settingsRoute(w http.ResponseWriter, r *http.Request, _ string) 
 		return
 	}
 	n.Settings.Merge(body.Settings)
-	n.Settings.Reconcile(r.Context())
 	reply(w, http.StatusOK, SettingsPush{From: n.Self.ID, Settings: n.Settings.Records()})
 }
 

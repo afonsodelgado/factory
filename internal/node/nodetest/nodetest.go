@@ -385,11 +385,12 @@ type Node struct {
 	Phone     phone.Store
 	Pusher    *phone.Pusher
 
-	mu       sync.Mutex
-	probes   []node.Probe
-	clones   []string
-	repos    map[string]string
-	settings map[string]string
+	mu        sync.Mutex
+	probes    []node.Probe
+	clones    []string
+	repos     map[string]string
+	settings  map[string]string
+	cloneTime time.Duration
 }
 
 func (n *Node) SetSetting(key, content string) {
@@ -438,7 +439,21 @@ func (n *Node) Clones() []string {
 	return slices.Clone(n.clones)
 }
 
-func (n *Node) clone(_ context.Context, url string) (string, error) {
+func (n *Node) SetCloneTime(d time.Duration) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.cloneTime = d
+}
+
+func (n *Node) clone(ctx context.Context, url string) (string, error) {
+	n.mu.Lock()
+	wait := n.cloneTime
+	n.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(wait):
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.clones = append(n.clones, url)
@@ -566,6 +581,9 @@ func (tn *Tailnet) Settle(nodes ...*Node) {
 	for range 3 {
 		for _, n := range nodes {
 			n.Nodes.Sync(context.Background())
+		}
+		for _, n := range nodes {
+			n.Nodes.Settings.Apply(context.Background())
 		}
 	}
 }
