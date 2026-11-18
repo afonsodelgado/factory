@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 
@@ -24,7 +25,10 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const factorySetupUsage = "usage: factory setup [--yes]"
+const (
+	factorySetupUsage = "usage: factory setup [--yes]"
+	settingsWait      = 2 * time.Minute
+)
 
 func runSetup(args []string) int {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -168,9 +172,32 @@ func nodeStep() setup.Step {
 			}
 			n := newNodeSetup(cfg, s.Out)
 			n.in, n.tty, n.join = s.In, true, alwaysJoin
-			return n.install(ctx)
+			if err := n.install(ctx); err != nil {
+				return err
+			}
+			awaitSettings(ctx, cfg, s)
+			return nil
 		},
 	}
+}
+
+func awaitSettings(ctx context.Context, cfg *state.Config, s *setup.Session) {
+	local := node.Unix(cfg.NodeSocket())
+	var roster node.Roster
+	if local.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster) != nil || len(roster.Members) < 2 {
+		return
+	}
+	fmt.Fprintln(s.Out, "\nCopying your shared settings and repos from your other nodes…")
+	deadline := time.Now().Add(settingsWait)
+	for time.Now().Before(deadline) {
+		var status node.SettingsStatus
+		if local.Do(ctx, http.MethodGet, "/api/settings", nil, &status) == nil && status.Records > 0 && len(status.Pending) == 0 {
+			install.WriteCheck(s.Out, install.Check{Name: "settings", Mark: install.Pass, Detail: count(status.Records, "shared setting") + " in place"})
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	install.WriteCheck(s.Out, install.Check{Name: "settings", Mark: install.Warn, Detail: "still copying; the node keeps going in the background, and factory doctor shows what is missing"})
 }
 
 func failing(checks []install.Check, names ...string) []install.Check {

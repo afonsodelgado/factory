@@ -394,3 +394,27 @@ func TestExpandHomeCleansTrailingSlashForRepoMatching(t *testing.T) {
 		t.Fatalf("expanded repo = %q, want clean path %q", got, want)
 	}
 }
+
+func TestSharedSettingsMoveBetweenConfigsWithoutTouchingMachineKeysOrComments(t *testing.T) {
+	from, to := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(from, "config.yml"), []byte("# laptop\nicons: unicode\nagents:\n  reviewer: {tool: codex, model: gpt-5.5, effort: high}\nstalled_after: 45m\nnode:\n  port: 7418\n"), 0o644)
+	os.WriteFile(filepath.Join(to, "config.yml"), []byte("# homebox, keep me\nreview:\n  browsers: 1\nnode:\n  owner: alice@example.com\nstalled_after: 20m\n"), 0o644)
+
+	shared, err := ReadShared(from)
+	if err != nil || !strings.Contains(shared, "reviewer") || strings.Contains(shared, "icons") || strings.Contains(shared, "port") {
+		t.Fatalf("shared settings of the laptop = %q, %v; want agents and stalled_after only", shared, err)
+	}
+	written, err := WriteShared(to, shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(to, "config.yml"))
+	for _, kept := range []string{"# homebox, keep me", "browsers: 1", "owner: alice@example.com", "45m", "gpt-5.5"} {
+		if !strings.Contains(string(data), kept) {
+			t.Errorf("after syncing, homebox's config.yml lacks %q:\n%s", kept, data)
+		}
+	}
+	if written != shared {
+		t.Errorf("homebox reads back %q after writing %q, so the next sync tick would see a local edit and send it back", written, shared)
+	}
+}

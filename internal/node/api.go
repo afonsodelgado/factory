@@ -89,6 +89,7 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 	route("POST /api/factories/{key}/preview", a.Preview)
 	if a.Nodes != nil {
 		a.Nodes.routes(route)
+		within(settingsBody)("POST /api/node/settings", nativeOnly(a.Nodes.settingsRoute))
 	}
 	if a.Transfers != nil {
 		a.Transfers.routes(route, within(StageBody(a.Transfers.limits())))

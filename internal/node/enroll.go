@@ -41,6 +41,7 @@ type Nodes struct {
 	Repos       func() map[string]string
 	Clone       func(ctx context.Context, url string) (string, error)
 	Update      func(version string) error
+	Settings    *Settings
 	Phone       *phone.Store
 	ProbeWait   time.Duration
 	UpdateWait  time.Duration
@@ -456,6 +457,9 @@ func (n *Nodes) Replicate(ctx context.Context) {
 }
 
 func (n *Nodes) Sync(ctx context.Context) {
+	if n.Settings != nil {
+		n.Settings.Reconcile(ctx)
+	}
 	roster := n.Dir.Roster()
 	if roster.Removed {
 		return
@@ -500,6 +504,7 @@ func (n *Nodes) exchange(ctx context.Context, m Member) {
 		n.Dir.Merge(theirs)
 	}
 	n.sendRecords(ctx, m)
+	n.sendSettings(ctx, m)
 	n.tellRemoved(ctx, m)
 }
 
@@ -630,6 +635,9 @@ func (n *Nodes) commit(ctx context.Context, c Commit) (Joined, error) {
 		n.unstagePush()
 		return Joined{}, err
 	}
+	if n.Settings != nil {
+		n.Settings.Join()
+	}
 	pushed, err := n.takePush(c)
 	n.Kick()
 	return Joined{Node: n.Self.ID, Clock: n.Dir.Clock(), Push: pushed}, err
@@ -686,6 +694,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/node/join/commit", nativeOnly(n.commitRoute))
 	route("POST /api/node/push/records", nativeOnly(n.recordsRoute))
 	route("POST /api/node/update", nativeOnly(n.updateRoute))
+	route("GET /api/settings", socketOnly("shared settings are read only from this machine", n.settingsStatusRoute))
 }
 
 func socketOnly(refusal string, serve func(http.ResponseWriter, *http.Request, string)) func(http.ResponseWriter, *http.Request, string) {

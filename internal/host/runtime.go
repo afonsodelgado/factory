@@ -231,3 +231,12 @@ func (m *Runtime) note(f factory.Factory, text string) {
 		m.Loader.Note(f, text)
 	}
 }
+
+func (m *Runtime) ReloadShared() error {
+	fresh, err := state.LoadConfig()
+	if err != nil {
+		return err
+	}
+	m.Config.TakeShared(fresh)
+	return nil
+}
