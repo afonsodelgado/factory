@@ -30,8 +30,6 @@ type Server struct {
 	Node      string
 	Changed   func()
 	Now       func() time.Time
-
-	grants grants
 }
 
 func (s *Server) now() time.Time {
@@ -49,8 +47,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/push/test", s.testPush)
 	mux.HandleFunc("GET /api/links/{key}", s.link)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, http.StatusNotFound, "no such route") })
-	mux.HandleFunc("/r/", s.openReview)
-	mux.HandleFunc(GrantPrefix+"{token}/{rest...}", s.sandboxed)
+	current := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serveReview(s.Review, w, r) })
+	(&Reviews{Review: current, Now: s.Now}).Register(mux)
 	mux.Handle("/", s.shell())
 	return mux
 }

@@ -43,6 +43,7 @@ type API struct {
 	Nodes     *Nodes
 	Transfers *Transfers
 	Awake     *Awake
+	Door      *LocalDoor
 
 	mu        sync.Mutex
 	current   *Snapshot
@@ -87,6 +88,9 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 	route("GET /api/operations/{operation}", a.Operation)
 	route("POST /api/factories/{key}/actions", a.Act)
 	route("POST /api/factories/{key}/preview", a.Preview)
+	if a.Door != nil {
+		route("POST /api/review/links", socketOnly("review links are only for the hub on this machine", a.reviewLink))
+	}
 	if a.Nodes != nil {
 		a.Nodes.routes(route)
 		within(settingsBody)("POST /api/node/settings", nativeOnly(a.Nodes.settingsRoute))
@@ -114,6 +118,20 @@ func (a *API) me(w http.ResponseWriter, r *http.Request, caller string) {
 		me.Awake = &status
 	}
 	reply(w, http.StatusOK, me)
+}
+
+func (a *API) reviewLink(w http.ResponseWriter, r *http.Request, _ string) {
+	var link ReviewLink
+	if err := decode(r, &link); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	url, err := a.Door.Link(link.Path)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	reply(w, http.StatusOK, ReviewLink{Path: link.Path, URL: url})
 }
 
 func (a *API) snapshot(w http.ResponseWriter, r *http.Request, _ string) {

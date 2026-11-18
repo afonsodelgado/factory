@@ -12,12 +12,14 @@ func opensPage(method, path string) bool {
 	return method == http.MethodGet && strings.HasPrefix(path, "/r/") && !strings.Contains(path, "/_api/")
 }
 
-func (s *Server) review(w http.ResponseWriter, r *http.Request) {
-	if s.Review == nil {
+func (v *Reviews) review(w http.ResponseWriter, r *http.Request) { serveReview(v.Review, w, r) }
+
+func serveReview(pages http.Handler, w http.ResponseWriter, r *http.Request) {
+	if pages == nil {
 		unavailable(w)
 		return
 	}
-	s.Review.ServeHTTP(w, r)
+	pages.ServeHTTP(w, r)
 }
 
 func page(w http.ResponseWriter, status int, t *template.Template, data any) {

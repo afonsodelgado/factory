@@ -197,6 +197,9 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 		return nil, err
 	}
 	api := &node.API{Version: version, Node: id, Boot: uuid.NewString(), Nodes: nodes, Awake: node.NewAwake(cfg.KeepsAwake())}
+	if owner == "" {
+		api.Door = &node.LocalDoor{Port: cfg.NodePort(), Review: pages.MobileHandler(), Stacks: stacks.Open}
+	}
 	api.Commands = node.Commands{Runtime: node.Activation{Caller: queue, Ready: nodes.Runnable, Exists: api.Holds}}
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
 	go api.Awake.Run(ctx, func() int { _, factories, _ := api.Factories(); return node.ActiveFactories(factories) })
@@ -230,6 +233,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	if err != nil {
 		n.close()
 		return nil, fmt.Errorf("port %d is taken; free it or pick another with node.port in %s: %w", cfg.NodePort(), cfg.ConfigFile(), err)
+	}
+	if api.Door != nil {
+		n.serve(tcp, api.Door)
+		return n, nil
 	}
 	n.serve(tcp, gate.Wrap(api.With(app, gate.Principal, node.NetworkKinds...)))
 	return n, nil

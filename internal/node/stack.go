@@ -61,6 +61,16 @@ type liveStack struct {
 	process *stackProcess
 	server  *http.Server
 	settled bool
+	browser string
+}
+
+func (s *Stacks) loopback() bool { return s.Host == "" }
+
+func (s *Stacks) origin(r stackRecord) string {
+	if s.loopback() {
+		return "http://127.0.0.1:" + strconv.Itoa(r.HTTPS)
+	}
+	return HTTPSOrigin(s.Host, r.HTTPS)
 }
 
 type ticket struct {
@@ -71,7 +81,7 @@ type ticket struct {
 func (s *Stacks) Start(ctx context.Context, lease host.StackLease, profile state.Profile) host.StackStatus {
 	s.Stop(lease.Factory)
 	ctx, cancel := context.WithCancel(ctx)
-	run := &liveStack{record: stackRecord{StackLease: lease, Run: rand.Text(), Host: s.Host}, cancel: cancel}
+	run := &liveStack{record: stackRecord{StackLease: lease, Run: rand.Text(), Host: s.Host}, cancel: cancel, browser: rand.Text()}
 	run.record.Status = host.StackStatus{Factory: lease.Factory, State: host.StackStarting, At: time.Now()}
 	s.mu.Lock()
 	if s.live == nil {
@@ -90,13 +100,17 @@ func (s *Stacks) bringUp(ctx context.Context, run *liveStack, profile state.Prof
 	if err := s.reserve(ctx, run); err != nil {
 		return err
 	}
-	origin := HTTPSOrigin(s.Host, run.record.HTTPS)
-	if run.recipe, err = recipe.Bind(origin); err != nil {
-		return err
-	}
-	if err := s.listen(run); err != nil {
+	ln, err := s.listen(run)
+	if err != nil {
 		return failed(host.FailPorts, fmt.Errorf("the review stack proxy could not listen on a loopback port: %w", err))
 	}
+	origin := s.origin(run.record)
+	if run.recipe, err = recipe.Bind(origin); err != nil {
+		ln.Close()
+		return err
+	}
+	run.server = &http.Server{Handler: s.proxy(run), ReadHeaderTimeout: proxyTimeout}
+	go run.server.Serve(ln)
 	if _, err := bringUp(ctx, run.recipe, func(p *stackProcess) {
 		run.process = p
 		s.update(run, func(r *stackRecord) { r.Stack = p.proc })
@@ -105,6 +119,9 @@ func (s *Stacks) bringUp(ctx context.Context, run *liveStack, profile state.Prof
 	}
 	if err := s.trySignIn(ctx, run); err != nil {
 		return err
+	}
+	if s.loopback() {
+		return nil
 	}
 	s.update(run, func(r *stackRecord) { r.Mapped = true })
 	if _, err := s.Tailscale.call(ctx, ServeArgs(run.record.HTTPS, run.record.Proxy)...); err != nil {
@@ -119,13 +136,17 @@ func (s *Stacks) trySignIn(ctx context.Context, run *liveStack) error {
 		return failed(host.FailSignIn, err)
 	}
 	upstream, _ := upstreamOf(run.recipe.URL)
-	if err := holdable(cookies, upstream.Hostname(), s.Host+":"+strconv.Itoa(run.record.HTTPS)); err != nil {
+	public, _ := url.Parse(s.origin(run.record))
+	if err := holdable(cookies, upstream.Hostname(), public.Host); err != nil {
 		return failed(host.FailPhoneSignIn, err)
 	}
 	return nil
 }
 
 func (s *Stacks) reserve(ctx context.Context, run *liveStack) error {
+	if s.loopback() {
+		return nil
+	}
 	sc, err := s.Tailscale.Serve(ctx)
 	if err != nil {
 		return failed(host.FailServe, err)
@@ -148,15 +169,39 @@ func (s *Stacks) reservedLocked() []int {
 	return ports
 }
 
-func (s *Stacks) listen(run *liveStack) error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func (s *Stacks) listen(run *liveStack) (net.Listener, error) {
+	ln, err := s.listener()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	run.server = &http.Server{Handler: s.proxy(run), ReadHeaderTimeout: proxyTimeout}
-	s.update(run, func(r *stackRecord) { r.Proxy = ln.Addr().(*net.TCPAddr).Port })
-	go run.server.Serve(ln)
-	return nil
+	port := ln.Addr().(*net.TCPAddr).Port
+	s.update(run, func(r *stackRecord) {
+		r.Proxy = port
+		if s.loopback() {
+			r.HTTPS = port
+		}
+	})
+	return ln, nil
+}
+
+func (s *Stacks) listener() (net.Listener, error) {
+	if !s.loopback() {
+		return net.Listen("tcp", "127.0.0.1:0")
+	}
+	s.mu.Lock()
+	reserved := s.reservedLocked()
+	s.mu.Unlock()
+	var err error
+	for port := FirstAppHTTPS; port <= LastAppHTTPS; port++ {
+		if slices.Contains(reserved, port) {
+			continue
+		}
+		var ln net.Listener
+		if ln, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err == nil {
+			return ln, nil
+		}
+	}
+	return nil, fmt.Errorf("every port from %d to %d on 127.0.0.1 is taken: %w", FirstAppHTTPS, LastAppHTTPS, err)
 }
 
 func (s *Stacks) settle(run *liveStack, err error) host.StackStatus {
@@ -185,7 +230,7 @@ func (s *Stacks) outcome(run *liveStack, err error) host.StackStatus {
 		return status
 	}
 	app, _ := url.Parse(run.recipe.URL)
-	status.Origin = HTTPSOrigin(s.Host, run.record.HTTPS)
+	status.Origin = s.origin(run.record)
 	status.URL = status.Origin + app.RequestURI()
 	status.Href = "/w/" + url.PathEscape(run.record.Route)
 	return status
@@ -348,7 +393,7 @@ func (s *Stacks) Open(w http.ResponseWriter, r *http.Request) {
 		phone.Notice(w, http.StatusConflict, "The review stack failed at "+status.Failure, status.Reason)
 	case status.State != host.StackReady:
 		phone.Notice(w, http.StatusConflict, "The review stack is still starting", "Open it again in a moment.")
-	case run.recipe.SignIn == state.NotNeeded:
+	case run.recipe.SignIn == state.NotNeeded && !s.loopback():
 		http.Redirect(w, r, status.URL, http.StatusSeeOther)
 	default:
 		w.Header().Set("Referrer-Policy", "no-referrer")

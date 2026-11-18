@@ -41,6 +41,8 @@ type Model struct {
 	Roster func(context.Context) (node.Roster, error)
 	Peers  func(name string) *node.Client
 
+	ReviewLink func(ctx context.Context, path string) (string, error)
+
 	DialogCommand func(kind string) string
 	Bell          io.Writer
 	Notify        func(text string)

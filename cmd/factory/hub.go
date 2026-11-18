@@ -98,6 +98,11 @@ func hubMain() error {
 			err := runtime.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster)
 			return roster, err
 		},
+		ReviewLink: func(ctx context.Context, path string) (string, error) {
+			var link node.ReviewLink
+			err := runtime.Do(ctx, http.MethodPost, "/api/review/links", node.ReviewLink{Path: path}, &link)
+			return link.URL, err
+		},
 		Bell:   os.Stderr,
 		Notify: notify,
 		Icons:  icons,

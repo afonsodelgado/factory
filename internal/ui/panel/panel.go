@@ -553,6 +553,12 @@ func gateForm(v View, it Item, ic theme.Icons, w int) []line {
 		cursor = "❯ "
 	}
 	lines = append(lines, line{{Text: cursor, Ink: theme.Focused.B()}, {Text: "✓ Approve", Ink: theme.FgInk(theme.Green).B()}, {Text: "  sends /factory approve " + it.Stage + " with the notes", Ink: theme.Muted}})
+	if v.LocalPages {
+		lines = append(lines, blank())
+		for _, l := range theme.Wrap("Pages open in this machine's browser, through a link from ctrl+o that works once.", w) {
+			lines = append(lines, line{{Text: l, Ink: theme.Muted}})
+		}
+	}
 	checked := checkedAt(it.Artifacts)
 	if !checked.IsZero() {
 		lines = append(lines, blank(), line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})

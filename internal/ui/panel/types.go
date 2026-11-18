@@ -151,6 +151,8 @@ type View struct {
 	Checked   time.Time
 	Artifacts []ArtifactRow
 	Activity  []ActivityRow
-	All       bool
-	Row       int
+
+	LocalPages bool
+	All        bool
+	Row        int
 }

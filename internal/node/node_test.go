@@ -520,6 +520,60 @@ func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	}
 }
 
+func TestAnOwnerlessNodeOpensOnlyHubLinkedReviewPagesToThisMachinesBrowser(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plan.html"), []byte("<body>plan</body>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := review.New("token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
+	door := &LocalDoor{Port: 7418, Review: pages.MobileHandler()}
+	const here = "127.0.0.1:7418"
+	get := func(host, path string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://"+host+path, nil)
+		r.RemoteAddr = "127.0.0.1:50000"
+		for _, c := range cookies {
+			r.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		door.ServeHTTP(w, r)
+		return w
+	}
+	link, err := door.Link("/r/k/plan.html")
+	if err != nil || !strings.HasPrefix(link, "http://"+here+"/open/") {
+		t.Fatalf("the hub got the link %q, %v; want a one-use loopback link", link, err)
+	}
+	ticket := strings.TrimPrefix(link, "http://"+here)
+	entered := get(here, ticket)
+	cookies := entered.Result().Cookies()
+	if entered.Code != http.StatusSeeOther || entered.Header().Get("Location") != "/r/k/plan.html" || len(cookies) != 1 || !cookies[0].HttpOnly {
+		t.Fatalf("the link answered %d to %q with cookies %v; want an HttpOnly session and the page", entered.Code, entered.Header().Get("Location"), cookies)
+	}
+	grant := get(here, "/r/k/plan.html", cookies...).Header().Get("Location")
+	if opened := get(here, grant); opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), "data-mobile") {
+		t.Fatalf("the page through its link answered %d %q; want it with the comment overlay", opened.Code, opened.Body)
+	}
+	for _, refused := range []struct {
+		name string
+		got  *httptest.ResponseRecorder
+	}{
+		{"a reused link", get(here, ticket)},
+		{"the page without the cookie", get(here, "/r/k/plan.html")},
+		{"the page under another Host", get("macbook.tail1234.ts.net", "/r/k/plan.html", cookies...)},
+		{"the snapshot", get(here, "/api/snapshot", cookies...)},
+		{"another node's hello", get(here, "/api/node/hello", cookies...)},
+		{"the phone app", get(here, "/", cookies...)},
+	} {
+		if refused.got.Code < 400 {
+			t.Errorf("%s answered %d; an ownerless node must refuse it", refused.name, refused.got.Code)
+		}
+	}
+}
+
 func TestKeepAwakeHoldsOnlyWhileFactoriesAreActiveOnExternalPowerAndReleasesOnShutdown(t *testing.T) {
 	onPower, holds, releases := true, 0, 0
 	a := &Awake{
