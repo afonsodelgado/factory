@@ -924,7 +924,8 @@ func (n *Nodes) drawAlone(c *theme.Canvas) {
 }
 
 func (n *Nodes) drawWithoutTailscale(c *theme.Canvas) {
-	y := paragraph(c, 5, "Every factory runs on this machine. "+node.NeedsTailscale(node.NodesFeature, n.Context.Machine)+".", theme.Text)
+	missing := node.NeedsTailscale(node.NodesFeature, n.Context.Machine)
+	y := paragraph(c, 5, "Every factory runs on this machine. "+strings.ToUpper(missing[:1])+missing[1:]+".", theme.Text)
 	y = paragraph(c, y+1, "A node is any machine of yours that runs factory, such as a home server that stays on. Its factories keep running while this laptop sleeps, and this hub and your phone list them next to these.", theme.Text)
 	y = addTailscale(c, y+1, "installs and logs in Tailscale and serves this node on your tailnet. Every factory, setting and repo here stays as it is.")
 	c.Spans(1, y, []theme.Span{{Text: "then, on the other machine:  ", Ink: theme.Muted}, {Text: node.AddTailscale, Ink: theme.Bright}, {Text: "  joins " + n.Context.Machine, Ink: theme.Muted}})

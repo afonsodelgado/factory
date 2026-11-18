@@ -230,7 +230,7 @@ func (m *NewFactoryModel) slug() string {
 func (m *NewFactoryModel) launch() factory.Launch {
 	repo := m.selectedRepo()
 	name, stages := m.chosenPipeline()
-	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole)}
+	launch := factory.Launch{Repo: repo.Path, Slug: m.slug(), Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.agent(supervisorRole), WatchComments: m.watchComments}
 	if launch.Supervisor.OnClaude() {
 		launch.SessionID = "<uuid>"
 	}
