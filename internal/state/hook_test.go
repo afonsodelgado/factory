@@ -95,6 +95,36 @@ func TestRecordHookWritesOnlyForFactories(t *testing.T) {
 	}
 }
 
+func TestCompactingASessionLeavesItIdleOrBusyAsItWas(t *testing.T) {
+	stateDir := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "repo", ".claude", "worktrees", "csv")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 17, 18, 54, 0, 0, time.UTC)
+	for _, c := range []struct {
+		session, before, want string
+	}{
+		{"idle", `"hook_event_name":"Stop"`, "Stop"},
+		{"busy", `"hook_event_name":"PostToolUse","tool_name":"Bash"`, "PostToolUse"},
+	} {
+		events := []string{c.before, `"hook_event_name":"PreCompact","trigger":"auto"`, `"hook_event_name":"PostCompact","trigger":"auto"`, `"hook_event_name":"SessionStart","source":"compact"`}
+		for i, event := range events {
+			payload := `{"session_id":"` + c.session + `","cwd":"` + worktree + `",` + event + `}`
+			if err := RecordHook(stateDir, []byte(payload), "", at.Add(time.Duration(i)*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file, err := ReadHookFile(filepath.Join(SessionsDir(stateDir), c.session+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := file.MainEvent().Event; got != c.want {
+			t.Errorf("the %s session reads as %s after compacting; want %s, or an idle supervisor looks busy forever and a queued answer is never typed", c.session, got, c.want)
+		}
+	}
+}
+
 func TestFactoriesInReposWithTheSameNameKeepSeparateFiles(t *testing.T) {
 	if FileStem("/home/a/dev/cowork", "eng-1") == FileStem("/home/a/work/cowork", "eng-1") {
 		t.Error("two repos named cowork share one activity log and one set of drafts")
