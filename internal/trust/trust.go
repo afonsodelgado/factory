@@ -83,11 +83,43 @@ var (
 
 const trusted = `trust_level = "trusted"`
 
+func CodexHeaders(path string) []string {
+	headers := []string{"[projects." + basicString(path) + "]"}
+	literalAllowed := !strings.ContainsFunc(path, func(r rune) bool { return r == '\'' || r < 0x20 || r == 0x7f })
+	if literalAllowed {
+		headers = append(headers, "[projects.'"+path+"']")
+	}
+	return headers
+}
+
+func basicString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\u%04X`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 func trustCodexProject(text, path string) string {
-	header := `[projects."` + path + `"]` + "\n"
-	start := strings.Index(text, header)
+	header, start := "", -1
+	for _, candidate := range CodexHeaders(path) {
+		if i := strings.Index(text, candidate+"\n"); i >= 0 {
+			header, start = candidate+"\n", i
+			break
+		}
+	}
 	if start < 0 {
-		return separated(text) + header + trusted + "\n"
+		return separated(text) + CodexHeaders(path)[0] + "\n" + trusted + "\n"
 	}
 	bodyStart := start + len(header)
 	rest := text[bodyStart:]
