@@ -44,6 +44,7 @@ func runSetup(args []string) int {
 	ctx := context.Background()
 	_, err := setup.Run(ctx, s, append(setup.Machine(s.Tailscale), setupSteps(s.Tailscale)...))
 	var root setup.NeedsRoot
+	var manual setup.Manual
 	switch {
 	case errors.Is(err, setup.ErrDeclined):
 		fmt.Println(err)
@@ -54,6 +55,9 @@ func runSetup(args []string) int {
 			fmt.Fprintln(os.Stderr, "  "+command)
 		}
 		fmt.Fprintf(os.Stderr, "\nThen run %s again as %s.\n", s.Command, s.User)
+		return 1
+	case errors.As(err, &manual):
+		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s\nthen run factory setup again: it skips what is already done.\n", err)
 		return 1
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s.\nFix that, then run factory setup again: it skips what is already done.\n", err)

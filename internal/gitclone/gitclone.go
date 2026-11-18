@@ -108,7 +108,11 @@ func Ensure(ctx context.Context, stateDir, gitURL string) (string, error) {
 	partial := dir + ".partial"
 	os.RemoveAll(partial)
 	if _, err := Git(ctx, filepath.Dir(dir), "clone", "--", gitURL, partial); err != nil {
-		return "", err
+		if ctx.Err() != nil {
+			return "", err
+		}
+		answer, _ := strings.CutPrefix(err.Error(), "git clone: ")
+		return "", fmt.Errorf("could not clone %s. git answered: %s", gitURL, answer)
 	}
 	return dir, os.Rename(partial, dir)
 }

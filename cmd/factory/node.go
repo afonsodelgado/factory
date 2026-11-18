@@ -287,7 +287,7 @@ func cloneFor(cfg *state.Config, queue node.Caller, settings *node.Settings) fun
 		defer cancel()
 		clone, err := gitclone.Ensure(ctx, cfg.StateDir, url)
 		if err != nil {
-			return "", err
+			return "", withGitHint(err)
 		}
 		if _, err := install.Init(clone, cfg.StateDir); err != nil {
 			return "", err

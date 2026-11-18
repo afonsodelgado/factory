@@ -5,6 +5,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -112,5 +116,63 @@ func TestOnlyATailscaleNodeOrTheFlagGetsTheTailscaleSteps(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func keySession(t *testing.T, sshAnswer string) (*Session, *bytes.Buffer, *[]string) {
+	t.Helper()
+	s, out := session(true)
+	s.Home = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(s.Home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.keyPath(), []byte("encrypted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch name {
+		case "ssh-keygen":
+			return nil, fmt.Errorf("ssh-keygen: %w", &exec.ExitError{Stderr: []byte("incorrect passphrase supplied to decrypt private key")})
+		case "ssh":
+			return nil, fmt.Errorf("ssh: %w", &exec.ExitError{Stderr: []byte(sshAnswer)})
+		}
+		return nil, nil
+	}
+	var interacted []string
+	s.Interact = func(_ context.Context, name string, args ...string) error {
+		interacted = append(interacted, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	return s, out, &interacted
+}
+
+func TestSetupNamesTheSSHKeyPassphraseAndYesStopsWithTheCommandThatRemovesIt(t *testing.T) {
+	s, out, interacted := keySession(t, "git@github.com: Permission denied (publickey).")
+	s.Yes = true
+	_, err := Run(context.Background(), s, []Step{sshKey()})
+	var manual Manual
+	if !errors.As(err, &manual) || manual.Command != `ssh-keygen -p -f ~/.ssh/id_ed25519 -N ""` || len(*interacted) > 0 {
+		t.Errorf("--yes with a passphrase key got %v and ran %v; want it to stop and name the ssh-keygen command", err, *interacted)
+	}
+	if said := out.String(); !strings.Contains(said, "~/.ssh/id_ed25519 has a passphrase, so the node cannot use it") || !strings.Contains(said, "ssh answered: git@github.com: Permission denied (publickey).") {
+		t.Errorf("setup skipped or hid the passphrase problem:\n%s", said)
+	}
+}
+
+func TestGitHubSSHFailureShowsSSHsAnswerAndTheSSOFixOnlyWhenItNamesSAML(t *testing.T) {
+	cases := []struct {
+		ssh string
+		sso bool
+	}{
+		{"git@github.com: Permission denied (publickey).", false},
+		{"ERROR: The 'acme' organization has enabled or enforced SAML SSO. To access this repository, you must re-authorize your SSH key.", true},
+	}
+	for _, c := range cases {
+		s, out, _ := keySession(t, c.ssh)
+		_, err := Run(context.Background(), s, []Step{githubKey()})
+		said := out.String()
+		if err == nil || !strings.Contains(said, c.ssh) || strings.Contains(said, "Configure SSO") != c.sso || c.sso && !strings.Contains(said, "authorise it for acme") {
+			t.Errorf("GitHub answering %q gave %v and printed:\n%s\nwant ssh's answer, and the SSO fix only for SAML", c.ssh, err, said)
+		}
 	}
 }
