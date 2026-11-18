@@ -63,6 +63,30 @@ func eventually(t *testing.T, what string, ok func() bool) {
 	}
 }
 
+func TestMovingThePhoneHomeOnOneNodeReachesEveryNodesList(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	studio := tn.Machine("studio").Start()
+	for _, name := range []string{"homelab", "studio"} {
+		if _, err := macbook.Add(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tn.Settle(macbook, homelab, studio)
+	var moved node.Roster
+	if err := studio.Local.Do(context.Background(), "POST", "/api/nodes/home", node.HomeRequest{Operation: uuid.NewString(), Node: homelab.ID}, &moved); err != nil {
+		t.Fatal(err)
+	}
+	tn.Settle(macbook, homelab, studio)
+	for _, n := range []*nodetest.Node{macbook, homelab, studio} {
+		roster := n.Roster()
+		if n.Nodes.Dir.Home() != "https://"+homelab.Name || roster.Home != "https://"+homelab.Name || !slices.Equal(roster.PreviousHomes, []string{"https://" + macbook.Name}) {
+			t.Errorf("%s has the home %s (roster %s, previous %v); want homelab, with macbook's address sending phones there", n.Short(), n.Nodes.Dir.Home(), roster.Home, roster.PreviousHomes)
+		}
+	}
+}
+
 func TestHubAddAndInstallJoinConvergeOnOneListWithTheFirstHome(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()

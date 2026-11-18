@@ -251,6 +251,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         await cache.adoptLegacy(id);
         await cache.setAccount(id);
+        const movedFrom = new URLSearchParams(location.search).get("from");
+        if (movedFrom) await cache.setMovedFrom(movedFrom);
         const browser = await cache.installation();
         setRefusal(undefined);
         setExposure(undefined);

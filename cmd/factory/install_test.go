@@ -538,6 +538,39 @@ func TestInstallJoinsAFoundNodeOnlyOnAYesOrAFlag(t *testing.T) {
 	}
 }
 
+func TestALinuxNodeJoiningIsAskedWhetherItStaysOnAndKeepsTheHomeUnlessToldYes(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homebox := tn.Machine("homebox").Start()
+	var out bytes.Buffer
+	s := nodeSetup{out: &out, in: strings.NewReader("\n"), tty: true, join: alwaysJoin, system: "linux"}
+	if joined, _, err := s.offerJoin(context.Background(), homebox.Local, "homebox"); !joined || err != nil {
+		t.Fatalf("homebox joined %v, %v:\n%s", joined, err, &out)
+	}
+	if !strings.Contains(out.String(), "Does homebox stay on all the time?") {
+		t.Fatalf("a Linux node joined without the stay-on question:\n%s", &out)
+	}
+	answer := func(in string, yes bool) {
+		out.Reset()
+		s.in, s.yes = strings.NewReader(in), yes
+		if err := s.offerHome(context.Background(), homebox.Local, homebox.Roster(), "homebox"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer("", true)
+	tn.Settle(macbook, homebox)
+	for _, n := range []*nodetest.Node{macbook, homebox} {
+		if home := n.Roster().Home; home != "https://"+macbook.Name {
+			t.Fatalf("after Enter and --yes %s has the home %s; a personal Linux PC must never take it by default", n.Short(), home)
+		}
+	}
+	answer("y\n", false)
+	tn.Settle(macbook, homebox)
+	if home := macbook.Roster().Home; home != "https://"+homebox.Name {
+		t.Errorf("after y macbook has the home %s; want homebox", home)
+	}
+}
+
 func TestPushKeyExportWritesOnlyANewPrivateFileAndImportNeverSilencesPhonesUnasked(t *testing.T) {
 	from, to := phone.Open(t.TempDir()), phone.Open(t.TempDir())
 	for _, store := range []phone.Store{from, to} {
@@ -549,7 +582,7 @@ func TestPushKeyExportWritesOnlyANewPrivateFileAndImportNeverSilencesPhonesUnask
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := to.Subscribe(phone.Subscription{Endpoint: "https://push.example/ipad", P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16)), Since: time.Now()}); err != nil {
+	if _, err := to.Subscribe(phone.Subscription{Endpoint: "https://push.example/ipad", P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16)), Since: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	secret, _ := from.Export()

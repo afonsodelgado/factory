@@ -53,6 +53,8 @@ type RepoURL struct {
 
 type NodesContext struct {
 	Machine   string
+	Self      string
+	Offer     string
 	Tailnet   string
 	Version   string
 	Factories int
@@ -80,6 +82,7 @@ type NodeActions interface {
 	Inspect(ctx context.Context, name string) (node.CheckReport, error)
 	Add(ctx context.Context, op, name string, replaceKey bool) (node.AddResult, error)
 	Remove(op, id string) (node.Roster, error)
+	MoveHome(op, id string) (node.Roster, error)
 	SetTarget(name string) error
 	Clone(ctx context.Context, name, op, url string) error
 	MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error)
@@ -192,6 +195,9 @@ type Nodes struct {
 
 	confirmingMove bool
 	batch          node.BatchProgress
+
+	homing    *homeChoice
+	movedFrom string
 }
 
 func NewNodes(c NodesContext, actions NodeActions) *Nodes {
@@ -342,6 +348,10 @@ func (n *Nodes) key(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	key := msg.String()
+	if n.homing != nil {
+		n.homeKey(key)
+		return nil
+	}
 	switch n.screen {
 	case selfDetailsScreen:
 		return n.selfDetailsKey(key)
@@ -391,6 +401,8 @@ func (n *Nodes) listKey(key string) tea.Cmd {
 		return n.openPick()
 	case "d":
 		n.makeDefault(row.Name)
+	case "h":
+		n.askHome()
 	case "x":
 		n.askRemoval(onPeer)
 	case "r":
@@ -462,6 +474,8 @@ func (n *Nodes) selfDetailsKey(key string) tea.Cmd {
 		n.checks = nil
 		n.checkRun++
 		return runChecks(n.actions, n.checkRun)
+	case "h":
+		n.askHome()
 	default:
 		n.scrollKey(key)
 	}
@@ -497,6 +511,8 @@ func (n *Nodes) peerDetailsKey(key string) tea.Cmd {
 		return n.clone(row)
 	case "d":
 		n.makeDefault(row.Name)
+	case "h":
+		n.askHome()
 	case "x":
 		n.screen, n.removing = nodesListScreen, true
 	default:
@@ -935,6 +951,14 @@ func (n *Nodes) drawLeaving(c *theme.Canvas, y int) int {
 func (n *Nodes) drawMany(c *theme.Canvas, y int) {
 	y = n.drawLeaving(c, y)
 	y = paragraph(c, y, "New factories run on "+n.targetName()+". Pick another node in New factory for a one-off.", theme.Text) + 1
+	y = n.drawHomeNews(c, y)
+	if n.homing != nil {
+		c.Clip(0, c.H-10)
+		n.drawPhoneApp(c, y, true)
+		c.Unclip()
+		n.drawHomeConfirm(c)
+		return
+	}
 	if n.added != nil {
 		y = n.drawAdded(c, y)
 	}
@@ -957,7 +981,7 @@ func (n *Nodes) drawMany(c *theme.Canvas, y int) {
 	}
 	y = n.drawPhoneApp(c, y, true)
 	n.drawProblem(c, y+1)
-	n.hint(c, "⏎ details   a add   d make default   x remove   r check again   esc close")
+	n.hint(c, "⏎ details   a add   d make default   h home   x remove   r check again   esc close")
 }
 
 func (n *Nodes) noAnswer(row NodeRow) string {
@@ -1095,8 +1119,11 @@ func (n *Nodes) drawFactories(c *theme.Canvas, x, y int, none string) {
 func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 	c.Put(1, y, "Phone app", theme.Bright.B())
 	url, urlInk := n.Context.Phone.url()
+	if n.Context.Home != "" {
+		url, urlInk = n.Context.Home, theme.Bright
+	}
 	end := c.PutMax(valueX, y, url, urlInk, c.W-valueX-1)
-	where := "lives on " + n.Context.Machine
+	where := "lives on " + n.homeShort()
 	if many {
 		where += ", reaches every node"
 	}
@@ -1120,14 +1147,21 @@ func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	n.drawHeading(c)
 	bottom := c.H - 1
-	if n.confirmingMove {
+	switch {
+	case n.confirmingMove:
 		bottom = c.H - 6
+	case n.homing != nil:
+		bottom = c.H - 10
 	}
 	c.Clip(1, bottom)
 	n.drawBody(c, 2-n.scroll)
 	c.Unclip()
 	if n.confirmingMove {
 		n.drawMoveAllConfirm(c)
+		return
+	}
+	if n.homing != nil {
+		n.drawHomeConfirm(c)
 		return
 	}
 	hints := n.hints()
@@ -1177,7 +1211,7 @@ func (n *Nodes) hints() string {
 		if n.checks == nil {
 			return "esc back"
 		}
-		return "r check again   esc back"
+		return "r check again   h home   esc back"
 	case peerDetailsScreen:
 		return n.peerHints()
 	}
@@ -1333,7 +1367,7 @@ func (n *Nodes) peerHints() string {
 	if n.takesFactories(row) {
 		hints += "m move all here   "
 	}
-	return hints + "d make default   x remove   esc back"
+	return hints + "d make default   h home   x remove   esc back"
 }
 
 func checkRows(checks []node.Check) []CheckRow {

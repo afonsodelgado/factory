@@ -141,6 +141,7 @@ type subscriptionBody struct {
 		Auth   string `json:"auth"`
 	} `json:"keys"`
 	Installation string `json:"installation"`
+	Replaces     string `json:"replaces,omitempty"`
 }
 
 func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +154,7 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, ErrRemoved.Error())
 		return
 	}
-	sub, err := s.Store.Subscribe(Subscription{Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, Installation: body.Installation, Since: s.now()})
+	sub, err := s.Store.Subscribe(Subscription{Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, Installation: body.Installation, Since: s.now()}, body.Replaces)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return

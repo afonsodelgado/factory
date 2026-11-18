@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -76,7 +78,7 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	if local.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) != nil {
 		return c
 	}
-	c.Version, c.Factories = snap.Version, len(snap.Factories)
+	c.Self, c.Version, c.Factories = snap.Node, snap.Version, len(snap.Factories)
 	for _, f := range snap.Factories {
 		if !f.NeedsSince.IsZero() {
 			c.NeedsYou++
@@ -85,8 +87,42 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	if snap.Roster != nil {
 		c.Home, c.Others = snap.Roster.Home, rosterRows(*snap.Roster, known.Others)
 		c.Leaving = snap.Roster.Leaving
+		c.Offer = offerHomeOnce(cfg.StateDir, *snap.Roster)
 	}
 	return c
+}
+
+func rosterHome(cfg *state.Config) string {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeAsk)
+	defer cancel()
+	var roster node.Roster
+	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/nodes", nil, &roster) != nil {
+		return ""
+	}
+	return roster.Home
+}
+
+func homeOfferedPath(stateDir string) string {
+	return filepath.Join(stateDir, "hub", "home-offered.json")
+}
+
+func offerHomeOnce(stateDir string, roster node.Roster) string {
+	var offered []string
+	if data, err := os.ReadFile(homeOfferedPath(stateDir)); err == nil {
+		json.Unmarshal(data, &offered)
+	}
+	i := slices.IndexFunc(roster.Members, func(m node.RosterMember) bool {
+		return !m.Self && m.OS == "linux" && "https://"+m.Name != roster.Home && !slices.Contains(offered, m.ID)
+	})
+	if i < 0 {
+		return ""
+	}
+	id := roster.Members[i].ID
+	data, _ := json.Marshal(append(offered, id))
+	if os.MkdirAll(filepath.Dir(homeOfferedPath(stateDir)), 0o700) != nil || state.WriteFileAtomic(homeOfferedPath(stateDir), data) != nil {
+		return ""
+	}
+	return id
 }
 
 func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
@@ -123,6 +159,9 @@ func printPhoneStatus(w io.Writer, cfg *state.Config) error {
 	url := "unknown; put node.hostname, this machine's ts.net name, in " + cfg.ConfigFile()
 	if status.Hostname != "" {
 		url = "https://" + status.Hostname
+	}
+	if home := rosterHome(cfg); home != "" && home != url {
+		url = home + ", the phone app's home"
 	}
 	running := "not running; start it with factory node run"
 	if status.Running {
@@ -260,6 +299,14 @@ func (a nodeActions) Remove(op, id string) (node.Roster, error) {
 	defer cancel()
 	var roster node.Roster
 	err := a.local.Do(ctx, http.MethodPost, "/api/nodes/"+url.PathEscape(id)+"/remove", node.RemoveRequest{Operation: op}, &roster)
+	return roster, err
+}
+
+func (a nodeActions) MoveHome(op, id string) (node.Roster, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
+	defer cancel()
+	var roster node.Roster
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes/home", node.HomeRequest{Operation: op, Node: id}, &roster)
 	return roster, err
 }
 

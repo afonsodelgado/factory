@@ -138,6 +138,7 @@ export type Member = {
 export type Roster = {
   id: string;
   home: string;
+  previous_homes?: string[];
   self: string;
   removed?: boolean;
   members: Member[];

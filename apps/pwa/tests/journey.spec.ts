@@ -5,6 +5,7 @@ import {
   fake,
   gate,
   handoff,
+  HOME,
   peer,
   question,
   roster,
@@ -648,4 +649,28 @@ test("pending removal stays visible until the offline node acknowledges it", asy
   await expect(
     page.getByText("homelab: removal pending", { exact: false }),
   ).toHaveCount(0);
+});
+
+test("the app at a previous home sends the phone to the new home with its installation", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  const newHome = `http://${peer("homelab")}`;
+  await server.set({
+    roster: {
+      ...roster("homelab"),
+      home: newHome,
+      previous_homes: [`http://${HOME}`],
+    },
+  });
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "This app moved to homelab" }),
+  ).toBeVisible();
+  const href = await page
+    .getByRole("link", { name: `Open ${peer("homelab")}` })
+    .getAttribute("href");
+  expect(href).toMatch(
+    new RegExp(`^${newHome.replace(/\./g, "\\.")}/\\?from=[0-9a-f-]{36}$`),
+  );
 });

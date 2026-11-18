@@ -102,7 +102,7 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 		t.Fatal("enabling Phone notified about an item that was already open")
 	}
 	for _, name := range []string{"a", "b"} {
-		if _, err := store.Subscribe(subscriptionFor(t, name, v.URL+"/"+name)); err != nil {
+		if _, err := store.Subscribe(subscriptionFor(t, name, v.URL+"/"+name), ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,6 +194,26 @@ func TestNotificationsReachEachPhoneOnceAndFollowTheItemsLifecycle(t *testing.T)
 	}
 }
 
+func TestAPhoneReinstalledFromTheNewHomeRetiresItsOldCopysSubscription(t *testing.T) {
+	store := Open(t.TempDir())
+	if _, err := store.VAPIDKey(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Subscribe(subscriptionFor(t, "old-copy", "https://push.example/old"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Subscribe(subscriptionFor(t, "new-copy", "https://push.example/new"), "old-copy"); err != nil {
+		t.Fatal(err)
+	}
+	live, err := store.Subscriptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].Installation != "new-copy" {
+		t.Fatalf("live subscriptions %+v; want only the new copy, or the phone gets every notification twice", live)
+	}
+}
+
 func TestAStaleFailureFromAnyNodeNeverRemovesARenewedSubscription(t *testing.T) {
 	store := Open(t.TempDir())
 	if _, err := store.VAPIDKey(""); err != nil {
@@ -203,12 +223,12 @@ func TestAStaleFailureFromAnyNodeNeverRemovesARenewedSubscription(t *testing.T) 
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
 	offline := func(string) bool { return false }
-	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/old")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/old"), ""); err != nil {
 		t.Fatal(err)
 	}
 	store.Reconcile(testNode, factoryWith(false, "old"), offline, now)
 	store.Reconcile(testNode, factoryWith(false, "old", "k1"), offline, now)
-	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new"), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,7 +243,7 @@ func TestAStaleFailureFromAnyNodeNeverRemovesARenewedSubscription(t *testing.T) 
 
 	stale, _ := store.SubscriptionOf("a")
 	store.Reconcile(testNode, factoryWith(false, "old", "k1", "k2"), offline, now)
-	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/new"), ""); err != nil {
 		t.Fatal(err)
 	}
 	v.answers["/new"] = []int{http.StatusGone}
@@ -253,7 +273,7 @@ func TestAHandoffAsksOnceWhetherTheWorkIsDoneEvenAsItsSupervisorExits(t *testing
 	v := newVendor(t)
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
-	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a"), ""); err != nil {
 		t.Fatal(err)
 	}
 	handoff := state.Attention{ID: "handoff-csv-1", Kind: "handoff", Title: "Work done: mark it done or continue working?", StageKey: "handoff", CreatedAt: state.Time{Time: now}}
@@ -305,7 +325,7 @@ func TestAGateIsPushedAgainOnceTheDesignerHasWorkedOnTheComments(t *testing.T) {
 	}
 	offline := func(string) bool { return false }
 	store.Reconcile(testNode, nil, offline, now)
-	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a")); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "a", v.URL+"/a"), ""); err != nil {
 		t.Fatal(err)
 	}
 	var bodies []string
@@ -364,7 +384,7 @@ func TestAPairedPhonesSubscriptionKeepsDeliveringAfterTheAuthMigration(t *testin
 	if calls := v.took(); len(calls) != 1 || calls[0].path != "/a" {
 		t.Fatalf("after the migration the vendor saw %+v; want the job queued before the upgrade delivered to phone a", calls)
 	}
-	if _, err := store.Subscribe(subscriptionFor(t, "pixel", a.Endpoint)); err != nil {
+	if _, err := store.Subscribe(subscriptionFor(t, "pixel", a.Endpoint), ""); err != nil {
 		t.Fatal(err)
 	}
 	store.Reconcile(testNode, factoryWith(false, "old", "k1"), func(string) bool { return false }, now)

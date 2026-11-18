@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { clock, hostName } from "../format.ts";
+import { clock, hostName, shortName } from "../format.ts";
 import { paths } from "../route.ts";
 import { useApp, type NodeView } from "../state.tsx";
 import { Link } from "./Link.tsx";
@@ -199,23 +199,59 @@ export function Refused() {
   );
 }
 
-export function Closed(props: { label: string; children: ReactNode }) {
+export function Moved(props: { home: string; installation?: string }) {
+  const from = hostName();
+  const to = shortName(new URL(props.home).hostname);
+  const target = new URL(props.home);
+  if (props.installation) target.searchParams.set("from", props.installation);
+  return (
+    <Closed label={`this app moved to ${to}`} glyph="↗" tone="cyn">
+      <h1>This app moved to {to}</h1>
+      <p>
+        Your phone app lives on {to} now. {to} stays on, so the app opens,
+        installs and adds nodes while {from} sleeps.
+      </p>
+      <ol className="steps">
+        <li>Open the new address below. Tailscale already says it's you.</li>
+        <li>Add it to the Home Screen again.</li>
+        <li>Turn notifications on again there.</li>
+      </ol>
+      <a className="btn pri wide" href={target.toString()}>
+        Open {target.host}
+      </a>
+      <p className="sm mute">
+        Until then, this copy keeps getting notifications from every node. Once
+        the new one has them on, each notification arrives once. Then delete
+        this copy from the Home Screen.
+      </p>
+    </Closed>
+  );
+}
+
+export function Closed(props: {
+  label: string;
+  children: ReactNode;
+  glyph?: string;
+  tone?: string;
+}) {
   const host = hostName();
+  const glyph = props.glyph ?? "✕";
+  const tone = props.tone ?? "red";
   return (
     <div className="shell">
       <header className="tb">
         <span className="mode">factory</span>
         <span className="host" aria-label={props.label}>
-          <span className="dot red" aria-hidden="true">
-            ✕
+          <span className={`dot ${tone}`} aria-hidden="true">
+            {glyph}
           </span>
           {host}
         </span>
       </header>
       <main className="body">
         <div className="pad stack page">
-          <p className="big-g red" aria-hidden="true">
-            ✕
+          <p className={`big-g ${tone}`} aria-hidden="true">
+            {glyph}
           </p>
           {props.children}
         </div>

@@ -241,13 +241,15 @@ type nodeSetup struct {
 	in            io.Reader
 	tty           bool
 	join          joinChoice
+	yes           bool
+	system        string
 }
 
 func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
 	home, _ := os.UserHomeDir()
 	return nodeSetup{
 		cfg: cfg, withTailscale: cfg.TailscaleNode(), tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
-		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out,
+		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out, system: runtime.GOOS,
 	}
 }
 
@@ -418,7 +420,46 @@ func (s nodeSetup) offerJoin(ctx context.Context, c *node.Client, here string) (
 	s.passed("joined", fmt.Sprintf("%s lists %s, and %s lists %s", target.Short, here, here, target.Short))
 	printPush(s.out, result.Push, target.Short, here)
 	s.passed("phone app", "trusts "+result.Roster.Home+", where your phone app lives")
+	if s.system == "linux" {
+		return true, true, s.offerHome(ctx, c, result.Roster, here)
+	}
 	return true, true, nil
+}
+
+func (s nodeSetup) offerHome(ctx context.Context, c *node.Client, roster node.Roster, here string) error {
+	i := slices.IndexFunc(roster.Members, func(m node.RosterMember) bool { return m.Self })
+	if i < 0 {
+		return nil
+	}
+	self := roster.Members[i]
+	origin, home := "https://"+self.Name, shortName(strings.TrimPrefix(roster.Home, "https://"))
+	if roster.Home == origin {
+		return nil
+	}
+	fmt.Fprintf(s.out, "\nDoes %s stay on all the time? Only then make it the phone app's home. The app then\ninstalls, opens and adds nodes while %s sleeps. Each phone opens\n%s once, adds it to the Home Screen again and turns\nnotifications on again; until then, %s's address sends it there. [y/N] ", here, home, origin, home)
+	if !s.confirmsHome() {
+		fmt.Fprintf(s.out, "  The phone app stays on %s. To move it later: press N in the hub, pick %s,\n  then h.\n", home, here)
+		return nil
+	}
+	if err := c.Do(ctx, http.MethodPost, "/api/nodes/home", node.HomeRequest{Operation: uuid.NewString(), Node: self.ID}, nil); err != nil {
+		return fmt.Errorf("the phone app stays on %s: %w", home, err)
+	}
+	s.passed("phone app", fmt.Sprintf("lives on %s now; %s and every other node know", here, home))
+	return nil
+}
+
+func (s nodeSetup) confirmsHome() bool {
+	switch {
+	case s.yes:
+		fmt.Fprintln(s.out, "n (--yes)")
+		return false
+	case !s.tty:
+		fmt.Fprintln(s.out, "n (no terminal)")
+		return false
+	}
+	line, _ := bufio.NewReader(s.in).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 func printPush(out io.Writer, push node.PushOutcome, from, to string) {

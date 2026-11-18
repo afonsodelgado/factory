@@ -6,7 +6,7 @@ import { AttentionItem } from "./components/AttentionItem.tsx";
 import { AddNode, CheckNode, NodeDetail } from "./components/Nodes.tsx";
 import { Exposed, Setup } from "./components/Setup.tsx";
 import { ThisPhone } from "./components/ThisPhone.tsx";
-import { AppShell, Refused } from "./components/AppShell.tsx";
+import { AppShell, Moved, Refused } from "./components/AppShell.tsx";
 import { paths, type Route } from "./route.ts";
 import { hostName } from "./format.ts";
 import { routeOn, useApp } from "./state.tsx";
@@ -25,9 +25,11 @@ function useWide(): boolean {
 }
 
 export function App() {
-  const { route, reach, snapshot } = useApp();
+  const { route, reach, snapshot, roster, installation } = useApp();
   const wide = useWide();
   if (reach === "refused") return <Refused />;
+  if (roster?.previous_homes?.includes(location.origin))
+    return <Moved home={roster.home} installation={installation} />;
   if (reach === "funnel") return <Exposed />;
   if (route.screen === "setup") return <Setup />;
   if (route.screen === "phone") return <ThisPhone />;

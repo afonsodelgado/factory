@@ -209,7 +209,7 @@ func nodeStep(withTailscale bool) setup.Step {
 				return err
 			}
 			n := newNodeSetup(cfg, s.Out)
-			n.withTailscale, n.in, n.tty, n.join = s.Tailscale, s.In, true, alwaysJoin
+			n.withTailscale, n.in, n.tty, n.join, n.yes = s.Tailscale, s.In, true, alwaysJoin, s.Yes
 			if err := n.install(ctx); err != nil {
 				return err
 			}

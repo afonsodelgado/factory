@@ -240,7 +240,7 @@ func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(
 	for range 30 {
 		n.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   esc back") {
+	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   h home   esc back") {
 		t.Fatalf("⏎ on this machine in an 80×24 terminal, scrolled down, shows:\n%s\nwant the last fix, the summary and every key", details)
 	}
 }
@@ -289,6 +289,8 @@ func (f *fakeNodeActions) Remove(_, id string) (node.Roster, error) {
 	f.removed = append(f.removed, id)
 	return node.Roster{Leaving: []node.RosterMember{{Member: node.Member{ID: id, Name: "build-box.tail5e2c.ts.net"}, Pending: 1}}}, nil
 }
+
+func (f *fakeNodeActions) MoveHome(string, string) (node.Roster, error) { return node.Roster{}, nil }
 
 func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
 func (f *fakeNodeActions) Clone(context.Context, string, string, string) error { return nil }

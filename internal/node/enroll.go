@@ -679,6 +679,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/nodes/check", n.homeOnly(n.checkRoute))
 	route("POST /api/nodes", n.homeOnly(n.addRoute))
 	route("POST /api/nodes/{id}/remove", n.homeOnly(n.removeRoute))
+	route("POST /api/nodes/home", socketOnly("moving the phone app's home runs only from the hub or setup on this machine", n.homeRoute))
 	route("POST /api/nodes/join", socketOnly("joining runs only from factory node install on this machine", n.joinRoute))
 	route("POST /api/nodes/update", socketOnly("updating every node runs only from factory update on this machine", n.updateAllRoute))
 	route("GET /api/readiness", n.readinessWithPush)
@@ -745,6 +746,42 @@ func (n *Nodes) joinRoute(w http.ResponseWriter, r *http.Request, _ string) {
 	}
 	result, err := n.Join(r.Context(), body.Operation, body.Name)
 	n.answer(w, result, err)
+}
+
+type HomeRequest struct {
+	Operation string `json:"operation"`
+	Node      string `json:"node"`
+}
+
+func (n *Nodes) homeRoute(w http.ResponseWriter, r *http.Request, _ string) {
+	var body HomeRequest
+	if err := decode(r, &body); err != nil || uuid.Validate(body.Operation) != nil {
+		fail(w, http.StatusBadRequest, "send {operation: a UUID, node}")
+		return
+	}
+	roster, err := n.MoveHome(r.Context(), body.Operation, body.Node)
+	n.answer(w, roster, err)
+}
+
+func (n *Nodes) MoveHome(ctx context.Context, op, id string) (Roster, error) {
+	m, ok := n.Dir.Member(id)
+	if !ok {
+		return Roster{}, fmt.Errorf("no node %s in the list", id)
+	}
+	if id != n.Self.ID {
+		var snap Snapshot
+		if err := Remote(m.Name, n.HTTP).Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap); err != nil {
+			return Roster{}, fmt.Errorf("%s did not answer, so the phone app stays where it is: %w", m.short(), err)
+		}
+		if !snap.Supports(CanHome) {
+			return Roster{}, fmt.Errorf("%s runs factory %s, which cannot be the phone app's home. Run factory update; h works once %s is on %s. Nothing changed", m.short(), snap.Version, m.short(), n.Version)
+		}
+	}
+	if err := n.Dir.MoveHome(m, op); err != nil {
+		return Roster{}, err
+	}
+	n.Kick()
+	return n.Dir.Roster(), nil
 }
 
 func (n *Nodes) removeRoute(w http.ResponseWriter, r *http.Request, _ string) {
