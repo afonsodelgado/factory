@@ -275,19 +275,21 @@ func TestAnsweringTakesTheFactoryOffNeedsYouUntilTheAnswerIsLost(t *testing.T) {
 	received := state.HookEvent{Event: "UserPromptSubmit", PromptHead: "q-7452-1 answers:", At: now.Add(time.Second)}
 	agentMessage := state.HookEvent{Event: "UserPromptSubmit", PromptHead: `<agent-message from="a1">`, At: now.Add(2 * time.Second)}
 	cases := []struct {
-		name    string
-		after   time.Duration
-		submits []state.HookEvent
-		status  factory.Status
-		shows   string
+		name       string
+		supervisor string
+		after      time.Duration
+		submits    []state.HookEvent
+		status     factory.Status
+		shows      string
 	}{
-		{"received, then an agent message", 3 * time.Second, []state.HookEvent{received, agentMessage}, factory.Running, "Answered q-7452-1"},
-		{"never received", 11 * time.Second, nil, factory.NeedsYou, "Not received by the supervisor"},
+		{"received, then an agent message", "Stop", 3 * time.Second, []state.HookEvent{received, agentMessage}, factory.Running, "Answered q-7452-1"},
+		{"never received", "Stop", 11 * time.Second, nil, factory.NeedsYou, "Not received by the supervisor"},
+		{"queued behind a busy supervisor", "PostToolUse", 3 * time.Second, nil, factory.AnswerQueued, "Queued q-7452-1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			snapshot := func(at time.Time) Snapshot {
-				snap := questionFactory("Stop", now)
+				snap := questionFactory(c.supervisor, now)
 				snap.At = at
 				snap.Items[0].Unblocked = factory.Running
 				return snap

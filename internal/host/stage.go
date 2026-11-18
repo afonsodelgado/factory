@@ -25,6 +25,7 @@ import (
 
 const (
 	resumeSettle = 5 * time.Second
+	AnswerWait   = 10 * time.Minute
 	submitWait   = time.Minute
 )
 
@@ -44,6 +45,7 @@ type StageReply struct {
 }
 
 type QueuedType struct {
+	QueuedAt  time.Time
 	TypingAt  time.Time
 	Pane      string
 	Token     string
@@ -386,6 +388,9 @@ func (m *Runtime) QueueType(q QueuedType) {
 	if pane, ok := byID(m.currentPanes(), q.Pane); ok && q.Token == "" {
 		q.Token = pane.Token
 	}
+	if q.QueuedAt.IsZero() {
+		q.QueuedAt = m.Now()
+	}
 	m.typeQueue = append(m.typeQueue, q)
 	if m.saveQueue(m.typeQueue) {
 		m.FlushTypeQueue()
@@ -432,9 +437,17 @@ func (m *Runtime) FlushTypeQueue() {
 		if q.Answers != nil && Refusal(target) == "" {
 			target = m.refreshed(target)
 		}
+		if reason := Refusal(target); reason != "" {
+			if q.Answers != nil && m.waitedTooLong(q) {
+				m.giveUpAnswer(*q.Answers, q.Label, reason)
+				continue
+			}
+			waiting = append(waiting, q)
+			continue
+		}
 		typing := q
 		typing.TypingAt = m.Now()
-		if Refusal(target) != "" || !m.saveQueue(slices.Concat(waiting, []QueuedType{typing}, m.typeQueue[i+1:])) {
+		if !m.saveQueue(slices.Concat(waiting, []QueuedType{typing}, m.typeQueue[i+1:])) {
 			waiting = append(waiting, q)
 			continue
 		}
@@ -460,6 +473,21 @@ func (m *Runtime) FlushTypeQueue() {
 	}
 	m.typeQueue = waiting
 	m.saveQueue(waiting)
+}
+
+func (m *Runtime) waitedTooLong(q QueuedType) bool {
+	waitingSince := q.QueuedAt
+	if q.NotBefore.After(waitingSince) {
+		waitingSince = q.NotBefore
+	}
+	return !waitingSince.IsZero() && m.Now().Sub(waitingSince) > AnswerWait
+}
+
+func (m *Runtime) giveUpAnswer(a Answer, label, refusal string) {
+	m.dropAnswer(a, fmt.Sprintf("%s did not come back to its prompt within %d minutes. %s Send it again once it waits at its prompt, or answer in the session.", label, int(AnswerWait.Minutes()), refusal))
+	if it, ok := m.snap.Find(a.Factory); ok && m.Loader != nil {
+		m.Loader.Note(it.Factory, "answer to "+a.ItemID+" was not sent: the supervisor never came back to its prompt")
+	}
 }
 
 func (m *Runtime) settleInterrupted(q QueuedType) {

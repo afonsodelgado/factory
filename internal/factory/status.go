@@ -23,10 +23,12 @@ const (
 	Done
 	Unreachable
 	VerificationPending
+	AnswerQueued
 )
 
 var statusWords = map[Status]string{
 	VerificationPending: "verification pending",
+	AnswerQueued:        "answer queued",
 	Running:             "running",
 	Starting:            "starting",
 	FailedToStart:       "failed to start",
