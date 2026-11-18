@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -137,16 +136,6 @@ func Retired(f factory.Factory) bool {
 
 func Named(f factory.Factory, id string) bool {
 	return f.Slug == id || strings.ToLower(f.Label()) == id
-}
-
-func (m *Runtime) RetiredMatch(repos []string, id string) (string, bool) {
-	for _, it := range m.snap.Items {
-		f := it.Factory
-		if Retired(f) && slices.Contains(repos, f.Repo) && Named(f, id) {
-			return f.Repo, true
-		}
-	}
-	return "", false
 }
 
 func (m *Runtime) RetiredFactories(repo, id string) []factory.Factory {

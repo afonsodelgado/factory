@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -142,7 +143,7 @@ func (s standIn) startFactory(t *testing.T, runtime *node.Client, id string) str
 	if err := runtime.Request(ctx, "repo", "", host.RepoRequest{Repo: repo}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Request(ctx, "open", uuid.NewString(), host.OpenRequest{Name: id, Repo: repo, Prompt: "Export contacts."}, nil); err != nil {
+	if err := runtime.Request(ctx, "create", uuid.NewString(), host.CreateRequest{Slug: id, Repo: repo, Prompt: "Export contacts."}, nil); err != nil {
 		t.Fatalf("creating %s: %v", id, err)
 	}
 	return repo
@@ -252,7 +253,7 @@ func TestStreamingFromANodeWithoutTheRouteExplainsSSHBeforeRunningIt(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := "ssh -t factory@" + homebox.Name + " factory host attach " + view
+	command := "ssh -t -o ClearAllForwardings=yes factory@" + homebox.Name + " factory host attach " + view
 	said, ran, found := strings.Cut(pane.String(), "ssh ran: ")
 	if !found || strings.TrimSpace(ran) != strings.TrimPrefix(command, "ssh ") {
 		t.Fatalf("the pane showed:\n%s\nwant ssh to run %q after the explanation", pane.String(), command)
@@ -354,5 +355,20 @@ func TestTheNodeStartsFactorysTmuxServerWithItsOwnConfig(t *testing.T) {
 		if got := strings.TrimSpace(string(out)); err != nil || got != want {
 			t.Errorf("factory's tmux server has %s %q (%v); want %q from factory's own tmux.conf", option, got, err, want)
 		}
+	}
+}
+
+func TestAskingAnotherNodeWhatReposNeedNeverSendsAnOriginWithCredentials(t *testing.T) {
+	withToken, plain := t.TempDir(), t.TempDir()
+	for repo, origin := range map[string]string{withToken: "https://alice:ghp_secret@github.com/alice/private.git", plain: "git@github.com:alice/cowork.git"} {
+		for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", origin}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+	}
+	asked, _ := json.Marshal(repoNeeds([]string{withToken, plain}))
+	if strings.Contains(string(asked), "ghp_secret") || !strings.Contains(string(asked), "alice/cowork.git") {
+		t.Errorf("the needs request to another node holds %s; want only the origin without credentials", asked)
 	}
 }

@@ -142,7 +142,7 @@ func update(path string, change func([]byte) ([]byte, error)) error {
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	}
-	for attempt := 0; ; attempt++ {
+	for range 2 {
 		before, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
@@ -154,10 +154,9 @@ func update(path string, change func([]byte) ([]byte, error)) error {
 		if bytes.Equal(after, before) {
 			return nil
 		}
-		current, _ := os.ReadFile(path)
-		if !bytes.Equal(current, before) && attempt == 0 {
-			continue
+		if current, _ := os.ReadFile(path); bytes.Equal(current, before) {
+			return state.WriteFileAtomic(path, after)
 		}
-		return state.WriteFileAtomic(path, after)
 	}
+	return fmt.Errorf("%s kept changing while factory recorded folder trust, so it was left as it is", path)
 }

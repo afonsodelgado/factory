@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
@@ -146,12 +145,9 @@ func (a Activation) Call(ctx context.Context, m host.Message) (host.Message, err
 }
 
 func creation(m host.Message) (repo, slug string, ok bool) {
-	var r struct{ Repo, Slug, Name string }
-	if (m.T != "create" && m.T != "open") || json.Unmarshal(m.Data, &r) != nil {
+	var r struct{ Repo, Slug string }
+	if m.T != "create" || json.Unmarshal(m.Data, &r) != nil {
 		return "", "", false
-	}
-	if m.T == "open" {
-		r.Slug = factory.Slugify(r.Name)
 	}
 	return r.Repo, r.Slug, r.Slug != ""
 }

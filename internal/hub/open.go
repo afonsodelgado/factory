@@ -8,14 +8,12 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 )
 
-type OpenRequest = host.OpenRequest
 type RepoRequest = host.RepoRequest
 type DeleteRequest = host.DeleteRequest
 
 type ShowRequest struct {
 	Here   string `json:"here,omitempty"`
 	Notice string `json:"notice,omitempty"`
-	Select string `json:"select,omitempty"`
 }
 
 func (m *Model) showRequest(e Event) tea.Cmd {
@@ -34,9 +32,6 @@ func (m *Model) show(r ShowRequest) {
 	}
 	if r.Notice != "" {
 		m.notice = news(r.Notice)
-	}
-	if r.Select != "" {
-		m.wanted = r.Select
 	}
 }
 

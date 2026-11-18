@@ -46,11 +46,6 @@ func (m *Runtime) handle(request Message) Message {
 	var value any
 	var err error
 	switch request.T {
-	case "open":
-		var r OpenRequest
-		if err = json.Unmarshal(request.Data, &r); err == nil {
-			value, err = m.Open(r)
-		}
 	case "delete":
 		var r DeleteRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {

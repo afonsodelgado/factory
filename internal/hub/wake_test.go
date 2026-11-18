@@ -77,7 +77,7 @@ func TestThePanesOwnSessionIsLiveAfterTheBridgeContinuesIt(t *testing.T) {
 	}
 }
 
-func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
+func TestAOnAnArchivedRowBringsItBack(t *testing.T) {
 	repo := t.TempDir()
 	worktree := filepath.Join(factory.WorktreesDir(repo), "eng-9-clean")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
@@ -92,15 +92,6 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "ENG-9"}, Entry: entry}}
 	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	node.show(model, Snapshot{At: time.Now(), Items: []Item{archived}})
-	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived", "doctor": "`doctor` is a factory command"} {
-		if err := model.ask("open", OpenRequest{Name: name}, nil); err == nil || !strings.Contains(err.Error(), reason) {
-			t.Errorf("open %q = %v; want it refused, naming %q", name, err, reason)
-		}
-	}
-	if registry.Find(repo, "doctor") != nil {
-		t.Error("open doctor registered a factory: a command word became a worktree, as on cowork")
-	}
-
 	model.selectorKey("H")
 	model.choose(archived.Factory.Key())
 	model.selectorKey("a")
@@ -136,7 +127,7 @@ func TestDeleteSelectsTheNextRowAndFreesTheId(t *testing.T) {
 	}
 }
 
-func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
+func TestNewFactoryWithADoneFactorysIdCreatesItUnderTheNextFreeId(t *testing.T) {
 	repo := t.TempDir()
 	legacy := filepath.Join(repo, ".claude", "factory", "ENG-9")
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
@@ -164,35 +155,11 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	if r, _ := result.(dialog.NewResult); r.Select != "" || r.Slug != "eng-9-2" || r.Prompt != "Retry the export." {
 		t.Errorf("n ENG-9 gave %+v; want a new factory with its prompt, under an id the done row does not hold", result)
 	}
-
-	model.ask("open", OpenRequest{Name: "ENG-9", Prompt: "Retry the export."}, nil)
-	if err := os.MkdirAll(filepath.Join(factory.WorktreesDir(repo), "eng-9-2"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	node.show(model, loader.Load())
-	var key string
-	model.ask("open", OpenRequest{Name: "eng-9-2"}, &key)
-	model.show(ShowRequest{Select: key})
-	node.show(model, loader.Load())
-	var keys []string
-	for _, it := range loader.Load().Items {
-		keys = append(keys, it.Factory.Slug)
-	}
-	if !slices.Equal(keys, []string{"eng-9", "eng-9-2"}) {
-		t.Errorf("after open ENG-9 and then open eng-9-2, the rows are %v; want the done eng-9 kept as history and eng-9-2 created once, never duplicated", keys)
-	}
-	if want := state.Key(repo, "eng-9-2"); model.selected != want {
-		t.Errorf("open eng-9-2 selected %q, want the existing %q", model.selected, want)
-	}
 }
 
-func TestOpenRefusesARepoTheRunningHubDoesNotListUntilFactoryRunsThere(t *testing.T) {
+func TestARepoAddedWhileTheHubRunsIsListedAndPickedInNewFactory(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}}, host.Runtime{})
-	err := model.ask("open", OpenRequest{Name: "ENG-1", Repo: "/r/added-later"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "does not list /r/added-later") {
-		t.Errorf("open in a repo the hub never discovers = %v; the factory would get no row", err)
-	}
 	model.ask("repo", RepoRequest{Repo: "/r/added-later"}, nil)
 	model.show(ShowRequest{Here: "/r/added-later"})
 	node.show(model, Snapshot{At: time.Now()})

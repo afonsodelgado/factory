@@ -141,10 +141,18 @@ func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
 	return rows
 }
 
+func shareableOrigin(repo string) string {
+	url := gitclone.Origin(repo)
+	if url == "" || gitclone.CheckURL(url) != nil {
+		return ""
+	}
+	return url
+}
+
 func repoURLs(repos []string) []dialog.RepoURL {
 	var urls []dialog.RepoURL
 	for _, repo := range repos {
-		if url := gitclone.Origin(repo); url != "" {
+		if url := shareableOrigin(repo); url != "" {
 			urls = append(urls, dialog.RepoURL{Name: strings.TrimSuffix(path.Base(url), ".git"), URL: url})
 		}
 	}
@@ -269,7 +277,7 @@ func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dial
 func repoNeeds(repos []string) []node.RepoNeeds {
 	var asked []node.RepoNeeds
 	for _, repo := range repos {
-		if url := gitclone.Origin(repo); url != "" {
+		if url := shareableOrigin(repo); url != "" {
 			asked = append(asked, node.RepoNeeds{URL: url, Needs: install.RepoNeeds(repo)})
 		}
 	}

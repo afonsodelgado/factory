@@ -86,7 +86,6 @@ type Model struct {
 	presented     bool
 	parked        map[string]bool
 	confirmedWork string
-	wanted        string
 	roster        *node.Roster
 	nodes         map[string]*nodeLink
 	nodeFeed      chan nodeMsg
@@ -319,10 +318,6 @@ func (m *Model) refresh() {
 	m.planWakes()
 	m.notePipelines()
 	rows := selector.Visible(m.data())
-	if _, ok := m.snap.Find(m.wanted); ok {
-		m.choose(m.wanted)
-		m.wanted = ""
-	}
 	if _, ok := m.snap.Find(m.selected); !ok || !containsKey(rows, m.selected) {
 		m.choose(m.landing(rows, starting))
 	} else if m.itemArrived(m.selected, shownBefore) {

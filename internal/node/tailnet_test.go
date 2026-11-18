@@ -569,13 +569,8 @@ func TestANodeMissingAToolJoinsButRefusesToCreateFactories(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "gh extension install github/gh-stack") {
 		t.Errorf("creating a factory on homelab answered %v; want a refusal naming the fix", err)
 	}
-	if calls := homelab.Runtime.Calls(); slices.Contains(calls, "create") || slices.Contains(calls, "open") {
+	if calls := homelab.Runtime.Calls(); slices.Contains(calls, "create") {
 		t.Errorf("the runtime received a new factory before homelab was runnable: %v", calls)
-	}
-	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/r/app:csv", ID: "csv", Repo: "/r/app"})
-	eventually(t, "homelab to publish its factory", func() bool { return homelab.API.Holds("/r/app", "csv") })
-	if err := homelab.Local.Request(context.Background(), "open", uuid.NewString(), host.OpenRequest{Name: "csv", Repo: "/r/app"}, nil); err != nil {
-		t.Errorf("opening an existing factory on homelab was refused: %v", err)
 	}
 }
 
