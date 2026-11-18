@@ -183,7 +183,7 @@ func (a *API) publish(local []host.LocalFactory) {
 		revision = a.current.Revision + 1
 	}
 	a.published = published
-	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local, Roster: roster}
+	a.current = &Snapshot{Node: a.Node, Version: a.Version, Protocol: Protocol, MinProtocol: MinProtocol, Boot: a.Boot, Revision: revision, ServerTime: a.now(), Factories: local, Roster: roster, User: osUser, Can: Capabilities}
 	a.broadcast(event("snapshot", a.current))
 }
 

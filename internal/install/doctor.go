@@ -31,7 +31,15 @@ const (
 	Warn Mark = "!"
 	Fail Mark = "✗"
 	Skip Mark = "–"
+	Off  Mark = "off"
 )
+
+func (m Mark) Glyph() string {
+	if m == Off {
+		return string(Skip)
+	}
+	return string(m)
+}
 
 type Check struct {
 	Name   string
@@ -477,7 +485,7 @@ func Report(w io.Writer, checks []Check, header string) (problems, warnings int)
 }
 
 func WriteCheck(w io.Writer, c Check) {
-	line := fmt.Sprintf("  %s %-12s %s", c.Mark, c.Name, c.Detail)
+	line := fmt.Sprintf("  %s %-12s %s", c.Mark.Glyph(), c.Name, c.Detail)
 	if c.Note != "" {
 		line = fmt.Sprintf("%-60s %s", line, c.Note)
 	}

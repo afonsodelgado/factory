@@ -1,6 +1,7 @@
 package node
 
 import (
+	"slices"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
@@ -19,7 +20,20 @@ type Snapshot struct {
 	ServerTime  time.Time           `json:"server_time"`
 	Factories   []host.LocalFactory `json:"factories"`
 	Roster      *Roster             `json:"roster,omitempty"`
+	User        string              `json:"user,omitempty"`
+	Can         []string            `json:"can,omitempty"`
 }
+
+const (
+	CanStream        = "stream"
+	CanHome          = "home"
+	CanNeeds         = "needs"
+	CanWatchComments = "watch_comments"
+)
+
+var Capabilities = []string{CanStream, CanHome, CanNeeds, CanWatchComments}
+
+func (s Snapshot) Supports(capability string) bool { return slices.Contains(s.Can, capability) }
 
 type Me struct {
 	Caller     string       `json:"caller"`
