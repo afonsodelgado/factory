@@ -13,6 +13,7 @@ import (
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/trust"
 )
 
 type InitResult struct {
@@ -44,8 +45,11 @@ func Init(path, stateDir string) (InitResult, error) {
 	if r.Excluded, err = excludeFactoryFiles(repo, r.ExcludeFile); err != nil {
 		return r, err
 	}
-	r.Remembered, err = state.RememberRepo(stateDir, repo)
-	return r, err
+	if r.Remembered, err = state.RememberRepo(stateDir, repo); err != nil {
+		return r, err
+	}
+	trust.Managed(repo)
+	return r, nil
 }
 
 func MainCheckout(path string) (repo, commonDir string, err error) {

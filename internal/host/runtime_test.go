@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -46,6 +47,7 @@ func newFixture(t *testing.T) fixture {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("FACTORY_CONFIG_DIR", filepath.Join(root, "config"))
 	t.Setenv("FACTORY_STATE_DIR", filepath.Join(root, "state"))
 	t.Setenv("FACTORY_TMUX_SOCKET", "host-test-"+uuid.NewString())
@@ -857,6 +859,7 @@ func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheck
 
 func TestANewFactoryTellsItsSupervisorEveryStageAndRoleAsTheAppResolvedThem(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	repo := t.TempDir()
 	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}, Agents: map[string]state.AgentSetting{
 		"reviewer": {Model: "sonnet"},
@@ -873,6 +876,52 @@ func TestANewFactoryTellsItsSupervisorEveryStageAndRoleAsTheAppResolvedThem(t *t
 		if !strings.Contains(launched, flag) {
 			t.Errorf("the supervisor was started with %q; want %s, so it never has to resolve the config itself", launched, flag)
 		}
+	}
+}
+
+func TestCreatingAFactoryTrustsItsRepoAndWorktreeAndNoOtherFolder(t *testing.T) {
+	claudeDir, codexHome := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+	claudeFile, codexFile := filepath.Join(claudeDir, ".claude.json"), filepath.Join(codexHome, "config.toml")
+	os.WriteFile(claudeFile, []byte(`{"oauthAccount":{"emailAddress":"alice@example.com"}}`), 0o600)
+	os.WriteFile(codexFile, []byte(`model = "gpt-6-astra"`), 0o600)
+	repo := t.TempDir()
+	worktree := filepath.Join(factory.WorktreesDir(repo), "csv")
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}
+	registry, _ := state.LoadRegistry(cfg.RegistryPath())
+	r := New(Runtime{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}, Engine: &wakingEngine{}, Now: time.Now})
+	if _, err := r.Create(CreateRequest{Repo: repo, Slug: "csv", Prompt: "Export contacts."}); err != nil {
+		t.Fatal(err)
+	}
+
+	var claude struct {
+		OAuthAccount map[string]string `json:"oauthAccount"`
+		Projects     map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	data, _ := os.ReadFile(claudeFile)
+	if err := json.Unmarshal(data, &claude); err != nil || claude.OAuthAccount["emailAddress"] == "" {
+		t.Fatalf("Claude's config lost its unrelated keys (%v):\n%s", err, data)
+	}
+	managed := map[string]bool{repo: true, worktree: true, resolved(repo): true, filepath.Join(resolved(repo), ".claude", "worktrees", "csv"): true}
+	for _, dir := range []string{resolved(repo), filepath.Join(resolved(repo), ".claude", "worktrees", "csv")} {
+		if !claude.Projects[dir].HasTrustDialogAccepted {
+			t.Errorf("Claude Code would ask whether to trust %s:\n%s", dir, data)
+		}
+	}
+	for dir := range claude.Projects {
+		if !managed[dir] {
+			t.Errorf("Claude Code now trusts %s, which factory does not manage", dir)
+		}
+	}
+	codex, _ := os.ReadFile(codexFile)
+	if !strings.Contains(string(codex), `model = "gpt-6-astra"`) || !catalog.CodexTrusts(codexHome, repo) || !catalog.CodexTrusts(codexHome, worktree) {
+		t.Errorf("Codex's config should keep its model and trust the repo and worktree:\n%s", codex)
+	}
+	if strings.Count(string(codex), "[projects.") > len(managed) {
+		t.Errorf("Codex now trusts a folder factory does not manage:\n%s", codex)
 	}
 }
 

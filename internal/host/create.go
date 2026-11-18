@@ -13,6 +13,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/trust"
 )
 
 type CreateRequest struct {
@@ -87,6 +88,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	if m.Engine == nil {
 		return "", errors.New("the hub is not attached to tmux")
 	}
+	trust.Managed(r.Repo, filepath.Join(factory.WorktreesDir(r.Repo), r.Slug))
 	pane, err := m.Engine.NewFactoryPane(NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: supervisorEnv(supervisor)})
 	if err != nil {
 		return "", err

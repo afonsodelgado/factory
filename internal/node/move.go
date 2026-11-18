@@ -19,6 +19,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/trust"
 )
 
 const (
@@ -309,6 +310,7 @@ func (ts *Transfers) materialize(ctx context.Context, m Manifest, repo, worktree
 	if err := unpack(StagedDir(ts.StateDir, m.Incarnation), worktree, repo, m); err != nil {
 		return "", err
 	}
+	trust.Managed(repo, worktree)
 	return key, ts.host(ctx, "launch-moved", map[string]string{"Key": key}, nil)
 }
 

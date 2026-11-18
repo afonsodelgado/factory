@@ -69,6 +69,7 @@ func newStandIn(t *testing.T) standIn {
 		"FACTORY_CONFIG_DIR="+filepath.Join(client, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(client, "state"),
 		"CLAUDE_CONFIG_DIR="+filepath.Join(client, "claude"),
+		"CODEX_HOME="+filepath.Join(client, "codex"),
 		"FACTORY_TMUX_SOCKET=frc-client-unused",
 		"TMUX=",
 	)
@@ -85,7 +86,7 @@ func newStandIn(t *testing.T) standIn {
 
 func (s standIn) onServer() []string {
 	return []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"),
-		"CLAUDE_CONFIG_DIR=" + filepath.Join(s.server, "claude"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+		"CLAUDE_CONFIG_DIR=" + filepath.Join(s.server, "claude"), "CODEX_HOME=" + filepath.Join(s.server, "codex"), "FACTORY_TMUX_SOCKET=" + s.tmux}
 }
 
 func (s standIn) serverNode(t *testing.T) {

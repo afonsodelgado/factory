@@ -1245,6 +1245,8 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusNoContent)
@@ -1812,6 +1814,7 @@ func newGitFixture(t *testing.T) gitFixture {
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	g := gitFixture{t: t, repo: filepath.Join(root, "app")}
 	g.run(root, "init", "-q", "--bare", bare)
 	g.run(root, "init", "-q", g.repo)

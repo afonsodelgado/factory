@@ -636,6 +636,7 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
 	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	for _, route := range []string{"add", "ctrl+e"} {
 		for _, config := range []string{"missing", "legacy", "current", "partial failure", "malformed"} {
 			t.Run(route+"/"+config, func(t *testing.T) {
