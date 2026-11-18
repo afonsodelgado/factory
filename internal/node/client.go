@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -153,12 +154,44 @@ func Answers(socket string) bool {
 	return Unix(socket).Do(ctx, http.MethodGet, "/api/me", nil, &me) == nil
 }
 
-func AttachCommand(ctx context.Context, c *Client, name string, r host.AttachRequest) ([]string, error) {
+type StreamTarget struct {
+	Machine string
+	User    string
+	Label   string
+}
+
+func AttachCommand(ctx context.Context, c *Client, to StreamTarget, r host.AttachRequest) ([]string, error) {
 	var view string
 	if err := c.Request(ctx, "attach", "", r, &view); err != nil {
 		return nil, err
 	}
-	return []string{"ssh", "-t", "-o", "ClearAllForwardings=yes", name, "factory", "host", "attach", view}, nil
+	self, err := os.Executable()
+	if err != nil {
+		self = "factory"
+	}
+	words := []string{self, "host", "stream"}
+	if to.User != "" {
+		words = append(words, "--user", to.User)
+	}
+	if to.Label != "" {
+		words = append(words, "--label", to.Label)
+	}
+	return append(words, to.Machine, view), nil
+}
+
+func LoginUser(s Snapshot) string {
+	if s.User != "" {
+		return s.User
+	}
+	for _, f := range s.Factories {
+		for _, homes := range []string{"/home/", "/Users/"} {
+			if rest, found := strings.CutPrefix(f.Repo, homes); found {
+				user, _, _ := strings.Cut(rest, "/")
+				return user
+			}
+		}
+	}
+	return ""
 }
 
 func (c *Client) Follow(ctx context.Context, snapshot func(Snapshot), beat func()) error {

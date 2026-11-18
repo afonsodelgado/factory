@@ -1076,9 +1076,13 @@ func hints(pairs ...string) []footer.Hint {
 }
 
 func (m *Model) hints() []footer.Hint {
+	shown := m.notice
+	if shown.text == "" && m.focus == footer.Session {
+		shown = m.streamNotice()
+	}
 	var notice []footer.Hint
-	if m.notice.text != "" {
-		notice = []footer.Hint{{Key: m.notice.mark(), Does: m.notice.text, Good: m.notice.ok}}
+	if shown.text != "" {
+		notice = []footer.Hint{{Key: shown.mark(), Does: shown.text, Good: shown.ok}}
 	}
 	switch m.focus {
 	case footer.Session:

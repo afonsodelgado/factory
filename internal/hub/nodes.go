@@ -527,13 +527,26 @@ func (m *Model) attachNodePane(it Item, lf host.LocalFactory, role, token string
 		return nil
 	}
 	l, _ := m.nodeOf(it.Factory)
-	client, name := m.peer(l.member.Name), l.member.Name
+	client := m.peer(l.member.Name)
+	to := node.StreamTarget{Machine: l.member.Name, User: node.LoginUser(l.snap), Label: it.Factory.Label()}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 		defer cancel()
-		words, err := node.AttachCommand(ctx, client, name, host.AttachRequest{Key: lf.Key, Role: role, Token: token})
+		words, err := node.AttachCommand(ctx, client, to, host.AttachRequest{Key: lf.Key, Role: role, Token: token})
 		return attachedMsg{key: key, role: role, token: token, words: words, err: err}
 	}
+}
+
+func (m *Model) streamNotice() notice {
+	it, ok := m.snap.Find(m.selected)
+	if !ok || it.Factory.Remote == nil {
+		return notice{}
+	}
+	l, ok := m.nodeOf(it.Factory)
+	if !ok || !l.snap.Supports(node.CanStream) {
+		return notice{}
+	}
+	return news("live from " + l.short() + " over the tailnet")
 }
 
 func (m *Model) nodeAttachProblem(it Item) string {

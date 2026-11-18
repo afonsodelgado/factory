@@ -33,6 +33,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 	cdp "github.com/chromedp/chromedp/remote"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -43,6 +45,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 func names(n ...string) []string { return n }
@@ -720,20 +723,95 @@ func TestAJoinChallengeWorksOnceAndExpires(t *testing.T) {
 	}
 }
 
-func TestAttachingToAnotherNodesPaneRunsSSHOnlyForThePreparedView(t *testing.T) {
+func TestAttachingToAnotherNodesPaneStreamsOnlyThePreparedView(t *testing.T) {
 	tn := nodetest.New(t)
 	tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
 	remote := node.Remote(homelab.Name, tn.Client(tn.Machine("laptop")))
-	if _, err := node.AttachCommand(context.Background(), remote, homelab.Name, host.AttachRequest{}); err == nil {
-		t.Error("an attach the node refused still produced an ssh command")
+	to := node.StreamTarget{Machine: homelab.Name, User: "factory"}
+	if _, err := node.AttachCommand(context.Background(), remote, to, host.AttachRequest{}); err == nil {
+		t.Error("an attach the node refused still produced a stream command")
 	}
-	args, err := node.AttachCommand(context.Background(), remote, homelab.Name, host.AttachRequest{Key: "/r/app:csv", Role: "supervisor", Token: "%12"})
+	args, err := node.AttachCommand(context.Background(), remote, to, host.AttachRequest{Key: "/r/app:csv", Role: "supervisor", Token: "%12"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args[0] != "ssh" || !slices.Contains(args, homelab.Name) || args[len(args)-1] != "view-/r/app:csv-%12" {
-		t.Errorf("attach ran %v; want ssh to homelab opening the view the node prepared", args)
+	if !slices.Equal(args[1:3], []string{"host", "stream"}) || !slices.Contains(args, homelab.Name) || args[len(args)-1] != "view-/r/app:csv-%12" {
+		t.Errorf("attach ran %v; want a stream from homelab of the view the node prepared", args)
+	}
+}
+
+func TestNodesStreamEachOthersSessionsBothWaysAndNeverToABrowser(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		if os.Getenv("CI") == "" {
+			t.Skip("tmux not installed")
+		}
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", "")
+	tm := tmux.Client{Socket: "node-stream-" + uuid.NewString(), ConfigFile: "/dev/null"}
+	t.Cleanup(func() { tm.Run("kill-server") })
+	tn := nodetest.New(t)
+	macbook, homelab := tn.Machine("macbook"), tn.Machine("homelab")
+	macbook.Tmux, homelab.Tmux = &tm, &tm
+	macbook.Start()
+	homelab.Start()
+	for _, pair := range [][2]*nodetest.Machine{{macbook, homelab}, {homelab, macbook}} {
+		from, to := pair[0], pair[1]
+		view := uuid.NewString()
+		session := host.ViewSession(view)
+		if _, err := tm.NewSession(session, "agent", 80, 24, `exec sh -c 'while read line; do echo "got $line"; done'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tm.Run("set-option", "-t", session, "status", "off"); err != nil {
+			t.Fatal(err)
+		}
+		address := "https://" + to.Name + "/api/node/stream/" + view
+		if _, resp, err := websocket.Dial(context.Background(), address, &websocket.DialOptions{HTTPClient: tn.Client(from), HTTPHeader: http.Header{"Origin": {"https://" + to.Name}}}); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s opened %s's session for a page from its own origin", from.Short(), to.Short())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, err := node.DialStream(ctx, tn.Client(from), to.Name, view, node.Resize{Cols: 80, Rows: 24}, "xterm-256color")
+		if err != nil {
+			t.Fatalf("%s could not stream %s's session: %v", from.Short(), to.Short(), err)
+		}
+		var mu sync.Mutex
+		var screen strings.Builder
+		go func() {
+			for {
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				mu.Lock()
+				screen.Write(data)
+				mu.Unlock()
+			}
+		}()
+		if err := conn.Write(ctx, websocket.MessageBinary, []byte("ping from "+from.Short()+"\r")); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "the answer to "+from.Short()+"'s typing", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return strings.Contains(screen.String(), "got ping from "+from.Short())
+		})
+		if err := wsjson.Write(ctx, conn, node.Resize{Cols: 100, Rows: 30}); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, from.Short()+"'s resize reaching the pane", func() bool {
+			size, _ := tm.Display("="+session+":", "#{pane_width}x#{pane_height}")
+			return size == "100x30"
+		})
+		conn.Close(websocket.StatusNormalClosure, "")
+		eventually(t, "the attach client leaving "+to.Short()+"'s session", func() bool {
+			clients, err := tm.Clients("=" + session)
+			return err == nil && len(clients) == 0
+		})
+		if !tm.HasSession(session) {
+			t.Errorf("closing %s's stream ended the session on %s", from.Short(), to.Short())
+		}
 	}
 }
 

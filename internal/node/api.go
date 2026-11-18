@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 const (
@@ -44,6 +45,7 @@ type API struct {
 	Transfers *Transfers
 	Awake     *Awake
 	Door      *LocalDoor
+	Tmux      *tmux.Client
 
 	mu        sync.Mutex
 	current   *Snapshot
@@ -94,6 +96,9 @@ func (a *API) Register(mux *http.ServeMux, principal Principal, kinds ...string)
 	if a.Nodes != nil {
 		a.Nodes.routes(route)
 		within(settingsBody)("POST /api/node/settings", nativeOnly(a.Nodes.settingsRoute))
+	}
+	if a.Tmux != nil {
+		route("GET /api/node/stream/{view}", nativeOnly(a.streamRoute))
 	}
 	if a.Transfers != nil {
 		a.Transfers.routes(route, within(StageBody(a.Transfers.limits())))

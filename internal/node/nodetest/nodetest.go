@@ -24,6 +24,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 const (
@@ -104,6 +105,7 @@ type Machine struct {
 	Tags     []string
 	IP       string
 	LastSeen time.Time
+	Tmux     *tmux.Client
 
 	net      *Tailnet
 	online   bool
@@ -501,7 +503,7 @@ func (m *Machine) Start() *Node {
 	ts := node.Tailscale{Run: m.Run}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	n.API = &node.API{Version: Version, Node: n.ID, Boot: uuid.NewString(), Now: tn.Now}
+	n.API = &node.API{Version: Version, Node: n.ID, Boot: uuid.NewString(), Now: tn.Now, Tmux: m.Tmux}
 	n.Nodes = &node.Nodes{
 		Self: self, Version: Version, Dir: directory, Tailscale: ts, HTTP: tn.Client(m),
 		Ready:     node.Readiness{Probes: n.currentProbes, Wait: tn.ReadyWait, Now: tn.Now},

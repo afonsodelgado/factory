@@ -196,7 +196,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 		n.close()
 		return nil, err
 	}
-	api := &node.API{Version: version, Node: id, Boot: uuid.NewString(), Nodes: nodes, Awake: node.NewAwake(cfg.KeepsAwake())}
+	api := &node.API{Version: version, Node: id, Boot: uuid.NewString(), Nodes: nodes, Awake: node.NewAwake(cfg.KeepsAwake()), Tmux: &tm}
 	if owner == "" {
 		api.Door = &node.LocalDoor{Port: cfg.NodePort(), Review: pages.MobileHandler(), Stacks: stacks.Open}
 	}

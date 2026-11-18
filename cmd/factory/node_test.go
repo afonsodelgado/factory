@@ -17,6 +17,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/node/nodetest"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -230,6 +231,38 @@ func TestClosingTheHubLeavesTheNodeRunningStages(t *testing.T) {
 	waitFor(t, "the engineer's stage window", func() bool { return strings.Contains(windows(), host.StageParkName("csv", "engineer")) })
 }
 
+func TestStreamingFromANodeWithoutTheRouteExplainsSSHBeforeRunningIt(t *testing.T) {
+	tn := nodetest.New(t)
+	laptop := tn.Machine("laptop")
+	homebox := tn.Machine("homebox").Start()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho \"ssh ran: $*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	view := uuid.NewString()
+	var pane strings.Builder
+	to := node.StreamTarget{Machine: homebox.Name, User: "factory", Label: "csv-export"}
+	err := streamView(context.Background(), tn.Client(laptop), to, view, &pane, func(words []string) error {
+		ssh := exec.Command(words[0], words[1:]...)
+		ssh.Stdout = &pane
+		return ssh.Run()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "ssh -t factory@" + homebox.Name + " factory host attach " + view
+	said, ran, found := strings.Cut(pane.String(), "ssh ran: ")
+	if !found || strings.TrimSpace(ran) != strings.TrimPrefix(command, "ssh ") {
+		t.Fatalf("the pane showed:\n%s\nwant ssh to run %q after the explanation", pane.String(), command)
+	}
+	for _, want := range []string{"homebox runs factory " + nodetest.Version + ", which cannot stream sessions to this hub", command, "it is the password of factory on homebox"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("before ssh ran, the pane said:\n%s\nwant it to say %q", said, want)
+		}
+	}
+}
+
 func TestAttachingFromAnotherNodeShowsThePreparedPaneAndClosingItLeavesTheAgentRunning(t *testing.T) {
 	s := newStandIn(t)
 	s.serverTmux(t, "set-option", "-g", "base-index", "1")
@@ -248,10 +281,10 @@ func TestAttachingFromAnotherNodeShowsThePreparedPaneAndClosingItLeavesTheAgentR
 	pane := s.serverTmux(t, "display-message", "-p", "-t", "=factory:"+host.ParkName("csv"), "#{pane_id}")
 
 	ctx := context.Background()
-	if _, err := node.AttachCommand(ctx, runtime, "homelab", host.AttachRequest{Key: csv.Key, Token: "%999"}); err == nil {
+	if _, err := node.AttachCommand(ctx, runtime, node.StreamTarget{Machine: "homelab"}, host.AttachRequest{Key: csv.Key, Token: "%999"}); err == nil {
 		t.Fatal("the node prepared a view for a pane token it does not have")
 	}
-	words, err := node.AttachCommand(ctx, runtime, "homelab", host.AttachRequest{Key: csv.Key, Token: csv.Pane})
+	words, err := node.AttachCommand(ctx, runtime, node.StreamTarget{Machine: "homelab"}, host.AttachRequest{Key: csv.Key, Token: csv.Pane})
 	if err != nil {
 		t.Fatal(err)
 	}

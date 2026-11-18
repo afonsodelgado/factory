@@ -12,6 +12,8 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/chromedp/cdproto v0.159.0
 	github.com/chromedp/chromedp v0.22.0
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/uuid v1.6.0
@@ -28,8 +30,6 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260213210345-44df1a37e875 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
