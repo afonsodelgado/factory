@@ -22,7 +22,7 @@ const (
 	revisedBody  = "Revised from your comments. Tap to review it again."
 )
 
-var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission", "handoff"}
+var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission", "prompt", "silent", "handoff"}
 
 type Link struct {
 	Route       string `json:"route"`

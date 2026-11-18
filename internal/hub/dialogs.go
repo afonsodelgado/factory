@@ -462,5 +462,5 @@ func (m *Model) archive(r dialog.ArchiveResult) error {
 func dirExists(path string) bool { return host.DirExists(path) }
 
 func archivable(it Item) bool {
-	return it.Status == factory.Done || it.Status == factory.Gone || it.Status == factory.Exited || it.Status == factory.FailedToStart
+	return it.Status == factory.Done || it.Status == factory.Gone || it.Status == factory.Exited || it.Unreported
 }

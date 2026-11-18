@@ -272,7 +272,8 @@ func nodeItem(l *nodeLink, lf host.LocalFactory) Item {
 		Remote: &factory.Location{Name: l.short(), Node: l.member.ID, Incarnation: lf.Incarnation, Repo: lf.RepoName},
 	}
 	status, _ := factory.ParseStatus(lf.Status)
-	return Item{Factory: f, Status: status, Unblocked: status}
+	unreported := slices.ContainsFunc(lf.Items, func(li host.LocalItem) bool { return li.Kind == "silent" })
+	return Item{Factory: f, Status: status, Unblocked: status, Unreported: unreported}
 }
 
 func (m *Model) nodeOf(f factory.Factory) (*nodeLink, bool) {
@@ -637,6 +638,10 @@ func presented(item panel.Item, status factory.Status) panel.Item {
 	switch item.Kind {
 	case "permission":
 		item.ID, item.Body, item.Action = "", host.PermissionBody, host.AnswerInSession
+	case "prompt":
+		item.ID, item.Action = "", host.AnswerItInSession
+	case "silent":
+		item.ID, item.Action = "", host.OpenSession
 	case "asleep":
 		item.Status, item.Action = status, host.WakeKey
 	}

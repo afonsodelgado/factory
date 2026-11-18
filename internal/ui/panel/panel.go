@@ -32,6 +32,8 @@ var kindLook = map[string]struct {
 	"failure":    {"failure", theme.FgInk(theme.Red), "failure"},
 	"handoff":    {"done", theme.FgInk(theme.Green), "work done"},
 	"permission": {"perm", theme.FgInk(theme.Orange), "permission"},
+	"prompt":     {"perm", theme.FgInk(theme.Orange), "prompt"},
+	"silent":     {"silent", theme.FgInk(theme.Yellow), "not reporting"},
 	"unreadable": {"warn", theme.FgInk(theme.Red), "unreadable"},
 }
 
@@ -189,7 +191,7 @@ func renderAttention(c *theme.Canvas, v View, ic theme.Icons, x, y, w, h int) {
 	}
 	if len(v.Items) == 0 {
 		c.Put(x, y, "Nothing needs you here.", theme.Bright)
-		y = paragraph(c, x, y+2, w, "Open items appear here when the supervisor asks, a gate lights, a cap trips, a stage fails twice, or the session waits on a permission prompt.")
+		y = paragraph(c, x, y+2, w, "Open items appear here when the supervisor asks, a gate lights, a cap trips, a stage fails twice, or the session waits at a prompt.")
 		nextLine(c, v, x, y+1)
 		return
 	}
@@ -276,10 +278,24 @@ func header(it Item, ic theme.Icons, v View) line {
 	if it.ID != "" {
 		l = append(l, theme.Span{Text: it.ID + "  ", Ink: theme.Bright.B()})
 	}
+	if it.Screen != nil {
+		l = append(l, theme.Span{Text: whereItWaits(it) + "  ", Ink: theme.Bright.B()})
+	}
 	if meta := ago(v.Now, it.Since); meta != "" {
 		l = append(l, theme.Span{Text: it.Since.Local().Format("15:04") + " · " + meta, Ink: theme.Muted})
 	}
 	return l
+}
+
+func whereItWaits(it Item) string {
+	place := "this machine"
+	if it.Node != "" {
+		place = "on " + it.Node
+	}
+	if it.Role != "" {
+		return it.Role + " · " + place
+	}
+	return place
 }
 
 func wrapped(s string, w int, ink theme.Ink) []line {
@@ -328,6 +344,9 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 	middle = append(middle, blank())
 	for _, d := range it.Detail {
 		middle = append(middle, text(d, theme.Text))
+	}
+	for _, l := range it.Screen {
+		middle = append(middle, line{{Text: "│ ", Ink: theme.Line}, {Text: l, Ink: theme.Text}})
 	}
 	var bottom []line
 	if it.Action != "" {

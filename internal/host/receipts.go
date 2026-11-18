@@ -342,8 +342,13 @@ func openSince(items []Item) map[string]time.Time {
 }
 
 func ClaimID(item AttentionItem) string {
-	if item.Kind == "permission" {
+	switch item.Kind {
+	case "permission":
 		return PermissionID(item.Role)
+	case "prompt":
+		return PromptID(item.Role)
+	case "silent":
+		return SilentID
 	}
 	return item.ID
 }
@@ -362,7 +367,7 @@ func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []It
 		m.settle(key, StatusDelivered, "")
 		os.Remove(mark.Draft)
 		return Settlement{Key: key}, true
-	case mark.At.IsZero() || mark.Action == ActPermission:
+	case mark.At.IsZero() || typedIntoScreen(mark):
 		return Settlement{}, false
 	case !mark.Received.IsZero():
 		if found && factory.IdleAtPrompt(it.Hook) && it.Hook.Main.At.After(mark.Received) {
@@ -398,6 +403,10 @@ func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []It
 		return Settlement{Key: key, Refused: NotReceived}, true
 	}
 	return Settlement{}, false
+}
+
+func typedIntoScreen(mark Answer) bool {
+	return mark.Action == ActPermission || mark.Action == ActPrompt
 }
 
 func findItem(items []Item, key string) (Item, bool) {
@@ -476,6 +485,8 @@ func (m *Runtime) Act(r ActionRequest) (Receipt, error) {
 		return m.sendMessage(it, r)
 	case ActPermission:
 		return m.answerPermission(it, r)
+	case ActPrompt:
+		return m.answerPrompt(it, r)
 	}
 	return m.answerItem(it, r)
 }

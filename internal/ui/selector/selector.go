@@ -1,6 +1,7 @@
 package selector
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -24,7 +25,10 @@ type Row struct {
 	Items    int
 	Number   int
 	Archived bool
+	Stuck    string
 }
+
+var stuckWords = map[string]string{"prompt": "at a prompt", "silent": "no report in"}
 
 func (r Row) Done() bool {
 	return r.Status == factory.Done
@@ -258,10 +262,7 @@ func factoryRow(c *theme.Canvas, y, inner int, r Row, d Data) {
 		c.Spans(6, y+1, theme.TrackSpans(r.Track, r.Status))
 	}
 	timeStart := c.Right(end, y+1, r.Time, theme.Muted)
-	stage := r.Stage
-	if stage == "" {
-		stage = "no state yet"
-	}
+	stage := cmp.Or(stuckWords[r.Stuck], r.Stage, "no state yet")
 	c.PutMax(18, y+1, stage, theme.Quiet, timeStart-1-18)
 }
 

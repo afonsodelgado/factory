@@ -120,8 +120,8 @@ func TestDeleteSelectsTheNextRowAndFreesTheId(t *testing.T) {
 	next := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-2-y", Created: true})
 	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	node.show(model, Snapshot{At: time.Now(), Items: []Item{
-		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-1-x", Entry: failed}},
-		{Status: factory.FailedToStart, Factory: factory.Factory{Repo: repo, Slug: "eng-2-y", Entry: next}},
+		{Status: factory.NeedsYou, Unreported: true, Factory: factory.Factory{Repo: repo, Slug: "eng-1-x", Entry: failed}},
+		{Status: factory.NeedsYou, Unreported: true, Factory: factory.Factory{Repo: repo, Slug: "eng-2-y", Entry: next}},
 	}})
 	model.choose(state.Key(repo, "eng-1-x"))
 

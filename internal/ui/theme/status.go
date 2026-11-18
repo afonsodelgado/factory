@@ -12,18 +12,17 @@ var statusLook = map[factory.Status]struct {
 	icon  string
 	color color.Color
 }{
-	factory.Running:       {"running", Green},
-	factory.Starting:      {"starting", Cyan},
-	factory.FailedToStart: {"failstart", Red},
-	factory.NeedsYou:      {"needs", Orange},
-	factory.WaitingCI:     {"ci", Magenta},
-	factory.WaitingAgent:  {"agent", Magenta},
-	factory.Stalled:       {"stalled", Yellow},
-	factory.Exited:        {"exited", Red},
-	factory.Gone:          {"gone", Red},
-	factory.Done:          {"done", Dim},
-	factory.Unreachable:   {"lost", Dim},
-	factory.AnswerQueued:  {"starting", Cyan},
+	factory.Running:      {"running", Green},
+	factory.Starting:     {"starting", Cyan},
+	factory.NeedsYou:     {"needs", Orange},
+	factory.WaitingCI:    {"ci", Magenta},
+	factory.WaitingAgent: {"agent", Magenta},
+	factory.Stalled:      {"stalled", Yellow},
+	factory.Exited:       {"exited", Red},
+	factory.Gone:         {"gone", Red},
+	factory.Done:         {"done", Dim},
+	factory.Unreachable:  {"lost", Dim},
+	factory.AnswerQueued: {"starting", Cyan},
 }
 
 func StatusIcon(s factory.Status) string {

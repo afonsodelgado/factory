@@ -65,6 +65,7 @@ const (
 	ActPause      = "pause"
 	ActWake       = "wake"
 	ActPermission = "permission"
+	ActPrompt     = "prompt"
 )
 
 const MaxMessageRunes = 4000

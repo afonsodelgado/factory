@@ -917,11 +917,24 @@ func (m *Model) row(it Item) selector.Row {
 		_, settled := m.shownItems(it)
 		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
 		row.Loop, row.Round = lf.Loop, lf.Round
+		if !lf.NeedsSince.IsZero() {
+			row.Time = theme.Age(m.Now().Sub(lf.NeedsSince))
+		}
 	}
+	row.Stuck = m.stuck(it)
 	if m.unverified(it) != "" {
 		row.Stage = "held, unchecked"
 	}
 	return row
+}
+
+func (m *Model) stuck(it Item) string {
+	for _, item := range m.attentionItems(it, nil) {
+		if item.Kind == "prompt" || item.Kind == "silent" {
+			return item.Kind
+		}
+	}
+	return ""
 }
 
 func tilde(path string) string { return host.Tilde(path) }
@@ -1028,7 +1041,6 @@ func (m *Model) Header() (string, string) {
 		{"ci", "#bb9af7", "waiting", []factory.Status{factory.WaitingCI, factory.WaitingAgent}},
 		{"stalled", "#e0af68", "asleep", []factory.Status{factory.Stalled, factory.Exited, factory.Gone}},
 		{"starting", "#7dcfff", "starting", []factory.Status{factory.Starting}},
-		{"failstart", "#f7768e", "failed to start", []factory.Status{factory.FailedToStart}},
 		{"unreachable", "#565f89", "unreachable", []factory.Status{factory.Unreachable}},
 	}
 	for _, p := range parts {
@@ -1122,14 +1134,20 @@ func (m *Model) selectorHints() []footer.Hint {
 		return hints("n", "new factory", "?", "all keys", "q", "quit the UI")
 	case it.Factory.Archived():
 		return hints("a", "unarchive "+it.Factory.Label(), "H", "hide archived", "⏎", "session", "j/k", "move", "/", "find", "n", "new", "d", "delete")
-	case factory.PermissionPrompt(it.Hook):
-		return hints("⏎", "answer in the session", "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "p", "pause")
+	case factory.PermissionPrompt(it.Hook) || m.stuck(it) == "prompt":
+		return stuckHints("answer in the session")
+	case m.stuck(it) == "silent":
+		return stuckHints("open the session")
 	case it.Status.Asleep():
 		return hints("w", "wake "+it.Factory.Label(), "W", "wake all asleep", "j/k", "move", "g", "next needing you", "/", "find", "p", "pause", "a", "archive", "d", "delete")
 	case it.Status == factory.Done:
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
 	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
+}
+
+func stuckHints(enter string) []footer.Hint {
+	return hints("⏎", enter, "j/k", "move", "g", "next needing you", "/", "find", "i", "panel", "n", "new", "w", "wake", "p", "pause", "N", "nodes")
 }
 
 func (m *Model) panelHints() []footer.Hint {
@@ -1184,8 +1202,10 @@ func (m *Model) panelHints() []footer.Hint {
 		return hints("ctrl+r", "retry", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "handoff":
 		return hints("ctrl+k", "mark done", "type", "what to do next", "ctrl+s", "continue working", "ctrl+n/p", "item", "esc", back)
-	case item.Kind == "permission":
+	case item.Kind == "permission" || item.Kind == "prompt":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
+	case item.Kind == "silent":
+		return hints("⏎", "open the session", "[ ]", "item", "esc", "back")
 	}
 	return hints("[ ]", "item", "tab", "next tab", "esc", "back")
 }

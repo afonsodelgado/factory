@@ -643,6 +643,46 @@ func TestAPermissionAnswerTypesOnlyIntoTheUnchangedPromptItWasPickedFrom(t *test
 	if _, err := r.Act(pick(item, "3", "use the staging data")); err != nil || strings.Join(typist.typed, ",") != "%5: use the staging data" {
 		t.Fatalf("the refusal typed %q; want the instruction once Claude shows its prompt", typist.typed)
 	}
+
+	clock := phoneNow
+	promptOn := func(screen, after string) (*Runtime, *fakeConsole, func() []LocalItem) {
+		unhooked := phoneSnapshot("Stop")
+		unhooked.Items[0].Hook = nil
+		r := phoneRuntime(t.TempDir(), &paneTypist{}, unhooked)
+		console := &fakeConsole{screens: map[string]string{"%1": screen}, after: map[string]string{"%1": after}}
+		r.Console, r.Now = console, func() time.Time { return clock }
+		return r, console, func() []LocalItem {
+			r.ReadScreens()
+			return slices.DeleteFunc(r.Local().Factories[0].Items, func(li LocalItem) bool { return li.Kind != "prompt" })
+		}
+	}
+	choose := func(item LocalItem, option string) ActionRequest {
+		return ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActPrompt, Item: item.ID, Since: item.Since, Option: option, Fingerprint: item.Menu.Fingerprint}
+	}
+
+	mcp := fixtureScreen(t, "mcp.txt")
+	r, console, prompts := promptOn(mcp, "")
+	first := prompts()
+	clock = clock.Add(6 * time.Second)
+	again := prompts()
+	if len(first) != 1 || len(again) != 1 || first[0].Key != again[0].Key || first[0].Menu == nil || len(first[0].Menu.Choices) != 3 {
+		t.Fatalf("a pane with no hooks showing a menu gave %+v, then %+v; want one prompt item with three choices and the same key on every tick, or the phone is notified again", first, again)
+	}
+	console.screens["%1"] = strings.Replace(mcp, "playwright", "filesystem", 1)
+	if receipt, _ := r.Act(choose(first[0], "2")); receipt.Status != StatusStale || len(console.pressed) != 0 {
+		t.Fatalf("a menu that changed after it was loaded got %+v and presses %v; want nothing typed", receipt, console.pressed)
+	}
+	console.screens["%1"] = mcp
+	if receipt, err := r.Act(choose(first[0], "2")); err != nil || receipt.Status == StatusStale || strings.Join(console.pressed, ",") != "%1: 2" {
+		t.Fatalf("choosing 2 on the unchanged menu pressed %v with %+v, %v; want only 2 typed into the supervisor's pane", console.pressed, receipt, err)
+	}
+
+	codex := fixtureScreen(t, "codex-update.txt")
+	cursorOnSkip := strings.Replace(strings.Replace(codex, "› 1.", "  1.", 1), "  2. Skip\n", "› 2. Skip\n", 1)
+	r, console, prompts = promptOn(codex, cursorOnSkip)
+	if _, err := r.Act(choose(prompts()[0], "2")); err != nil || strings.Join(console.pressed, ",") != "%1: 2,%1: Enter" {
+		t.Fatalf("a menu whose digit only moves the cursor got presses %v, %v; want 2 then Enter, or the choice is never made", console.pressed, err)
+	}
 }
 
 func TestPauseMarksTheFactoryOnlyWhenThePauseWorked(t *testing.T) {

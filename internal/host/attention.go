@@ -1,6 +1,7 @@
 package host
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -67,8 +68,19 @@ type AttentionItem struct {
 	Action      string               `json:"-"`
 	Role        string               `json:"role,omitempty"`
 	Revising    string               `json:"revising,omitempty"`
+	Screen      []string             `json:"screen,omitempty"`
+	Node        string               `json:"node,omitempty"`
 	Pane        *tmux.Pane           `json:"-"`
 	Prompt      *state.PendingPrompt `json:"-"`
+}
+
+type Screen struct {
+	Node  string
+	Role  string
+	Pane  *tmux.Pane
+	Lines []string
+	Menu  *Menu
+	Since time.Time
 }
 
 func (i AttentionItem) Answerable() bool {
@@ -86,16 +98,28 @@ func (i AttentionItem) AsksQuestions() bool {
 type ThreadCounter func(url string) (int, bool)
 
 const (
-	PermissionBody  = "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot."
-	AnswerInSession = "⏎ answer in the session"
-	WakeKey         = "w wake"
+	PermissionBody    = "Claude Code is showing a permission prompt in the session. Answer it there; the panel cannot."
+	AnswerInSession   = "⏎ answer in the session"
+	AnswerItInSession = "⏎ answer it in the session"
+	OpenSession       = "⏎ open the session"
+	WakeKey           = "w wake"
+	SilentID          = "silent"
 )
+
+var toolNames = map[string]string{state.ToolClaude: "Claude Code", state.ToolCodex: "Codex", state.ToolOpenCode: "OpenCode"}
 
 func PermissionID(role string) string {
 	if role == "" {
 		return "permission"
 	}
 	return "permission-" + role
+}
+
+func PromptID(role string) string {
+	if role == "" {
+		return "prompt"
+	}
+	return "prompt-" + role
 }
 
 func AttentionItems(it Item, now time.Time, counter ThreadCounter) []AttentionItem {
@@ -112,6 +136,7 @@ func AttentionItems(it Item, now time.Time, counter ThreadCounter) []AttentionIt
 		}
 	}
 	items = append(items, permissionItems(it)...)
+	items = append(items, stuckItems(it)...)
 	slotExplainsIt := it.Status == factory.Gone
 	if it.Status.Asleep() && !slotExplainsIt {
 		items = append(items, asleepItem(it, now))
@@ -146,6 +171,46 @@ func permissionItem(prompt *state.PendingPrompt, role string, pane *tmux.Pane) A
 		Pane:   pane,
 		Prompt: prompt,
 	}
+}
+
+func stuckItems(it Item) []AttentionItem {
+	switch {
+	case it.Screen != nil && it.Screen.Menu != nil:
+		return []AttentionItem{promptItem(it)}
+	case it.Unreported:
+		return []AttentionItem{silentItem(it)}
+	}
+	return nil
+}
+
+func promptItem(it Item) AttentionItem {
+	s := it.Screen
+	item := AttentionItem{
+		Kind: "prompt", Title: "waits at a prompt", Since: s.Since, Action: AnswerItInSession, Role: s.Role, Pane: s.Pane, Screen: s.Lines,
+		Body: it.Factory.Label() + "'s supervisor waits at a prompt factory did not expect, and has sent no hook event since it showed it.",
+	}
+	if s.Role != "" && it.Stage != nil {
+		stage := s.Role
+		if it.Factory.State != nil && it.Factory.State.Stage != "" {
+			stage = it.Factory.State.Stage
+		}
+		item.Title = "the " + s.Role + " waits at a prompt"
+		item.Body = fmt.Sprintf("The %s stage, on %s, waits at a prompt factory did not expect. The %s stops until it is answered.", s.Role, toolNames[it.Stage.Run.Setting.ToolName()], stage)
+	}
+	return item
+}
+
+func silentItem(it Item) AttentionItem {
+	s := it.Screen
+	if s == nil {
+		s = &Screen{Pane: it.Pane}
+	}
+	quiet := fmt.Sprintf("%dm", int(factory.StartTimeout.Minutes()))
+	body := fmt.Sprintf("%s has not reported in for %s. %s started its supervisor at %s and has had no hook event and no state since.", it.Factory.Label(), quiet, cmp.Or(s.Node, "This machine"), it.Factory.CreatedAt().Local().Format("15:04"))
+	if len(s.Lines) > 0 {
+		body += " Its screen ends with:"
+	}
+	return AttentionItem{Kind: "silent", Title: "not reported in for " + quiet, Body: body, Since: it.Factory.CreatedAt(), Action: OpenSession, Pane: s.Pane, Screen: s.Lines}
 }
 
 func fromAttention(st *state.State, a state.Attention, counter ThreadCounter) AttentionItem {
@@ -333,6 +398,7 @@ type LocalItem struct {
 	Answer     *Receipt        `json:"answer,omitempty"`
 	Send       Eligibility     `json:"send"`
 	Permission *PermissionMenu `json:"permission,omitempty"`
+	Menu       *Menu           `json:"menu,omitempty"`
 }
 
 type Resolution struct {
@@ -346,12 +412,18 @@ type Resolution struct {
 
 func NeedsSince(it Item) time.Time {
 	var oldest time.Time
+	consider := func(since time.Time) {
+		if oldest.IsZero() || since.Before(oldest) {
+			oldest = since
+		}
+	}
 	if it.Factory.State != nil {
 		for _, a := range it.Factory.State.OpenAttention() {
-			if oldest.IsZero() || a.CreatedAt.Before(oldest) {
-				oldest = a.CreatedAt.Time
-			}
+			consider(a.CreatedAt.Time)
 		}
+	}
+	for _, item := range stuckItems(it) {
+		consider(item.Since)
 	}
 	if oldest.IsZero() && it.Hook != nil && it.Hook.Main != nil {
 		oldest = it.Hook.Main.At
@@ -444,6 +516,14 @@ func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalIte
 			li.Body = "Claude Code is asking for permission in the session. Pick an answer here, or answer it there."
 			li.Send = Eligibility{Ready: true, Reason: "Types the option you pick into the session."}
 		}
+	}
+	switch item.Kind {
+	case "prompt":
+		li.ID, li.Node, li.Menu = PromptID(item.Role), m.Machine, it.Screen.Menu
+		li.Send = Eligibility{Ready: true, Reason: "Types the choice you pick into the session."}
+	case "silent":
+		li.ID, li.Node = SilentID, m.Machine
+		li.Send = Eligibility{Reason: "Open the session from a computer."}
 	}
 	li.Key = ItemKey(Incarnation(it.Factory), li.ID, item.Since, item.Pane)
 	if claimed, ok := m.Claim(ClaimKey(it.Factory.Key(), li.ID)); ok && claimed.ItemSince.Equal(item.Since) {

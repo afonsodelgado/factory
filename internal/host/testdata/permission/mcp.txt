@@ -1,0 +1,20 @@
+ ╭──────────────────────────────────────────────────────────╮
+ │ ✻ Welcome to Claude Code!                                │
+ │                                                          │
+ │   /help for help, /status for your current setup         │
+ │                                                          │
+ │   cwd: ~/.local/state/factory/repos/cowork-3f9c          │
+ ╰──────────────────────────────────────────────────────────╯
+
+ ╭──────────────────────────────────────────────────────────────────────────────╮
+ │ New MCP server found in .mcp.json: playwright                                │
+ │                                                                              │
+ │ MCP servers may execute code or access system resources. All tool calls      │
+ │ require approval. Learn more in the MCP documentation.                       │
+ │                                                                              │
+ │ ❯ 1. Use this and all future MCP servers in this project                     │
+ │   2. Use this MCP server                                                     │
+ │   3. Continue without using this MCP server                                  │
+ ╰──────────────────────────────────────────────────────────────────────────────╯
+    Enter to confirm · Esc to reject
+

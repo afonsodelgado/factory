@@ -68,6 +68,26 @@ type Runtime struct {
 	prs         map[string][]PR
 	prsPolled   time.Time
 	holdings    map[string]Holding
+	readings    map[string]reading
+}
+
+const (
+	quietHooks   = 30 * time.Second
+	captureEvery = 5 * time.Second
+)
+
+type reading struct {
+	at     time.Time
+	since  time.Time
+	token  string
+	screen string
+	menu   *Menu
+}
+
+type watchedPane struct {
+	role string
+	pane *tmux.Pane
+	hook *state.HookFile
 }
 
 func New(r Runtime) *Runtime {
@@ -81,6 +101,7 @@ func New(r Runtime) *Runtime {
 	r.leases = map[string]browserLease{}
 	r.preparing = map[string]string{}
 	r.holdings = map[string]Holding{}
+	r.readings = map[string]reading{}
 	return &r
 }
 
@@ -113,6 +134,7 @@ func (m *Runtime) Tick() {
 	if m.Loader != nil {
 		m.snap = m.Loader.Load()
 	}
+	m.ReadScreens()
 	m.SettleReceipts(m.snap.Items, func(string) time.Time { return m.snap.At })
 	m.QueueInbox()
 	m.FlushTypeQueue()
@@ -120,6 +142,83 @@ func (m *Runtime) Tick() {
 	m.ReleaseFinishedBrowsers()
 	m.ReleaseFinishedStacks()
 	m.SyncReview()
+}
+
+func (m *Runtime) ReadScreens() {
+	now, previous := m.Now(), m.readings
+	m.readings = map[string]reading{}
+	for i := range m.snap.Items {
+		it := &m.snap.Items[i]
+		it.Screen = m.screenOf(*it, now, previous)
+		if it.Screen != nil && it.Screen.Menu != nil {
+			it.Status, it.Unblocked = factory.NeedsYou, factory.NeedsYou
+		}
+	}
+}
+
+func (m *Runtime) screenOf(it Item, now time.Time, previous map[string]reading) *Screen {
+	nothingToRead := it.Status == factory.Done || it.Status == factory.Gone || it.Status == factory.Exited
+	if nothingToRead || it.Factory.Archived() {
+		return nil
+	}
+	for _, w := range watchedPanes(it) {
+		if !w.quiet(now) {
+			continue
+		}
+		if r, ok := m.read(w.pane, now, previous); ok && r.menu != nil {
+			return &Screen{Node: m.Machine, Role: w.role, Pane: w.pane, Lines: ScreenTail(r.screen), Menu: r.menu, Since: r.since}
+		}
+	}
+	if !it.Unreported {
+		return nil
+	}
+	screen := &Screen{Node: m.Machine, Pane: it.Pane}
+	if r, ok := m.read(it.Pane, now, previous); ok {
+		screen.Lines = ScreenTail(r.screen)
+	}
+	return screen
+}
+
+func watchedPanes(it Item) []watchedPane {
+	supervisor := watchedPane{pane: it.Pane, hook: it.Hook}
+	if it.Stage == nil {
+		return []watchedPane{supervisor}
+	}
+	return []watchedPane{{role: it.Stage.Run.Role, pane: it.Stage.Pane, hook: it.Stage.Hook}, supervisor}
+}
+
+func (w watchedPane) quiet(now time.Time) bool {
+	live := w.pane != nil && !w.pane.Dead && !w.pane.InMode
+	hooksQuiet := w.hook == nil || now.Sub(w.hook.Last.At) >= quietHooks
+	return live && hooksQuiet && !factory.PermissionPrompt(w.hook)
+}
+
+func (m *Runtime) read(p *tmux.Pane, now time.Time, previous map[string]reading) (reading, bool) {
+	if p == nil {
+		return reading{}, false
+	}
+	last, seen := m.readings[p.ID]
+	if !seen {
+		last, seen = previous[p.ID]
+	}
+	if seen && last.token == p.Token && now.Sub(last.at) < captureEvery {
+		m.readings[p.ID] = last
+		return last, true
+	}
+	screen, err := m.console().Capture(p.ID)
+	if err != nil {
+		return reading{}, false
+	}
+	r := reading{at: now, since: now, token: p.Token, screen: screen}
+	if menu, ok := ParseMenu(screen); ok {
+		menu.Fingerprint = promptFingerprint(p, menu)
+		r.menu = &menu
+		if seen && last.menu != nil && last.menu.Fingerprint == menu.Fingerprint {
+			r.since = last.since
+		}
+	}
+	m.readings[p.ID] = r
+	return r, true
 }
 
 func (m *Runtime) repoConfig(repo string) (*state.Config, state.Profile) {

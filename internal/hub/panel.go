@@ -522,12 +522,16 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 		return m.listKey(key)
 	}
 	switch {
-	case hasItem && item.Kind == "permission" && key == "enter":
+	case hasItem && opensTheSession(item) && key == "enter":
 		m.focusSession()
 	case !hasItem && key == "enter":
 		m.nextNeedingYou()
 	}
 	return nil
+}
+
+func opensTheSession(item panel.Item) bool {
+	return item.Kind == "permission" || item.Kind == "prompt" || item.Kind == "silent"
 }
 
 func (m *Model) moveItem(delta int) {
