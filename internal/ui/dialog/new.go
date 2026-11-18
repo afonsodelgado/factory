@@ -38,6 +38,7 @@ type NewFactoryModel struct {
 	place          int
 	probes         map[string]probe
 	ProbeNode      func(name string) (string, error)
+	watchComments  bool
 }
 
 const supervisorRole = "supervisor"
@@ -67,8 +68,10 @@ func defaultPlace(c NewContext) int {
 
 const firstStageRow = 1
 
+var watchRow = firstStageRow + len(state.StageKeys)
+
 func (m *NewFactoryModel) rowStage() string {
-	if m.row < firstStageRow {
+	if m.row < firstStageRow || m.row == watchRow {
 		return ""
 	}
 	return state.StageKeys[m.row-firstStageRow]
@@ -644,6 +647,13 @@ func (m *NewFactoryModel) promptWidth() int {
 func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.problem = ""
 	stage, role := m.rowStage(), m.rowRole()
+	if m.row == watchRow && msg.String() == "space" {
+		m.watchComments = !m.watchComments
+		return nil
+	}
+	if m.row == watchRow && slices.Contains([]string{"t", "m", "e"}, msg.String()) {
+		return nil
+	}
 	switch msg.String() {
 	case "esc":
 		m.step = 1
@@ -658,7 +668,7 @@ func (m *NewFactoryModel) stagesKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "up":
 		m.row = max(m.row-1, 0)
 	case "down":
-		m.row = min(m.row+1, len(state.StageKeys))
+		m.row = min(m.row+1, watchRow)
 	case "tab":
 		m.nextPipeline()
 	case "space":
@@ -685,7 +695,7 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		return nil
 	}
 	name, stages := m.chosenPipeline()
-	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Node: m.node()}
+	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Node: m.node(), WatchComments: m.watchComments}
 	return tea.Quit
 }
 
@@ -950,6 +960,10 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 	}
 	y++
 	y += m.drawPromptInput(c, y, w, max(c.H-y-5, 1)) + 2
+	if m.watchComments {
+		c.Spans(1, y, []theme.Span{{Text: "✓ ", Ink: theme.FgInk(theme.Green)}, {Text: "Watches review comments on its PRs.", Ink: theme.Muted}})
+		y++
+	}
 	if m.problem != "" {
 		for _, l := range theme.Wrap("✗ "+m.problem, w) {
 			y++
@@ -992,7 +1006,7 @@ func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
 	w := c.W - 2
 	c.Put(1, 0, "Stages & agents · "+m.slug(), theme.Bright.B())
 	c.Right(c.W-2, 0, "2 of 3", theme.Muted)
-	hints := "⏎ next   space stage   t tool   m model   e effort   tab preset   esc back"
+	hints := "⏎ next   space toggle   t tool   m model   e effort   tab preset   esc back"
 	if problem := m.selectedRepo().PipelineProblem; problem != "" {
 		for i, l := range theme.Wrap("✗ "+problem, w) {
 			c.Put(1, 2+i, l, theme.FgInk(theme.Red))
@@ -1010,6 +1024,8 @@ func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
 		y++
 	}
 	y++
+	m.drawWatchRow(c, y)
+	y += 2
 	m.drawPreview(c, 1, y, w)
 	if m.problem != "" {
 		for _, l := range theme.Wrap("✗ "+m.problem, w) {
@@ -1017,6 +1033,21 @@ func (m *NewFactoryModel) drawStages(c *theme.Canvas) {
 		}
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
+}
+
+func (m *NewFactoryModel) drawWatchRow(c *theme.Canvas, y int) {
+	if m.row == watchRow {
+		c.Put(1, y, "❯", theme.Focused.B())
+	}
+	if m.watchComments {
+		c.Put(3, y, "✓", theme.Bright)
+		c.Put(5, y, "watch review comments", theme.Bright)
+		c.PutMax(31, y, "on: the ci stage answers reviewers' comments on its PRs", theme.Text, c.W-32)
+		return
+	}
+	c.Put(3, y, "·", theme.Muted)
+	c.Put(5, y, "watch review comments", theme.Text)
+	c.PutMax(31, y, "off: reviewers' comments on its PRs are left to you", theme.Muted, c.W-32)
 }
 
 func (m *NewFactoryModel) drawPresets(c *theme.Canvas, y int) int {

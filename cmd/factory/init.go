@@ -55,8 +55,8 @@ func runInit(args []string) int {
 	return 0
 }
 
-func setUpRepo(path string, named bool) (repo, notice string, err error) {
-	if _, _, err := install.MainCheckout(path); err != nil && !named {
+func setUpRepo(path string) (repo, notice string, err error) {
+	if _, _, err := install.MainCheckout(path); err != nil {
 		return "", "", nil
 	}
 	r, err := install.Init(path, state.StateDir())

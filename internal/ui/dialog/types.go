@@ -81,6 +81,8 @@ type NewResult struct {
 	Select     string                        `json:"select,omitempty"`
 	Wake       bool                          `json:"wake,omitempty"`
 	Node       string                        `json:"node,omitempty"`
+
+	WatchComments bool `json:"watch_comments,omitempty"`
 }
 
 type SettingsContext struct {

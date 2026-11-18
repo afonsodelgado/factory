@@ -40,7 +40,7 @@ func hubMain() error {
 	}
 	self := os.Getenv("TMUX_PANE")
 	if self == "" {
-		return errors.New("not inside tmux; start the hub with factory open")
+		return errors.New("not inside tmux; start the hub with factory")
 	}
 	unlock, err := lockHub(cfg.HubViewLock())
 	if err != nil {

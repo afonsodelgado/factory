@@ -355,7 +355,7 @@ func (m *Model) unarchive(it Item) error {
 
 func (m *Model) create(r dialog.NewResult) error {
 	var key string
-	err := m.effect("create", host.CreateRequest{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}, &key)
+	err := m.effect("create", host.CreateRequest{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, WatchComments: r.WatchComments}, &key)
 	if key != "" {
 		m.selected = key
 	}

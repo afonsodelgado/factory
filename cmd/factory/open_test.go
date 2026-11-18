@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-
-	"github.com/afonsodelgado/factory/internal/hub"
 )
 
 func TestOpenRepoResolvesToTheConfiguredPathOrIsRefused(t *testing.T) {
@@ -40,13 +38,13 @@ func TestOpenAndTheHubRefuseWithoutANodeAndCreateNothing(t *testing.T) {
 	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 	t.Setenv("FACTORY_TMUX_SOCKET", "factory-open-test-unused")
 	t.Chdir(repo)
-	if err := openMain(hub.OpenRequest{Name: "csv", Prompt: "Export contacts."}); !errors.Is(err, errNoNode) {
-		t.Fatalf("open without a node = %v; want the node guidance", err)
+	if err := openHere(); !errors.Is(err, errNoNode) {
+		t.Fatalf("factory without a node = %v; want the node guidance", err)
 	}
 	if err := hubMain(); !errors.Is(err, errNoNode) {
 		t.Fatalf("the hub without a node = %v; want the node guidance, never a runtime of its own", err)
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".factory")); err == nil {
-		t.Error("open set up the repo before finding no node to run the factory")
+		t.Error("factory set up the repo before finding no node to run the hub")
 	}
 }

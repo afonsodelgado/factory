@@ -49,7 +49,7 @@ Tests, manual runs and QA never touch the real machine:
 - Never run `bootstrap` or `install-hooks` against `~/.claude`, and never write to `~/.config/factory` or `~/.local/state/factory`.
 - `factory setup` and `install.sh` also run package managers, `sudo`, `curl`, `gh`, `claude`, `ssh-keygen` and `git config --global`, and `factory update` replaces the running binary and restarts the node. Never run them on the real machine: tests inject the session's runner, and manual runs use a disposable container or VM.
 - `factory node install`, `uninstall`, `status` and `run`, `factory doctor`, `factory bootstrap`, `factory update` and `factory phone check` call `tailscale`, `launchctl`, `systemctl` and `loginctl` by name, and a running node also calls `pmset` and `caffeinate` unless `node.keep_awake` is false. Run them only with a temporary `HOME` and fakes of those commands first on `PATH`; tests inject a runner instead, and tests that start a node set `keep_awake: false`. Never let them reach the real service manager or tailnet.
-- `factory` and `factory open` set up the repo they run in, as `init` does. Run `init`, `factory` and `factory open` only in a temporary git repo, with `HOME`, `FACTORY_CONFIG_DIR` and `FACTORY_STATE_DIR` pointing at temporary directories, never in a real repo.
+- `factory` sets up the repo it runs in, as `init` does. Run `init` and `factory` only in a temporary git repo, with `HOME`, `FACTORY_CONFIG_DIR` and `FACTORY_STATE_DIR` pointing at temporary directories, never in a real repo.
 
 Integration tests that need tmux start their own scratch server and kill it in `t.Cleanup`. They skip when `tmux` is missing only if `CI` is unset.
 

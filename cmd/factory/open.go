@@ -16,87 +16,22 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
-	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/hub"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
-	"github.com/google/uuid"
 )
 
 var passedEnv = []string{"FACTORY_CONFIG_DIR", "FACTORY_STATE_DIR", "FACTORY_TMUX_SOCKET", "CLAUDE_CONFIG_DIR"}
 
-func runOpen(args []string) int {
-	flags := flag.NewFlagSet("open", flag.ContinueOnError)
-	repo := flags.String("repo", "", "repo to create the factory in")
-	prompt := flags.String("prompt", "", "what the factory should do; written to brief.md")
-	pipeline := flags.String("pipeline", "", "the pipeline of stages to run; default_pipeline when omitted")
-	stages := flags.String("stages", "", "the exact stages to run, comma-separated; instead of --pipeline")
-	agents := agentFlags{}
-	flags.Var(agents, "agent", "role=model:effort or role=tool/model:effort for one agent of this factory; repeatable")
-	supervisorFlag := flags.String("supervisor", "", "tool/model:effort the supervisor runs on, such as codex/gpt-6.1-sol:high")
-	if err := flags.Parse(reorder(flags, args)); err != nil {
-		return 2
-	}
-	if *pipeline != "" && *stages != "" {
-		fmt.Fprintln(os.Stderr, "factory open: give --pipeline or --stages, not both")
-		return 2
-	}
-	id, rest := "", flags.Args()
-	if len(rest) > 0 {
-		id, rest = rest[0], rest[1:]
-	}
-	if *prompt == "" {
-		*prompt = strings.Join(rest, " ")
-	}
-	supervisor := state.ParseSetting(*supervisorFlag)
-	if err := state.ValidateSupervisor("--supervisor", supervisor); err != nil {
-		fmt.Fprintln(os.Stderr, "factory open:", err)
-		return 2
-	}
-	if err := catalogRefusal(agents, supervisor); err != nil {
-		fmt.Fprintln(os.Stderr, "factory open:", err)
-		return 2
-	}
-	request := hub.OpenRequest{Name: factory.Slugify(id), Repo: *repo, Prompt: *prompt, Pipeline: *pipeline, Stages: splitStages(*stages), Agents: agents, Supervisor: supervisor}
-	if err := openMain(request); err != nil {
-		fmt.Fprintln(os.Stderr, "factory open:", err)
+func runOpen() int {
+	if err := openHere(); err != nil {
+		fmt.Fprintln(os.Stderr, "factory:", err)
 		return 1
 	}
 	return 0
-}
-
-func catalogRefusal(agents map[string]state.AgentSetting, supervisor state.AgentSetting) error {
-	catalogs := catalog.Local(state.StateDir())
-	if err := catalog.Refusal(catalogs.ValidateAgents("--agent", agents)); err != nil {
-		return err
-	}
-	return catalog.Refusal(catalogs.Validate("--supervisor", "supervisor", supervisor))
-}
-
-type agentFlags map[string]state.AgentSetting
-
-func (a agentFlags) String() string { return "" }
-
-func (a agentFlags) Set(flag string) error {
-	role, setting, err := state.ParseAgentFlag(flag)
-	if err != nil {
-		return err
-	}
-	a[role] = setting
-	return nil
-}
-
-func splitStages(list string) []string {
-	var stages []string
-	for _, stage := range strings.Split(list, ",") {
-		if stage = strings.TrimSpace(stage); stage != "" {
-			stages = append(stages, stage)
-		}
-	}
-	return stages
 }
 
 func reorder(flags *flag.FlagSet, args []string) []string {
@@ -129,7 +64,7 @@ func takesValue(flags *flag.FlagSet, arg string) bool {
 	return !ok || !boolean.IsBoolFlag()
 }
 
-func openMain(r hub.OpenRequest) error {
+func openHere() error {
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		return err
@@ -138,45 +73,19 @@ func openMain(r hub.OpenRequest) error {
 	if err != nil {
 		return err
 	}
-	name, named := r.Name, r.Repo != ""
-	target := "."
-	if named {
-		target = state.ExpandHome(r.Repo)
-	}
-	setUp, notice, err := setUpRepo(target, named)
+	setUp, notice, err := setUpRepo(".")
 	if err != nil {
-		if named {
-			return err
-		}
 		fmt.Fprintf(os.Stderr, "factory: could not set up %s: %v\n", install.HomeRelative(setUp), err)
 	}
 	if cfg, err = state.LoadConfig(); err != nil {
 		return err
 	}
-	here, listed := "", false
+	here := ""
 	if setUp != "" {
-		here, listed = configuredRepo(cfg.Repos, setUp)
+		here, _ = configuredRepo(cfg.Repos, setUp)
 	}
-	if named && !listed {
-		return fmt.Errorf("could not add %s to the hub's repos", r.Repo)
-	}
-	repo := here
-	if !named {
-		repo = repoOf(cfg, name, here)
-	}
-	ctx := context.Background()
-	if err := runtime.Request(ctx, "repo", "", hub.RepoRequest{Repo: here}, nil); err != nil {
+	if err := runtime.Request(context.Background(), "repo", "", hub.RepoRequest{Repo: here}, nil); err != nil {
 		return err
-	}
-	show := hub.ShowRequest{Notice: notice}
-	if !named {
-		show.Here = here
-	}
-	if name != "" {
-		open := hub.OpenRequest{Name: name, Repo: repo, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}
-		if err := runtime.Request(ctx, "open", uuid.NewString(), open, &show.Select); err != nil {
-			return err
-		}
 	}
 	tm, err := factoryTmux(cfg)
 	if err != nil {
@@ -189,7 +98,7 @@ func openMain(r hub.OpenRequest) error {
 	if err := ensureHub(cfg, tm, bin); err != nil {
 		return err
 	}
-	reply, err := request(cfg.SocketPath(), "show", show)
+	reply, err := request(cfg.SocketPath(), "show", hub.ShowRequest{Notice: notice, Here: here})
 	if err != nil {
 		return err
 	}

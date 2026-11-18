@@ -327,7 +327,14 @@ type Runtime struct {
 	mu        sync.Mutex
 	factories []host.LocalFactory
 	calls     []string
+	sent      map[string][]json.RawMessage
 	behind    node.Caller
+}
+
+func (r *Runtime) Sent(kind string) []json.RawMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.sent[kind])
 }
 
 func (r *Runtime) Behind(c node.Caller) {
@@ -369,6 +376,10 @@ func (r *Runtime) Call(ctx context.Context, m host.Message) (host.Message, error
 		value = "view-" + a.Key + "-" + a.Token
 	default:
 		r.calls = append(r.calls, m.T)
+		if r.sent == nil {
+			r.sent = map[string][]json.RawMessage{}
+		}
+		r.sent[m.T] = append(r.sent[m.T], m.Data)
 	}
 	data, _ := json.Marshal(value)
 	return host.Message{T: "done", Data: data}, nil

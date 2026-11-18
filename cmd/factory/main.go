@@ -19,7 +19,7 @@ func main() {
 func run(args []string) int {
 	listDroppedRemotes(args)
 	if len(args) == 0 {
-		return runOpen(nil)
+		return runOpen()
 	}
 	switch args[0] {
 	case "--version":
@@ -42,8 +42,6 @@ func run(args []string) int {
 		return runView(args[1:])
 	case "dialog":
 		return runDialog(args[1:])
-	case "open":
-		return runOpen(args[1:])
 	case "delete":
 		return runDelete(args[1:], os.Stdin, os.Stdout)
 	case "init":
@@ -78,7 +76,7 @@ func run(args []string) int {
 	return 2
 }
 
-var typedCommands = []string{"open", "delete", "init", "forget", "doctor", "setup", "bootstrap", "install-hooks", "update", "node", "move", "phone"}
+var typedCommands = []string{"delete", "init", "forget", "doctor", "setup", "bootstrap", "install-hooks", "update", "node", "move", "phone"}
 
 func listDroppedRemotes(args []string) {
 	typed := len(args) == 0 || slices.Contains(typedCommands, args[0]) && !slices.Equal(args[:min(2, len(args))], []string{"node", "run"})
@@ -107,13 +105,10 @@ func runHook(stdin io.Reader) int {
 func usage(w io.Writer) {
 	fmt.Fprint(w, `usage: factory <command> [arguments]
 
+With no command, factory opens the hub, or jumps to it, and sets up the
+repo you are in. Press n in the hub to create a factory.
+
 commands:
-  open [<id>] [--prompt text | <prompt…>] [--repo path]
-              [--pipeline name | --stages a,b,c]
-              [--agent role=model:effort | role=tool/model:effort]
-              [--supervisor tool/model:effort]
-              select the factory with this id, or create it with the prompt
-              as its spec (without one the supervisor asks), then attach
   delete <id> [--repo path] [--yes]
               delete a factory: its pane, worktree, local branches, state,
               activity log, drafts and registry entry, so the id can be used
@@ -122,17 +117,18 @@ commands:
   init [path] add a repo (default: the one you are in) without opening the
               hub: write its .factory/config.yml, ignore the factory's files
               in .git/info/exclude and list it in the hub; nothing is
-              committed. factory and factory open do this by themselves
+              committed. factory does this by itself
               in a repo the hub does not list yet
   forget <path>
               stop listing a repo in the hub; its files stay
   doctor      check what the factory needs and print the fix commands
-  setup [--yes]
-              install everything this machine needs: packages, Tailscale,
-              GitHub and Claude Code logins, tools, plugins, skills and hooks,
-              then run the node and join your other nodes; it asks once, uses
-              sudo only for system steps and skips what is already done;
-              --yes takes every default without asking
+  setup [--tailscale] [--yes]
+              install everything this machine needs: packages, GitHub and
+              Claude Code logins, tools, plugins, skills and hooks, then run
+              the node; it asks once, uses sudo only for system steps and
+              skips what is already done; --tailscale also adds Tailscale,
+              so your phone and other machines reach this node, and joins
+              your other nodes; --yes takes every default without asking
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]

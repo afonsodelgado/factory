@@ -18,6 +18,8 @@ type OpenRequest struct {
 	Stages     []string                      `json:"stages,omitempty"`
 	Agents     map[string]state.AgentSetting `json:"agents,omitempty"`
 	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
+
+	WatchComments bool `json:"watch_comments,omitempty"`
 }
 
 type RepoRequest struct {
@@ -47,7 +49,7 @@ func (m *Runtime) Open(r OpenRequest) (string, error) {
 	repos := m.Config.Repos
 	if r.Repo != "" {
 		if !slices.Contains(m.Config.Repos, r.Repo) {
-			return "", fmt.Errorf("the running hub does not list %s; run factory open again from inside that repo to add it", r.Repo)
+			return "", fmt.Errorf("the running hub does not list %s; run factory from inside that repo to add it", r.Repo)
 		}
 		repos = []string{r.Repo}
 	}
@@ -57,13 +59,13 @@ func (m *Runtime) Open(r OpenRequest) (string, error) {
 		}
 	}
 	if len(repos) == 0 {
-		return "", errors.New("no repos yet; run factory open again from inside a repo to add it")
+		return "", errors.New("no repos yet; run factory from inside a repo to add it")
 	}
 	repo := repos[0]
 	if earlier, ok := m.RetiredMatch(repos, id); ok {
 		repo = earlier
 	}
-	return m.Create(CreateRequest{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor})
+	return m.Create(CreateRequest{Repo: repo, Slug: id, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, WatchComments: r.WatchComments})
 }
 
 func (m *Runtime) AddRepo(repo string) {

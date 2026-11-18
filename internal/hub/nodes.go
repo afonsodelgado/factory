@@ -458,8 +458,13 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 		return err
 	}
 	client := m.peer(l.member.Name)
-	create := host.CreateRequest{Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}
-	m.notice = news("Creating " + r.Slug + " on " + short + ". It appears under ↔ " + short + " once it starts.")
+	create := host.CreateRequest{Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, WatchComments: r.WatchComments}
+	creating := "Creating " + r.Slug + " on " + short + ". It appears under ↔ " + short + " once it starts."
+	if r.WatchComments && !l.snap.Supports(node.CanWatchComments) {
+		create.WatchComments = false
+		creating += fmt.Sprintf(" %s runs factory %s, which does not record comment watching, so %s leaves review comments to you.", short, l.snap.Version, r.Slug)
+	}
+	m.notice = news(creating)
 	m.later = append(m.later, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), createWait)
 		defer cancel()

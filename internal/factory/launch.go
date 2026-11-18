@@ -56,6 +56,8 @@ type Launch struct {
 	SessionID  string
 	Supervisor state.AgentSetting
 	AddDirs    []string
+
+	WatchComments bool
 }
 
 func (l Launch) flags() []string {
@@ -95,6 +97,7 @@ func (l Launch) Message() string {
 			message += " --agent " + setting.Flag(role)
 		}
 	}
+	message += " --comments " + map[bool]string{true: "on", false: "off"}[l.WatchComments]
 	if strings.TrimSpace(l.Prompt) != "" {
 		message += "\n" + strings.TrimRight(l.Prompt, "\n")
 	}

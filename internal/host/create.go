@@ -24,6 +24,8 @@ type CreateRequest struct {
 	Stages     []string
 	Agents     map[string]state.AgentSetting
 	Supervisor state.AgentSetting
+
+	WatchComments bool
 }
 
 func (m *Runtime) Create(r CreateRequest) (string, error) {
@@ -70,7 +72,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.RetiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.SlugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: pipeline.Stages, Agents: withToolNamed(agents), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: pipeline.Stages, Agents: withToolNamed(agents), Supervisor: supervisor, WatchComments: r.WatchComments}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
