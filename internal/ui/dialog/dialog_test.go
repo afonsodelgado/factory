@@ -622,12 +622,68 @@ func TestNewFactoryStartsOnTheDefaultNodeAndNeverFallsBackFromAnUnreachableOne(t
 		t.Fatalf("⏎ with the unreachable default node went to step %d on %q; want it held there, never moved to this machine", m.step, m.node())
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	m.Update(probedMsg{node: "homelab.tail5e2c.ts.net", text: "homelab is ready"})
+	m.Update(probedMsg{key: m.probeKey()})
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.prompt.text = "Export contacts."
 	m.start()
 	if r, _ := m.Result(); r.(NewResult).Node != "homelab.tail5e2c.ts.net" {
 		t.Errorf("picking homelab started %+v; want it created on homelab", r)
+	}
+}
+
+func TestNewFactoryOnANodeMissingWhatTheRepoNeedsStartsOnlyWithStartAnyway(t *testing.T) {
+	context := NewContext{
+		Repos:  []RepoOption{{Name: "cowork", Path: "/r/cowork", GitURL: "git@github.com:acme/cowork.git"}},
+		Nodes:  []NodeChoice{{Name: "homebox.tail5e2c.ts.net"}},
+		Target: "homebox.tail5e2c.ts.net",
+	}
+	missing := NodeReadiness{Needs: node.RepoReport{URL: "git@github.com:acme/cowork.git", Checks: []node.Check{
+		{Name: "pnpm", Mark: node.MarkFail, Detail: "not installed; package.json asks for pnpm@10.33.0", Fix: "npm install -g pnpm@10.33.0", On: "homebox"},
+		{Name: "QA_PASSWORD", Mark: node.MarkFail, Detail: "not set for homebox's node; qa.sign_in reads it", Fix: "set it in the node's environment", On: "homebox"},
+		{Name: "node", Mark: node.MarkOK, Detail: "24.22.1", On: "homebox"},
+	}}}
+	press := func(m *NewFactoryModel, keys ...tea.KeyPressMsg) {
+		for _, k := range keys {
+			if _, cmd := m.Update(k); cmd != nil {
+				m.Update(cmd())
+			}
+		}
+	}
+	enter, startAnyway, start := tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	opened := func() (*NewFactoryModel, tea.Msg) {
+		m := NewFactory(context)
+		m.ProbeNode = func(string, RepoOption) (NodeReadiness, error) { return missing, nil }
+		m.Update(tea.WindowSizeMsg{Width: 88, Height: 30})
+		checked := m.Init()()
+		m.name = "csv-export"
+		return m, checked
+	}
+
+	m, checked := opened()
+	m.Update(checked)
+	press(m, enter)
+	golden.RequireEqual(t, m.View().Content)
+	if m.step != 1 {
+		t.Fatal("⏎ went on although homebox is missing 2 things cowork needs; want it held on step 1")
+	}
+	press(m, startAnyway, enter)
+	m.prompt.text = "Export contacts as CSV."
+	press(m, start)
+	if r, ok := m.Result(); !ok || !r.(NewResult).StartAnyway || r.(NewResult).Node != "homebox.tail5e2c.ts.net" {
+		t.Errorf("ctrl+y then ctrl+s gave %+v; want a start on homebox with StartAnyway", r)
+	}
+
+	m, checked = opened()
+	press(m, enter, enter)
+	m.prompt.text = "Export contacts as CSV."
+	press(m, start)
+	m.Update(checked)
+	if r, ok := m.Result(); ok || !strings.Contains(m.View().Content, "so csv-export did not start") {
+		t.Fatalf("ctrl+s before the check answered started %+v; want it to wait, then refuse with the missing items:\n%s", r, m.View().Content)
+	}
+	press(m, startAnyway)
+	if r, ok := m.Result(); !ok || !r.(NewResult).StartAnyway {
+		t.Errorf("ctrl+y on the refusal gave %+v; want a start with StartAnyway", r)
 	}
 }
 

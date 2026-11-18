@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -518,7 +519,7 @@ func (m *Machine) Start() *Node {
 	n.Nodes = &node.Nodes{
 		Self: self, Version: Version, Dir: directory, Tailscale: ts, HTTP: tn.Client(m),
 		Ready:     node.Readiness{Probes: n.currentProbes, Wait: tn.ReadyWait, Now: tn.Now},
-		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, UpdateWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
+		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, UpdateWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos, Needs: install.CheckNeeds,
 	}
 	n.Nodes.Settings = &node.Settings{Path: node.SettingsPath(dir), Self: n.ID, Now: tn.Now, Sources: node.Sources{Read: n.readSettings, Write: n.writeSetting}}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}

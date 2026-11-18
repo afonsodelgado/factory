@@ -257,7 +257,30 @@ func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dial
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, node.ReadyWait+node.ProbeWait)
 	defer cancel()
-	return answer, peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report)
+	if err := peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report); err != nil {
+		return answer, err
+	}
+	if answer.Snapshot.Supports(node.CanNeeds) {
+		answer.Needs, _ = askNeeds(ctx, peer, repoNeeds(a.cfg.Repos))
+	}
+	return answer, nil
+}
+
+func repoNeeds(repos []string) []node.RepoNeeds {
+	var asked []node.RepoNeeds
+	for _, repo := range repos {
+		if url := gitclone.Origin(repo); url != "" {
+			asked = append(asked, node.RepoNeeds{URL: url, Needs: install.RepoNeeds(repo)})
+		}
+	}
+	return asked
+}
+
+func askNeeds(ctx context.Context, peer *node.Client, repos []node.RepoNeeds) (node.NeedsReport, error) {
+	ctx, cancel := context.WithTimeout(ctx, node.ReadyWait)
+	defer cancel()
+	var report node.NeedsReport
+	return report, peer.Do(ctx, http.MethodPost, node.NeedsRoute, node.NeedsRequest{Repos: repos}, &report)
 }
 
 func (a nodeActions) Seen(ctx context.Context, name string) (node.Peer, error) {
@@ -317,20 +340,39 @@ func (a nodeActions) SetTarget(name string) error {
 	})
 }
 
-func probeNode(name string) (string, error) {
+func probeNode(name string, repo dialog.RepoOption) (dialog.NodeReadiness, error) {
 	short, _, _ := strings.Cut(name, ".")
 	ctx, cancel := context.WithTimeout(context.Background(), node.ReadyWait+node.ProbeWait)
 	defer cancel()
+	peer := node.Remote(name, node.PeerHTTP())
+	unanswered := func(err error) (dialog.NodeReadiness, error) {
+		return dialog.NodeReadiness{}, fmt.Errorf("%s did not answer its readiness check: %w", short, err)
+	}
+	var snap node.Snapshot
+	if err := peer.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap); err != nil {
+		return unanswered(err)
+	}
 	var report node.Report
-	if err := node.Remote(name, node.PeerHTTP()).Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
-		return "", fmt.Errorf("%s did not answer its readiness check: %w", short, err)
+	if err := peer.Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
+		return unanswered(err)
 	}
 	for _, c := range report.Checks {
 		if c.Mark == node.MarkFail {
-			return "", fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
+			return dialog.NodeReadiness{}, fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
 		}
 	}
-	return short + " is ready: every check passes", nil
+	if !snap.Supports(node.CanNeeds) {
+		return dialog.NodeReadiness{Unchecked: true, PeerVersion: snap.Version, HubVersion: version}, nil
+	}
+	needs, err := askNeeds(context.Background(), peer, []node.RepoNeeds{{URL: repo.GitURL, Needs: install.RepoNeeds(repo.Path)}})
+	if err != nil {
+		return unanswered(err)
+	}
+	readiness := dialog.NodeReadiness{}
+	if len(needs.Repos) > 0 {
+		readiness.Needs = needs.Repos[0]
+	}
+	return readiness, nil
 }
 
 func (a nodeActions) Clone(ctx context.Context, name, op, repo string) error {

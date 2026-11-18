@@ -19,7 +19,7 @@ type Manager struct {
 
 var managers = []Manager{
 	{Name: "pacman", Install: []string{"sudo", "pacman", "-S", "--needed", "--noconfirm"}, names: map[string]string{"gh": "github-cli", "node": "nodejs npm", "python3": "python"}},
-	{Name: "apt-get", Install: []string{"sudo", "apt-get", "install", "-y"}, Refresh: []string{"sudo", "apt-get", "update"}, names: map[string]string{"node": "nodejs npm"}},
+	{Name: "apt-get", Install: []string{"sudo", "apt-get", "install", "-y"}, Refresh: []string{"sudo", "apt-get", "update"}, names: map[string]string{"node": "nodejs npm", "docker": "docker-compose-v2"}},
 	{Name: "dnf", Install: []string{"sudo", "dnf", "install", "-y"}, names: map[string]string{"node": "nodejs npm"}},
 	{Name: "zypper", Install: []string{"sudo", "zypper", "install", "-y"}, names: map[string]string{"node": "nodejs npm"}},
 }

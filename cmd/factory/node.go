@@ -260,7 +260,7 @@ func nodeRoster(ctx context.Context, cfg *state.Config, id, owner string, ts nod
 		}
 	}
 	store := phone.Open(cfg.StateDir)
-	return &node.Nodes{Self: self, Version: version, Dir: dir, Tailscale: ts, HTTP: node.PeerHTTP(), Ready: node.Readiness{Probes: readinessProbes}, Repos: repoOrigins, Phone: &store}, nil
+	return &node.Nodes{Self: self, Version: version, Dir: dir, Tailscale: ts, HTTP: node.PeerHTTP(), Ready: node.Readiness{Probes: readinessProbes}, Needs: install.CheckNeeds, Repos: repoOrigins, Phone: &store}, nil
 }
 
 func repoOrigins() map[string]string {

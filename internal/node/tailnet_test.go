@@ -484,6 +484,37 @@ func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOn
 	}
 }
 
+func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFix(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	cowork := "git@github.com:alice/cowork.git"
+	homelab.SetRepos(map[string]string{cowork: t.TempDir()})
+	t.Setenv("QA_NEEDS_TEST_PASSWORD", "")
+	needs := []node.Need{
+		{Name: "factory-needs-test-absent-tool", Kind: node.NeedTool, Why: "qa.start runs it"},
+		{Name: ".env.local", Kind: node.NeedFile, Why: "compose.yml reads it"},
+		{Name: "QA_NEEDS_TEST_PASSWORD", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
+	}
+	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: cowork, Needs: needs}}})
+	if status != http.StatusOK {
+		t.Fatalf("homelab answered %d %s", status, body)
+	}
+	var report node.NeedsReport
+	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 {
+		t.Fatalf("homelab reported %s; want one report for cowork", body)
+	}
+	missing := report.Repos[0].Missing()
+	if len(missing) != len(needs) {
+		t.Fatalf("homelab reported %+v missing; want the tool, the file and the variable", missing)
+	}
+	for i, c := range missing {
+		if c.Name != needs[i].Name || c.Fix == "" || c.On != "homelab" || !strings.Contains(c.Detail, needs[i].Why) {
+			t.Errorf("homelab reported %+v for %s; want it named, with why and a fix on homelab", c, needs[i].Name)
+		}
+	}
+}
+
 func rosterFiles(t *testing.T, nodes ...*nodetest.Node) []string {
 	var files []string
 	for _, n := range nodes {

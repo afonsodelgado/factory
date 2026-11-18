@@ -40,6 +40,7 @@ type Nodes struct {
 	Factories   func() int
 	Repos       func() map[string]string
 	Clone       func(ctx context.Context, url string) (string, error)
+	Needs       NeedsCheck
 	Update      func(version string) error
 	Settings    *Settings
 	Phone       *phone.Store
@@ -687,6 +688,7 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/clone", n.homeOrNative(n.cloneRoute))
 	route("GET /api/node/hello", nativeOnly(func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.hello()) }))
 	route("GET /api/node/readiness", nativeOnly(n.readinessRoute))
+	route("POST "+NeedsRoute, nativeOnly(n.needsRoute))
 	route("POST /api/node/pull", nativeOnly(n.pullRoute))
 	route("POST /api/node/kick", nativeOnly(n.kickRoute))
 	route("POST /api/node/join/request", nativeOnly(n.requestRoute))

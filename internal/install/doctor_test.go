@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -217,5 +218,40 @@ func TestDoctorFailsANodeStillRunningAnOlderBinary(t *testing.T) {
 	}
 	if c := nodeProcess(context.Background(), Options{Config: cfg, Version: "v0.1.37"}, "4242"); c.Mark != Pass {
 		t.Errorf("a node on this binary's version got %s %q", c.Mark, c.Detail)
+	}
+}
+
+func TestRepoNeedsNamesEveryNeedAndNeverReadsAValue(t *testing.T) {
+	const secret = "hunter2-never-leaves-this-machine"
+	t.Setenv("QA_PASSWORD", secret)
+	repo := filepath.Join(t.TempDir(), "cowork")
+	files := map[string]string{
+		"package.json":        `{"packageManager": "pnpm@10.33.0+sha512.abc"}`,
+		".nvmrc":              "v24.22.1\n",
+		"compose.yml":         "services:\n  web:\n    env_file: .env.local\n",
+		".env.example":        "QA_PASSWORD=" + secret + "\n",
+		".env.local":          "QA_PASSWORD=" + secret + "\n",
+		".factory/config.yml": "commands:\n  build: make build\n  test: CI=1 pnpm test\nqa:\n  start: docker compose up -d\n  sign_in: ./scripts/sign-in --email \"$QA_EMAIL\" --password \"${QA_PASSWORD}\" --url $FACTORY_URL\n",
+	}
+	for name, content := range files {
+		os.MkdirAll(filepath.Dir(filepath.Join(repo, name)), 0o755)
+		os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644)
+	}
+	needs := RepoNeeds(repo)
+	want := []Need{
+		{Name: "pnpm", Kind: node.NeedTool, Why: "package.json asks for pnpm@10.33.0", Version: "10.33.0"},
+		{Name: "node", Kind: node.NeedTool, Why: ".nvmrc asks for node 24.22.1", Version: "24.22.1"},
+		{Name: "docker", Kind: node.NeedTool, Why: "compose.yml runs cowork's QA stack"},
+		{Name: "make", Kind: node.NeedTool, Why: "commands.build runs it"},
+		{Name: ".env.local", Kind: node.NeedFile, Why: "compose.yml reads it"},
+		{Name: ".env", Kind: node.NeedFile, Why: ".env.example is its template"},
+		{Name: "QA_EMAIL", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
+		{Name: "QA_PASSWORD", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
+	}
+	if !slices.Equal(needs, want) {
+		t.Errorf("RepoNeeds = %+v\nwant %+v", needs, want)
+	}
+	if strings.Contains(fmt.Sprint(needs), secret) {
+		t.Errorf("RepoNeeds carried a secret value: %+v; only names may cross to another node", needs)
 	}
 }

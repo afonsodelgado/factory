@@ -37,23 +37,14 @@ type NewFactoryModel struct {
 	height         int
 	place          int
 	probes         map[string]probe
-	ProbeNode      func(name string) (string, error)
+	ProbeNode      func(name string, repo RepoOption) (NodeReadiness, error)
+	startAnyway    bool
+	waiting        bool
+	refused        bool
 	watchComments  bool
 }
 
 const supervisorRole = "supervisor"
-
-type probe struct {
-	done bool
-	text string
-	err  error
-}
-
-type probedMsg struct {
-	node string
-	text string
-	err  error
-}
 
 func NewFactory(c NewContext) *NewFactoryModel {
 	return &NewFactoryModel{Context: c, repo: max(0, min(c.Repo, len(c.Repos)-1)), step: 1, row: firstStageRow, place: defaultPlace(c), probes: map[string]probe{}, repoPath: sharedRepoDirectory(c.Repos)}
@@ -118,26 +109,10 @@ func (m *NewFactoryModel) placeName() string {
 	return ""
 }
 
-func (m *NewFactoryModel) probe() tea.Cmd {
-	choice, ok := m.nodeChoice()
-	if !ok || choice.Unreachable || m.ProbeNode == nil {
-		return nil
-	}
-	name, check := choice.Name, m.ProbeNode
-	if _, started := m.probes[name]; started {
-		return nil
-	}
-	m.probes[name] = probe{}
-	return func() tea.Msg {
-		text, err := check(name)
-		return probedMsg{node: name, text: text, err: err}
-	}
-}
-
 func (m *NewFactoryModel) moveOn(delta int) tea.Cmd {
 	places := len(m.Context.Nodes) + 1
 	m.place = (m.place + delta + places) % places
-	return m.probe()
+	return m.placeChanged()
 }
 
 func (m *NewFactoryModel) elsewhere() bool {
@@ -150,7 +125,7 @@ func (m *NewFactoryModel) choosesPlace() bool {
 
 func (m *NewFactoryModel) nodeProblem(choice NodeChoice) string {
 	short, repo := shortName(choice.Name), m.selectedRepo()
-	switch p := m.probes[choice.Name]; {
+	switch p, _ := m.currentProbe(); {
 	case repo.NoGitRemote != "":
 		return repo.Name + " has no git remote, so " + short + " has nothing to clone. Push it to one first (git remote add origin <url>, then git push), or pick this machine with ←."
 	case choice.Unreachable:
@@ -495,7 +470,7 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptEdited:
 		m.promptEdited(msg)
 	case probedMsg:
-		m.probes[msg.node] = probe{done: true, text: msg.text, err: msg.err}
+		return m, m.probed(msg)
 	case tea.KeyPressMsg:
 		m.Context.Notice = ""
 		switch m.step {
@@ -538,6 +513,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.repo = max(m.repo-1, 0)
 		m.Context.Here = false
 		m.resetChoices()
+		return m.placeChanged()
 	case "tab":
 		if m.addingRepo() {
 			m.repoPathEdited = true
@@ -549,6 +525,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.repo = (m.repo + 1) % (len(m.Context.Repos) + 1)
 		m.Context.Here = false
 		m.resetChoices()
+		return m.placeChanged()
 	case "backspace":
 		if m.addingRepo() {
 			m.repoPathEdited = true
@@ -582,6 +559,10 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "enter":
 		return m.next()
+	case "ctrl+y":
+		return m.startAnywayKey()
+	case "ctrl+r":
+		return m.recheck()
 	default:
 		m.typeText(DecodeKeys(msg.Text))
 	}
@@ -607,7 +588,7 @@ func (m *NewFactoryModel) next() tea.Cmd {
 		m.result = &NewResult{Select: e.Key}
 		return tea.Quit
 	}
-	if problem := m.placeProblem(); problem != "" {
+	if problem := m.placeProblem(); problem != "" || m.heldBack() {
 		return nil
 	}
 	m.pipeline = m.pipelineName()
@@ -619,11 +600,15 @@ func (m *NewFactoryModel) promptKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.problem = ""
 	switch msg.String() {
 	case "esc":
-		m.step = 2
+		m.step, m.waiting = 2, false
 	case "ctrl+c":
 		return tea.Quit
 	case "ctrl+s":
 		return m.start()
+	case "ctrl+y":
+		return m.startAnywayKey()
+	case "ctrl+r":
+		return m.recheck()
 	case "ctrl+g":
 		return editExternally(m.prompt.text)
 	default:
@@ -694,8 +679,12 @@ func (m *NewFactoryModel) start() tea.Cmd {
 		m.problem = problem
 		return nil
 	}
+	if m.holdStart() {
+		return nil
+	}
 	name, stages := m.chosenPipeline()
 	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Node: m.node(), WatchComments: m.watchComments}
+	m.result.StartAnyway = m.startAnyway && len(m.missing()) > 0
 	return tea.Quit
 }
 
@@ -792,7 +781,7 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			y++
 		}
 	}
-	if !matched && problem == "" && m.id() != "" && !factory.IsReservedID(m.name) {
+	if !matched && problem == "" && m.id() != "" && !factory.IsReservedID(m.name) && !m.heldBack() {
 		y++
 		m.drawPreview(c, 1, y, w)
 	}
@@ -811,6 +800,8 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 		hints = "⏎ select it   ctrl+w select and wake it   ctrl+e settings   esc cancel"
 	case problem != "" && m.placeProblem() != "":
 		hints = "←→ runs on   ↑↓ repo   ctrl+e settings   esc cancel"
+	case m.heldBack():
+		hints = "ctrl+y start anyway   ctrl+r check again   ←→ runs on   ↑↓ repo   esc cancel"
 	}
 	c.Put(1, c.H-1, hints, theme.Text)
 }
@@ -841,6 +832,8 @@ func (m *NewFactoryModel) notice(w int) [][]theme.Span {
 	switch {
 	case m.name == "":
 		add("A short id for this factory, such as csv-export. It names the worktree. You write what the factory should do next.", theme.Muted)
+	case m.id() != "" && !factory.IsReservedID(m.name) && m.heldBack():
+		add(fmt.Sprintf("%s is a new factory. It starts on %s when these pass, or now with ctrl+y.", m.id(), m.placeName()), theme.Muted)
 	case m.id() != "" && !factory.IsReservedID(m.name):
 		add(fmt.Sprintf("%s is a new factory%s. You'll write its prompt next.", m.id(), onRemote(m.placeName())), theme.Muted)
 	}
@@ -872,10 +865,9 @@ func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
 	}
 	y++
 	if choice, ok := m.nodeChoice(); ok {
-		m.drawNodeState(c, y, w, choice)
-	} else {
-		c.PutMax(3, y, "Runs here, in a new worktree of "+m.selectedRepo().Display+".", theme.Muted, w-3)
+		return m.drawNodeState(c, y, w, choice) + 1
 	}
+	c.PutMax(3, y, "Runs here, in a new worktree of "+m.selectedRepo().Display+".", theme.Muted, w-3)
 	return y + 2
 }
 
@@ -887,19 +879,22 @@ func (m *NewFactoryModel) placeNames() []string {
 	return names
 }
 
-func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeChoice) {
-	short := shortName(choice.Name)
-	p := m.probes[choice.Name]
+func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeChoice) int {
+	short, repo := shortName(choice.Name), m.selectedRepo().Name
+	p, _ := m.currentProbe()
 	switch {
+	case m.selectedRepo().GitURL == "":
+		return y
 	case choice.Unreachable:
 		c.PutMax(3, y, "✗ "+short+" is unreachable, so nothing starts there now.", theme.FgInk(theme.Red), w-3)
 	case !p.done:
-		c.PutMax(3, y, "◌ checking "+short+"…", theme.FgInk(theme.Cyan), w-3)
+		c.PutMax(3, y, "◌ checking what "+repo+" needs on "+short+"…", theme.FgInk(theme.Cyan), w-3)
 	case p.err != nil:
 		c.PutMax(3, y, "✗ "+p.err.Error(), theme.FgInk(theme.Red), w-3)
 	default:
-		c.PutMax(3, y, "↔ "+p.text, theme.FgInk(theme.Cyan), w-3)
+		return drawReadiness(c, y, w, short, repo, p.report)
 	}
+	return y + 1
 }
 
 func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
@@ -959,7 +954,8 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 		y++
 	}
 	y++
-	y += m.drawPromptInput(c, y, w, max(c.H-y-5, 1)) + 2
+	y += m.drawPromptInput(c, y, w, max(c.H-y-5-m.startLinesHeight(w), 1)) + 2
+	y = m.drawStartLines(c, y, w)
 	if m.watchComments {
 		c.Spans(1, y, []theme.Span{{Text: "✓ ", Ink: theme.FgInk(theme.Green)}, {Text: "Watches review comments on its PRs.", Ink: theme.Muted}})
 		y++
@@ -971,7 +967,11 @@ func (m *NewFactoryModel) drawPrompt(c *theme.Canvas) {
 		}
 	}
 	count := plural(strings.Count(m.prompt.text, "\n")+1, "line") + " · " + plural(uniseg.GraphemeClusterCount(m.prompt.text), "character")
-	hintsStart := c.Right(c.W-2, c.H-1, "ctrl+s start   ⏎ new line   ctrl+g open in editor   esc back", theme.Text)
+	hints := "ctrl+s start   ⏎ new line   ctrl+g open in editor   esc back"
+	if m.refused && m.heldBack() {
+		hints = "ctrl+y start anyway   ctrl+r check again   ctrl+s start   esc back"
+	}
+	hintsStart := c.Right(c.W-2, c.H-1, hints, theme.Text)
 	if theme.Width(count)+2 < hintsStart {
 		c.Put(1, c.H-1, count, theme.Muted)
 	}

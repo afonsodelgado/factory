@@ -71,6 +71,7 @@ type NodesContext struct {
 type NodeAnswer struct {
 	Snapshot node.Snapshot
 	Report   node.Report
+	Needs    node.NeedsReport
 }
 
 type NodeActions interface {
@@ -1293,7 +1294,8 @@ func (n *Nodes) drawPeerDetails(c *theme.Canvas, y int) int {
 	if p.cloneErr != nil {
 		y = paragraph(c, y+1, "✗ "+p.cloneErr.Error(), theme.FgInk(theme.Red))
 	}
-	return paragraph(c, y+1, readySummary(row.Short(), p.answer.Report.Problems), theme.Text)
+	y = paragraph(c, y+1, readySummary(row.Short(), p.answer.Report.Problems), theme.Text)
+	return n.drawNeeds(c, y+1, row, p.answer)
 }
 
 func readySummary(short string, problems int) string {
