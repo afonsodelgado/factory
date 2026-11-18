@@ -73,41 +73,28 @@ Each agent ships with defaults. Your config, the repo's config and `--agent` on 
 
 ## Install
 
-macOS or Linux, with tmux 3.3 or later, git, [gh](https://cli.github.com) and [Claude Code](https://claude.com/claude-code). `factory doctor` checks the rest.
-
-**1. Download the binary** for your machine: `darwin_arm64`, `darwin_amd64`, `linux_amd64` or `linux_arm64`. The first two lines pick `darwin` or `linux` and `amd64` or `arm64` from `uname`:
+macOS or Linux. On each machine that should run factories, run:
 
 ```sh
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-arch=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
-gh release download --repo afonsodelgado/factory --pattern "factory_${os}_${arch}" --output ~/.local/bin/factory --clobber
-chmod +x ~/.local/bin/factory
+curl -fsSL https://raw.githubusercontent.com/afonsodelgado/factory/main/install.sh | sh
 ```
 
-Or build it with Go 1.26 or later:
+It downloads the release binary for your machine to `~/.local/bin/factory`, checks it against the release's `factory_checksums.txt`, adds `~/.local/bin` to your `PATH` when it is missing, and runs `factory setup`. Pass flags to setup after `sh -s --`, such as `sh -s -- --yes`.
 
-```sh
-GOPRIVATE=github.com/afonsodelgado/* go install github.com/afonsodelgado/factory/cmd/factory@latest
-```
+`factory setup` lists what this machine still needs, asks once, and then does it:
 
-A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
+- **Packages:** tmux 3.3 or later, git, python3, jq, curl, Node with npm (for `npx`) and [gh](https://cli.github.com), through Homebrew, apt, dnf, pacman or zypper. On apt it takes gh from GitHub's own apt repository.
+- **[Tailscale](https://tailscale.com/download):** installs it on Linux and logs this machine in. It also lets your user run `tailscale serve` without sudo, and waits while you turn on HTTPS Certificates for the tailnet, which you do once.
+- **GitHub:** creates an SSH key with no passphrase, because the node clones and pushes unattended, and logs `gh` in. It adds the key to your account, sets `user.name` and `user.email` when they are unset, and asks whether to sign commits with the key.
+- **[Claude Code](https://claude.com/claude-code):** installs it and opens it once so you can `/login`.
+- **Tools:** `gh-stack`, revmux, and the revmux and impeccable plugins with their marketplaces.
+- **Skills, agents and hooks:** the same as `factory bootstrap`.
+- **The node:** the always-on service that owns this machine's factories (see [The node service](#the-node-service)). On Linux, setup turns on lingering so the node starts at boot. When your tailnet already has a node, this machine joins its list and copies your [shared settings](#several-nodes), including your repos, before setup finishes.
+- **What your repos need:** Chrome for browser QA, and Codex or OpenCode with their logins when your settings use them.
 
-**2. Check the machine and install the skills and hooks.** `doctor` lists what is missing, each with the command that fixes it, and changes nothing. `bootstrap` installs the bundled skills, agents and hooks into your Claude config, backing up any file it replaces.
+Setup uses `sudo` only for packages, Tailscale's install, the Tailscale operator and lingering. It asks for your password once, before anything changes. On an account that cannot use sudo, it prints those commands for an admin account and stops; run setup again afterwards. Each step is checked again after it runs, so a second run does only what is still missing, and setup ends with what `factory doctor` still lists. `--yes` takes every default without asking.
 
-```sh
-factory doctor
-factory bootstrap
-```
-
-**3. Install the node**, the always-on service that owns this machine's factories. It needs [Tailscale](https://tailscale.com/download) logged in as you, with HTTPS Certificates on for the tailnet and Funnel off.
-
-```sh
-factory node install
-```
-
-It checks Tailscale, HTTPS, Funnel and that nothing else serves `https://<machine>.<tailnet>.ts.net/`, saves your Tailscale login as `node.owner` and the machine's name as `node.hostname`, writes a launchd agent (macOS) or systemd user unit (Linux) that runs `factory node run`, waits for the node to answer, then runs `tailscale serve --bg --https=443 http://127.0.0.1:7418`. The first install prints that URL as a QR for the phone; it holds only the URL. See [The node service](#the-node-service).
-
-**4. Open the hub.**
+Then open the hub:
 
 ```sh
 factory
@@ -115,7 +102,15 @@ factory
 
 The hub opens full screen in the terminal or tmux pane you typed `factory` in, and `q` puts your shell back. The factories keep running on factory's own tmux server, with its own configuration, so they never show up in your tmux sessions and your `tmux.conf` never applies to them.
 
-`bootstrap` never installs system packages; it prints the `doctor` commands for those. Running it again on an up-to-date machine changes nothing, and it keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
+**By hand.** `factory doctor` lists what is missing, each with the command that fixes it, and changes nothing. `factory bootstrap` installs the bundled skills, agents and hooks into your Claude config, backing up any file it replaces. `factory node install` installs the node. `bootstrap` never installs system packages, and running it again on an up-to-date machine changes nothing. It keeps the hooks you already have in `settings.json`. Restart running Claude Code sessions afterwards so they pick up the hooks. `factory install-hooks --remove` takes the hooks out again.
+
+To build the binary yourself, use Go 1.26 or later:
+
+```sh
+go install github.com/afonsodelgado/factory/cmd/factory@latest
+```
+
+A binary you build has no release version: `factory version` shows `dev`, plus the commit and its date when you build from a checkout with `go build ./cmd/factory`. Built inside a git worktree, it shows the main checkout's commit, because Go reads the commit from the first `.git` directory above the source.
 
 A permission prompt marks its factory "needs you" until the approved tool has run, on the thread that asked: the `PostToolUse` and `PostToolUseFailure` hooks report that, and `doctor` lists them as missing until `bootstrap` or `install-hooks` adds them. A session started before you updated keeps its old hooks until you restart it, and a prompt that was already open when you updated shows as answered.
 
@@ -124,10 +119,14 @@ A permission prompt marks its factory "needs you" until the approved tool has ru
 ```sh
 factory version    # what is running, and the latest release
 factory --version  # only what is running, with no network call
-factory update     # install the latest release, then run its bootstrap
+factory update     # update every node to the latest release
 ```
 
-`factory version` asks GitHub through `gh`. Without `gh`, or when `gh` is not logged in, it prints only the running version. `factory update` downloads the release binary for your machine next to the running one and replaces it. Then it runs the new binary's `bootstrap`, so the skills, agents and hooks match it. It changes nothing when you already run the latest release, and it refuses when it cannot write to the binary's directory. A running hub keeps the old version: quit it with `q` and run `factory` again.
+`factory update` downloads the release binary for your machine from GitHub over HTTPS, checks it against the release's `factory_checksums.txt`, and replaces the running one. It refuses a download that does not match, and it refuses when it cannot write to the binary's directory. Then it runs the new binary's `bootstrap`, so the skills, agents and hooks match it. When the node is installed and runs another version, `bootstrap` restarts it on the new binary.
+
+Then update asks every other node in your list to do the same and prints how each one ended: updated, already current, unreachable, or too old to update remotely, in which case you run `factory update` on that machine once. `--this-node` updates only this machine, and `--version <tag>` installs that release instead of the latest. When this machine already runs the latest release, update still restarts a node that runs an older binary and still updates the other nodes.
+
+Restarting a node stops a browser QA run or walkthrough in progress, which recovers as `node_restart`. Factory sessions keep running. A running hub keeps the old version: quit it with `q` and run `factory` again.
 
 ## Develop
 
@@ -172,7 +171,7 @@ Pull requests and pushes to `main` always start CI. Changed paths select the Go 
 
 | Changed paths | Validation |
 |---|---|
-| Root `*.go`, `cmd/**`, `internal/**`, `bundle/**` except `bundle/review/**`, `go.mod`, `go.sum`, release workflow | Go |
+| Root `*.go`, `cmd/**`, `internal/**`, `bundle/**` except `bundle/review/**`, `go.mod`, `go.sum`, `install.sh`, release workflow | Go |
 | `bundle/review/**` (the review overlay the phone app's browser tests load) | Go and web |
 | `apps/pwa/**`, `apps/web/public/fonts/**` (the app's embedded fonts), root pnpm manifests and lockfile, `turbo.json`, `.nvmrc` | Go and web |
 | Other `apps/**` (the site in `apps/web`: source, public assets, scripts, tests and config), `packages/**` | Web |
@@ -184,7 +183,7 @@ Mixed changes run the union of the matching workloads. Go-owned directories incl
 Require the final `ci` check in branch protection. It reports success only when change detection succeeds and both workloads succeed or are skipped; failures, cancellations and unexpected results fail it. After adopting this workflow, replace any old matrix requirements with `ci` manually. A started workflow reports this aggregate after path skips or dependency failures, but platform outages, manual workflow cancellation and commit-level CI-skip directives still affect reporting.
 ### Releases
 
-Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `go.mod`, `go.sum`, the release workflow, or what the embedded phone app is built from: `apps/pwa/`, the site's fonts it bundles, root pnpm manifests and lockfile, `turbo.json` and `.nvmrc`. Other site, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The release installs the frozen JavaScript dependencies, builds and embeds the phone app, and fails when a binary lacks the app's build stamp. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64`. An already-tagged main HEAD skips automatic release.
+Pushes to `main` publish a release when they change root Go files, `cmd/`, `internal/`, `bundle/`, `go.mod`, `go.sum`, the release workflow, or what the embedded phone app is built from: `apps/pwa/`, the site's fonts it bundles, root pnpm manifests and lockfile, `turbo.json` and `.nvmrc`. Other site, CI-only and root documentation changes alone do not release; embedded documentation in `bundle/` does. The release installs the frozen JavaScript dependencies, builds and embeds the phone app, and fails when a binary lacks the app's build stamp. The patch version goes up by one from the highest stable semantic-version tag (the first is `v0.1.0`), with a binary for `darwin_arm64`, `darwin_amd64`, `linux_amd64` and `linux_arm64` and their sha256 sums in `factory_checksums.txt`, which `factory update` and `install.sh` verify. `install.sh` is served from `main`, so changing it alone does not release. An already-tagged main HEAD skips automatic release.
 
 For a minor or major bump, push the tag yourself (`git tag v0.2.0 && git push origin v0.2.0`), and that exact release is published instead. A `v*` tag push releases regardless of changed paths, including tags on site-only commits.
 
@@ -225,7 +224,7 @@ Every machine runs one node, which owns its factories: their tmux panes, review 
 | `factory init ~/dev/new-repo` | non-interactive equivalent for scripts and headless setups; add and configure repos interactively from the hub’s `n` dialog |
 | `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 
-An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `host`, `node`, `move`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
+An id is made of lowercase letters, digits and dashes; `factory open "CSV Export"` uses `csv-export`. The command words (`open`, `init`, `doctor`, `setup`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `host`, `node`, `move`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog and by `factory open`; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
 
 The binary replaces the old `factory` shell function; remove that function from your shell config.
 
@@ -244,7 +243,7 @@ Upgrading from a release with ssh remotes: the first command you type, such as `
 | `factory node install` | checks that Tailscale is logged in on an untagged device, HTTPS Certificates are on, every Funnel entry is off and `https://<machine>.<tailnet>.ts.net/` serves nothing else; saves `node.owner` and `node.hostname`; writes and loads the service; waits for the node to answer; then serves it with `tailscale serve --bg --https=443 http://127.0.0.1:<node.port>` |
 | `factory node uninstall` | unloads and removes the service, and removes the Serve mapping only while it still points at the node |
 | `factory node status` | prints whether the service is installed and running, the running and configured versions, the port, the tailnet, the URL and what keep-awake does now; it works while the node is stopped |
-| `factory node install --join` / `--no-join` | answers the join question for scripts; without a terminal, install refuses to guess when it finds a node |
+| `factory node install --join` / `--no-join` | answers the join question for scripts; without a terminal, install refuses to guess when it finds a node; `factory setup` always joins |
 | `factory node list` | prints the node list, this machine first, with changes a node has not confirmed yet and the phone app's home |
 | `factory node add <machine>` | checks a machine from `tailscale status` (short name, full name or tailnet address) and adds it |
 | `factory node remove <node>` | removes a node from the list on every node; its factories keep running there |
@@ -257,15 +256,25 @@ The nodes keep one node list between them, in `roster.json` in each state direct
 
 Adding a machine reads `tailscale status` and asks only your own online, untagged macOS and Linux machines, at `https://<machine>.<tailnet>.ts.net`, for 2 seconds each; a typed name must be one that `tailscale status` lists, never a URL. Checking writes nothing anywhere: the machine runs its own readiness checks (tools, Claude login, git access, clones) and sends the results back, and a check with no answer in 10 seconds counts as failed. Funnel on, another owner, a tagged machine, another tailnet, an incompatible node API or a node already in another list refuse the add, with the fix. Missing tools, logins, git access or clones do not: the node joins, and creating a factory there refuses, naming each fix, until they pass. Nodes confirm each other by calling back each other's canonical HTTPS name with a one-use challenge that expires after 2 minutes; the routes for that refuse any request from a browser. The phone app's home stays the first node's URL, and a browser on it reads every node in the list; other origins get nothing. `node.target` in `config.yml` names the node this hub creates new factories on.
 
+The nodes also keep your shared settings in sync, so a new machine needs no copying by hand:
+
+- `rules.md`;
+- the `agents`, `supervisor`, `pipelines`, `default_pipeline`, `stalled_after` and `codex` keys of `config.yml`;
+- your repo list, with each repo's `.factory/config.yml`.
+
+A node checks its own copies every 15 seconds. An edit on any node reaches every node it can reach, and the last edit wins. A node that receives a newer version saves the file it replaces as `<file>.<time>.bak`. It changes only those keys in `config.yml`, keeps your comments, and applies them without a restart. A node that joins takes the list's settings over its own. A repo another node lists is cloned on this node with this node's own git login, and gets that repo's config instead of a template.
+
+Everything else stays on its machine: `repos` paths, `hub`, `alerts`, `icons`, `tmux`, `review`, `node`, `phone`, credentials, `.env` files and logins. Deleting a file or forgetting a repo changes only the machine you do it on. The settings live in `settings.json` in the state directory. A node on a release without this sync simply doesn't take part until `factory update` reaches it.
+
 Adding a node also gives it the list's push key, the phones' subscriptions and the app home, sent node to node over the tailnet only to the machine that answered the challenge for that add; the key never reaches a browser, the output, a log or a factory directory, and it lands in the new node's state directory, readable only by you. Each node then notifies your phone on its own with the same key, so a phone subscribes once. When the machine already notifies a phone with a key of its own, the add says so first: `p` in the hub, or the phone's choice to switch the key, replaces it, and the phone subscribed to the old key subscribes again. Without that choice, or with `factory node install --join`, the machine joins but keeps its key, can't notify your phone and says so, and `factory node push-key export` on another node with `import --replace` there switches it later. Turning notifications on or off, a browser's renewed subscription and a push service retiring one reach every node in the list within 15 seconds; an older failure never removes a newer subscription. A node that learns it was removed forgets the list's phones and drops the notifications it had queued. A notification names the node that sent it, so the installed app opens that factory on its node even while the first node is down, and resolving one node's item never clears another node's notification.
 
-On macOS the service is the launchd agent `~/Library/LaunchAgents/dev.factory.node.plist`. It starts when you log in: after a reboot the node waits for your login, and FileVault's login screen is not enough. On Linux it is the systemd user unit `~/.config/systemd/user/factory-node.service`, and install turns on lingering with `loginctl enable-linger` so the node starts at boot and keeps running after you log out; when that needs root, install says so and `sudo loginctl enable-linger <you>` fixes it. Both run this binary's absolute path in your home directory with `PATH`, `HOME`, `SHELL`, locale and the `FACTORY_*`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` variables of the shell that installed it, and nothing else from its environment. The node's log is `logs/node.log` in the state directory, readable only by you. A systemd stop leaves the tmux server and its agents running.
+On macOS the service is the launchd agent `~/Library/LaunchAgents/dev.factory.node.plist`. It starts when you log in: after a reboot the node waits for your login, and FileVault's login screen is not enough. On Linux it is the systemd user unit `~/.config/systemd/user/factory-node.service`, and install turns on lingering with `loginctl enable-linger` so the node starts at boot and keeps running after you log out; when that needs root, install says so and `sudo loginctl enable-linger <you>` fixes it. In a shell without a systemd user session, such as after `sudo -iu <user>`, factory finds that user's session in `/run/user/<uid>` by itself once lingering is on. Both run this binary's absolute path in your home directory with `PATH`, `HOME`, `SHELL`, locale and the `FACTORY_*`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` variables of the shell that installed it, and nothing else from its environment. The node's log is `logs/node.log` in the state directory, readable only by you. A systemd stop leaves the tmux server and its agents running.
 
 Install refuses, before it changes anything, a tagged device (`sudo tailscale up --advertise-tags= --force-reauth`, then sign in as yourself), HTTPS Certificates off, a Funnel entry, which it lists with its own `tailscale funnel … off` command, and anything else on `https://<machine>.<tailnet>.ts.net/`. It adopts an existing mapping that already points at the node. If a step fails, it says which and records what it finished in `node-install.json` in the state directory: a service whose node never answers is unloaded again, and running install again completes the rest. The QR prints once, when an install first completes. Uninstall keeps factories, their panes, push keys, subscriptions, `config.yml` and every other Serve entry. On Linux, `tailscale serve` and `tailscale funnel` changes need sudo unless you are the Tailscale operator (`sudo tailscale set --operator=$USER`).
 
 On a Mac, the node keeps the machine awake while it has an active factory and the Mac draws from external power: it holds a sleep assertion with `caffeinate -i`, so the Mac does not sleep when it sits idle. An active factory is one that is not paused, archived or done; a factory waiting for you counts, so the phone can still reach its review pages. The node checks every 15 seconds and lets go on battery, when the last active factory pauses or finishes, and when the node stops. `node.keep_awake: false` in `config.yml` turns it off. Keep-awake does not make closing a laptop's lid supported: a Mac with its lid closed may still sleep. Linux nodes do not apply it; keep the machine itself from suspending.
 
-`factory doctor` checks the node: Tailscale login, that `node.owner` is that untagged user, `node.hostname`, HTTPS certificates, the Serve mapping, every Funnel entry, the service and its unit, the running process, lingering, keep-awake, the permissions of the state directory, sockets and log, and the push services, each failure with its own fix.
+`factory doctor` checks the node: Tailscale login, that `node.owner` is that untagged user, `node.hostname`, HTTPS certificates, the Serve mapping, every Funnel entry, the service and its unit, the running process and that it runs this binary's version, lingering, keep-awake, the permissions of the state directory, sockets and log, and the push services, each failure with its own fix.
 
 In the hub, `N` opens the Nodes popup: every node in the list with its state (`● this machine`, `● running`, `◌ asking…`, `! n to fix` or `↮ unreachable 12m`), version, factories and how many need you, the node new factories run on, and the phone app's URL with whether notifications are on. Each node answers for itself, so a slow one never holds up the others. `⏎` on this machine runs the node checks of `factory phone check`; on another node it shows that node's own readiness checks with the fix for each, and for a node that does not answer, whether Tailscale sees the machine offline or online with its node silent. `a` adds a node in two steps: pick one of your machines (offline, tagged and node-less machines show why they can't be picked) or type its name, then read its checks; only `⏎` on the checks adds it, and a refusal offers no `⏎`. `c` clones a repo a node is missing, with that node's git login; `d` makes a node the default for new factories (`node.target`); `x` removes a node after `y`, and refuses this machine with the `factory node uninstall` advice. The first time a node starts, the hub's footer says `<machine>'s node is running. N shows it and the URL your phone opens.`, once.
 
@@ -360,6 +369,8 @@ review:
 
 `alerts.desktop` sends a desktop notification when a factory needs you: through `osascript` on macOS and `notify-send` on Linux. The older `alerts.macos` key still works. `hub.session` names the session on factory's tmux server that holds the hub and the factories' panes. `icons: unicode` draws plain Unicode instead of Nerd Font icons. The node serves the factories' design and plan pages to the phone app and the hub through its own listener and to local tools through the owner-only `review.sock` in the state directory; it never opens a browser window. `review.chrome` names the Chrome binary for headless browser QA when it is not in the usual place. `review.browsers` is how many headless QA browsers the node runs at once; a QA stage over that waits, says so in the factory's activity, and starts when one finishes. Older `review.port` and `review.browser` keys are ignored. Every other value above is the default.
 
+`stalled_after`, `agents`, `supervisor`, `pipelines`, `default_pipeline` and `codex` are shared: an edit on one node reaches your other nodes, which apply it without a restart (see [Several nodes](#several-nodes)). The other keys stay on the machine you set them on.
+
 State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/factory` or `$FACTORY_STATE_DIR`.
 
 ### Repo config
@@ -395,7 +406,7 @@ qa: {mode: browser, url: 'http://localhost:${FACTORY_WEB_PORT}/', start: PORT=$F
 
 `qa.url` makes a stack portable: the node picks a free loopback port for each stack, exports it to `qa.start`, `qa.seed` and `qa.sign_in` as `FACTORY_WEB_PORT` and `FACTORY_API_PORT`, expands `${FACTORY_WEB_PORT}` and `${FACTORY_API_PORT}` in `qa.url` and `qa.health`, and runs the commands in the worktree. `FACTORY_PUBLIC_ORIGIN` holds the origin a browser uses: the review stack's tailnet HTTPS origin, or the local one for QA. Point the dev server's allowed hosts or public URL at it if the app checks them. Without `qa.url` the stack uses the fixed `qa.web_port` and `qa.api_port`, so only one stack per repo runs on a node at a time; `factory doctor` warns about it. `qa.url` must be an `http` URL on `localhost` with a port. Sign-in reads credentials from the node's own environment; its cookies go only into the job's temporary profile or the browser that opened the one-use link, never into the factory directory.
 
-`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
+`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. The repo config itself is shared: every node that lists the repo gets the same `.factory/config.yml`. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
 
 ## Pipelines
 
