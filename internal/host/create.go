@@ -25,7 +25,7 @@ type CreateRequest struct {
 	Agents     map[string]state.AgentSetting
 	Supervisor state.AgentSetting
 
-	WatchComments bool
+	WatchComments bool `json:",omitempty"`
 }
 
 func (m *Runtime) Create(r CreateRequest) (string, error) {

@@ -57,10 +57,10 @@ func runSetup(args []string) int {
 		fmt.Fprintf(os.Stderr, "\nThen run %s again as %s.\n", s.Command, s.User)
 		return 1
 	case errors.As(err, &manual):
-		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s\nthen run factory setup again: it skips what is already done.\n", err)
+		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s\nthen run %s again: it skips what is already done.\n", err, s.Command)
 		return 1
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s.\nFix that, then run factory setup again: it skips what is already done.\n", err)
+		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s.\nFix that, then run %s again: it skips what is already done.\n", err, s.Command)
 		return 1
 	}
 	return finishSetup()
@@ -202,7 +202,7 @@ func nodeStep(withTailscale bool) setup.Step {
 				return tailnetNodeReason(ctx, cfg)
 			case !record.Complete || !nodeAnswers(cfg):
 				return "runs this machine's node as a service, for this machine only"
-			case joinable(ctx, cfg):
+			case s.Tailscale && joinable(ctx, cfg):
 				return "joins the node list of your other machines"
 			}
 			return ""

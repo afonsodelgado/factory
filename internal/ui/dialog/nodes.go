@@ -918,7 +918,7 @@ func (n *Nodes) drawAlone(c *theme.Canvas) {
 	c.Put(1, 5, "No other nodes yet. Every factory runs on this machine.", theme.Text)
 	y := paragraph(c, 7, "A node is any machine of yours that ran factory setup or factory node install, such as a home server that stays on. Its factories keep running while this laptop sleeps or travels, and this hub and your phone list them next to these.", theme.Text)
 	c.Spans(1, y+1, []theme.Span{{Text: "a", Ink: theme.Key}, {Text: "  add one from the machines on your tailnet", Ink: theme.Text}})
-	c.Spans(1, y+2, []theme.Span{{Text: "or, on the other machine:  ", Ink: theme.Muted}, {Text: "factory setup", Ink: theme.Bright}, {Text: "  installs what it needs and joins " + n.Context.Machine, Ink: theme.Muted}})
+	c.Spans(1, y+2, []theme.Span{{Text: "or, on the other machine:  ", Ink: theme.Muted}, {Text: node.AddTailscale, Ink: theme.Bright}, {Text: "  installs what it needs and joins " + n.Context.Machine, Ink: theme.Muted}})
 	y = n.drawPhoneApp(c, y+4, false)
 	n.drawProblem(c, y+1)
 	n.hint(c, "⏎ details   a add a node   esc close")
