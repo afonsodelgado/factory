@@ -555,7 +555,7 @@ func (r jobRecord) stop() {
 	}
 	profile := filepath.Join(r.Dir, "profile")
 	for range 20 {
-		if killUsing(profile) == 0 && os.RemoveAll(r.Dir) == nil {
+		if review.KillUsing(profile) == 0 && os.RemoveAll(r.Dir) == nil {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -579,21 +579,4 @@ func startTime(pid int) (string, bool) {
 func (p process) ours() bool {
 	started, alive := startTime(p.PID)
 	return !alive || started == p.Started
-}
-
-func killUsing(profile string) int {
-	out, err := exec.Command("ps", "-axww", "-o", "pid=,command=").Output()
-	if err != nil {
-		return 0
-	}
-	arg := "--user-data-dir=" + profile + " "
-	killed := 0
-	for line := range strings.SplitSeq(string(out), "\n") {
-		pid, command, _ := strings.Cut(strings.TrimSpace(line), " ")
-		n, err := strconv.Atoi(pid)
-		if err == nil && strings.Contains(command+" ", arg) && syscall.Kill(n, syscall.SIGKILL) == nil {
-			killed++
-		}
-	}
-	return killed
 }
