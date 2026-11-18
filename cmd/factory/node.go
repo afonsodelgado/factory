@@ -88,12 +88,15 @@ func runNodeService(cfg *state.Config, owner string, ts node.Tailscale) error {
 		return err
 	}
 	defer n.close()
-	fmt.Printf("factory node: %s on %s and 127.0.0.1:%d\n", owner, cfg.NodeSocket(), cfg.NodePort())
+	fmt.Printf("factory node: %s on %s and 127.0.0.1:%d\n", cmp.Or(owner, "this machine only"), cfg.NodeSocket(), cfg.NodePort())
 	return n.wait()
 }
 
 func learnIdentity(ctx context.Context, cfg *state.Config, owner string, ts node.Tailscale) (string, error) {
 	hostname := cfg.NodeHostname()
+	if owner == "" && hostname == "" {
+		return "", nil
+	}
 	if owner == "" || hostname == "" {
 		self, err := ts.Status(ctx)
 		switch {
@@ -169,7 +172,10 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	browsers := &node.Browsers{Chrome: cfg.Review.Chrome, Max: cfg.Review.Browsers, StateDir: cfg.StateDir, Ctx: ctx}
 	exposure := &node.Exposure{Tailscale: ts}
 	refusal, exposed := phone.RefusalPage(cfg.NodeName()), phone.ExposedPage(cfg.NodeName())
-	stacks := &node.Stacks{Tailscale: ts, Gate: node.Gate{Owner: owner, RefusalPage: refusal, ExposedPage: exposed, Exposure: exposure}, Host: cfg.NodeHostname(), Origin: cfg.NodeOrigin(), Review: pages, StateDir: cfg.StateDir}
+	stacks := &node.Stacks{Tailscale: ts, Gate: node.Gate{Owner: owner, RefusalPage: refusal, ExposedPage: exposed, Exposure: exposure}, Origin: cfg.NodeOrigin(), Review: pages, StateDir: cfg.StateDir}
+	if owner != "" {
+		stacks.Host = cfg.NodeHostname()
+	}
 	n := &runningNode{closers: []io.Closer{pages, browsers, stacks}, stopped: make(chan error, 1)}
 	reviewListener, err := node.ListenUnix(cfg.ReviewSocket())
 	if err != nil {
@@ -203,12 +209,16 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	transfers.HoldUnverified(ctx)
 	go transfers.Watch(ctx)
 	go api.Poll(ctx)
-	go nodes.Replicate(ctx)
+	if owner != "" {
+		go nodes.Replicate(ctx)
+	}
 	go nodes.Settings.Run(ctx)
 	app := http.NewServeMux()
 	app.HandleFunc("GET /w/{route}", stacks.Open)
 	app.Handle("/", phoneApp(ctx, cfg, api, pages, nodes))
-	go exposure.Watch(ctx)
+	if owner != "" {
+		go exposure.Watch(ctx)
+	}
 	gate := node.Gate{Owner: owner, Hosts: nodeHosts(cfg), Origin: cfg.NodeOrigin(), Home: nodes.Dir.Home, OpaquePath: phone.GrantPrefix, RefusalPage: refusal, ExposedPage: exposed, Exposure: exposure}
 	unixListener, err := node.ListenUnix(cfg.NodeSocket())
 	if err != nil {
@@ -232,8 +242,10 @@ func nodeRoster(ctx context.Context, cfg *state.Config, id, owner string, ts nod
 	}
 	self := node.Member{ID: id, Name: cfg.NodeHostname(), Owner: owner, OS: nodeOS()}
 	_, self.Tailnet, _ = strings.Cut(self.Name, ".")
-	if status, err := ts.Status(ctx); err == nil {
-		self.Peer = status.ID
+	if owner != "" {
+		if status, err := ts.Status(ctx); err == nil {
+			self.Peer = status.ID
+		}
 	}
 	if self.Name != "" {
 		if err := dir.Seed(self, cfg.NodeOrigin()); err != nil {
@@ -370,6 +382,8 @@ func runNodeList(args []string) int {
 	}
 	ctx := context.Background()
 	switch {
+	case !cfg.TailscaleNode() && len(args) <= 2:
+		return withoutTailscale(ctx, cfg, c, args)
 	case args[0] == "list" && len(args) == 1:
 		err = listNodes(ctx, c, os.Stdout)
 	case args[0] == "add" && len(args) == 2:
@@ -384,6 +398,25 @@ func runNodeList(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory node:", err)
 		return 1
 	}
+	return 0
+}
+
+func withoutTailscale(ctx context.Context, cfg *state.Config, c *node.Client, args []string) int {
+	here := cfg.NodeName()
+	if args[0] != "list" {
+		next := node.AddTailscale + " adds it."
+		if args[0] == "add" && len(args) == 2 {
+			next = fmt.Sprintf("Run %s here, then %s on %s.", node.AddTailscale, node.AddTailscale, args[1])
+		}
+		fmt.Fprintf(os.Stderr, "factory node: %s.\n%s\n", node.NeedsTailscale(node.NodesFeature, here), next)
+		return 1
+	}
+	var snap node.Snapshot
+	if err := c.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap); err != nil {
+		fmt.Fprintln(os.Stderr, "factory node:", err)
+		return 1
+	}
+	fmt.Printf("%-10s this machine   %-8s %s\nOther machines join over Tailscale: %s adds it.\n", here, snap.Version, factoryCount(len(snap.Factories)), node.AddTailscale)
 	return 0
 }
 

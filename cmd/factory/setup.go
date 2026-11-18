@@ -26,22 +26,23 @@ import (
 )
 
 const (
-	factorySetupUsage = "usage: factory setup [--yes]"
+	factorySetupUsage = "usage: factory setup [--tailscale] [--yes]"
 	settingsWait      = 2 * time.Minute
 )
 
 func runSetup(args []string) int {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	yes := flags.Bool("yes", false, "answer every question with its default and never wait for Enter")
+	tailscale := flags.Bool("tailscale", false, "add Tailscale, so your phone and your other machines reach this node")
 	if err := flags.Parse(args); err != nil || flags.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, factorySetupUsage)
 		return 2
 	}
 	home, _ := os.UserHomeDir()
 	os.Setenv("PATH", filepath.Join(home, ".local", "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	s := newSetupSession(home, *yes || !term.IsTerminal(os.Stdin.Fd()))
+	s := newSetupSession(home, *yes || !term.IsTerminal(os.Stdin.Fd()), *tailscale)
 	ctx := context.Background()
-	_, err := setup.Run(ctx, s, append(setup.Machine(), setupSteps()...))
+	_, err := setup.Run(ctx, s, append(setup.Machine(s.Tailscale), setupSteps(s.Tailscale)...))
 	var root setup.NeedsRoot
 	switch {
 	case errors.Is(err, setup.ErrDeclined):
@@ -52,7 +53,7 @@ func runSetup(args []string) int {
 		for _, command := range root.Commands {
 			fmt.Fprintln(os.Stderr, "  "+command)
 		}
-		fmt.Fprintf(os.Stderr, "\nThen run factory setup again as %s.\n", s.User)
+		fmt.Fprintf(os.Stderr, "\nThen run %s again as %s.\n", s.Command, s.User)
 		return 1
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "\nfactory setup stopped at %s.\nFix that, then run factory setup again: it skips what is already done.\n", err)
@@ -61,25 +62,35 @@ func runSetup(args []string) int {
 	return finishSetup()
 }
 
-func newSetupSession(home string, yes bool) *setup.Session {
+func newSetupSession(home string, yes, addingTailscale bool) *setup.Session {
 	login := os.Getenv("USER")
 	if u, err := user.Current(); err == nil {
 		login = u.Username
 	}
 	host, _ := os.Hostname()
 	host, _, _ = strings.Cut(host, ".")
+	command := "factory setup"
+	if addingTailscale {
+		command += " --tailscale"
+	}
+	var machine state.Machine
+	if cfg, err := state.LoadConfig(); err == nil {
+		machine = cfg.Machine
+	}
 	return &setup.Session{
-		Run:      node.System,
-		Interact: interact,
-		CanSudo:  canSudo,
-		In:       bufio.NewReader(os.Stdin),
-		Out:      os.Stdout,
-		Home:     home,
-		User:     login,
-		Host:     host,
-		OS:       runtime.GOOS,
-		Options:  doctorOptions,
-		Yes:      yes,
+		Tailscale: setup.WantsTailscale(addingTailscale, machine),
+		Command:   command,
+		Run:       node.System,
+		Interact:  interact,
+		CanSudo:   canSudo,
+		In:        bufio.NewReader(os.Stdin),
+		Out:       os.Stdout,
+		Home:      home,
+		User:      login,
+		Host:      host,
+		OS:        runtime.GOOS,
+		Options:   doctorOptions,
+		Yes:       yes,
 	}
 }
 
@@ -113,8 +124,8 @@ func canSudo(ctx context.Context) bool {
 	return interact(ctx, "sudo", "-v") == nil
 }
 
-func setupSteps() []setup.Step {
-	return []setup.Step{skillsStep(), nodeStep(), repoToolsStep(), browserStep()}
+func setupSteps(withTailscale bool) []setup.Step {
+	return []setup.Step{skillsStep(), nodeStep(withTailscale), repoToolsStep(), browserStep()}
 }
 
 func skillsStep() setup.Step {
@@ -161,9 +172,21 @@ func joinable(ctx context.Context, cfg *state.Config) bool {
 	return slices.ContainsFunc(answer.Candidates, func(c node.Candidate) bool { return c.Selectable })
 }
 
-func nodeStep() setup.Step {
+func tailnetNodeReason(ctx context.Context, cfg *state.Config) string {
+	var snap node.Snapshot
+	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) == nil && len(snap.Factories) > 0 {
+		return fmt.Sprintf("serves this node on your tailnet; its %s keep running", factoryCount(len(snap.Factories)))
+	}
+	return "serves this node on your tailnet and joins your other nodes"
+}
+
+func nodeStep(withTailscale bool) setup.Step {
+	name := "node"
+	if withTailscale {
+		name = "tailnet node"
+	}
 	return setup.Step{
-		Name: "node",
+		Name: name,
 		Needed: func(ctx context.Context, s *setup.Session) string {
 			cfg := s.Options().Config
 			if cfg == nil {
@@ -171,8 +194,10 @@ func nodeStep() setup.Step {
 			}
 			record, _ := node.LoadInstall(cfg.StateDir)
 			switch {
+			case s.Tailscale && (!cfg.TailscaleNode() || !record.Complete || !nodeAnswers(cfg)):
+				return tailnetNodeReason(ctx, cfg)
 			case !record.Complete || !nodeAnswers(cfg):
-				return "runs this machine's node as a service and joins your other nodes"
+				return "runs this machine's node as a service, for this machine only"
 			case joinable(ctx, cfg):
 				return "joins the node list of your other machines"
 			}
@@ -184,7 +209,7 @@ func nodeStep() setup.Step {
 				return err
 			}
 			n := newNodeSetup(cfg, s.Out)
-			n.in, n.tty, n.join = s.In, true, alwaysJoin
+			n.withTailscale, n.in, n.tty, n.join = s.Tailscale, s.In, true, alwaysJoin
 			if err := n.install(ctx); err != nil {
 				return err
 			}
@@ -211,6 +236,16 @@ func awaitSettings(ctx context.Context, cfg *state.Config, s *setup.Session) {
 		time.Sleep(2 * time.Second)
 	}
 	install.WriteCheck(s.Out, install.Check{Name: "settings", Mark: install.Warn, Detail: "still copying; the node keeps going in the background, and factory doctor shows what is missing"})
+}
+
+func joinedHome(cfg *state.Config) string {
+	var roster node.Roster
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/nodes", nil, &roster) != nil || len(roster.Members) < 2 {
+		return ""
+	}
+	return roster.Home
 }
 
 func failing(checks []install.Check, names ...string) []install.Check {
@@ -309,8 +344,14 @@ func finishSetup() int {
 			install.WriteCheck(os.Stdout, c)
 		}
 	}
-	if o.Config != nil && o.Config.NodeHostname() != "" {
-		fmt.Printf("\nThis machine is a factory node at https://%s.\nOpen the hub with factory, or that URL on your phone with Tailscale on.\n", o.Config.NodeHostname())
+	switch {
+	case o.Config != nil && o.Config.TailscaleNode():
+		fmt.Printf("\nThis machine is a factory node at https://%s.\nOpen the hub with factory, or the phone app with Tailscale on.\n", o.Config.NodeHostname())
+		if home := joinedHome(o.Config); home != "" {
+			fmt.Printf("phone app  %s\n", home)
+		}
+	case o.Config != nil:
+		printOnItsOwn(os.Stdout, o.Config.NodeName())
 	}
 	if slices.ContainsFunc(open, func(c install.Check) bool { return c.Mark == install.Fail && c.Name != "repos" }) {
 		return 1

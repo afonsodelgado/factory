@@ -193,7 +193,11 @@ func NodeChecks(o Options) []Check {
 	defer cancel()
 	checks := tailnetChecks(ctx, o.Config, node.Tailscale{Run: run})
 	checks = append(checks, serviceChecks(ctx, o, node.NewService(o.Config, o.Binary, o.Home, run))...)
-	return append(checks, keepAwake(ctx, o.Config), permissions(o.Config), pushReach(ctx, o.DialTLS))
+	checks = append(checks, keepAwake(ctx, o.Config), permissions(o.Config))
+	if !o.Config.TailscaleNode() {
+		return checks
+	}
+	return append(checks, pushReach(ctx, o.DialTLS))
 }
 
 func nodeProcess(ctx context.Context, o Options, pid string) Check {
@@ -221,6 +225,9 @@ func keepAwake(ctx context.Context, cfg *state.Config) Check {
 }
 
 func tailnetChecks(ctx context.Context, cfg *state.Config, ts node.Tailscale) []Check {
+	if !cfg.TailscaleNode() {
+		return []Check{{Name: "tailscale", Mark: Off, Detail: "not connected: " + node.AddTailscale + " adds the phone and other machines"}}
+	}
 	self, err := ts.Status(ctx)
 	switch {
 	case errors.Is(err, node.ErrNoTailscale):
@@ -441,7 +448,7 @@ func dirExists(path string) bool {
 
 var markRank = map[Mark]int{Skip: 0, Pass: 1, Warn: 2, Fail: 3}
 
-var nodeMarks = map[Mark]string{Pass: node.MarkOK, Warn: node.MarkWarn, Fail: node.MarkFail, Skip: node.MarkSkip}
+var nodeMarks = map[Mark]string{Pass: node.MarkOK, Warn: node.MarkWarn, Fail: node.MarkFail, Skip: node.MarkSkip, Off: node.MarkSkip}
 
 func combined(name string, checks []Check) node.Check {
 	worst := Skip

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,17 +15,19 @@ import (
 )
 
 type Session struct {
-	Run      node.Runner
-	Interact func(ctx context.Context, name string, args ...string) error
-	CanSudo  func(ctx context.Context) bool
-	In       *bufio.Reader
-	Out      io.Writer
-	Home     string
-	User     string
-	Host     string
-	OS       string
-	Options  func() install.Options
-	Yes      bool
+	Run       node.Runner
+	Interact  func(ctx context.Context, name string, args ...string) error
+	CanSudo   func(ctx context.Context) bool
+	In        *bufio.Reader
+	Out       io.Writer
+	Home      string
+	User      string
+	Host      string
+	OS        string
+	Options   func() install.Options
+	Yes       bool
+	Tailscale bool
+	Command   string
 }
 
 type Step struct {
@@ -62,7 +65,7 @@ func Run(ctx context.Context, s *Session, steps []Step) (bool, error) {
 		fmt.Fprintln(s.Out, "Everything is set up. Nothing changed.")
 		return false, nil
 	}
-	fmt.Fprintf(s.Out, "factory setup · %s\n\n", s.Host)
+	fmt.Fprintf(s.Out, "%s · %s\n\n", cmp.Or(s.Command, "factory setup"), s.Host)
 	for _, line := range todo {
 		fmt.Fprintln(s.Out, "  • "+line)
 	}

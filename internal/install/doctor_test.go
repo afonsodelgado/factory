@@ -125,13 +125,13 @@ func TestDoctorNamesEachNodeSetupGapAndItsFix(t *testing.T) {
 	served := `{"TCP":{"443":{"HTTPS":true}},"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}}}}`
 	funnels := `{"TCP":{"443":{"HTTPS":true},"8443":{"HTTPS":true},"10000":{"TCPForward":"127.0.0.1:5432"}},"Web":{"` + host + `:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7418"}}},"` + host + `:8443":{"Handlers":{"/grafana":{"Proxy":"http://127.0.0.1:3000"}}}},"AllowFunnel":{"` + host + `:443":true,"` + host + `:8443":true,"` + host + `:10000":true}}`
 	cases := []struct {
-		name, status, serve, owner string
-		missing, offline           bool
-		failing                    []string
-		fix                        string
+		name, status, serve, owner  string
+		missing, offline, ownerless bool
+		failing                     []string
+		fix                         string
 	}{
 		{name: "everything set up", status: running, serve: served},
-		{name: "no tailscale", missing: true, failing: []string{"tailscale"}},
+		{name: "a machine that never added Tailscale", missing: true, ownerless: true},
 		{name: "logged out", status: `{"BackendState":"NeedsLogin"}`, failing: []string{"tailscale"}},
 		{name: "a tagged device", status: tagged, serve: served, failing: []string{"owner"}, fix: "sudo tailscale up --advertise-tags= --force-reauth"},
 		{name: "another owner", status: running, serve: served, owner: "bob@example.com", failing: []string{"owner"}},
@@ -164,8 +164,15 @@ func TestDoctorNamesEachNodeSetupGapAndItsFix(t *testing.T) {
 				return nil
 			}
 			cfg := &state.Config{StateDir: t.TempDir(), Machine: state.Machine{Node: state.Node{Hostname: host, Owner: cmp.Or(c.owner, "alice@example.com")}}}
+			if c.ownerless {
+				cfg.Machine = state.Machine{}
+			}
+			checks := NodeChecks(Options{Config: cfg, Home: t.TempDir(), Run: run, DialTLS: dial})
+			if tailnetRows := slices.DeleteFunc(slices.Clone(checks), func(c Check) bool { return !slices.Contains(tailnet, c.Name) }); c.ownerless && (len(tailnetRows) != 1 || tailnetRows[0].Mark != Off) {
+				t.Errorf("a machine without Tailscale got tailnet rows %+v; want one row marked off, so setup and doctor never fail for it", tailnetRows)
+			}
 			var failing []string
-			for _, check := range NodeChecks(Options{Config: cfg, Home: t.TempDir(), Run: run, DialTLS: dial}) {
+			for _, check := range checks {
 				if check.Mark != Fail || !slices.Contains(tailnet, check.Name) {
 					continue
 				}

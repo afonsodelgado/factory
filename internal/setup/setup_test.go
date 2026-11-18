@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 type fakeMachine struct {
@@ -82,5 +84,33 @@ func TestSetupStopsWhenAStepIsStillNotDoneAfterItRan(t *testing.T) {
 	_, err := Run(context.Background(), s, []Step{stuck, f.step("gh-stack", false)})
 	if err == nil || !strings.Contains(err.Error(), "github login is still not done") || len(f.applied) > 0 {
 		t.Errorf("a login that did not take got %v and then ran %v; want setup to stop there", err, f.applied)
+	}
+}
+
+func TestOnlyATailscaleNodeOrTheFlagGetsTheTailscaleSteps(t *testing.T) {
+	tailscaleSteps := []string{"tailscale", "tailscale user", "tailscale login", "tailnet HTTPS"}
+	tailnetNode := state.Machine{Node: state.Node{Owner: "alice@example.com", Hostname: "macbook.tail1234.ts.net"}}
+	cases := []struct {
+		name    string
+		adding  bool
+		machine state.Machine
+		want    bool
+	}{
+		{name: "a machine with no record", want: false},
+		{name: "an existing Tailscale node", machine: tailnetNode, want: true},
+		{name: "factory setup --tailscale", adding: true, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var names []string
+			for _, step := range Machine(WantsTailscale(c.adding, c.machine)) {
+				names = append(names, step.Name)
+			}
+			for _, step := range tailscaleSteps {
+				if slices.Contains(names, step) != c.want {
+					t.Errorf("steps %v; want %q present=%v", names, step, c.want)
+				}
+			}
+		})
 	}
 }

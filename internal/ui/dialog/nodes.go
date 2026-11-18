@@ -385,6 +385,9 @@ func (n *Nodes) listKey(key string) tea.Cmd {
 	case "enter":
 		return n.openDetails()
 	case "a":
+		if !n.Context.Phone.Tailscale {
+			return nil
+		}
 		return n.openPick()
 	case "d":
 		n.makeDefault(row.Name)
@@ -804,6 +807,9 @@ func (n *Nodes) drawList(c *theme.Canvas) {
 			title = fmt.Sprintf("%s · asking %d %s…", n.domain(), asking, nounFor(asking, "node"))
 		}
 	}
+	if !n.Context.Phone.Tailscale {
+		title = "this machine only"
+	}
 	c.Right(c.W-2, 0, title, theme.Muted)
 	newOnesX := min(defaultX, c.W-1-theme.Width("● default"))
 	for x, heading := range map[int]string{nodeX: "node", nodeStateX: "state", versionX: "version", countX: "factories", newOnesX: "new ones"} {
@@ -813,7 +819,11 @@ func (n *Nodes) drawList(c *theme.Canvas) {
 	for i, row := range n.Context.Others {
 		n.drawPeerRow(c, 4+i, i+1, row, newOnesX)
 	}
-	if len(n.Context.Others) == 0 {
+	switch {
+	case !n.Context.Phone.Tailscale:
+		n.drawWithoutTailscale(c)
+		return
+	case len(n.Context.Others) == 0:
 		n.drawAlone(c)
 		return
 	}
@@ -895,6 +905,17 @@ func (n *Nodes) drawAlone(c *theme.Canvas) {
 	y = n.drawPhoneApp(c, y+4, false)
 	n.drawProblem(c, y+1)
 	n.hint(c, "⏎ details   a add a node   esc close")
+}
+
+func (n *Nodes) drawWithoutTailscale(c *theme.Canvas) {
+	y := paragraph(c, 5, "Every factory runs on this machine. "+node.NeedsTailscale(node.NodesFeature, n.Context.Machine)+".", theme.Text)
+	y = paragraph(c, y+1, "A node is any machine of yours that runs factory, such as a home server that stays on. Its factories keep running while this laptop sleeps, and this hub and your phone list them next to these.", theme.Text)
+	y = addTailscale(c, y+1, "installs and logs in Tailscale and serves this node on your tailnet. Every factory, setting and repo here stays as it is.")
+	c.Spans(1, y, []theme.Span{{Text: "then, on the other machine:  ", Ink: theme.Muted}, {Text: node.AddTailscale, Ink: theme.Bright}, {Text: "  joins " + n.Context.Machine, Ink: theme.Muted}})
+	c.Put(1, y+2, "Phone app", theme.Bright.B())
+	c.Put(valueX, y+2, "off: the phone app needs Tailscale too", theme.Muted)
+	n.drawProblem(c, y+4)
+	n.hint(c, "⏎ details   esc close")
 }
 
 func (n *Nodes) targetName() string {

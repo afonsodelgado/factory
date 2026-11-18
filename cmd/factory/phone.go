@@ -37,12 +37,16 @@ func runPhone(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory phone:", err)
 		return 1
 	}
-	switch args[0] {
-	case "status":
+	needsTailscale := (args[0] == "test" || args[0] == "check") && !cfg.TailscaleNode()
+	switch {
+	case needsTailscale:
+		fmt.Fprintln(os.Stderr, "factory phone: "+node.NeedsTailscale(node.PhoneFeature, cfg.NodeName())+".\n"+node.AddTailscale+" adds it. Every factory keeps running.")
+		return 1
+	case args[0] == "status":
 		err = printPhoneStatus(os.Stdout, cfg)
-	case "test":
+	case args[0] == "test":
 		err = printTestPush(os.Stdout, cfg)
-	case "check":
+	case args[0] == "check":
 		if summarize("factory phone check · checks only, changes nothing", phoneDoctor(cfg)) > 0 {
 			return 1
 		}
@@ -59,7 +63,7 @@ func runPhone(args []string) int {
 
 func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
 	subs, err := phone.Open(cfg.StateDir).Subscriptions()
-	return dialog.PhoneContext{Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
+	return dialog.PhoneContext{Machine: cfg.NodeName(), Tailscale: cfg.TailscaleNode(), Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
 }
 
 func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.NodesContext) dialog.NodesContext {
@@ -123,6 +127,10 @@ func printPhoneStatus(w io.Writer, cfg *state.Config) error {
 	running := "not running; start it with factory node run"
 	if status.Running {
 		running = "running"
+	}
+	if !cfg.TailscaleNode() {
+		fmt.Fprintf(w, "node      %s\nurl       none: %s\nport      127.0.0.1:%d, this machine only\nnotify    %d subscribed\n%s serves the app on your tailnet. Every factory keeps running.\n", running, node.NeedsTailscale(node.PhoneFeature, cfg.NodeName()), status.Port, status.Subscriptions, node.AddTailscale)
+		return nil
 	}
 	fmt.Fprintf(w, "node      %s\nurl       %s\nport      127.0.0.1:%d\nnotify    %d subscribed\n", running, url, status.Port, status.Subscriptions)
 	keys, err := phone.Open(cfg.StateDir).KeyState()

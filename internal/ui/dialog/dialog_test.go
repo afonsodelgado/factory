@@ -206,7 +206,7 @@ func (f *fakePhoneActions) Check() []CheckRow {
 }
 
 func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *testing.T) {
-	actions := &fakePhoneActions{status: PhoneContext{Running: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Subscriptions: 2}}
+	actions := &fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Subscriptions: 2}}
 	p := NewPhone(actions.status, actions)
 	p.Update(tea.WindowSizeMsg{Width: 74, Height: 18})
 	press := func(key string) {
@@ -226,7 +226,7 @@ func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *tes
 }
 
 func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(t *testing.T) {
-	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}}
+	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}}
 	n := NewNodes(NodesContext{Machine: "macbook", Tailnet: "tail5e2c.ts.net", Version: "0.9.4", Factories: 2, NeedsYou: 1, Phone: actions.status}, actions)
 	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
 	golden.RequireEqual(t, n.View().Content)
@@ -448,7 +448,7 @@ var nodesNow = time.Date(2026, 11, 16, 12, 10, 0, 0, time.Local)
 func threeNodes(t *testing.T) (*Nodes, *fakeNodeActions) {
 	t.Helper()
 	actions := &fakeNodeActions{
-		fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}},
+		fakePhoneActions: fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}},
 		answers: map[string]NodeAnswer{"homelab.tail5e2c.ts.net": {
 			Snapshot: node.Snapshot{Version: "0.9.4", Factories: []host.LocalFactory{{ID: "rate-limits"}, {ID: "doctor-json", NeedsSince: nodesNow}}},
 			Report:   node.Report{At: nodesNow},

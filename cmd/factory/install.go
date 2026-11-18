@@ -231,21 +231,22 @@ const (
 )
 
 type nodeSetup struct {
-	cfg       *state.Config
-	tailscale node.Tailscale
-	service   node.Service
-	app       func() error
-	wait      time.Duration
-	out       io.Writer
-	in        io.Reader
-	tty       bool
-	join      joinChoice
+	cfg           *state.Config
+	withTailscale bool
+	tailscale     node.Tailscale
+	service       node.Service
+	app           func() error
+	wait          time.Duration
+	out           io.Writer
+	in            io.Reader
+	tty           bool
+	join          joinChoice
 }
 
 func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
 	home, _ := os.UserHomeDir()
 	return nodeSetup{
-		cfg: cfg, tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
+		cfg: cfg, withTailscale: cfg.TailscaleNode(), tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
 		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out,
 	}
 }
@@ -285,6 +286,9 @@ func runNodeSetup(args []string) int {
 	switch args[0] {
 	case "install":
 		err = s.install(ctx)
+		if err == nil && !s.withTailscale {
+			printOnItsOwn(s.out, cfg.NodeName())
+		}
 	case "uninstall":
 		err = s.uninstall(ctx)
 	case "status":
@@ -300,7 +304,35 @@ func runNodeSetup(args []string) int {
 	return 0
 }
 
+func printOnItsOwn(out io.Writer, name string) {
+	fmt.Fprintf(out, "\n%s runs factories on its own. Open the hub with factory.\n%s connects your phone and your other machines.\n", name, node.AddTailscale)
+}
+
 func (s nodeSetup) install(ctx context.Context) error {
+	if !s.withTailscale {
+		return s.installService(ctx)
+	}
+	return s.installTailnet(ctx)
+}
+
+func (s nodeSetup) installService(ctx context.Context) error {
+	record, err := node.LoadInstall(s.cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "factory node install · %s\n\n", s.cfg.NodeName())
+	record.Binary = s.service.Binary
+	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
+		return err
+	}
+	if err := s.startService(ctx); err != nil {
+		return err
+	}
+	record.Complete = true
+	return node.SaveInstall(s.cfg.StateDir, record)
+}
+
+func (s nodeSetup) installTailnet(ctx context.Context) error {
 	record, err := node.LoadInstall(s.cfg.StateDir)
 	if err != nil {
 		return err
@@ -500,7 +532,11 @@ func (s nodeSetup) startService(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.passed("service", s.service.Loaded(persists))
+	reach := "; answers this machine only"
+	if s.withTailscale {
+		reach = ""
+	}
+	s.passed("service", s.service.Loaded(persists)+reach)
 	if !persists {
 		install.WriteCheck(s.out, install.Check{Name: "at boot", Mark: install.Warn, Detail: detail, Fix: fix})
 	}
@@ -657,6 +693,9 @@ func (s nodeSetup) status(ctx context.Context) {
 		}
 	}
 	tailnet, url := "unknown until factory node install or factory node run learns it", "unknown"
+	if !s.cfg.TailscaleNode() {
+		tailnet, url = "none: "+node.AddTailscale+" adds it", "none: this machine only"
+	}
 	if host := s.cfg.NodeHostname(); host != "" {
 		_, tailnet, _ = strings.Cut(host, ".")
 		url = "https://" + host

@@ -12,6 +12,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const (
@@ -27,8 +28,18 @@ curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo 
 sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null`
 
-func Machine() []Step {
-	steps := []Step{packages(), tailscaleApp(), tailscaleOperator(), linger(), tailscaleLogin(), tailnetHTTPS(), sshKey(), githubLogin(), githubKey(), gitIdentity(), commitSigning(), claudeCode(), claudeLogin(), ghStack(), revmux()}
+func WantsTailscale(adding bool, m state.Machine) bool { return adding || m.TailscaleNode() }
+
+func Machine(withTailscale bool) []Step {
+	steps := []Step{packages()}
+	if withTailscale {
+		steps = append(steps, tailscaleApp(), tailscaleOperator())
+	}
+	steps = append(steps, linger())
+	if withTailscale {
+		steps = append(steps, tailscaleLogin(), tailnetHTTPS())
+	}
+	steps = append(steps, sshKey(), githubLogin(), githubKey(), gitIdentity(), commitSigning(), claudeCode(), claudeLogin(), ghStack(), revmux())
 	for _, p := range install.Plugins {
 		steps = append(steps, plugin(p))
 	}
@@ -131,7 +142,9 @@ func tailscaleApp() Step {
 		},
 		Apply: func(ctx context.Context, s *Session) error {
 			if !onLinux(s) {
-				return errors.New("install the Tailscale app from https://tailscale.com/download, open it and log in, then run factory setup again")
+				fmt.Fprintln(s.Out, "Install the Tailscale app from https://tailscale.com/download and open it.")
+				s.confirm("Press Enter once it is installed. ", true)
+				return nil
 			}
 			return s.shell(ctx, tailscaleInstall)
 		},

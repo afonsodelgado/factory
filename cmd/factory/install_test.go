@@ -210,7 +210,7 @@ func newFakeMachine(t *testing.T) (*fakeMachine, nodeSetup, *bytes.Buffer) {
 		f.stopNode()
 	})
 	var out bytes.Buffer
-	setup := nodeSetup{cfg: cfg, tailscale: node.Tailscale{Run: f.run}, service: node.NewService(cfg, "/opt/factory/bin/factory", home, f.run), app: func() error { return nil }, wait: 5 * time.Second, out: &out}
+	setup := nodeSetup{cfg: cfg, withTailscale: true, tailscale: node.Tailscale{Run: f.run}, service: node.NewService(cfg, "/opt/factory/bin/factory", home, f.run), app: func() error { return nil }, wait: 5 * time.Second, out: &out}
 	return f, setup, &out
 }
 
@@ -270,6 +270,39 @@ func TestNodeInstallStartsAPrivateServiceBeforeServeAndShowsOnlyTheAppURL(t *tes
 	}
 	if got := f.take(); slices.Contains(got, "tailscale "+strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " ")) || strings.Contains(out.String(), "█") {
 		t.Errorf("a second install ran %v and printed\n%s\nwant the existing mapping adopted and no second QR", got, out)
+	}
+}
+
+func TestAddingTailscaleLaterRecordsTheOwnerMapsServeAndKeepsTheNode(t *testing.T) {
+	f, setup, out := newFakeMachine(t)
+	setup.withTailscale = false
+	if err := setup.install(context.Background()); err != nil {
+		t.Fatalf("install without Tailscale: %v\n%s", err, out)
+	}
+	if got := f.take(); slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "tailscale") }) {
+		t.Fatalf("an install without Tailscale ran %v", got)
+	}
+	kept := map[string]string{node.RosterPath(f.cfg.StateDir): `{"seeded":true}`, f.cfg.RegistryPath(): `{"factories":1}`}
+	for path, content := range kept {
+		writeFile(t, path, content)
+	}
+
+	setup.withTailscale = true
+	if err := setup.install(context.Background()); err != nil {
+		t.Fatalf("install --tailscale: %v\n%s", err, out)
+	}
+	restart := loadSequence(os.Getenv("HOME"))
+	serve := "tailscale " + strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " ")
+	if got := f.take(); !slices.Equal(got[:2], []string{"tailscale status --json", "tailscale serve status --json"}) || !slices.Contains(got, restart[len(restart)-1]) || got[len(got)-1] != serve {
+		t.Fatalf("adding Tailscale ran\n  %s\nwant the checks first, then the node restarted, then Serve mapped", strings.Join(got, "\n  "))
+	}
+	if cfg, _ := state.LoadConfig(); !cfg.TailscaleNode() {
+		t.Errorf("after adding Tailscale the node records owner %q and hostname %q", cfg.Node.Owner, cfg.NodeHostname())
+	}
+	for path, content := range kept {
+		if got, _ := os.ReadFile(path); string(got) != content {
+			t.Errorf("adding Tailscale changed %s to %q; the node must keep its state", path, got)
+		}
 	}
 }
 
@@ -406,13 +439,11 @@ func TestUninstallRemovesOnlyItsUnitAndMappingAndStatusStillAnswers(t *testing.T
 func TestNodeRunLearnsItsOwnerAndNameFromTailscaleAndRunsOfflineOnSavedSettings(t *testing.T) {
 	cases := []struct {
 		name, saved, owner, wantOwner, wantHost string
-		online                                  bool
-		refused                                 bool
+		online, ownerless                       bool
 	}{
-		{name: "a fresh machine online", online: true, wantOwner: "alice@example.com", wantHost: tailnetHost},
 		{name: "a saved owner online", saved: "node:\n  owner: bob@example.com\n", owner: "bob@example.com", online: true, wantOwner: "bob@example.com", wantHost: tailnetHost},
 		{name: "a saved owner offline", saved: "node:\n  owner: bob@example.com\n", owner: "bob@example.com", wantOwner: "bob@example.com"},
-		{name: "a fresh machine offline", refused: true},
+		{name: "a fresh machine starts ownerless even with Tailscale logged in", online: true, ownerless: true},
 		{name: "an owner given to a named machine offline", saved: "node:\n  hostname: " + tailnetHost + "\n", owner: "carol@example.com", wantOwner: "carol@example.com", wantHost: tailnetHost},
 	}
 	for _, c := range cases {
@@ -428,11 +459,8 @@ func TestNodeRunLearnsItsOwnerAndNameFromTailscaleAndRunsOfflineOnSavedSettings(
 				ts.Run = f.run
 			}
 			owner, err := learnIdentity(context.Background(), cfg, c.owner, ts)
-			if c.refused {
-				if err == nil || !strings.Contains(err.Error(), "--owner") {
-					t.Fatalf("got %q, %v; want setup guidance", owner, err)
-				}
-				return
+			if c.ownerless && len(f.take()) > 0 {
+				t.Fatal("a machine with no Tailscale record asked tailscale before starting")
 			}
 			saved, _ := state.LoadConfig()
 			if err != nil || owner != c.wantOwner || cfg.NodeHostname() != c.wantHost || saved.NodeHostname() != c.wantHost || saved.Node.Owner != c.wantOwner {
