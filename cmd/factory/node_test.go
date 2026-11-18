@@ -368,7 +368,10 @@ func TestAskingAnotherNodeWhatReposNeedNeverSendsAnOriginWithCredentials(t *test
 		}
 	}
 	asked, _ := json.Marshal(repoNeeds([]string{withToken, plain}))
-	if strings.Contains(string(asked), "ghp_secret") || !strings.Contains(string(asked), "alice/cowork.git") {
-		t.Errorf("the needs request to another node holds %s; want only the origin without credentials", asked)
+	served, _ := json.Marshal(originsOf([]string{withToken, plain}))
+	for what, sent := range map[string][]byte{"the needs request to another node": asked, "the repos this node lists to others": served} {
+		if strings.Contains(string(sent), "ghp_secret") || !strings.Contains(string(sent), "alice/cowork.git") {
+			t.Errorf("%s holds %s; want only the origin without credentials", what, sent)
+		}
 	}
 }

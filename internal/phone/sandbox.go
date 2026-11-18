@@ -154,7 +154,7 @@ func (v *Reviews) sandboxed(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !live:
 		if opensPage(r.Method, path) {
-			page(w, http.StatusUnauthorized, expiredPage, nil)
+			page(w, http.StatusUnauthorized, v.expired(), nil)
 			return
 		}
 		fail(w, http.StatusUnauthorized, "This review page expired.")
@@ -168,6 +168,9 @@ func (v *Reviews) sandboxed(w http.ResponseWriter, r *http.Request) {
 		forward := r.Clone(r.Context())
 		forward.URL.Path, forward.URL.RawPath = path, escaped
 		forward.Header.Set(review.PrefixHeader, GrantPrefix+token)
+		if v.Session != nil {
+			forward.Header.Set(review.NoBackHeader, "1")
+		}
 		v.review(w, forward)
 	}
 }
@@ -175,6 +178,18 @@ func (v *Reviews) sandboxed(w http.ResponseWriter, r *http.Request) {
 var expiredPage = template.Must(template.New("expired").Parse(pageHead + `<h1>This review page expired</h1>
 <p>Open factory and open the page again.</p>
 <p><a href="/">Open factory</a></p>
+</body></html>
+`))
+
+func (v *Reviews) expired() *template.Template {
+	if v.Session != nil {
+		return doorExpiredPage
+	}
+	return expiredPage
+}
+
+var doorExpiredPage = template.Must(template.New("door expired").Parse(pageHead + `<h1>This review page expired</h1>
+<p>In the hub, press <code>ctrl+o</code> on the page again for a new link.</p>
 </body></html>
 `))
 

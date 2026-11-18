@@ -151,7 +151,10 @@ func (d *LocalDoor) enter(w http.ResponseWriter, r *http.Request, token string) 
 		phone.UsedLink(w)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: d.cookie(), Value: d.open(), Path: "/", MaxAge: int(doorSessionLife.Seconds()), HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	session := d.open()
+	for _, scope := range []string{"/r/", "/w/"} {
+		http.SetCookie(w, &http.Cookie{Name: d.cookie(), Value: session, Path: scope, MaxAge: int(doorSessionLife.Seconds()), HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	}
 	http.Redirect(w, r, path, http.StatusSeeOther)
 }
 

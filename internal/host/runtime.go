@@ -1,7 +1,9 @@
 package host
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -69,6 +71,7 @@ type Runtime struct {
 	prsPolled   time.Time
 	holdings    map[string]Holding
 	readings    map[string]reading
+	promptsSeen map[string]time.Time
 }
 
 const (
@@ -147,12 +150,37 @@ func (m *Runtime) Tick() {
 func (m *Runtime) ReadScreens() {
 	now, previous := m.Now(), m.readings
 	m.readings = map[string]reading{}
+	shown := map[string]time.Time{}
 	for i := range m.snap.Items {
 		it := &m.snap.Items[i]
 		it.Screen = m.screenOf(*it, now, previous)
 		if it.Screen != nil && it.Screen.Menu != nil {
 			it.Status, it.Unblocked = factory.NeedsYou, factory.NeedsYou
+			shown[it.Screen.Menu.Fingerprint] = it.Screen.Since
 		}
+	}
+	m.rememberPrompts(shown)
+}
+
+func (m *Runtime) promptsPath() string { return filepath.Join(m.Config.StateDir, "prompts.json") }
+
+func (m *Runtime) seenPrompts() map[string]time.Time {
+	if m.promptsSeen == nil {
+		m.promptsSeen = map[string]time.Time{}
+		if data, err := os.ReadFile(m.promptsPath()); err == nil {
+			json.Unmarshal(data, &m.promptsSeen)
+		}
+	}
+	return m.promptsSeen
+}
+
+func (m *Runtime) rememberPrompts(shown map[string]time.Time) {
+	if maps.Equal(shown, m.seenPrompts()) {
+		return
+	}
+	m.promptsSeen = shown
+	if data, err := json.Marshal(shown); err == nil {
+		state.WriteFileAtomic(m.promptsPath(), data)
 	}
 }
 
@@ -215,6 +243,8 @@ func (m *Runtime) read(p *tmux.Pane, now time.Time, previous map[string]reading)
 		r.menu = &menu
 		if seen && last.menu != nil && last.menu.Fingerprint == menu.Fingerprint {
 			r.since = last.since
+		} else if before, ok := m.seenPrompts()[menu.Fingerprint]; ok {
+			r.since = before
 		}
 	}
 	m.readings[p.ID] = r

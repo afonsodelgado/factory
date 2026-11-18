@@ -668,6 +668,11 @@ func TestAPermissionAnswerTypesOnlyIntoTheUnchangedPromptItWasPickedFrom(t *test
 	if len(first) != 1 || len(again) != 1 || first[0].Key != again[0].Key || first[0].Menu == nil || len(first[0].Menu.Choices) != 3 {
 		t.Fatalf("a pane with no hooks showing a menu gave %+v, then %+v; want one prompt item with three choices and the same key on every tick, or the phone is notified again", first, again)
 	}
+	r.readings, r.promptsSeen = nil, nil
+	clock = clock.Add(time.Minute)
+	if restarted := prompts(); len(restarted) != 1 || restarted[0].Key != first[0].Key || !restarted[0].Since.Equal(first[0].Since) {
+		t.Fatalf("after a node restart the unchanged menu became %+v; want the same key and wait time, or every update notifies the phone again", restarted)
+	}
 	console.screens["%1"] = strings.Replace(mcp, "playwright", "filesystem", 1)
 	if receipt, _ := r.Act(choose(first[0], "2")); receipt.Status != StatusStale || len(console.pressed) != 0 {
 		t.Fatalf("a menu that changed after it was loaded got %+v and presses %v; want nothing typed", receipt, console.pressed)

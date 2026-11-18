@@ -86,11 +86,20 @@ func alertsOf(factories []host.LocalFactory) (open map[string]alert, active, wor
 			}
 			if slices.Contains(notifiable, item.Kind) {
 				link := Link{Route: f.Route, Item: item.ID, Incarnation: f.Incarnation, Open: true}
-				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + item.Kind, Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused, reopens: item.Kind == "gate"}
+				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + kindWord(item.Kind), Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused, reopens: item.Kind == "gate"}
 			}
 		}
 	}
 	return open, active, working
+}
+
+var kindWords = map[string]string{"prompt": "waits at a prompt", "silent": "not reporting"}
+
+func kindWord(kind string) string {
+	if word, ok := kindWords[kind]; ok {
+		return word
+	}
+	return kind
 }
 
 func alertBody(kind string) string {

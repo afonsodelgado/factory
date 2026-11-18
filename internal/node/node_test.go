@@ -550,12 +550,13 @@ func TestAnOwnerlessNodeOpensOnlyHubLinkedReviewPagesToThisMachinesBrowser(t *te
 	ticket := strings.TrimPrefix(link, "http://"+here)
 	entered := get(here, ticket)
 	cookies := entered.Result().Cookies()
-	if entered.Code != http.StatusSeeOther || entered.Header().Get("Location") != "/r/k/plan.html" || len(cookies) != 1 || !cookies[0].HttpOnly {
-		t.Fatalf("the link answered %d to %q with cookies %v; want an HttpOnly session and the page", entered.Code, entered.Header().Get("Location"), cookies)
+	scoped := len(cookies) > 0 && !slices.ContainsFunc(cookies, func(c *http.Cookie) bool { return !c.HttpOnly || (c.Path != "/r/" && c.Path != "/w/") })
+	if entered.Code != http.StatusSeeOther || entered.Header().Get("Location") != "/r/k/plan.html" || !scoped {
+		t.Fatalf("the link answered %d to %q with cookies %v; want HttpOnly sessions scoped to the review paths, since cookies reach every port on 127.0.0.1", entered.Code, entered.Header().Get("Location"), cookies)
 	}
 	grant := get(here, "/r/k/plan.html", cookies...).Header().Get("Location")
-	if opened := get(here, grant); opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), "data-mobile") {
-		t.Fatalf("the page through its link answered %d %q; want it with the comment overlay", opened.Code, opened.Body)
+	if opened := get(here, grant); opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), "data-mobile") || !strings.Contains(opened.Body.String(), `data-back=""`) {
+		t.Fatalf("the page through its link answered %d %q; want it with the comment overlay and no back link to phone routes the door refuses", opened.Code, opened.Body)
 	}
 	for _, refused := range []struct {
 		name string

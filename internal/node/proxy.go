@@ -26,6 +26,9 @@ func (s *Stacks) proxy(run *liveStack) http.Handler {
 	public, _ := url.Parse(s.origin(run.record))
 	page := review.Factory{Key: lease.Route, Label: lease.Label}
 	back := s.Origin + "/f/" + url.PathEscape(lease.Route) + "/pages"
+	if s.loopback() {
+		back = ""
+	}
 	tag := func(r *http.Request) []byte {
 		return review.AppTag(page, lease.Page, strings.Contains(r.UserAgent(), "Mobi"), back)
 	}

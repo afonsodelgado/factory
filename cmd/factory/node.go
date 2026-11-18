@@ -274,7 +274,7 @@ func repoOrigins() map[string]string {
 func originsOf(repos []string) map[string]string {
 	origins := map[string]string{}
 	for _, repo := range repos {
-		if url := gitclone.Origin(repo); url != "" {
+		if url := shareableOrigin(repo); url != "" {
 			origins[url] = repo
 		}
 	}
