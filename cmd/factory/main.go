@@ -54,6 +54,8 @@ func run(args []string) int {
 		return runDoctor(args[1:])
 	case "bootstrap":
 		return runBootstrap(args[1:])
+	case "setup":
+		return runSetup(args[1:])
 	case "install-hooks":
 		return runInstallHooks(args[1:])
 	case "workflow":
@@ -76,7 +78,7 @@ func run(args []string) int {
 	return 2
 }
 
-var typedCommands = []string{"open", "delete", "init", "forget", "doctor", "bootstrap", "install-hooks", "update", "node", "move", "phone"}
+var typedCommands = []string{"open", "delete", "init", "forget", "doctor", "setup", "bootstrap", "install-hooks", "update", "node", "move", "phone"}
 
 func listDroppedRemotes(args []string) {
 	typed := len(args) == 0 || slices.Contains(typedCommands, args[0]) && !slices.Equal(args[:min(2, len(args))], []string{"node", "run"})
@@ -125,6 +127,12 @@ commands:
   forget <path>
               stop listing a repo in the hub; its files stay
   doctor      check what the factory needs and print the fix commands
+  setup [--yes]
+              install everything this machine needs: packages, Tailscale,
+              GitHub and Claude Code logins, tools, plugins, skills and hooks,
+              then run the node and join your other nodes; it asks once, uses
+              sudo only for system steps and skips what is already done;
+              --yes takes every default without asking
   bootstrap   install the bundled skills, agents and hooks into the Claude
               config, and for Codex and OpenCode when they are installed
   install-hooks [--remove]
@@ -169,7 +177,10 @@ commands:
               (run by the supervisor)
   version     print the version and check the latest release on GitHub;
               --version prints only the local version
-  update      install the latest release, then run its bootstrap
+  update [--version <tag>] [--this-node]
+              install the latest release, run its bootstrap, restart this
+              machine's node on it, then ask every other node in the list to
+              update and restart itself; --this-node updates only this machine
   node run [--owner login]
               run this machine's node in the foreground: it owns the
               factories, their panes, review pages and notifications whether

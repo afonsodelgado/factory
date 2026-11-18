@@ -110,16 +110,7 @@ func Doctor(o Options) []Check {
 }
 
 func doctor(o Options, extra ...Check) []Check {
-	checks := []Check{
-		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
-		tool("python3", "3.8", "python3", []string{"--version"}, installCommand("python3")),
-		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
-		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
-		ghCheck(),
-		ghStack(),
-		revmux(o),
-		plugin(o, PluginNamed("impeccable")),
-	}
+	checks := append(Toolchain(), GitHub(), GhStack(), Revmux(o), PluginCheck(o, PluginNamed("impeccable")))
 	checks = append(checks, extra...)
 	checks = append(checks, bundleCheck(o), hooksCheck(o))
 	if o.ConfigErr != nil {

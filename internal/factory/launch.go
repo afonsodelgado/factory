@@ -27,7 +27,7 @@ func Slugify(s string) string {
 	return strings.TrimSuffix(b.String(), "-")
 }
 
-var ReservedIDs = []string{"open", "init", "doctor", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "node", "move", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
+var ReservedIDs = []string{"open", "init", "doctor", "setup", "bootstrap", "install-hooks", "version", "update", "hub", "view", "dialog", "hook", "host", "node", "move", "help", "delete", "forget", "stage", "review", "-h", "--help", "--version"}
 
 func IsReservedID(name string) bool {
 	return slices.Contains(ReservedIDs, name) || slices.Contains(ReservedIDs, Slugify(name))

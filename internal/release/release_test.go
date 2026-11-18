@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +70,41 @@ func TestInstallReplacesTheBinaryOnlyWhenItsChecksumMatches(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(target); string(got) != "new factory" {
 		t.Errorf("the binary is %q after a verified install", got)
+	}
+}
+
+func TestInstallScriptInstallsAVerifiedBinaryThenRunsSetup(t *testing.T) {
+	stub := []byte("#!/bin/sh\n[ \"$1\" = --version ] && echo 'factory v9.9.9' && exit 0\necho \"$@\" > \"$HOME/ran\"\n")
+	sum := sha256.Sum256(stub)
+	checksums := hex.EncodeToString(sum[:]) + "  " + Asset() + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch filepath.Base(r.URL.Path) {
+		case Asset():
+			w.Write(stub)
+		case Checksums:
+			w.Write([]byte(checksums))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	install := func() (string, error) {
+		home := t.TempDir()
+		cmd := exec.Command("sh", "../../install.sh", "--yes")
+		cmd.Env = append(os.Environ(), "HOME="+home, "SHELL=/bin/sh", "FACTORY_RELEASES="+server.URL)
+		out, err := cmd.CombinedOutput()
+		ran, _ := os.ReadFile(filepath.Join(home, "ran"))
+		if err != nil {
+			return string(ran), fmt.Errorf("%w: %s", err, out)
+		}
+		return string(ran), nil
+	}
+
+	if ran, err := install(); err != nil || ran != "setup --yes\n" {
+		t.Fatalf("install.sh ran %q, %v; want the verified binary installed and factory setup --yes run", ran, err)
+	}
+	checksums = strings.Repeat("0", 64) + "  " + Asset() + "\n"
+	if ran, err := install(); err == nil || ran != "" {
+		t.Errorf("install.sh accepted a binary that does not match its checksum and ran %q", ran)
 	}
 }
