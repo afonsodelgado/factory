@@ -23,6 +23,7 @@ var statusLook = map[factory.Status]struct {
 	factory.Gone:          {"gone", Red},
 	factory.Done:          {"done", Dim},
 	factory.Unreachable:   {"lost", Dim},
+	factory.AnswerQueued:  {"starting", Cyan},
 }
 
 func StatusIcon(s factory.Status) string {

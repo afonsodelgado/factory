@@ -505,6 +505,29 @@ func TestAQueuedPhoneAnswerSurvivesARestartAndIsTypedOnce(t *testing.T) {
 	}
 }
 
+func TestAnAnswerQueuedForASupervisorThatNeverLooksIdleIsGivenBack(t *testing.T) {
+	handoff := asked("handoff-csv-1", "handoff")
+	typist := &paneTypist{}
+	r := phoneRuntime(t.TempDir(), typist, phoneSnapshot("PostToolUse", handoff))
+	now := phoneNow
+	r.Now = func() time.Time { return now }
+	markDone := ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActHandled, Item: handoff.ID, Since: handoff.CreatedAt.Time}
+	if receipt, err := r.Act(markDone); err != nil || receipt.Status != StatusQueued {
+		t.Fatalf("marking done while the supervisor looks busy gave %+v, %v; want it queued", receipt, err)
+	}
+	now = phoneNow.Add(AnswerWait - time.Minute)
+	r.FlushTypeQueue()
+	if receipt, _ := r.LookupReceipt(ReceiptRequest{Operation: markDone.Operation}); receipt.Status != StatusQueued {
+		t.Fatalf("before the wait ran out the answer reads %+v; want still queued for the supervisor's next idle moment", receipt)
+	}
+	now = phoneNow.Add(AnswerWait + time.Minute)
+	r.FlushTypeQueue()
+	receipt, _ := r.LookupReceipt(ReceiptRequest{Operation: markDone.Operation})
+	if receipt.Status != StatusRefused || !strings.Contains(receipt.Reason, "did not come back to its prompt") || len(typist.typed) != 0 {
+		t.Fatalf("after the wait the answer reads %+v and typed %q; want it given back untyped with the reason, not left queued for hours behind a running status", receipt, typist.typed)
+	}
+}
+
 func TestAPhoneMessageShowsOnlyTheSupervisorsReplyToItsOwnTurn(t *testing.T) {
 	r := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop"))
 	send := func(text string) string {

@@ -76,6 +76,10 @@ func (p hookPayload) matcher() string {
 	return ""
 }
 
+func (p hookPayload) compacts() bool {
+	return p.HookEventName == "PreCompact" || p.HookEventName == "PostCompact" || (p.HookEventName == "SessionStart" && p.Source == "compact")
+}
+
 func (p hookPayload) asksPermission() bool {
 	return p.HookEventName == "PermissionRequest" || (p.HookEventName == "Notification" && p.NotificationType == "permission_prompt")
 }
@@ -192,7 +196,7 @@ func RecordHook(stateDir string, payload []byte, token string, now time.Time) er
 		file.Last = event
 	}
 	mainThread := p.AgentID == ""
-	if mainThread && (file.Main == nil || !now.Before(file.Main.At)) {
+	if mainThread && !p.compacts() && (file.Main == nil || !now.Before(file.Main.At)) {
 		file.Main = &event
 	}
 	file.Prompt = nextPrompt(file.Prompt, p, now)
