@@ -22,6 +22,8 @@ import (
 
 var releases = release.Default()
 
+const installLine = "curl -fsSL https://raw.githubusercontent.com/" + release.Repo + "/main/install.sh | sh"
+
 func versionLine() string {
 	var details []string
 	if info, ok := debug.ReadBuildInfo(); ok {

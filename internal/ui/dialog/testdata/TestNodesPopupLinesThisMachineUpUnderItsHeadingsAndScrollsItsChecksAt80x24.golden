@@ -5,12 +5,12 @@
                                                                                         
  [38;2;169;177;214mNo other nodes yet. Every factory runs on this machine.[m                                
                                                                                         
- [38;2;169;177;214mA node is any machine of yours that ran factory node install, such as a home server[m    
- [38;2;169;177;214mthat stays on. Its factories keep running while this laptop sleeps or travels, and[m     
- [38;2;169;177;214mthis hub and your phone list them next to these.[m                                       
+ [38;2;169;177;214mA node is any machine of yours that ran factory setup or factory node install, such as[m 
+ [38;2;169;177;214ma home server that stays on. Its factories keep running while this laptop sleeps or[m    
+ [38;2;169;177;214mtravels, and this hub and your phone list them next to these.[m                          
                                                                                         
  [1;38;2;125;207;255ma[m[38;2;169;177;214m  add one from the machines on your tailnet[m                                           
- [38;2;86;95;137mor, on the other machine:  [m[38;2;192;202;245mfactory node install[m[38;2;86;95;137m  finds macbook and offers to join it[m   
+ [38;2;86;95;137mor, on the other machine:  [m[38;2;192;202;245mfactory setup[m[38;2;86;95;137m  installs what it needs and joins macbook[m     
                                                                                         
  [1;38;2;192;202;245mPhone app[m    [38;2;192;202;245mhttps://macbook.tail5e2c.ts.net[m   [38;2;86;95;137mlives on macbook[m                        
    [38;2;169;177;214mnotify[m     [38;2;158;206;106mon for 1 phone[m                                                            

@@ -2,9 +2,11 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -40,8 +42,28 @@ func (s Service) Unit() []byte {
 	return []byte(b.String())
 }
 
+var userRuntimeRoot = "/run/user"
+
 func (s Service) systemctl(ctx context.Context, args ...string) ([]byte, error) {
+	if err := findUserBus(); err != nil {
+		return nil, err
+	}
 	return s.Run(ctx, "systemctl", append([]string{"--user"}, args...)...)
+}
+
+func findUserBus() error {
+	if os.Getenv("XDG_RUNTIME_DIR") != "" {
+		return nil
+	}
+	runtimeDir := filepath.Join(userRuntimeRoot, strconv.Itoa(os.Getuid()))
+	if _, err := os.Stat(runtimeDir); err != nil {
+		return fmt.Errorf("this shell has no systemd user session (no %s), as after sudo -iu or su; run sudo loginctl enable-linger %s, then try again", runtimeDir, os.Getenv("USER"))
+	}
+	os.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		os.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(runtimeDir, "bus"))
+	}
+	return nil
 }
 
 func (s Service) State(ctx context.Context) ServiceState {

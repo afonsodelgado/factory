@@ -575,7 +575,7 @@ func (s nodeSetup) welcome(self node.Self, firstInstall, foundNodes bool) error 
 	url := "https://" + self.DNSName
 	fmt.Fprintf(s.out, "\n%s is a factory node. It keeps running with the hub closed.\n\n", self.Short())
 	if !foundNodes {
-		fmt.Fprintf(s.out, "No other factory nodes on your tailnet yet. Run factory node install on another\nmachine, such as a home server: it finds %s and offers to join it.\n\n", self.Short())
+		fmt.Fprintf(s.out, "No other factory nodes on your tailnet yet. To add another machine, run this there:\n  %s\nIt sets that machine up and joins %s.\n\n", installLine, self.Short())
 	}
 	fmt.Fprintf(s.out, "Next\n  hub      factory\n  phone    open %s with Tailscale on, then add it to\n           the Home Screen. Tailscale already says it's you: no code, no pairing.\n", url)
 	if !firstInstall {

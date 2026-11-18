@@ -191,6 +191,7 @@ func newFakeMachine(t *testing.T) (*fakeMachine, nodeSetup, *bytes.Buffer) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
 	t.Setenv("FACTORY_STATE_DIR", stateDir)
 	t.Setenv("PATH", "/usr/bin:/bin")
