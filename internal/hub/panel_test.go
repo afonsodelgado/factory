@@ -94,7 +94,7 @@ func TestAnEmptyHubPointsAtNodesAndAnnouncesTheNodesFirstStartOnlyOnce(t *testin
 	if list := selector.Render(m.data(), SelectorWidth, 24); !strings.Contains(list, "nodes and the phone app") {
 		t.Errorf("the empty factory list does not offer N:\n%s", list)
 	}
-	if bar := m.FooterView(112, 1); !strings.Contains(bar, "macbook's node is running. N shows it and the URL your phone opens.") {
+	if bar := m.FooterView(112, 1); !strings.Contains(bar, "macbook's node is running for this machine only.") {
 		t.Errorf("on the node's first start the footer reads:\n%s\nwant the welcome naming macbook", bar)
 	}
 	restarted := host.New(host.Runtime{Config: cfg, Machine: "macbook"})

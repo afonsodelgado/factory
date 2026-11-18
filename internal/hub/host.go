@@ -65,8 +65,11 @@ func (m *Model) applyPresentation(p host.Presentation) {
 	if p.Notice != "" {
 		m.notice = problem(p.Notice)
 	}
-	if p.FirstStart != "" {
+	switch {
+	case p.FirstStart != "" && m.Config.TailscaleNode():
 		m.notice = news(p.FirstStart + "'s node is running. N shows it and the URL your phone opens.")
+	case p.FirstStart != "":
+		m.notice = news(p.FirstStart + "'s node is running for this machine only. factory setup --tailscale adds your phone and other machines.")
 	}
 	if p.Repos != nil {
 		m.Config.Repos = p.Repos
