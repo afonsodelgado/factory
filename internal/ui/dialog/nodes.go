@@ -1148,12 +1148,15 @@ func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 
 func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	n.drawHeading(c)
+	problem := theme.Wrap("✗ "+n.problem, c.W-2)
 	bottom := c.H - 1
 	switch {
 	case n.confirmingMove:
 		bottom = c.H - 6
 	case n.homing != nil:
 		bottom = c.H - 10
+	case n.problem != "":
+		bottom = c.H - 2 - len(problem)
 	}
 	c.Clip(1, bottom)
 	n.drawBody(c, 2-n.scroll)
@@ -1165,6 +1168,9 @@ func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	if n.homing != nil {
 		n.drawHomeConfirm(c)
 		return
+	}
+	if n.problem != "" {
+		paragraph(c, c.H-1-len(problem), "✗ "+n.problem, theme.FgInk(theme.Red))
 	}
 	hints := n.hints()
 	if n.maxScroll() > 0 {
@@ -1213,6 +1219,9 @@ func (n *Nodes) hints() string {
 		if n.checks == nil {
 			return "esc back"
 		}
+		if !n.Context.Phone.Tailscale {
+			return "r check again   esc back"
+		}
 		return "r check again   h home   esc back"
 	case peerDetailsScreen:
 		return n.peerHints()
@@ -1223,6 +1232,10 @@ func (n *Nodes) hints() string {
 func (n *Nodes) drawSelfDetails(c *theme.Canvas, y int) int {
 	url, urlInk := n.Context.Phone.url()
 	notify, notifyInk := n.Context.Phone.notify()
+	if !n.Context.Phone.Tailscale {
+		url, urlInk = "none: Tailscale is not added; "+node.AddTailscale+" adds it", theme.FgInk(theme.Yellow)
+		notify, notifyInk = "off: the phone app needs Tailscale too", theme.Muted
+	}
 	c.Put(3, y, "address", theme.Text)
 	c.PutMax(fieldX, y, url, urlInk, c.W-fieldX-1)
 	c.Put(3, y+1, "factories", theme.Text)

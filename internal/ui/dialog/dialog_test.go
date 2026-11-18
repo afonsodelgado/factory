@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
@@ -222,6 +223,19 @@ func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *tes
 	press("h")
 	if screen := p.View().Content; !strings.Contains(screen, "✗") || !strings.Contains(screen, "tailscale serve --bg --https=443") {
 		t.Fatalf("checks show:\n%s\nwant the failing serve mapping with its fix", screen)
+	}
+}
+
+func TestThisMachineWithoutTailscaleNamesTheSetupStepAndOffersNoPhoneHome(t *testing.T) {
+	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Machine: "macbook", Running: true, Port: 7418}}}
+	n := NewNodes(NodesContext{Machine: "macbook", Version: "0.9.4", Phone: actions.status}, actions)
+	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
+	_, check := n.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	n.Update(check())
+	n.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	details := ansi.Strip(n.View().Content)
+	if strings.Contains(details, "node.hostname") || !strings.Contains(details, "factory setup --tailscale") || n.homing != nil || !strings.Contains(details, "the phone app needs Tailscale") {
+		t.Errorf("this machine's details without Tailscale, after h, show:\n%s\nwant factory setup --tailscale named, no node.hostname advice that stops the node, and h refused with the reason", details)
 	}
 }
 

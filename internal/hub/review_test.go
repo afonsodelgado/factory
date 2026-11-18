@@ -1,8 +1,10 @@
 package hub
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -246,5 +248,18 @@ func TestCtrlOOnADesignGateOpensTheNodesReviewPage(t *testing.T) {
 	want := "https://mac.tail.ts.net/r/" + state.FileStem(fx.f.Repo, fx.f.Slug) + "/design/variant-a.html"
 	if len(opened) != 1 || opened[0] != want {
 		t.Fatalf("ctrl+o on the gate opened %q; want %s, the review page with comments", opened, want)
+	}
+
+	fx.m.Config.Node.Hostname, opened = "", nil
+	var asked []string
+	fx.m.ReviewLink = func(_ context.Context, page string) (string, error) {
+		asked = append(asked, page)
+		return "http://127.0.0.1:7418/open/one-use", nil
+	}
+	if _, cmd := fx.m.Update(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: "ctrl+o"}})); cmd != nil {
+		cmd()
+	}
+	if page := strings.TrimPrefix(want, "https://mac.tail.ts.net"); !slices.Equal(asked, []string{page}) || !slices.Equal(opened, []string{"http://127.0.0.1:7418/open/one-use"}) {
+		t.Errorf("ctrl+o without a tailnet origin asked for %q and opened %q; want the node's one-use loopback link for %s", asked, opened, page)
 	}
 }

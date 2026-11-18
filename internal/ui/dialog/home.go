@@ -33,6 +33,10 @@ func (n *Nodes) chosenHome() homeChoice {
 }
 
 func (n *Nodes) askHome() {
+	if !n.Context.Phone.Tailscale {
+		n.problem = node.NeedsTailscale(node.PhoneFeature, n.Context.Machine) + ". " + node.AddTailscale + " adds it."
+		return
+	}
 	choice := n.chosenHome()
 	if choice.origin() == n.Context.Home {
 		n.problem = "The phone app already lives on " + choice.short() + "."
