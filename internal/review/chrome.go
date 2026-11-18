@@ -316,12 +316,30 @@ func (h *Headless) Close() error {
 	h.cancel()
 	var err error
 	for range 50 {
+		KillUsing(h.Profile)
 		if err = os.RemoveAll(h.Profile); err == nil {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return err
+}
+
+func KillUsing(profile string) int {
+	out, err := exec.Command("ps", "-axww", "-o", "pid=,command=").Output()
+	if err != nil {
+		return 0
+	}
+	arg := "--user-data-dir=" + profile + " "
+	killed := 0
+	for line := range strings.SplitSeq(string(out), "\n") {
+		pid, command, _ := strings.Cut(strings.TrimSpace(line), " ")
+		n, err := strconv.Atoi(pid)
+		if err == nil && strings.Contains(command+" ", arg) && syscall.Kill(n, syscall.SIGKILL) == nil {
+			killed++
+		}
+	}
+	return killed
 }
 
 func (h *Headless) keepFinalScreenshot() {
