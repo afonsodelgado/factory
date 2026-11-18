@@ -98,6 +98,9 @@ jobs:
           for binary in dist/factory_*; do
             grep -q "shell-$stamp" "$binary" || { echo "$binary lacks the phone app $stamp"; exit 1; }
           done
+      - name: Write the checksums that factory update and install.sh verify
+        if: steps.tag.outputs.skip != 'true'
+        run: cd dist && sha256sum factory_* > factory_checksums.txt
       - name: Publish the release
         if: steps.tag.outputs.skip != 'true'
         env:

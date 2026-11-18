@@ -68,6 +68,7 @@ type fakeMachine struct {
 	silent    bool
 	serveFail int
 	node      []*http.Server
+	running   string
 }
 
 func (f *fakeMachine) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -100,6 +101,7 @@ func (f *fakeMachine) run(_ context.Context, name string, args ...string) ([]byt
 		return []byte("LoadState=loaded\nActiveState=active\nMainPID=4242\n"), nil
 	case "launchctl bootstrap gui/" + strconv.Itoa(os.Getuid()) + " " + filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", node.ServiceLabel+".plist"), "systemctl --user restart " + node.ServiceLabel:
 		f.loaded = true
+		f.running = "9.9.9"
 		f.stopNode()
 		f.startNode()
 	case "launchctl bootout gui/" + strconv.Itoa(os.Getuid()) + "/" + node.ServiceLabel, "systemctl --user disable --now " + node.ServiceLabel:
@@ -143,7 +145,11 @@ func (f *fakeMachine) startNode() {
 	if f.silent {
 		return
 	}
-	me := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"version":"9.9.9"}`) })
+	me := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		fmt.Fprintf(w, `{"version":%q}`, f.running)
+	})
 	for _, listen := range []func() (net.Listener, error){
 		func() (net.Listener, error) { return node.ListenUnix(f.cfg.NodeSocket()) },
 		func() (net.Listener, error) {
@@ -263,6 +269,29 @@ func TestNodeInstallStartsAPrivateServiceBeforeServeAndShowsOnlyTheAppURL(t *tes
 	}
 	if got := f.take(); slices.Contains(got, "tailscale "+strings.Join(node.ServeArgs(node.HomeHTTPS, f.port), " ")) || strings.Contains(out.String(), "█") {
 		t.Errorf("a second install ran %v and printed\n%s\nwant the existing mapping adopted and no second QR", got, out)
+	}
+}
+
+func TestBootstrapRestartsANodeStillRunningAnOlderBinary(t *testing.T) {
+	f, setup, out := newFakeMachine(t)
+	if err := setup.install(context.Background()); err != nil {
+		t.Fatalf("install: %v\n%s", err, out)
+	}
+	defer func(was string) { version = was }(version)
+	version = "9.9.9"
+	f.mu.Lock()
+	f.running = "9.9.8"
+	f.mu.Unlock()
+	f.take()
+
+	setup.reconcile(context.Background())
+	restart := loadSequence(os.Getenv("HOME"))
+	if got := f.take(); !slices.Contains(got, restart[len(restart)-1]) {
+		t.Fatalf("a node on 9.9.8 under a 9.9.9 binary was left running old code; reconcile ran %v\n%s", got, out)
+	}
+	setup.reconcile(context.Background())
+	if got := f.take(); slices.Contains(got, restart[len(restart)-1]) {
+		t.Errorf("a node already on this binary's version was restarted again: %v", got)
 	}
 }
 

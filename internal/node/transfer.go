@@ -366,19 +366,8 @@ func (ts *Transfers) Accept(ctx context.Context, cp Checkpoint) (Staged, error) 
 }
 
 func (ts *Transfers) verifiedSource(ctx context.Context, source string) error {
-	n := ts.Nodes
-	m, member := n.Dir.Member(source)
-	if !member || source == n.Self.ID {
-		return errors.New("the checkpoint comes from a node that is not in this node list")
-	}
-	inv, err := n.Tailscale.Inventory(ctx)
-	if err != nil {
-		return err
-	}
-	if !n.stillTheSamePeer(inv, m) {
-		return fmt.Errorf("tailscale status no longer shows %s as this owner's machine", m.Name)
-	}
-	return nil
+	_, err := ts.Nodes.verifiedMember(ctx, source)
+	return err
 }
 
 func (ts *Transfers) sameIdentity(m Manifest) error {

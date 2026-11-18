@@ -45,6 +45,7 @@ type Check struct {
 
 type Options struct {
 	ClaudeDir  string
+	Version    string
 	Binary     string
 	Browser    []string
 	Home       string

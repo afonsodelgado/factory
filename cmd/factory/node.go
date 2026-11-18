@@ -195,6 +195,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
 	go api.Awake.Run(ctx, func() int { _, factories, _ := api.Factories(); return node.ActiveFactories(factories) })
 	nodes.Clone = cloneFor(cfg, queue)
+	nodes.Update = selfUpdate(cfg)
 	transfers := &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation, Holders: &node.Holders{Dir: filepath.Join(cfg.StateDir, "holders.git")}, Ctx: ctx}
 	api.Transfers = transfers
 	transfers.HoldUnverified(ctx)

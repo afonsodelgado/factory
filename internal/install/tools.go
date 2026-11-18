@@ -196,6 +196,16 @@ func NodeChecks(o Options) []Check {
 	return append(checks, keepAwake(ctx, o.Config), permissions(o.Config), pushReach(ctx, o.DialTLS))
 }
 
+func nodeProcess(ctx context.Context, o Options, pid string) Check {
+	var me node.Me
+	err := node.Unix(o.Config.NodeSocket()).Do(ctx, http.MethodGet, "/api/me", nil, &me)
+	stale := err == nil && o.Version != "" && me.Version != o.Version
+	if stale {
+		return Check{Name: "node process", Mark: Fail, Detail: fmt.Sprintf("pid %s runs factory %s, but this binary is %s, so the node runs old code", pid, me.Version, o.Version), Fix: "factory update  restarts it on this binary"}
+	}
+	return Check{Name: "node process", Mark: Pass, Detail: "pid " + pid + ", answering on node.sock"}
+}
+
 func keepAwake(ctx context.Context, cfg *state.Config) Check {
 	if unsupported := node.NewAwake(cfg.KeepsAwake()).Unsupported; unsupported != "" {
 		return Check{Name: "keep awake", Mark: Skip, Detail: unsupported}
@@ -321,7 +331,7 @@ func serviceChecks(ctx context.Context, o Options, svc node.Service) []Check {
 	case !answers:
 		checks = append(checks, Check{Name: "node process", Mark: Fail, Detail: "pid " + st.PID + " runs, but node.sock does not answer; its log is " + tilde(svc.Log), Fix: svc.RestartCommand()})
 	default:
-		checks = append(checks, Check{Name: "node process", Mark: Pass, Detail: "pid " + st.PID + ", answering on node.sock"})
+		checks = append(checks, nodeProcess(ctx, o, st.PID))
 	}
 	detail, fix, persists := svc.Boot(ctx, false)
 	if !persists {

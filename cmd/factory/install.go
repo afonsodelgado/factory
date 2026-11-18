@@ -42,7 +42,7 @@ func binaryPath() string {
 
 func doctorOptions() install.Options {
 	home, _ := os.UserHomeDir()
-	o := install.Options{ClaudeDir: install.ClaudeDir(), Binary: binaryPath(), Home: home, ConfigFile: filepath.Join(state.ConfigDir(), "config.yml")}
+	o := install.Options{ClaudeDir: install.ClaudeDir(), Version: version, Binary: binaryPath(), Home: home, ConfigFile: filepath.Join(state.ConfigDir(), "config.yml")}
 	cfg, err := state.LoadConfig()
 	if err != nil {
 		o.ConfigErr = err
@@ -124,6 +124,9 @@ func runBootstrap(args []string) int {
 		if !applyPlan(plan) {
 			return 1
 		}
+	}
+	if o.Config != nil {
+		newNodeSetup(o.Config, os.Stdout).reconcile(context.Background())
 	}
 	printToolFixes(o)
 	return 0
@@ -492,17 +495,10 @@ func (s nodeSetup) startService(ctx context.Context) error {
 	if _, alive := runningMe(s.cfg); alive && !s.service.State(ctx).Running {
 		return errors.New("a factory node already runs in the foreground (factory node run). Stop it, then run factory node install again so the service takes over")
 	}
-	if err := s.service.Write(); err != nil {
-		return err
-	}
 	detail, fix, persists := s.service.Boot(ctx, true)
-	if err := s.service.Load(ctx); err != nil {
-		return fmt.Errorf("could not load the %s: %w", s.service.Kind(), err)
-	}
-	me, answered := s.awaitNode()
-	if !answered {
-		s.service.Unload(ctx)
-		return fmt.Errorf("the %s started, but the node did not answer within %s, so it is stopped again. Its log is %s; fix what it says, then run factory node install again", s.service.Kind(), s.wait, s.service.Log)
+	me, err := s.restartService(ctx)
+	if err != nil {
+		return err
 	}
 	s.passed("service", s.service.Loaded(persists))
 	if !persists {
@@ -510,6 +506,39 @@ func (s nodeSetup) startService(ctx context.Context) error {
 	}
 	s.passed("node", fmt.Sprintf("%s, answering on 127.0.0.1:%d and its local socket", me.Version, s.cfg.NodePort()))
 	return nil
+}
+
+func (s nodeSetup) restartService(ctx context.Context) (node.Me, error) {
+	if err := s.service.Write(); err != nil {
+		return node.Me{}, err
+	}
+	if err := s.service.Load(ctx); err != nil {
+		return node.Me{}, fmt.Errorf("could not load the %s: %w", s.service.Kind(), err)
+	}
+	me, answered := s.awaitNode()
+	if !answered {
+		s.service.Unload(ctx)
+		return me, fmt.Errorf("the %s started, but the node did not answer within %s, so it is stopped again. Its log is %s; fix what it says, then run factory node install again", s.service.Kind(), s.wait, s.service.Log)
+	}
+	return me, nil
+}
+
+func (s nodeSetup) reconcile(ctx context.Context) {
+	record, err := node.LoadInstall(s.cfg.StateDir)
+	if err != nil || !record.Complete || record.Binary != s.service.Binary {
+		return
+	}
+	before, alive := runningMe(s.cfg)
+	if alive && before.Version == version {
+		return
+	}
+	me, err := s.restartService(ctx)
+	if err != nil {
+		install.WriteCheck(s.out, install.Check{Name: "node", Mark: install.Fail, Detail: err.Error(), Fix: "factory node install"})
+		return
+	}
+	was := cmp.Or(before.Version, "not running")
+	s.passed("node", fmt.Sprintf("restarted on %s (was %s)", me.Version, was))
 }
 
 func (s nodeSetup) awaitNode() (node.Me, bool) {

@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/catalog"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -186,4 +188,27 @@ func find(checks []Check, name string) Check {
 		}
 	}
 	return Check{}
+}
+
+func TestDoctorFailsANodeStillRunningAnOlderBinary(t *testing.T) {
+	stateDir, err := os.MkdirTemp("/tmp", "fdoc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(stateDir) })
+	cfg := &state.Config{StateDir: stateDir}
+	ln, err := node.ListenUnix(cfg.NodeSocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"version":"v0.1.37"}`)) })}
+	go server.Serve(ln)
+	t.Cleanup(func() { server.Close() })
+
+	if c := nodeProcess(context.Background(), Options{Config: cfg, Version: "v0.1.42"}, "4242"); c.Mark != Fail || !strings.Contains(c.Detail, "v0.1.37") {
+		t.Errorf("a node on v0.1.37 under a v0.1.42 binary got %s %q; want a failure naming the old version, or doctor passes a node running old code", c.Mark, c.Detail)
+	}
+	if c := nodeProcess(context.Background(), Options{Config: cfg, Version: "v0.1.37"}, "4242"); c.Mark != Pass {
+		t.Errorf("a node on this binary's version got %s %q", c.Mark, c.Detail)
+	}
 }

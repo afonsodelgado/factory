@@ -461,7 +461,7 @@ func (m *Machine) Start() *Node {
 	n.Nodes = &node.Nodes{
 		Self: self, Version: Version, Dir: directory, Tailscale: ts, HTTP: tn.Client(m),
 		Ready:     node.Readiness{Probes: n.currentProbes, Wait: tn.ReadyWait, Now: tn.Now},
-		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
+		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, UpdateWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
 	}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}
 	n.API.Nodes = n.Nodes

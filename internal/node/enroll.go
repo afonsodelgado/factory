@@ -40,8 +40,10 @@ type Nodes struct {
 	Factories   func() int
 	Repos       func() map[string]string
 	Clone       func(ctx context.Context, url string) (string, error)
+	Update      func(version string) error
 	Phone       *phone.Store
 	ProbeWait   time.Duration
+	UpdateWait  time.Duration
 	Now         func() time.Time
 
 	mu      sync.Mutex
@@ -669,7 +671,8 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/nodes/check", n.homeOnly(n.checkRoute))
 	route("POST /api/nodes", n.homeOnly(n.addRoute))
 	route("POST /api/nodes/{id}/remove", n.homeOnly(n.removeRoute))
-	route("POST /api/nodes/join", socketOnly(n.joinRoute))
+	route("POST /api/nodes/join", socketOnly("joining runs only from factory node install on this machine", n.joinRoute))
+	route("POST /api/nodes/update", socketOnly("updating every node runs only from factory update on this machine", n.updateAllRoute))
 	route("GET /api/readiness", n.readinessWithPush)
 	route("GET /api/repos", func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.repos()) })
 	route("POST /api/clone", n.homeOrNative(n.cloneRoute))
@@ -682,12 +685,13 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/node/join/verify", nativeOnly(n.verifyRoute))
 	route("POST /api/node/join/commit", nativeOnly(n.commitRoute))
 	route("POST /api/node/push/records", nativeOnly(n.recordsRoute))
+	route("POST /api/node/update", nativeOnly(n.updateRoute))
 }
 
-func socketOnly(serve func(http.ResponseWriter, *http.Request, string)) func(http.ResponseWriter, *http.Request, string) {
+func socketOnly(refusal string, serve func(http.ResponseWriter, *http.Request, string)) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, caller string) {
 		if !viaSocket(r) {
-			fail(w, http.StatusNotFound, "joining runs only from factory node install on this machine")
+			fail(w, http.StatusNotFound, refusal)
 			return
 		}
 		serve(w, r, caller)
