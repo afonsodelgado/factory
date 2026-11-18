@@ -2,6 +2,7 @@ package selector
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -16,6 +17,8 @@ type Row struct {
 	Repo     string
 	Status   factory.Status
 	Track    []factory.Step
+	Loop     string
+	Round    int
 	Stage    string
 	Time     string
 	Items    int
@@ -249,7 +252,11 @@ func factoryRow(c *theme.Canvas, y, inner int, r Row, d Data) {
 	}
 	c.PutMax(6, y, r.Label, theme.Bright.B(), start-6-1)
 
-	c.Spans(6, y+1, theme.TrackSpans(r.Track, r.Status))
+	if r.Loop != "" {
+		c.PutMax(6, y+1, fmt.Sprintf("%s %d", strings.Split(r.Loop, "_")[0], r.Round), theme.Quiet, 11)
+	} else {
+		c.Spans(6, y+1, theme.TrackSpans(r.Track, r.Status))
+	}
 	timeStart := c.Right(end, y+1, r.Time, theme.Muted)
 	stage := r.Stage
 	if stage == "" {

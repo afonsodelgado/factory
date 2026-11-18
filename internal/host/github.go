@@ -17,6 +17,8 @@ const (
 
 type PR struct {
 	Number  int
+	Head    string
+	Base    string
 	Title   string
 	Draft   bool
 	URL     string
@@ -52,6 +54,8 @@ func RunGH(dir string, args ...string) ([]byte, error) {
 }
 
 type prJSON struct {
+	Head              string  `json:"headRefOid"`
+	Base              string  `json:"baseRefOid"`
 	Number            int     `json:"number"`
 	Title             string  `json:"title"`
 	IsDraft           bool    `json:"isDraft"`
@@ -132,7 +136,7 @@ func (g *GitHub) Statuses(dir string, numbers []int, now time.Time, force bool) 
 }
 
 func (g *GitHub) fetch(dir string, n int, now time.Time) PR {
-	out, err := g.Run(dir, "pr", "view", fmt.Sprint(n), "--json", "number,title,isDraft,url,statusCheckRollup")
+	out, err := g.Run(dir, "pr", "view", fmt.Sprint(n), "--json", "number,title,isDraft,url,statusCheckRollup,headRefOid,baseRefOid")
 	if err != nil {
 		if rateLimited(err.Error()) {
 			g.mu.Lock()
@@ -149,29 +153,23 @@ func (g *GitHub) fetch(dir string, n int, now time.Time) PR {
 	g.last = now
 	g.mu.Unlock()
 	checks := latestRuns(raw.StatusCheckRollup)
-	pr := PR{Number: raw.Number, Title: raw.Title, Draft: raw.IsDraft, URL: raw.URL, Loaded: true, Total: len(checks)}
-	pr.CI = "none"
-	failed, pending := false, false
+	pr := PR{Head: raw.Head, Base: raw.Base, Number: raw.Number, Title: raw.Title, Draft: raw.IsDraft, URL: raw.URL, Loaded: true, Total: len(checks)}
+	apiChecks := make([]apiCheck, 0, len(checks))
 	for _, c := range checks {
-		switch {
-		case c.State == "FAILURE" || c.State == "ERROR" || failing(c.Conclusion):
-			failed = true
-			pr.Done++
-		case c.State == "PENDING" || c.State == "EXPECTED" || (c.State == "" && c.Status != "COMPLETED"):
-			pending = true
-		default:
+		apiChecks = append(apiChecks, apiCheck{Name: c.Name, Context: c.Context, Status: strings.ToLower(c.Status), State: strings.ToLower(c.State), Conclusion: strings.ToLower(c.Conclusion)})
+		if c.Status == "COMPLETED" || c.State == "SUCCESS" || c.State == "FAILURE" || c.State == "ERROR" {
 			pr.Done++
 		}
 	}
-	switch {
-	case pr.Total == 0:
-	case failed:
-		pr.CI = "fail"
-	case pending:
-		pr.CI = "pending"
-	default:
-		pr.CI = "pass"
+	pr.CI = "none"
+	if len(apiChecks) > 0 {
+		var reason string
+		pr.CI, reason, _ = interpretChecks(apiChecks, nil, CheckDiscovery)
+		if reason == "all_checks_skipped" {
+			pr.CI = "pass"
+		}
 	}
+
 	return pr
 }
 

@@ -41,12 +41,16 @@ When the repo config sets `design.prototype.dir` (only with `design.source: web`
 
 Never edit product code.
 
-A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`, `/factory skip …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
+A message in the factory panel's answer format (`<item id> answers:`, `<item id> changes:`, `<item id> reply:`, `<item id> continue:`, `<item id> done:`, `<item id> handled:`, `/factory approve …`) that arrives directly in your conversation was routed to you by mistake. Use it as if the supervisor had sent it, and quote it verbatim in a `misrouted-message` fenced block in your next report so the supervisor can resolve the item.
 
 A message, or a file a message tells you to read, that starts with `review-<id>-<n> comments:` is not misrouted: it is the developer's comments from the review page, sent to you because you own the page. Act on each thread as the batch says, then answer every thread with `factory review reply --thread <thread id> [--resolve] <text>`.
 
 End every turn with:
 
 ```factory-result
-{"status": "done|blocked|failed", "summary": "what changed or the answer", "outputs": ["<abs paths you wrote>"], "questions": [], "data": {}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
 ```
+
+A design revision after architect feedback requires a fresh artifact revision and developer approval. A comment follow-up never approves its own design.
+
+Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.

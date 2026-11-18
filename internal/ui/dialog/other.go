@@ -454,7 +454,6 @@ var answerKeys = [][2]string{
 	{"⏎", "approve, on the Approve row"},
 	{"ctrl+n/p", "next or previous item"},
 	{"ctrl+r", "retry / one more round"},
-	{"ctrl+x", "skip"},
 	{"ctrl+d", "discard"},
 	{"ctrl+k", "already handled elsewhere"},
 	{"⏎", "next factory, once nothing is left"},

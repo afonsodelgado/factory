@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -28,15 +29,14 @@ const (
 )
 
 type StageRequest struct {
-	Action  string   `json:"action"`
-	Token   string   `json:"token"`
-	Cwd     string   `json:"cwd"`
-	Role    string   `json:"role"`
-	Text    string   `json:"text"`
-	PRs     []string `json:"prs,omitempty"`
-	Factory string   `json:"factory,omitempty"`
-
-	Review bool
+	EffectID string   `json:"effect_id"`
+	Action   string   `json:"action"`
+	Token    string   `json:"token"`
+	Cwd      string   `json:"cwd"`
+	Role     string   `json:"role"`
+	Text     string   `json:"text"`
+	PRs      []string `json:"prs,omitempty"`
+	Factory  string   `json:"factory,omitempty"`
 }
 
 type StageReply struct {
@@ -79,9 +79,52 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if err := m.unverified(it.Factory.Key()); err != nil {
 		return StageReply{}, err
 	}
+	if it.Factory.State == nil || it.Factory.State.Workflow.ActiveRun != r.EffectID || r.EffectID == "" {
+		return StageReply{}, errors.New("commit a workflow stage effect before dispatch")
+	}
+	if len(it.Factory.State.Workflow.Runs) == 0 {
+		return StageReply{}, errors.New("committed effect has no run")
+	}
+	effect := it.Factory.State.Workflow.Pending
+	active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
+	if active.ID != r.EffectID || active.Role != r.Role || (effect != nil && (effect.ID != r.EffectID || effect.Role != r.Role || effect.Kind != "stage")) {
+		return StageReply{}, errors.New("stage request does not match the committed effect")
+	}
+	lockPath := state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return StageReply{}, err
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return StageReply{}, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return StageReply{}, err
+	}
 	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
 	if err != nil {
 		return StageReply{}, err
+	}
+	for i := len(runs.Runs) - 1; i >= 0; i-- {
+		previous := runs.Runs[i]
+		if previous.ID != r.EffectID {
+			continue
+		}
+		live := m.preparing[it.Factory.Key()] == previous.Token || m.leases[it.Factory.Key()].Token == previous.Token
+		if _, ok := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, previous.Token)); ok {
+			live = true
+		}
+		if previous.Finished() || live {
+			return StageReply{Result: previous.Result}, nil
+		}
+		if active.Retries <= previous.Attempt {
+			return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
+		}
+		break
+	}
+	if effect == nil {
+		return StageReply{}, errors.New("acknowledged dispatch has no receipt; reconcile before retrying")
 	}
 	if r.Action == "send" {
 		return m.SendStage(it, runs, r)
@@ -101,18 +144,21 @@ func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
 	if err != nil {
 		return StageReply{}, err
 	}
-	command := factory.ShellQuote(script) + " --dir " + factory.ShellQuote(it.Factory.Dir) + " --inbox"
+	if it.Factory.State == nil || it.Factory.State.Workflow.ActiveRun == "" {
+		return StageReply{}, errors.New("CI watcher requires an active run")
+	}
+	command := factory.ShellQuote(script) + " --dir " + factory.ShellQuote(it.Factory.Dir) + " --run " + factory.ShellQuote(it.Factory.State.Workflow.ActiveRun)
 	for _, pr := range r.PRs {
 		command += " " + factory.ShellQuote(pr)
 	}
-	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "ci"); err != nil {
+	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, "ci-wait"); err != nil {
 		return StageReply{}, err
 	}
 	pane, err := m.TM.NewWindow(tmux.Window{Session: m.Session, Name: "c-" + it.Factory.Slug, Dir: it.Factory.Worktree, Command: command})
 	if err != nil {
 		return StageReply{}, err
 	}
-	for _, o := range [][2]string{{"@factory_ui", "ci"}, {"@factory_repo", it.Factory.Repo}, {"@factory_stage_of", it.Factory.Slug}, {"@factory_stage", "ci"}} {
+	for _, o := range [][2]string{{"@factory_ui", "ci-wait"}, {"@factory_repo", it.Factory.Repo}, {"@factory_stage_of", it.Factory.Slug}, {"@factory_stage", "ci-wait"}} {
 		if err := m.TM.SetPaneOption(pane, o[0], o[1]); err != nil {
 			return StageReply{}, err
 		}
@@ -176,6 +222,9 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	if err := WriteFile(run.Prompt, prompt); err != nil {
 		return StageReply{}, err
 	}
+	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
+		return StageReply{}, err
+	}
 	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, r.Role); err != nil {
 		return StageReply{}, err
 	}
@@ -200,8 +249,10 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
-	run.Review = r.Review
 	if err := WriteFile(run.Prompt, r.Text+"\n\n## Your result\n\n"+ResultContract(run.Result)); err != nil {
+		return StageReply{}, err
+	}
+	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
 		return StageReply{}, err
 	}
 	kickoff := KickoffFor(run)
@@ -274,13 +325,15 @@ func Runnable(repo, role string, setting state.AgentSetting) error {
 }
 
 func (m *Runtime) NewRun(it Item, runs *state.StageRuns, role string, setting state.AgentSetting, token string) state.StageRun {
-	round := runs.NextRound(role)
-	base := filepath.Join(it.Factory.Dir, "stages", fmt.Sprintf("%s-%d", role, round))
-	return state.StageRun{Role: role, Round: round, Setting: setting, Token: token, Prompt: base + ".prompt.md", Result: base + ".result.json", StartedAt: m.Now()}
+	active := it.Factory.State.Workflow.Runs[len(it.Factory.State.Workflow.Runs)-1]
+	return state.StageRun{ID: active.ID, Attempt: active.Retries, Role: role, Round: active.Round, Setting: setting, Token: token, Prompt: filepath.Join(it.Factory.Dir, active.Prompt), Result: filepath.Join(it.Factory.Dir, active.Result), StartedAt: m.Now()}
+
 }
 
 func (m *Runtime) Record(it Item, runs *state.StageRuns, run state.StageRun, verb string) (StageReply, error) {
-	runs.Runs = append(runs.Runs, run)
+	if !slices.ContainsFunc(runs.Runs, func(old state.StageRun) bool { return old.ID == run.ID && old.Attempt == run.Attempt }) {
+		runs.Runs = append(runs.Runs, run)
+	}
 	if err := runs.Save(); err != nil {
 		return StageReply{}, err
 	}
@@ -461,8 +514,10 @@ func KickoffFor(run state.StageRun) string {
 	return "Read " + run.Prompt + " and follow it."
 }
 
+const findingContract = `Each entry in "findings" is {"id":"<stable id, reused when you report the same finding again>","stage":"<the stage this run belongs to>","severity":"minor|major|blocker|regression|design","layer":"<owning stack branch>","disposition":"open|closed","description":"<the defect and its mechanism>","evidence":"<file, command or repro>"}. Any other severity or disposition rejects the whole result. major, blocker, regression and design gate the loop; minor is listed and never loops. Use design only for a finding that should send the work back to the designer. Close a finding only once it is fixed and verified.`
+
 func ResultContract(path string) string {
-	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file."
+	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file.\n\n" + findingContract
 }
 
 const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have; for HTML without the factory-artifact skill, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the factory app serves the files you write."

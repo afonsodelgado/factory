@@ -38,9 +38,9 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 		item Item
 		want string
 	}{
-		{"registry", gone(factory.Factory{Entry: &state.Entry{SessionID: "from-registry"}, State: &state.State{SessionID: "from-state"}}), "claude --resume from-registry '/factory resume'"},
-		{"state.json", gone(factory.Factory{State: &state.State{SessionID: "from-state"}}), "claude --resume from-state '/factory resume'"},
-		{"newest hook file in the worktree", gone(factory.Factory{State: &state.State{}}), "claude --resume from-hook '/factory resume'"},
+		{"registry", gone(factory.Factory{Entry: &state.Entry{SessionID: "from-registry"}, State: &state.State{SchemaVersion: 2, SessionID: "from-state"}}), "claude --resume from-registry '/factory resume'"},
+		{"state.json", gone(factory.Factory{State: &state.State{SchemaVersion: 2, SessionID: "from-state"}}), "claude --resume from-state '/factory resume'"},
+		{"newest hook file in the worktree", gone(factory.Factory{State: &state.State{SchemaVersion: 2}}), "claude --resume from-hook '/factory resume'"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestWakeResumesTheRecordedConversation(t *testing.T) {
 		})
 	}
 
-	nothing := PlanWake(gone(factory.Factory{State: &state.State{}}), nil, nil)
+	nothing := PlanWake(gone(factory.Factory{State: &state.State{SchemaVersion: 2}}), nil, nil)
 	if nothing.Command != "claude --continue '/factory resume'" || nothing.Note() != "woke with --continue: no session id in the registry, state.json or the hook files" {
 		t.Errorf("without any session id: %q, activity %q", nothing.Command, nothing.Note())
 	}
@@ -63,7 +63,7 @@ func TestThePanesOwnSessionIsLiveAfterTheBridgeContinuesIt(t *testing.T) {
 	live := &state.HookFile{SessionID: "06c7ff87", CWD: worktree, Token: "t1", Main: &state.HookEvent{Event: "UserPromptSubmit", At: at}, Last: state.HookEvent{Event: "UserPromptSubmit", At: at}}
 	hooks := []*state.HookFile{frozen, live}
 	pane := &tmux.Pane{ID: "%5", Command: "claude", Token: "t1"}
-	f := factory.Factory{Repo: "/r/factory", Slug: "release-0-2", Worktree: worktree, Entry: &state.Entry{SessionID: "57bcd935"}, State: &state.State{SessionID: "57bcd935"}}
+	f := factory.Factory{Repo: "/r/factory", Slug: "release-0-2", Worktree: worktree, Entry: &state.Entry{SessionID: "57bcd935"}, State: &state.State{SchemaVersion: 2, SessionID: "57bcd935"}}
 
 	hook := hookFor(f, pane.Token, hooks)
 	if hook != live {
@@ -89,7 +89,7 @@ func TestOpenSaysWhyWhenItCannotSelectAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := registry.Upsert(state.Entry{Repo: repo, Slug: "eng-9-clean", Archived: true})
-	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{ID: "ENG-9"}, Entry: entry}}
+	archived := Item{Status: factory.Done, Factory: factory.Factory{Repo: repo, Slug: "eng-9-clean", Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "ENG-9"}, Entry: entry}}
 	model, node := withNode(Model{Config: cfg}, host.Runtime{Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}})
 	node.show(model, Snapshot{At: time.Now(), Items: []Item{archived}})
 	for name, reason := range map[string]string{"!!!": "letters", "ENG-9": "archived", "doctor": "`doctor` is a factory command"} {
@@ -142,7 +142,7 @@ func TestOpeningAnIdSelectsItsFactoryOrCreatesOne(t *testing.T) {
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(legacy, "state.json"), []byte(`{"ticket":"ENG-9","worktree":"","stages":{"handoff":{"status":"done"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, "state.json"), []byte(`{"schema_version":2,"id":"ENG-9","worktree":"","stages":{"handoff":{"status":"done"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &state.Config{Repos: []string{repo}, StateDir: t.TempDir()}
@@ -281,7 +281,7 @@ func TestRepoSettingsWaitsForPopupCloseAndRefreshesTheSelectedRepo(t *testing.T)
 			t.Fatal(err)
 		}
 		picked := context.Repos[context.Repo]
-		if picked.Path != repo || context.Here || !picked.Browser || !picked.CodeRabbit || picked.DefaultPipeline != "quick" || context.StateDir != cfg.StateDir {
+		if picked.Path != repo || context.Here || !picked.Browser || picked.DefaultPipeline != "quick" || context.StateDir != cfg.StateDir {
 			t.Fatalf("stale return context: %+v", context)
 		}
 		engineer := slices.IndexFunc(picked.Agents, func(a dialog.AgentOption) bool { return a.Role == "engineer" })

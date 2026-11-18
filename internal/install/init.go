@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/parser"
 
 	"github.com/afonsodelgado/factory/bundle"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -86,60 +84,22 @@ func writeProfile(repo string) (copiedFrom string, written bool, err error) {
 
 func detectProfile(repo string) ([]byte, error) {
 	template, err := fs.ReadFile(bundle.Files, "skills/factory/templates/factory.yml")
-	if err != nil {
-		return nil, err
+	if err != nil || !servesWeb(repo) {
+		return template, err
 	}
-	file, err := parser.ParseBytes(template, parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-	commands, browser, detected := detectCommands(repo)
-	edits := map[string]string{"$.coderabbit": "false"}
-	if detected {
-		edits["$.commands"] = mappingYAML(commands)
-		if !browser {
-			edits["$.qa"] = mappingYAML(yaml.MapSlice{{Key: "mode", Value: "terminal"}, {Key: "notes", Value: ""}})
-		}
-	}
-	for at, value := range edits {
-		path, err := yaml.PathString(at)
-		if err != nil {
-			return nil, err
-		}
-		if err := path.ReplaceWithReader(file, strings.NewReader(value)); err != nil {
-			return nil, err
-		}
-	}
-	return []byte(strings.TrimRight(file.String(), "\n") + "\n"), nil
+	template = bytes.Replace(template, []byte("  source: terminal\n"), []byte("  source: web\n"), 1)
+	return bytes.Replace(template, []byte("  mode: terminal\n"), []byte("  mode: browser\n"), 1), nil
 }
 
-func detectCommands(repo string) (commands yaml.MapSlice, browser, detected bool) {
-	if exists(filepath.Join(repo, "go.mod")) {
-		return yaml.MapSlice{{Key: "build", Value: "go build ./..."}, {Key: "lint", Value: "go vet ./..."}, {Key: "test", Value: "go test ./..."}}, false, true
-	}
+func servesWeb(repo string) bool {
 	data, err := os.ReadFile(filepath.Join(repo, "package.json"))
 	if err != nil {
-		return nil, false, false
+		return false
 	}
 	var pkg struct {
 		Scripts map[string]string `json:"scripts"`
 	}
-	json.Unmarshal(data, &pkg)
-	for _, s := range []struct{ key, script string }{{"build", "build"}, {"lint", "lint"}, {"test", "test"}, {"migrate", "db:migrate"}} {
-		if _, ok := pkg.Scripts[s.script]; ok {
-			commands = append(commands, yaml.MapItem{Key: s.key, Value: "npm run " + s.script})
-		}
-	}
-	_, hasDev := pkg.Scripts["dev"]
-	return commands, hasDev, true
-}
-
-func mappingYAML(m yaml.MapSlice) string {
-	if len(m) == 0 {
-		return "{}"
-	}
-	out, _ := yaml.Marshal(m)
-	return string(out)
+	return json.Unmarshal(data, &pkg) == nil && pkg.Scripts["dev"] != ""
 }
 
 func excludeFactoryFiles(repo, excludeFile string) ([]string, error) {

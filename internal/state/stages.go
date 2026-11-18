@@ -10,6 +10,8 @@ import (
 )
 
 type StageRun struct {
+	ID        string       `json:"id"`
+	Attempt   int          `json:"attempt"`
 	Role      string       `json:"role"`
 	Round     int          `json:"round"`
 	Setting   AgentSetting `json:"setting"`
@@ -17,12 +19,22 @@ type StageRun struct {
 	Prompt    string       `json:"prompt"`
 	Result    string       `json:"result"`
 	StartedAt time.Time    `json:"started_at"`
-	Review    bool         `json:"review,omitempty"`
 }
 
 func (r StageRun) Finished() bool {
-	_, err := os.Stat(r.Result)
-	return err == nil
+	data, err := os.ReadFile(r.Result)
+	if err != nil {
+		return false
+	}
+	var result struct {
+		SchemaVersion int    `json:"schema_version"`
+		RunID         string `json:"run_id"`
+		Status        string `json:"status"`
+	}
+	if json.Unmarshal(data, &result) != nil {
+		return false
+	}
+	return r.ID != "" && result.SchemaVersion == 2 && result.RunID == r.ID && (result.Status == "done" || result.Status == "blocked" || result.Status == "failed")
 }
 
 type StageRuns struct {
@@ -78,11 +90,6 @@ func (s *StageRuns) Latest(role string) (StageRun, bool) {
 		}
 	}
 	return StageRun{}, false
-}
-
-func (s *StageRuns) NextRound(role string) int {
-	latest, _ := s.Latest(role)
-	return latest.Round + 1
 }
 
 func (s *StageRuns) Running() (StageRun, bool) {

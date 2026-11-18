@@ -23,12 +23,11 @@ type Existing struct {
 const UnarchiveAdvice = "In the factory list, H shows archived factories and a on the row unarchives it."
 
 type RepoOption struct {
-	Name       string     `json:"name"`
-	Path       string     `json:"path"`
-	Display    string     `json:"display"`
-	Browser    bool       `json:"browser"`
-	CodeRabbit bool       `json:"coderabbit"`
-	Existing   []Existing `json:"existing"`
+	Name     string     `json:"name"`
+	Path     string     `json:"path"`
+	Display  string     `json:"display"`
+	Browser  bool       `json:"browser"`
+	Existing []Existing `json:"existing"`
 
 	Pipelines       []state.Pipeline `json:"pipelines"`
 	DefaultPipeline string           `json:"default_pipeline"`
@@ -210,5 +209,5 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 }
 
 func (r RepoOption) Support() state.RepoSupport {
-	return state.RepoSupport{CodeRabbit: r.CodeRabbit, BrowserQA: r.Browser}
+	return state.RepoSupport{BrowserQA: r.Browser}
 }

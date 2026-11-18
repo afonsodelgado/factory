@@ -15,10 +15,10 @@ func TestStatusOf(t *testing.T) {
 		return &state.HookFile{Main: &state.HookEvent{Event: main, At: mainAt}, Last: state.HookEvent{Event: main, At: mainAt}}
 	}
 	v2 := func(waitingOn string, items ...state.Attention) *state.State {
-		return &state.State{Stage: "implement", WaitingOn: waitingOn, Attention: append([]state.Attention{}, items...)}
+		return &state.State{SchemaVersion: 2, Stage: "implement", WaitingOn: waitingOn, Attention: append([]state.Attention{}, items...)}
 	}
 	v1 := func(waitingOn string) *state.State {
-		return &state.State{Stage: "implement", WaitingOn: waitingOn}
+		return &state.State{SchemaVersion: 2, Stage: "implement", WaitingOn: waitingOn}
 	}
 	openQuestion := state.Attention{ID: "q-1-1", Kind: "question"}
 	resolved := state.Attention{ID: "q-1-1", Kind: "question", ResolvedAt: state.Time{Time: ago(time.Hour)}}
@@ -45,7 +45,7 @@ func TestStatusOf(t *testing.T) {
 		want    Status
 	}{
 		{"open question", Factory{State: v2("user", openQuestion), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, NeedsYou},
-		{"a gate left open after its stage is done", Factory{State: pastGate, StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, WaitingAgent},
+		{"an unresolved gate stays visible after moving stages", Factory{State: pastGate, StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, NeedsYou},
 		{"a gate lit on a stage marked done that the factory has not left", Factory{State: litGate, StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, NeedsYou},
 		{"answered question, stage agent working", Factory{State: v2("agent", resolved), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute))}, WaitingAgent},
 		{"permission prompt", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: prompting}, NeedsYou},
@@ -61,7 +61,7 @@ func TestStatusOf(t *testing.T) {
 		{"subagent tool call after the supervisor stopped", Factory{State: v2("agent"), StateMod: ago(2 * time.Hour)}, Live{Pane: alive, Hook: subagentBusy}, WaitingAgent},
 		{"exited beats needs you", Factory{State: v2("user", openQuestion)}, Live{Pane: Pane{Found: true, Shell: true}, Hook: hook("Stop", ago(time.Minute))}, Exited},
 		{"no pane", Factory{State: v2("agent")}, Live{Pane: Pane{}, Hook: nil}, Gone},
-		{"done", Factory{State: &state.State{Stages: map[string]state.Stage{"handoff": {Status: "done"}}}}, Live{Pane: Pane{}, Hook: nil}, Done},
+		{"done", Factory{State: &state.State{SchemaVersion: 2, Stages: map[string]state.Stage{"handoff": {Status: "done"}}}}, Live{Pane: Pane{}, Hook: nil}, Done},
 		{"created a minute ago", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{Pane: alive, Hook: nil}, Starting},
 		{"no state five minutes after creation, claude still up", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{Pane: alive, Hook: nil}, FailedToStart},
 		{"claude exited right after launch, so wake can reuse the shell", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{Pane: Pane{Found: true, Shell: true}, Hook: nil}, Exited},

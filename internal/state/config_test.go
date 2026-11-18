@@ -28,16 +28,16 @@ func TestPipelineResolution(t *testing.T) {
 		want                        []string
 		refused                     string
 	}{
-		{name: "built-in quick works with no config", pick: "quick", want: []string{"requirements", "plan", "implement", "review", "handoff"}},
-		{name: "global config overrides a built-in", config: "pipelines:\n  quick: [requirements, implement, handoff]\n", pick: "quick", want: []string{"requirements", "implement", "handoff"}},
-		{name: "profile wins over the global config, also for the default", config: "pipelines:\n  tiny: [plan]\ndefault_pipeline: quick\n", profile: "pipelines:\n  tiny: [implement]\ndefault_pipeline: tiny\n", want: []string{"requirements", "implement", "handoff"}},
-		{name: "coderabbit false in the profile removes the stage", profile: "coderabbit: false\n", pick: "full", want: []string{"requirements", "design", "plan", "implement", "review", "qa", "qa_fixes", "test_gaps", "handoff"}},
-		{name: "a browser QA repo walks through the app before the handoff, a terminal one never does", profile: "qa:\n  mode: browser\n", pick: "full", want: []string{"requirements", "design", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "walkthrough", "handoff"}},
-		{name: "requirements and handoff are always kept", config: "pipelines:\n  bare: [implement]\n", pick: "bare", want: []string{"requirements", "implement", "handoff"}},
-		{name: "unknown stage in the profile is refused with the file and key", profile: "pipelines:\n  quick: [requirements, qa_fix]\n", refused: `.factory/config.yml: pipelines.quick has the unknown stage "qa_fix"`},
-		{name: "unknown stage in the config is refused with the file and key", config: "pipelines:\n  quick: [tests]\n", refused: `config.yml: pipelines.quick has the unknown stage "tests"`},
-		{name: "without qa there is nothing for qa_fixes and test_gaps to fix", config: "pipelines:\n  noqa: [implement, qa_fixes, test_gaps]\n", pick: "noqa", want: []string{"requirements", "implement", "handoff"}},
-		{name: "custom is reserved for a factory's own list", profile: "pipelines:\n  custom: [plan]\n", refused: ".factory/config.yml: pipelines.custom is reserved"},
+		{name: "built-in quick includes independent review and publication", pick: "quick", want: []string{"requirements", "plan", "implement", "review", "pr", "handoff"}},
+		{name: "global config overrides a built-in", config: "pipelines:\n  quick: [plan, implement, review, qa, pr]\n", pick: "quick", want: []string{"requirements", "plan", "implement", "review", "qa", "pr", "handoff"}},
+		{name: "profile wins over the global config", config: "pipelines:\n  tiny: [plan, implement, review, qa, pr]\ndefault_pipeline: quick\n", profile: "pipelines:\n  tiny: [plan, implement, review, pr]\ndefault_pipeline: tiny\n", want: []string{"requirements", "plan", "implement", "review", "pr", "handoff"}},
+		{name: "stale vendor setting is ignored", profile: "coderabbit: false\n", pick: "full", want: StageKeys},
+		{name: "browser and terminal use the same stages", profile: "qa:\n  mode: browser\n", pick: "full", want: StageKeys},
+		{name: "requirements and handoff are always kept", config: "pipelines:\n  bare: [plan, implement, review, pr]\n", pick: "bare", want: []string{"requirements", "plan", "implement", "review", "pr", "handoff"}},
+		{name: "unknown stage in profile is refused", profile: "pipelines:\n  quick: [qa_fixes]\n", refused: `.factory/config.yml: pipelines.quick has the unknown stage "qa_fixes"`},
+		{name: "unknown stage in config is refused", config: "pipelines:\n  quick: [coderabbit]\n", refused: `config.yml: pipelines.quick has the unknown stage "coderabbit"`},
+		{name: "publication cannot be omitted", config: "pipelines:\n  incomplete: [plan, implement, review]\n", refused: "must include pr"},
+		{name: "custom is reserved", profile: "pipelines:\n  custom: [plan]\n", refused: ".factory/config.yml: pipelines.custom is reserved"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -370,7 +370,7 @@ func TestRepoSettingsSaveKeepsUnownedConfigAndComments(t *testing.T) {
 	}
 }
 
-func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
+func TestRepoSettingsIgnoresAStaleVendorKey(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.MkdirAll(RepoDir(repo), 0o755); err != nil {
 		t.Fatal(err)
@@ -382,8 +382,8 @@ func TestRepoSettingsReadsANullCodeRabbitAsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.Values["coderabbit"] != "true" {
-		t.Errorf("coderabbit = %q; the pipeline treats a null as on, so the form must show on", settings.Values["coderabbit"])
+	if settings.Values["coderabbit"] != "" {
+		t.Errorf("coderabbit = %q; the retired setting must not appear in the form", settings.Values["coderabbit"])
 	}
 }
 

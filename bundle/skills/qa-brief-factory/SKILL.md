@@ -41,3 +41,5 @@ Known gaps deliberately left for later, so they aren't reported as bugs.
 ```
 
 Build "Already verified" and "Unsure about" from what actually happened in this conversation, not from what the code suggests. If the session didn't exercise something, it goes under "Unsure about". Then tell the user the path.
+
+In factory mode use the supervisor-recorded local stack and shared command recipe. Never pull, push, submit or sync during implementation, review or QA. Report untested behaviour and prior unresolved findings explicitly.

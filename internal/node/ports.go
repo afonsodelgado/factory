@@ -43,5 +43,5 @@ func pickHTTPS(sc ServeConfig, reserved []int) (int, error) {
 			return port, nil
 		}
 	}
-	return 0, failed(host.FailPorts, fmt.Errorf("every tailnet HTTPS port from %d to %d already serves a walkthrough or another Serve entry; stop a walkthrough, or free a port with tailscale serve --https=<port> off", FirstAppHTTPS, LastAppHTTPS))
+	return 0, failed(host.FailPorts, fmt.Errorf("every tailnet HTTPS port from %d to %d already serves a review stack or another Serve entry; stop a review stack, or free a port with tailscale serve --https=<port> off", FirstAppHTTPS, LastAppHTTPS))
 }

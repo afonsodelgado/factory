@@ -22,14 +22,14 @@ func writeState(t *testing.T, dir, body string) {
 func TestDiscoverDeduplicatesSymlinkedStateAndReadsOldTicketFiles(t *testing.T) {
 	repo := t.TempDir()
 	worktrees := WorktreesDir(repo)
-	writeState(t, filepath.Join(repo, ".claude", "factory", "ENG-740"), `{"ticket":"ENG-740","stage":"plan"}`)
+	writeState(t, filepath.Join(repo, ".claude", "factory", "ENG-740"), `{"schema_version":2,"id":"ENG-740","stage":"plan"}`)
 	if err := os.MkdirAll(filepath.Join(worktrees, "eng-740-cors", ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join(repo, ".claude", "factory"), filepath.Join(worktrees, "eng-740-cors", ".claude", "factory")); err != nil {
 		t.Fatal(err)
 	}
-	writeState(t, filepath.Join(worktrees, "csv-export", ".claude", "factory", "csv-export"), `{"ticket":null,"stage":"design"}`)
+	writeState(t, filepath.Join(worktrees, "csv-export", ".claude", "factory", "csv-export"), `{"schema_version":2,"id":null,"stage":"design"}`)
 
 	found := Discover([]string{repo}, &state.Registry{})
 
@@ -43,7 +43,7 @@ func TestDiscoverDeduplicatesSymlinkedStateAndReadsOldTicketFiles(t *testing.T) 
 	}
 	for key, label := range want {
 		if labels[key] != label {
-			t.Errorf("%s is labelled %q, want %q: a state.json written with ticket, or ticket null, must still name its factory", key, labels[key], label)
+			t.Errorf("%s is labelled %q, want %q: a state.json written with an id, or id null, must still name its factory", key, labels[key], label)
 		}
 	}
 }
@@ -51,7 +51,7 @@ func TestDiscoverDeduplicatesSymlinkedStateAndReadsOldTicketFiles(t *testing.T) 
 func TestDiscoverOpensAPortableArtifactInItsOwnFactoryFolder(t *testing.T) {
 	repo := t.TempDir()
 	dir := filepath.Join(WorktreesDir(repo), "csv", ".claude", "factory", "csv")
-	writeState(t, dir, `{"id":"csv","stages":{"design":{"artifacts":[{"url":"design/variant-a.html"},{"url":"../../../../etc/passwd"},{"url":"https://example.com/page"}]}}}`)
+	writeState(t, dir, `{"schema_version":2,"id":"csv","stages":{"design":{"artifacts":[{"url":"design/variant-a.html"},{"url":"../../../../etc/passwd"},{"url":"https://example.com/page"}]}}}`)
 	found := Discover([]string{repo}, &state.Registry{})
 	if len(found) != 1 {
 		t.Fatalf("found %d factories", len(found))

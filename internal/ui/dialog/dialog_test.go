@@ -28,7 +28,7 @@ import (
 func TestNewFactorySelectsTheFactoryWithTheTypedID(t *testing.T) {
 	context := NewContext{
 		Repos: []RepoOption{
-			{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Browser: true, CodeRabbit: true, Existing: []Existing{{Key: "/r/cowork:eng-7450-ssrf-guard", Worktree: "eng-7450-ssrf-guard", Label: "ENG-7450", Status: "stalled", Stage: "review"}}},
+			{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Browser: true, Existing: []Existing{{Key: "/r/cowork:eng-7450-ssrf-guard", Worktree: "eng-7450-ssrf-guard", Label: "ENG-7450", Status: "stalled", Stage: "review"}}},
 			{Name: "factory", Path: "/r/factory", Display: "~/dev/factory"},
 		},
 	}
@@ -44,8 +44,7 @@ func TestNewFactorySelectsTheFactoryWithTheTypedID(t *testing.T) {
 }
 
 func TestNewFactoryStartsWithThePickedPipeline(t *testing.T) {
-	off := false
-	pipelines, err := state.ResolvePipelines(&state.Config{}, state.Profile{CodeRabbit: &off}, "")
+	pipelines, err := state.ResolvePipelines(&state.Config{}, state.Profile{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +74,7 @@ func TestNewFactoryStartsWithItsOwnStagesAndAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents := state.ResolveAgents(&state.Config{}, state.Profile{Agents: map[string]state.AgentSetting{"reviewer": {Effort: "low"}}}, nil)
-	repo := RepoOption{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", CodeRabbit: true, Pipelines: pipelines.List, DefaultPipeline: pipelines.Default}
+	repo := RepoOption{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", Pipelines: pipelines.List, DefaultPipeline: pipelines.Default}
 	for _, role := range state.AgentRoles {
 		repo.Agents = append(repo.Agents, AgentOption{Role: role, AgentSetting: agents[role]})
 	}
@@ -96,7 +95,7 @@ func TestNewFactoryStartsWithItsOwnStagesAndAgents(t *testing.T) {
 	r, _ := final.Result()
 	want := NewResult{
 		Repo: "/r/cowork", Slug: "csv-export", Prompt: "Export contacts as CSV.", Pipeline: state.CustomPipeline,
-		Stages: []string{"requirements", "plan", "implement", "review", "coderabbit", "qa", "qa_fixes", "test_gaps", "handoff"},
+		Stages: []string{"requirements", "plan", "implement", "review", "qa", "pr", "handoff"},
 		Agents: map[string]state.AgentSetting{"engineer": {Model: "fable"}},
 	}
 	if !reflect.DeepEqual(r, want) {
@@ -876,7 +875,7 @@ func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {
 				}
 				return
 			}
-			if settings.values["commands.build"] != "old" || len(settings.fields()) != 10 {
+			if settings.values["commands.build"] != "old" || len(settings.fields()) != 9 {
 				t.Fatal("file not loaded")
 			}
 			settings.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
@@ -885,11 +884,11 @@ func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {
 			settings.Update(tea.PasteMsg{Content: " edited"})
 			settings.field = 3
 			settings.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-			if len(settings.fields()) != 5 || settings.values["qa.start"] != "serve edited" {
+			if len(settings.fields()) != 4 || settings.values["qa.start"] != "serve edited" {
 				t.Fatal("terminal fields lost edits")
 			}
 			settings.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-			if len(settings.fields()) != 10 {
+			if len(settings.fields()) != 9 {
 				t.Fatal("browser fields not restored")
 			}
 			settings.Update(tea.KeyPressMsg{Code: tea.KeySpace})

@@ -36,7 +36,6 @@ type Profile struct {
 		Seed           string `yaml:"seed"`
 		SignIn         string `yaml:"sign_in"`
 	} `yaml:"qa"`
-	CodeRabbit      *bool                   `yaml:"coderabbit"`
 	Pipelines       map[string][]string     `yaml:"pipelines"`
 	DefaultPipeline string                  `yaml:"default_pipeline"`
 	Agents          map[string]AgentSetting `yaml:"agents"`

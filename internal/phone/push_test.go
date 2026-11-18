@@ -258,7 +258,7 @@ func TestAHandoffAsksOnceWhetherTheWorkIsDoneEvenAsItsSupervisorExits(t *testing
 	}
 	handoff := state.Attention{ID: "handoff-csv-1", Kind: "handoff", Title: "Work done: mark it done or continue working?", StageKey: "handoff", CreatedAt: state.Time{Time: now}}
 	finished := func(pane *tmux.Pane, attention ...state.Attention) []host.LocalFactory {
-		st := &state.State{ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "running"}}, WaitingOn: "user", Attention: attention}
+		st := &state.State{SchemaVersion: 2, ID: "csv", Stage: "handoff", Stages: map[string]state.Stage{"handoff": {Status: "running"}}, WaitingOn: "user", Attention: attention}
 		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})
 		r.SetSnapshot(host.Snapshot{At: now, Items: []host.Item{{Factory: factory.Factory{Repo: "/r/app", Slug: "csv", State: st}, Status: factory.NeedsYou, Pane: pane}}})
 		return r.Local().Factories
@@ -296,7 +296,7 @@ func TestAGateIsPushedAgainOnceTheDesignerHasWorkedOnTheComments(t *testing.T) {
 	v := newVendor(t)
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	pusher := &Pusher{Store: store, Origin: "https://" + testHost, Client: v.Client(), Now: func() time.Time { return now }}
-	gate := state.Attention{ID: "gate-csv-design", Kind: "gate", Title: "Approve the design", CreatedAt: state.Time{Time: now}}
+	gate := state.Attention{ID: "gate-csv-design", Kind: "gate", StageKey: "design", Title: "Approve the design", CreatedAt: state.Time{Time: now}}
 	gated := func(revising map[string]string) []host.LocalFactory {
 		st := &state.State{ID: "csv", Stage: "design", WaitingOn: "user", Attention: []state.Attention{gate}}
 		r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}})

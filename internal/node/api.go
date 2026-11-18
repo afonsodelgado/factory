@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	Protocol    = 2
-	MinProtocol = 2
+	Protocol    = 3
+	MinProtocol = 3
 	maxBody     = 64 << 10
 	commandWait = time.Minute
 	heartbeat   = 15 * time.Second

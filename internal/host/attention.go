@@ -50,6 +50,9 @@ type ArtifactRow struct {
 
 type AttentionItem struct {
 	ID          string               `json:"id"`
+	Loop        string               `json:"loop,omitempty"`
+	LimitKey    string               `json:"limit_key,omitempty"`
+	Revision    uint64               `json:"revision"`
 	Kind        string               `json:"kind"`
 	Title       string               `json:"title"`
 	Body        string               `json:"body,omitempty"`
@@ -70,7 +73,7 @@ type AttentionItem struct {
 
 func (i AttentionItem) Answerable() bool {
 	switch i.Kind {
-	case "question", "gate", "comment", "cap", "failure", "handoff":
+	case "question", "commands", "design_return", "gate", "comment", "cap", "failure", "handoff":
 		return true
 	}
 	return false
@@ -146,7 +149,7 @@ func permissionItem(prompt *state.PendingPrompt, role string, pane *tmux.Pane) A
 }
 
 func fromAttention(st *state.State, a state.Attention, counter ThreadCounter) AttentionItem {
-	item := AttentionItem{ID: a.ID, Kind: a.Kind, Title: a.Title, Body: a.Body, ArtifactURL: a.ArtifactURL, ThreadID: a.ThreadID, Since: a.CreatedAt.Time, Stage: a.Stage()}
+	item := AttentionItem{ID: a.ID, Loop: a.Loop, LimitKey: a.LimitKey, Revision: a.Revision, Kind: a.Kind, Title: a.Title, Body: a.Body, ArtifactURL: a.ArtifactURL, ThreadID: a.ThreadID, Since: a.CreatedAt.Time, Stage: a.Stage()}
 	for i, q := range a.Questions {
 		question := Question{Text: q}
 		if i < len(a.Options) {
@@ -283,13 +286,15 @@ type LocalFactory struct {
 	Repo        string       `json:"repo"`
 	RepoName    string       `json:"repo_name"`
 	Stage       string       `json:"stage,omitempty"`
+	Loop        string       `json:"loop,omitempty"`
+	Round       int          `json:"round,omitempty"`
 	Status      string       `json:"status"`
 	Paused      bool         `json:"paused"`
 	NeedsSince  time.Time    `json:"needs_since,omitzero"`
 	Items       []LocalItem  `json:"items"`
 	Resolved    []Resolution `json:"resolved,omitempty"`
 	Pages       []LocalPage  `json:"pages"`
-	Walkthrough *StackStatus `json:"walkthrough,omitempty"`
+	ReviewStack *StackStatus `json:"review_stack,omitempty"`
 	Message     Eligibility  `json:"message"`
 	CanPause    bool         `json:"can_pause"`
 	CanWake     bool         `json:"can_wake"`
@@ -315,7 +320,7 @@ func localPage(f review.Factory, row ArtifactRow) LocalPage {
 	case static:
 		page.Href = href
 	case strings.HasPrefix(row.URL, "http"):
-		page.Unavailable = "It runs on the app's dev server; the walkthrough link opens the app once factory review stack has started it."
+		page.Unavailable = "It runs on the app's dev server; the review stack link opens the app once factory review stack has started it."
 	default:
 		page.Unavailable = "It is not an HTML page in this factory's folder."
 	}
@@ -359,7 +364,7 @@ func NeedsSince(it Item) time.Time {
 
 func (m *Runtime) Local() Local {
 	local := Local{At: m.snap.At, Factories: []LocalFactory{}}
-	for _, it := range m.snap.Items {
+	for _, it := range m.verificationSnapshot().Items {
 		if it.Factory.Remote == nil && !it.Factory.Archived() {
 			local.Factories = append(local.Factories, m.localFactory(it))
 		}
@@ -378,6 +383,10 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	}
 	if f.State != nil {
 		lf.Stage = f.State.Stage
+		lf.Loop, lf.Round = f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds
+		if lf.Loop != "" {
+			lf.Round = f.State.Loops.Used[lf.Loop]
+		}
 		for _, a := range f.State.Artifacts() {
 			lf.Pages = append(lf.Pages, localPage(ReviewFactory(it), NewArtifactRow(a, m.threadCounter())))
 		}
@@ -394,8 +403,8 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	for _, item := range AttentionItems(it, m.snap.At, m.threadCounter()) {
 		lf.Items = append(lf.Items, m.localItem(it, item, target))
 	}
-	if s, ok := m.walkthrough(f.Key()); ok {
-		lf.Walkthrough = &s
+	if s, ok := m.reviewStack(f.Key()); ok {
+		lf.ReviewStack = &s
 		if s.State == StackFailed {
 			lf.Items = append(lf.Items, m.localItem(it, stackItem(s), target))
 		}

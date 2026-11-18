@@ -22,20 +22,22 @@ const (
 	Gone
 	Done
 	Unreachable
+	VerificationPending
 )
 
 var statusWords = map[Status]string{
-	Running:       "running",
-	Starting:      "starting",
-	FailedToStart: "failed to start",
-	NeedsYou:      "needs you",
-	WaitingCI:     "on CI",
-	WaitingAgent:  "on agent",
-	Stalled:       "stalled",
-	Exited:        "exited",
-	Gone:          "gone",
-	Done:          "done",
-	Unreachable:   "unreachable",
+	VerificationPending: "verification pending",
+	Running:             "running",
+	Starting:            "starting",
+	FailedToStart:       "failed to start",
+	NeedsYou:            "needs you",
+	WaitingCI:           "on CI",
+	WaitingAgent:        "on agent",
+	Stalled:             "stalled",
+	Exited:              "exited",
+	Gone:                "gone",
+	Done:                "done",
+	Unreachable:         "unreachable",
 }
 
 func (s Status) String() string {

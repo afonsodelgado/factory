@@ -901,6 +901,10 @@ func (m *Model) row(it Item) selector.Row {
 		row.Stage += " · " + name
 	}
 	if f.State != nil {
+		row.Loop, row.Round = f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds
+		if row.Loop != "" {
+			row.Round = f.State.Loops.Used[row.Loop]
+		}
 		_, settled := m.shownItems(it)
 		row.Items = len(f.State.OpenAttention()) - len(settled)
 	}
@@ -910,6 +914,7 @@ func (m *Model) row(it Item) selector.Row {
 	if lf, onNode := m.nodeFactories[f.Key()]; onNode {
 		_, settled := m.shownItems(it)
 		row.Stage, row.Items = lf.Stage, len(lf.Items)-len(settled)
+		row.Loop, row.Round = lf.Loop, lf.Round
 	}
 	if m.unverified(it) != "" {
 		row.Stage = "held, unchecked"
@@ -1142,8 +1147,8 @@ func (m *Model) panelHints() []footer.Hint {
 	if editing {
 		back = "stop typing"
 	}
-	if item.Kind == "question" && len(item.Questions) == 0 {
-		return hints("type", "your answer", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
+	if panel.TextAnswered(item) {
+		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
 	}
 	d := &panel.Draft{}
 	if item.Answerable() {
@@ -1168,9 +1173,9 @@ func (m *Model) panelHints() []footer.Hint {
 	case item.Kind == "comment":
 		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "cap":
-		return hints("ctrl+r", "one more round", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "one more round", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "failure":
-		return hints("ctrl+r", "retry", "ctrl+x", "skip", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "retry", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "handoff":
 		return hints("ctrl+k", "mark done", "type", "what to do next", "ctrl+s", "continue working", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission":
@@ -1274,4 +1279,25 @@ func noPaneReason(it Item) string {
 		return fmt.Sprintf("The tmux pane is gone. Its last hook event was at %s.", it.Hook.Last.At.Local().Format("Jan 2 15:04"))
 	}
 	return "The tmux pane is gone."
+}
+
+func loopStage(f factory.Factory) string {
+	if f.State != nil {
+		round := f.State.Stages[f.State.Stage].Rounds
+		if f.State.Loops.Active != "" {
+			round = f.State.Loops.Used[f.State.Loops.Active]
+		}
+		return workflowStage(f.State.Stage, f.State.Loops.Active, round)
+	}
+	return stageOf(f)
+}
+
+func workflowStage(stage, loop string, round int) string {
+	if round == 0 {
+		return stage
+	}
+	if loop != "" {
+		stage += " · " + loop
+	}
+	return fmt.Sprintf("%s · round %d", stage, round)
 }

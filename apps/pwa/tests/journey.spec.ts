@@ -247,7 +247,7 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
   await server.node(peer("homelab"), {
     factories: [
       factory("rate-limits", [], {
-        walkthrough: {
+        review_stack: {
           state: "ready",
           at: new Date().toISOString(),
           origin: "https://homelab.tail5e2c.ts.net:8443",
@@ -292,7 +292,9 @@ test("with three nodes the list groups by node, counts a lost one apart, keeps a
   });
   await list.getByRole("link").filter({ hasText: "rate-limits" }).click();
   await page.getByRole("link", { name: /Pages/ }).click();
-  await expect(page.getByRole("link", { name: /Walkthrough/ })).toHaveAttribute(
+  await expect(
+    page.getByRole("link", { name: /Review stack/ }),
+  ).toHaveAttribute(
     "href",
     `http://${peer("homelab")}/w/shop-1a2b-rate-limits`,
   );

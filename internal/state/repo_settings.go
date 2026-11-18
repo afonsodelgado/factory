@@ -39,20 +39,10 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 		s.Present[key] = node != nil
 		value := ""
 		if node != nil {
-			if key == "coderabbit" && node.Type() == ast.NullType {
-				value = "true"
-			} else if key == "coderabbit" {
-				var enabled bool
-				err = yaml.NodeToValue(node, &enabled)
-				value = fmt.Sprint(enabled)
-			} else {
-				err = yaml.NodeToValue(node, &value)
-			}
+			err = yaml.NodeToValue(node, &value)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %s: %w", path, key, err)
 			}
-		} else if key == "coderabbit" {
-			value = "true"
 		} else if key == "qa.mode" {
 			value = "terminal"
 		}
@@ -66,7 +56,7 @@ func SettingsKeys(mode string) []string {
 	if mode == "browser" {
 		keys = append(keys, "qa.start", "qa.health", "qa.seed", "qa.sign_in", "qa.url")
 	}
-	return append(keys, "coderabbit")
+	return keys
 }
 
 func (s *RepoSettings) Changes(values map[string]string) []string {
@@ -165,9 +155,6 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	}
 	for _, key := range s.Changes(values) {
 		var value any = values[key]
-		if key == "coderabbit" {
-			value = values[key] == "true"
-		}
 		encoded, err := encodeSetting(value)
 		if err != nil {
 			return err

@@ -142,11 +142,11 @@ func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewR
 	var id, target string
 	sent, err := store.Send(page, func(drafts []review.Thread, batch int) error {
 		id = review.BatchID(it.Factory.Label(), batch)
-		path, text, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
+		path, _, err := review.WriteBatch(it.Factory.Dir, id, page, drafts, store.TakeConsole(), batch)
 		if err != nil {
 			return err
 		}
-		if target, err = m.DeliverReview(it, page, id, path, text); err != nil {
+		if target, err = m.DeliverReview(it, page, id, path); err != nil {
 			os.Remove(path)
 		}
 		return err
@@ -158,31 +158,26 @@ func (m *Runtime) SendReview(it Item, store *review.Store, page string) (ReviewR
 	return ReviewReply{Target: target, Batch: id, Count: len(sent)}, nil
 }
 
-func (m *Runtime) DeliverReview(it Item, page, id, path, text string) (string, error) {
-	if role := state.RoleOf(StageOfPage(it.Factory, page)); role != "" && m.ReachesRole(it, role, text) {
-		return role, nil
-	}
+func (m *Runtime) DeliverReview(it Item, page, id, path string) (string, error) {
 	if it.Pane == nil {
 		return "", fmt.Errorf("%s has no supervisor pane; wake it, then send again", it.Factory.Label())
 	}
-	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: id + " comments: " + path})
+	m.QueueType(QueuedType{Pane: it.Pane.ID, Token: it.Pane.Token, Label: it.Factory.Label(), Text: id + " comments: " + path + batchInstruction(it.Factory, page)})
 	return "supervisor", nil
 }
 
-func (m *Runtime) ReachesRole(it Item, role, text string) bool {
-	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
-	if err != nil {
-		return false
+func batchInstruction(f factory.Factory, page string) string {
+	switch StageOfPage(f, page) {
+	case "design":
+		return "; submit a design_comments event with this batch ID as the receipt before dispatching the designer"
+	case "plan":
+		gate := "the plan gate"
+		if open, ok := OpenGate(f, "plan"); ok {
+			gate = "plan gate " + open.ID
+		}
+		return "; these are plan comments for the architect: submit them as a changes answer on " + gate + " with this batch ID as the receipt"
 	}
-	latest, ran := runs.Latest(role)
-	if !ran {
-		return false
-	}
-	if _, alive := LiveStagePane(stagePaneOf(m.snap.Panes, it.Factory, role, latest.Token)); !alive && m.Engine == nil {
-		return false
-	}
-	_, err = m.SendStage(it, runs, StageRequest{Role: role, Text: text, Review: true})
-	return err == nil
+	return ""
 }
 
 func (m *Runtime) ApproveFromPage(it Item, page, seen string) (ReviewReply, error) {
@@ -238,7 +233,7 @@ func (m *Runtime) Speaker(it Item, token string) string {
 func StageOfPage(f factory.Factory, page string) string {
 	switch page {
 	case review.App:
-		return "walkthrough"
+		return "design"
 	case review.Prototype:
 		return "design"
 	}

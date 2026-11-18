@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -91,6 +92,9 @@ func browserJob(key string) string { return "browser " + key }
 
 func (m *Runtime) browsesForQA(it Item, role string) (state.Profile, bool) {
 	_, profile := m.repoConfig(it.Factory.Repo)
+	if resolved, err := recipe.Resolve(it.Factory.Worktree); err == nil && resolved.Profile.QA.Mode != "" {
+		profile = resolved.Profile
+	}
 	return profile, role == "qa" && profile.BrowserQA()
 }
 
@@ -155,7 +159,7 @@ func (m *Runtime) closeQA(f factory.Factory, run state.StageRun, failure, reason
 		m.Engine.KillStages(f.Repo, f.Slug, run.Role)
 	}
 	m.note(f, "browser QA failed at "+failure+": "+reason)
-	return WriteFile(run.Result, failedResult(failure, reason, evidence))
+	return WriteFile(run.Result, failedResult(f.State, run, failure, reason, evidence))
 }
 
 func (m *Runtime) currentQARun(f factory.Factory, token string) (state.StageRun, bool) {
@@ -212,7 +216,7 @@ func (m *Runtime) recoverBrowsers() {
 		return
 	}
 	for _, lease := range m.Browsers.Recover() {
-		f := factory.Factory{Repo: lease.Repo, Slug: lease.Slug, Worktree: lease.Worktree}
+		f := m.recoveredFactory(lease)
 		if run, current := m.currentQARun(f, lease.Token); current && !run.Finished() {
 			m.closeQA(f, run, FailRestart, "the node stopped while this QA ran; its browser, stack and profile were removed", lease.Evidence)
 		}
@@ -223,13 +227,35 @@ func stagesEnded(it Item) bool {
 	return it.Status == factory.Done || it.Status == factory.Gone || it.Factory.Archived()
 }
 
-func failedResult(failure, reason, evidence string) string {
+func (m *Runtime) recoveredFactory(lease BrowserLease) factory.Factory {
+	if m.Loader != nil {
+		if f, ok := m.Loader.Lookup(lease.Repo, lease.Slug); ok {
+			return f
+		}
+	}
+	return factory.Factory{Repo: lease.Repo, Slug: lease.Slug, Worktree: lease.Worktree}
+}
+
+func failedResult(snapshot *state.State, run state.StageRun, failure, reason, evidence string) string {
+	var heads, stack []state.StackBranch
+	if snapshot != nil {
+		stack = snapshot.Stack
+		for _, active := range snapshot.Workflow.Runs {
+			if active.ID == run.ID {
+				heads = active.InputHeads
+			}
+		}
+	}
 	data, _ := json.Marshal(map[string]any{
-		"status":    "failed",
-		"summary":   "browser QA failed at " + failure + ": " + reason,
-		"outputs":   []string{},
-		"questions": []string{},
-		"data":      map[string]any{"failure": failure, "evidence": evidence},
+		"schema_version": 2,
+		"run_id":         run.ID,
+		"input_heads":    heads,
+		"output_heads":   stack,
+		"status":         "failed",
+		"summary":        "browser QA failed at " + failure + ": " + reason,
+		"outputs":        []string{},
+		"questions":      []string{},
+		"data":           map[string]any{"failure": failure, "evidence": evidence},
 	})
 	return string(data) + "\n"
 }

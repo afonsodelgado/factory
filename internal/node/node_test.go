@@ -55,7 +55,7 @@ func asking(t *testing.T, typed host.Typist) *host.Runtime {
 	t.Helper()
 	pane := tmux.Pane{ID: "%1", Command: "claude", Token: "sup"}
 	question := state.Attention{ID: "q1", Kind: "question", Questions: []string{"Which region?"}, CreatedAt: state.Time{Time: testNow.Add(-2 * time.Minute)}}
-	f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{ID: "csv", Stage: "plan", Attention: []state.Attention{question}}}
+	f := factory.Factory{Repo: "/r/app", Slug: "csv", State: &state.State{SchemaVersion: 2, ID: "csv", Stage: "plan", Attention: []state.Attention{question}}}
 	idle := state.HookEvent{Event: "Stop", At: testNow.Add(-time.Minute)}
 	r := host.New(host.Runtime{Config: &state.Config{StateDir: t.TempDir()}, TM: tmux.Client{Socket: "factory-test-" + uuid.NewString(), ConfigFile: "/dev/null"}, Typist: typed, Now: func() time.Time { return testNow }})
 	r.SetSnapshot(host.Snapshot{At: testNow, Panes: []tmux.Pane{pane}, Items: []host.Item{{Factory: f, Status: factory.NeedsYou, Hook: &state.HookFile{Main: &idle, Last: idle}, Pane: &pane}}})
