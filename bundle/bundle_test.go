@@ -81,14 +81,14 @@ func TestNoBundledInstructionAsksForVisibleChromeOrItsExtension(t *testing.T) {
 func TestNoCommandConfigOrDocStillOffersTheOldSSHRemotes(t *testing.T) {
 	removed := regexp.MustCompile(`factory remote\b|host request|\bntfy\b|default_remote|--remote(\s|$)|\bRemotes\b|^\s*remotes:`)
 	migration := map[string]string{
-		"README.md":                       "Upgrading from a release with ssh remotes",
+		"docs/reference.md":               "Upgrading from a release with ssh remotes",
 		"cmd/factory/main.go":             "ssh remotes are gone",
 		"internal/state/machine.go":       "",
 		"internal/state/config_test.go":   "",
 		"bundle/skills/gh-stack/SKILL.md": "",
 	}
 	root := ".."
-	for _, top := range []string{"cmd", "internal", "bundle", "apps/pwa/src", "README.md", "CLAUDE.md"} {
+	for _, top := range []string{"cmd", "internal", "bundle", "apps/pwa/src", "README.md", "docs", "CLAUDE.md"} {
 		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err

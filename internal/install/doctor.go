@@ -2,7 +2,6 @@ package install
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +44,7 @@ type Check struct {
 
 type Options struct {
 	ClaudeDir  string
+	Version    string
 	Binary     string
 	Browser    []string
 	Home       string
@@ -90,29 +90,6 @@ func atLeast(have, want string) bool {
 	return true
 }
 
-var linuxPackageManagers = []struct {
-	binary  string
-	install string
-	renamed map[string]string
-}{
-	{"pacman", "sudo pacman -S --needed --noconfirm ", map[string]string{"gh": "github-cli"}},
-	{"apt-get", "sudo apt-get install -y ", nil},
-	{"dnf", "sudo dnf install -y ", nil},
-	{"zypper", "sudo zypper install -y ", nil},
-}
-
-func installCommand(pkg string) string {
-	if runtime.GOOS == "darwin" {
-		return "brew install " + pkg
-	}
-	for _, m := range linuxPackageManagers {
-		if hasCommand(m.binary) {
-			return m.install + cmp.Or(m.renamed[pkg], pkg)
-		}
-	}
-	return "install " + pkg + " with your package manager"
-}
-
 func hasCommand(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
@@ -133,16 +110,7 @@ func Doctor(o Options) []Check {
 }
 
 func doctor(o Options, extra ...Check) []Check {
-	checks := []Check{
-		tool("claude", "2.1.300", "claude", []string{"--version"}, "curl -fsSL https://claude.ai/install.sh | bash"),
-		tool("python3", "3.8", "python3", []string{"--version"}, installCommand("python3")),
-		tool("git", "2.31", "git", []string{"--version"}, installCommand("git")),
-		tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")),
-		ghCheck(),
-		ghStack(),
-		revmux(o),
-		plugin(o, "impeccable", "impeccable@impeccable", "design stage"),
-	}
+	checks := append(Toolchain(), GitHub(), GhStack(), Revmux(o), PluginCheck(o, PluginNamed("impeccable")))
 	checks = append(checks, extra...)
 	checks = append(checks, bundleCheck(o), hooksCheck(o))
 	if o.ConfigErr != nil {
@@ -283,12 +251,12 @@ func installedPlugins(claudeDir string) map[string]string {
 	return found
 }
 
-func plugin(o Options, name, id, purpose string) Check {
-	v, ok := installedPlugins(o.ClaudeDir)[id]
+func plugin(o Options, p Plugin) Check {
+	v, ok := installedPlugins(o.ClaudeDir)[p.ID]
 	if !ok {
-		return Check{Name: name, Mark: Fail, Detail: "plugin " + id + " not installed; the " + purpose + " needs it", Fix: "claude plugin install " + id}
+		return Check{Name: p.Name, Mark: Fail, Detail: "plugin " + p.ID + " not installed; the " + p.Purpose + " needs it", Fix: p.Fix(o.ClaudeDir)}
 	}
-	return Check{Name: name, Mark: Pass, Detail: strings.TrimSpace("plugin " + id + " " + v), Note: purpose}
+	return Check{Name: p.Name, Mark: Pass, Detail: strings.TrimSpace("plugin " + p.ID + " " + v), Note: p.Purpose}
 }
 
 func revmux(o Options) Check {
@@ -296,9 +264,9 @@ func revmux(o Options) Check {
 	_, pluginInstalled := installedPlugins(o.ClaudeDir)["revmux@revmux"]
 	switch {
 	case binaryErr != nil:
-		return Check{Name: "revmux", Mark: Fail, Detail: "the revmux binary is not on PATH", Fix: "install revmux, then claude plugin install revmux@revmux"}
+		return Check{Name: "revmux", Mark: Fail, Detail: "the revmux binary is not on PATH", Fix: RevmuxInstall() + "  then  " + PluginNamed("revmux").Fix(o.ClaudeDir)}
 	case !pluginInstalled:
-		return Check{Name: "revmux", Mark: Fail, Detail: "plugin revmux@revmux not installed", Fix: "claude plugin install revmux@revmux"}
+		return Check{Name: "revmux", Mark: Fail, Detail: "plugin revmux@revmux not installed", Fix: PluginNamed("revmux").Fix(o.ClaudeDir)}
 	}
 	out, _ := run("revmux", "--version")
 	return Check{Name: "revmux", Mark: Pass, Detail: strings.TrimSpace(version(out) + " · plugin revmux@revmux")}
@@ -411,6 +379,9 @@ func isNoHeads(err error) bool {
 }
 
 func nerdFont(o Options) Check {
+	if os.Getenv("SSH_CONNECTION") != "" {
+		return Check{Name: "Nerd Font", Mark: Skip, Detail: "over ssh, the terminal you connect from draws the icons"}
+	}
 	fix := nerdFontInstallCommand()
 	var found []string
 	if runtime.GOOS == "darwin" {

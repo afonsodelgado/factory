@@ -1,0 +1,92 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/state"
+)
+
+const repoSetting = "repo:"
+
+func readSettings(cfg *state.Config) map[string]string {
+	local := map[string]string{}
+	if shared, err := state.ReadShared(cfg.ConfigDir); err == nil && shared != "" {
+		local["config"] = shared
+	}
+	if rules, err := os.ReadFile(cfg.RulesPath()); err == nil && strings.TrimSpace(string(rules)) != "" {
+		local["rules"] = string(rules)
+	}
+	for origin, repo := range repoOrigins() {
+		if profile, err := os.ReadFile(state.ProfilePath(repo)); err == nil && strings.TrimSpace(string(profile)) != "" {
+			local[repoSetting+origin] = string(profile)
+		}
+	}
+	return local
+}
+
+func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) node.Sources {
+	write := func(ctx context.Context, key, content string) (string, error) {
+		switch {
+		case key == "config":
+			backup(cfg.ConfigFile())
+			written, err := state.WriteShared(cfg.ConfigDir, content)
+			if err != nil {
+				return "", err
+			}
+			answer, err := queue.Call(ctx, host.Message{T: "settings"})
+			if err == nil && answer.T != "done" {
+				err = errors.New(answer.Error)
+			}
+			return written, err
+		case key == "rules":
+			return content, replaceFile(cfg.RulesPath(), content)
+		case strings.HasPrefix(key, repoSetting):
+			origin := strings.TrimPrefix(key, repoSetting)
+			repo, ok := repoOrigins()[origin]
+			if !ok {
+				cloned, err := nodes.Clone(ctx, origin)
+				if err != nil {
+					return "", err
+				}
+				repo = cloned
+			}
+			return content, replaceFile(state.ProfilePath(repo), content)
+		}
+		return "", errors.New("unknown setting " + key)
+	}
+	reload := func(key string) {
+		if key == "config" {
+			queue.Call(context.Background(), host.Message{T: "settings"})
+		}
+	}
+	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write, Cloned: clonedHere(cfg), Authored: reload}
+}
+
+func clonedHere(cfg *state.Config) func(string) bool {
+	clones := filepath.Join(cfg.StateDir, "repos") + string(filepath.Separator)
+	return func(key string) bool {
+		origin, repo := strings.CutPrefix(key, repoSetting)
+		return repo && strings.HasPrefix(repoOrigins()[origin], clones)
+	}
+}
+
+func replaceFile(path, content string) error {
+	backup(path)
+	return state.WriteFileAtomic(path, []byte(content))
+}
+
+func backup(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return
+	}
+	os.WriteFile(path+"."+time.Now().Format("20060102-150405")+".bak", data, 0o600)
+}

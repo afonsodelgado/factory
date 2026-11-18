@@ -111,6 +111,8 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &r); err == nil {
 			m.Register(r)
 		}
+	case "settings":
+		err = m.ReloadShared()
 	case "create":
 		var r CreateRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {

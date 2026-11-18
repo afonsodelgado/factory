@@ -385,10 +385,40 @@ type Node struct {
 	Phone     phone.Store
 	Pusher    *phone.Pusher
 
-	mu     sync.Mutex
-	probes []node.Probe
-	clones []string
-	repos  map[string]string
+	mu        sync.Mutex
+	probes    []node.Probe
+	clones    []string
+	repos     map[string]string
+	settings  map[string]string
+	cloneTime time.Duration
+}
+
+func (n *Node) SetSetting(key, content string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.settings[key] = content
+}
+
+func (n *Node) Setting(key string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.settings[key]
+}
+
+func (n *Node) readSettings() map[string]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return maps.Clone(n.settings)
+}
+
+func (n *Node) writeSetting(ctx context.Context, key, content string) (string, error) {
+	if url, repo := strings.CutPrefix(key, "repo:"); repo && n.Setting(key) == "" {
+		if _, err := n.clone(ctx, url); err != nil {
+			return "", err
+		}
+	}
+	n.SetSetting(key, content)
+	return content, nil
 }
 
 func (n *Node) SetRepos(repos map[string]string) {
@@ -409,7 +439,21 @@ func (n *Node) Clones() []string {
 	return slices.Clone(n.clones)
 }
 
-func (n *Node) clone(_ context.Context, url string) (string, error) {
+func (n *Node) SetCloneTime(d time.Duration) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.cloneTime = d
+}
+
+func (n *Node) clone(ctx context.Context, url string) (string, error) {
+	n.mu.Lock()
+	wait := n.cloneTime
+	n.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(wait):
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.clones = append(n.clones, url)
@@ -443,7 +487,7 @@ func (m *Machine) Start() *Node {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	n := &Node{Machine: m, ID: uuid.NewString(), Dir: dir, Runtime: &Runtime{}}
+	n := &Node{Machine: m, ID: uuid.NewString(), Dir: dir, Runtime: &Runtime{}, settings: map[string]string{}}
 	n.probes = []node.Probe{Passing("tools", "tmux 3.4 · git 2.43 · gh 2.45")}
 	directory, err := node.OpenDirectory(dir, n.ID, tn.Now)
 	if err != nil {
@@ -461,8 +505,9 @@ func (m *Machine) Start() *Node {
 	n.Nodes = &node.Nodes{
 		Self: self, Version: Version, Dir: directory, Tailscale: ts, HTTP: tn.Client(m),
 		Ready:     node.Readiness{Probes: n.currentProbes, Wait: tn.ReadyWait, Now: tn.Now},
-		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
+		Factories: func() int { _, f, _ := n.API.Factories(); return len(f) }, ProbeWait: tn.ProbeWait, UpdateWait: tn.ProbeWait, Now: tn.Now, Clone: n.clone, Repos: n.currentRepos,
 	}
+	n.Nodes.Settings = &node.Settings{Path: node.SettingsPath(dir), Self: n.ID, Now: tn.Now, Sources: node.Sources{Read: n.readSettings, Write: n.writeSetting}}
 	n.API.Commands = node.Commands{Runtime: node.Activation{Caller: n.Runtime, Ready: n.Nodes.Runnable, Exists: n.API.Holds}}
 	n.API.Nodes = n.Nodes
 	n.Transfers = &node.Transfers{Commands: node.Commands{Runtime: n.Runtime}, Nodes: n.Nodes, StateDir: dir, Holds: n.API.HoldsIncarnation, Poll: 20 * time.Millisecond, Holders: &node.Holders{Dir: filepath.Join(dir, "holders.git")}, Ctx: ctx}
@@ -536,6 +581,9 @@ func (tn *Tailnet) Settle(nodes ...*Node) {
 	for range 3 {
 		for _, n := range nodes {
 			n.Nodes.Sync(context.Background())
+		}
+		for _, n := range nodes {
+			n.Nodes.Settings.Apply(context.Background())
 		}
 	}
 }

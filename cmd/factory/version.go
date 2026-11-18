@@ -1,58 +1,28 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
+	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
-	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/release"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const releaseRepo = "afonsodelgado/factory"
+var releases = release.Default()
 
-type semver [3]int
-
-func parseVersion(s string) (semver, bool) {
-	var v semver
-	rest, hasPrefix := strings.CutPrefix(strings.TrimSpace(s), "v")
-	parts := strings.Split(rest, ".")
-	if !hasPrefix || len(parts) != 3 {
-		return v, false
-	}
-	for i, part := range parts {
-		n, err := strconv.Atoi(part)
-		if err != nil || n < 0 {
-			return v, false
-		}
-		v[i] = n
-	}
-	return v, true
-}
-
-func isNewer(latest, current string) bool {
-	l, ok := parseVersion(latest)
-	if !ok {
-		return false
-	}
-	c, ok := parseVersion(current)
-	if !ok {
-		return true
-	}
-	for i := range l {
-		if l[i] != c[i] {
-			return l[i] > c[i]
-		}
-	}
-	return false
-}
+const installLine = "curl -fsSL https://raw.githubusercontent.com/" + release.Repo + "/main/install.sh | sh"
 
 func versionLine() string {
 	var details []string
@@ -77,66 +47,17 @@ func versionLine() string {
 	return fmt.Sprintf("factory %s (%s)", version, strings.Join(details, ", "))
 }
 
-func ghRelease(timeout time.Duration, args ...string) ([]byte, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return nil, errors.New("gh is not installed")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "gh", append([]string{"release"}, args...)...)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("gh timed out after %s", timeout)
-	}
-	if err != nil {
-		if line := firstLine(stderr.String()); line != "" {
-			return nil, errors.New("gh: " + line)
-		}
-		return nil, fmt.Errorf("gh: %w", err)
-	}
-	return out, nil
-}
-
-func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
-	}
-	return ""
-}
-
-func latestRelease() (string, error) {
-	out, err := ghRelease(5*time.Second, "view", "--repo", releaseRepo, "--json", "tagName")
-	if err != nil {
-		return "", err
-	}
-	var release struct {
-		TagName string `json:"tagName"`
-	}
-	if err := json.Unmarshal(out, &release); err != nil {
-		return "", fmt.Errorf("unexpected gh output: %w", err)
-	}
-	if _, ok := parseVersion(release.TagName); !ok {
-		return "", fmt.Errorf("the latest release has an unexpected tag %q", release.TagName)
-	}
-	return release.TagName, nil
-}
-
 func runVersion() int {
 	fmt.Println(versionLine())
-	latest, err := latestRelease()
+	latest, err := releases.Latest(context.Background())
 	if err != nil {
 		fmt.Printf("latest release unknown: %s\n", err)
 		return 0
 	}
-	_, isRelease := parseVersion(version)
 	switch {
-	case !isRelease:
+	case !release.Valid(version):
 		fmt.Printf("latest  %s · run factory update to install it\n", latest)
-	case isNewer(latest, version):
+	case release.Newer(latest, version):
 		fmt.Printf("latest  %s · run factory update\n", latest)
 	default:
 		fmt.Printf("latest  %s · up to date\n", latest)
@@ -144,57 +65,115 @@ func runVersion() int {
 	return 0
 }
 
+const updateUsage = "usage: factory update [--version <tag>] [--this-node]"
+
 func runUpdate(args []string) int {
-	latest, err := latestRelease()
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	wanted := flags.String("version", "", "install this release instead of the latest")
+	thisNode := flags.Bool("this-node", false, "update only this machine, not the other nodes in the list")
+	if err := flags.Parse(args); err != nil || flags.NArg() > 0 {
+		fmt.Fprintln(os.Stderr, updateUsage)
+		return 2
+	}
+	ctx := context.Background()
+	tag := *wanted
+	if tag == "" {
+		latest, err := releases.Latest(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "factory update: cannot find the latest release:", err)
+			return 1
+		}
+		tag = latest
+	}
+	if !release.Valid(tag) {
+		fmt.Fprintf(os.Stderr, "factory update: %q is not a release tag, such as v0.1.42\n", tag)
+		return 2
+	}
+	if code := updateThisMachine(ctx, tag); code != 0 || *thisNode {
+		return code
+	}
+	cfg, err := state.LoadConfig()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "factory update: cannot find the latest release:", err)
-		return 1
-	}
-	_, isRelease := parseVersion(version)
-	if isRelease && !isNewer(latest, version) {
-		fmt.Printf("factory %s is the latest release. Nothing changed.\n", version)
-		return 0
-	}
-	target := binaryPath()
-	if err := replaceBinary(target, latest); err != nil {
 		fmt.Fprintln(os.Stderr, "factory update:", err)
 		return 1
 	}
-	fmt.Printf("Installed factory %s at %s.\n\n", latest, target)
+	return updateOtherNodes(ctx, cfg, tag, os.Stdout)
+}
+
+func updateThisMachine(ctx context.Context, tag string) int {
+	if release.Valid(version) && !release.Newer(tag, version) {
+		fmt.Printf("factory %s is installed, the release you asked for or newer.\n", version)
+		if cfg, err := state.LoadConfig(); err == nil {
+			newNodeSetup(cfg, os.Stdout).reconcile(ctx)
+		}
+		return 0
+	}
+	target := binaryPath()
+	if err := releases.Install(ctx, tag, target); err != nil {
+		fmt.Fprintln(os.Stderr, "factory update:", err)
+		return 1
+	}
+	fmt.Printf("Installed factory %s at %s.\n\n", tag, target)
 	bootstrap := exec.Command(target, "bootstrap")
 	bootstrap.Stdout, bootstrap.Stderr = os.Stdout, os.Stderr
 	if err := bootstrap.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "factory update: the new binary is installed, but bootstrap failed: %v\nRun factory bootstrap again.\n", err)
 		return 1
 	}
-	fmt.Printf("\nQuit the app with q and run factory again to use %s.\n", latest)
+	fmt.Printf("\nQuit the app with q and run factory again to use %s.\n", tag)
 	return 0
 }
 
-func replaceBinary(target, tag string) error {
-	dir := filepath.Dir(target)
-	tmp, err := os.CreateTemp(dir, ".factory-update-*")
-	if err != nil {
-		return fmt.Errorf("cannot write to %s, where factory is installed: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	tmp.Close()
-	installed := false
-	defer func() {
-		if !installed {
-			os.Remove(tmpPath)
+func selfUpdate(cfg *state.Config) func(string) error {
+	return func(tag string) error {
+		logs := filepath.Join(cfg.StateDir, "logs")
+		if err := os.MkdirAll(logs, 0o700); err != nil {
+			return err
 		}
-	}()
-	asset := fmt.Sprintf("factory_%s_%s", runtime.GOOS, runtime.GOARCH)
-	if _, err := ghRelease(2*time.Minute, "download", tag, "--repo", releaseRepo, "--pattern", asset, "--output", tmpPath, "--clobber"); err != nil {
-		return fmt.Errorf("cannot download %s of %s: %w", asset, tag, err)
+		log, err := os.OpenFile(filepath.Join(logs, "update.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		defer log.Close()
+		cmd := exec.Command(binaryPath(), "update", "--version", tag, "--this-node")
+		cmd.Stdout, cmd.Stderr = log, log
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go cmd.Wait()
+		return nil
 	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return err
+}
+
+func updateOtherNodes(ctx context.Context, cfg *state.Config, tag string, out io.Writer) int {
+	if _, alive := runningMe(cfg); !alive {
+		return 0
 	}
-	if err := os.Rename(tmpPath, target); err != nil {
-		return fmt.Errorf("cannot replace %s: %w", target, err)
+	fmt.Fprintf(out, "\nAsking the other nodes in your list to update to %s…\n", tag)
+	ctx, cancel := context.WithTimeout(ctx, node.UpdateWait+30*time.Second)
+	defer cancel()
+	var updates node.Updates
+	if err := node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodPost, "/api/nodes/update", node.UpdateAll{Version: tag}, &updates); err != nil {
+		fmt.Fprintln(os.Stderr, "factory update: could not reach the other nodes:", err)
+		return 1
 	}
-	installed = true
-	return nil
+	if len(updates.Nodes) == 0 {
+		fmt.Fprintln(out, "No other nodes in the list.")
+		return 0
+	}
+	code := 0
+	for _, u := range updates.Nodes {
+		c := install.Check{Name: u.Node, Mark: install.Pass}
+		switch u.Outcome {
+		case node.Updated:
+			c.Detail = fmt.Sprintf("%s → %s, restarted", u.From, u.To)
+		case node.Current:
+			c.Detail = "already on " + u.From
+		default:
+			c.Mark, c.Detail, code = install.Fail, u.Detail, 1
+		}
+		install.WriteCheck(out, c)
+	}
+	return code
 }

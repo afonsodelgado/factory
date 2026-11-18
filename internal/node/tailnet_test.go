@@ -550,6 +550,7 @@ func TestBrowsersCannotEnrollReadOrReachNodeRoutesFromOtherOrigins(t *testing.T)
 		{"the home app reading another node", "GET", "/api/nodes", home, nil, nil, 200, home},
 		{"the home app's preflight", "OPTIONS", "/api/snapshot", home, nil, []string{"Access-Control-Request-Method", "GET"}, 204, home},
 		{"the home app checking a machine through another node", "POST", "/api/nodes/check", home, node.NodeRequest{Name: "macbook"}, nil, 200, home},
+		{"the home app asking a node to update itself", "POST", "/api/node/update", home, node.UpdateRequest{From: macbook.ID, Version: "v9.9.9"}, nil, 403, home},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -564,6 +565,82 @@ func TestBrowsersCannotEnrollReadOrReachNodeRoutesFromOtherOrigins(t *testing.T)
 				t.Errorf("a refused request still carried data: %s", body)
 			}
 		})
+	}
+}
+
+func TestFactoryUpdateAsksEveryListedNodeAndNoOtherMachineCanTriggerOne(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	studio := tn.Machine("studio").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	tn.Settle(macbook, homelab)
+	var mu sync.Mutex
+	var asked []string
+	homelab.Nodes.Update = func(version string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, version)
+		return nil
+	}
+
+	status, _, body := tn.Request(studio.Machine, homelab.Machine, "POST", "/api/node/update", "", node.UpdateRequest{From: studio.ID, Version: "v9.9.9"})
+	if status != http.StatusForbidden {
+		t.Errorf("a machine outside the list asked homelab to update and got %d: %s", status, body)
+	}
+	var updates node.Updates
+	if err := macbook.Local.Do(context.Background(), http.MethodPost, "/api/nodes/update", node.UpdateAll{Version: "v9.9.9"}, &updates); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(asked, []string{"v9.9.9"}) || len(updates.Nodes) != 1 || updates.Nodes[0].Node != "homelab" {
+		t.Errorf("factory update on macbook asked homelab for %v and reported %+v; want exactly one request for v9.9.9, from the listed node only", asked, updates.Nodes)
+	}
+}
+
+func TestSharedSettingsReachEveryNodeAndAJoinerTakesTheListsOverItsOwn(t *testing.T) {
+	const repo = "repo:git@github.com:acme/app.git"
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	macbook.SetSetting("rules", "be terse")
+	macbook.SetSetting(repo, "qa: {mode: browser}")
+	homelab.SetCloneTime(3 * tn.ProbeWait)
+	for _, draft := range []string{"homelab's first draft", "homelab's own draft"} {
+		homelab.SetSetting("rules", draft)
+		tn.Settle(homelab)
+	}
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	tn.Settle(macbook, homelab)
+
+	if got := homelab.Setting("rules"); got != "be terse" {
+		t.Errorf("homelab joined with rules %q; want the list's rules, or a joiner's own file overwrites every node", got)
+	}
+	if got := homelab.Setting(repo); got != "qa: {mode: browser}" || !slices.Equal(homelab.Clones(), []string{"git@github.com:acme/app.git"}) {
+		t.Errorf("homelab has repo config %q and cloned %v; want the repo cloned with its config", got, homelab.Clones())
+	}
+
+	homelab.SetSetting("rules", "be terser")
+	tn.Settle(macbook, homelab)
+	if got := macbook.Setting("rules"); got != "be terser" {
+		t.Errorf("an edit on homelab left macbook with %q", got)
+	}
+	revisions := func() map[string]int64 {
+		r := map[string]int64{}
+		for _, s := range macbook.Nodes.Settings.Records() {
+			r[s.Key] = s.Revision
+		}
+		return r
+	}
+	before := revisions()
+	tn.Settle(macbook, homelab)
+	if after := revisions(); !maps.Equal(before, after) {
+		t.Errorf("settling again changed the revisions from %v to %v, so the nodes keep sending the same settings back and forth", before, after)
 	}
 }
 

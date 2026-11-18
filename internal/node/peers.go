@@ -17,7 +17,7 @@ import (
 const (
 	ProbeWait   = 2 * time.Second
 	probeFanout = 8
-	UpdateFix   = "factory update  then factory node install"
+	UpdateFix   = "factory update"
 )
 
 var errRedirect = errors.New("a node answered with a redirect, and nodes never follow one")
