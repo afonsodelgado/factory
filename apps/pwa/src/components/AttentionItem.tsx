@@ -7,7 +7,7 @@ import type {
   LocalItem,
   Receipt,
 } from "../api/types.ts";
-import { clock, hostName, kindLook, openThreads } from "../format.ts";
+import { clock, hostName, kindLook, kindWord, openThreads } from "../format.ts";
 import {
   settled,
   useBlocked,
@@ -163,6 +163,8 @@ const forms: Record<string, (props: FormProps) => ReactNode> = {
   cap: CapForm,
   failure: CapForm,
   permission: PermissionForm,
+  prompt: PromptForm,
+  silent: SilentForm,
   handoff: HandoffForm,
 };
 
@@ -233,9 +235,9 @@ function ItemHead({ item }: { item: LocalItem }) {
       <p className="k">
         <span className={`${look.tone} b`}>
           <span aria-hidden="true">{look.glyph} </span>
-          {item.kind}
+          {kindWord(item.kind)}
         </span>
-        {item.id && item.kind !== "permission" ? (
+        {item.id && !screenRead(item) && item.kind !== "permission" ? (
           <span className="id">{item.id}</span>
         ) : null}
         <span className="mute sm">
@@ -796,6 +798,128 @@ function PermissionForm(props: FormProps) {
           {chosen ? `Answer: ${chosen.id}. ${chosen.label}` : "Pick an answer"}
         </button>
       </Actions>
+    </>
+  );
+}
+
+const screenRead = (item: LocalItem) =>
+  item.kind === "prompt" || item.kind === "silent";
+
+function ScreenBox({ item }: { item: LocalItem }) {
+  if (!item.screen?.length) return null;
+  return (
+    <section className="box">
+      <h3 className="bt mute">screen · {item.node ?? hostName()}</h3>
+      {item.screen.map((line, i) => (
+        <p key={i} className="cmd">
+          {line}
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function FromAComputer(props: {
+  factory: LocalFactory;
+  glyph: string;
+  children?: ReactNode;
+}) {
+  return (
+    <p className="stat idle">
+      <span className="gl" aria-hidden="true">
+        {props.glyph}
+      </span>
+      <span>
+        Open the session from a computer: <code>⏎</code> on {props.factory.id}{" "}
+        in the hub.
+      </span>
+      {props.children}
+    </p>
+  );
+}
+
+function PromptForm(props: FormProps) {
+  const menu = props.item.menu;
+  if (!menu)
+    return (
+      <>
+        <ScreenBox item={props.item} />
+        <FromAComputer factory={props.factory} glyph="◈">
+          <span className="x">The phone never types text into a session.</span>
+        </FromAComputer>
+        {props.outcome}
+      </>
+    );
+  const stale = props.receipt?.status === "stale";
+  const yesNo = menu.choices.every((c) => c.id === "yes" || c.id === "no");
+  return (
+    <>
+      {stale ? (
+        <p className="stat warn">
+          <span className="gl" aria-hidden="true">
+            !
+          </span>
+          <span>
+            The screen changed before your answer reached it. Nothing was typed.
+            This is what it shows now.
+          </span>
+        </p>
+      ) : null}
+      <ScreenBox item={props.item} />
+      <p className="ink">
+        Answer from here: each button types its {yesNo ? "answer" : "number"}{" "}
+        into the session.
+      </p>
+      <div
+        className="opts flush"
+        role="group"
+        aria-label="Answer to the prompt"
+      >
+        {menu.choices.map((choice) => (
+          <button
+            key={choice.id}
+            type="button"
+            className="opt send"
+            disabled={props.disabled}
+            onClick={() =>
+              props.submit({
+                action: "prompt",
+                option: choice.id,
+                fingerprint: menu.fingerprint,
+              })
+            }
+          >
+            <span className="mk" aria-hidden="true">
+              {yesNo ? choice.id[0] : choice.id}
+            </span>
+            <span>{choice.label}</span>
+          </button>
+        ))}
+      </div>
+      <p className="stat ok">
+        <span className="gl" aria-hidden="true">
+          ✓
+        </span>
+        <span>
+          Sent only if the screen still shows this {yesNo ? "question" : "menu"}
+          .
+        </span>
+      </p>
+      {stale ? null : props.outcome}
+      <p className="note mute">
+        Anything else, open the session from a computer: <code>⏎</code> on{" "}
+        {props.factory.id} in the hub.
+      </p>
+    </>
+  );
+}
+
+function SilentForm(props: FormProps) {
+  return (
+    <>
+      <ScreenBox item={props.item} />
+      <FromAComputer factory={props.factory} glyph="◌" />
+      {props.outcome}
     </>
   );
 }

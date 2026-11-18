@@ -674,3 +674,69 @@ test("the app at a previous home sends the phone to the new home with its instal
     new RegExp(`^${newHome.replace(/\./g, "\\.")}/\\?from=[0-9a-f-]{36}$`),
   );
 });
+
+test("a prompt's choice sends its option in one tap, and a prompt that is no menu offers no input", async ({
+  page,
+}) => {
+  const server = fake(page.request);
+  await server.set({ roster: roster() });
+  const prompt = (key: string, menu?: unknown) => ({
+    id: "prompt",
+    key,
+    kind: "prompt",
+    title: "waits at a prompt",
+    since: new Date().toISOString(),
+    screen: [
+      "❯ 1. Use this and all future MCP servers",
+      "  2. Use this MCP server",
+    ],
+    node: "homebox",
+    menu,
+    send: {
+      ready: true,
+      reason: "Types the choice you pick into the session.",
+    },
+  });
+  await server.factories([
+    factory("csv-export", [
+      prompt("k-menu", {
+        choices: [
+          { id: "1", label: "Use this and all future MCP servers" },
+          { id: "2", label: "Use this MCP server" },
+        ],
+        fingerprint: "f1",
+      }),
+    ]),
+    factory("ssrf-fix", [prompt("k-typed")]),
+  ]);
+  await page.goto("/");
+  await page
+    .getByRole("link", { name: /csv-export/ })
+    .first()
+    .click();
+  await page.getByRole("link", { name: /waits at a prompt/ }).click();
+  await page.getByRole("button", { name: /Use this MCP server/ }).click();
+  await expect
+    .poll(async () =>
+      (await server.state()).actions.map((a) => [
+        a.action,
+        a.option,
+        a.fingerprint,
+      ]),
+    )
+    .toEqual([["prompt", "2", "f1"]]);
+
+  await page.goto("/");
+  await page
+    .getByRole("link", { name: /ssrf-fix/ })
+    .first()
+    .click();
+  await page.getByRole("link", { name: /waits at a prompt/ }).click();
+  await expect(
+    page.getByText("The phone never types text into a session."),
+  ).toBeVisible();
+  await expect(page.getByRole("textbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("group", { name: "Answer to the prompt" }),
+  ).toHaveCount(0);
+});

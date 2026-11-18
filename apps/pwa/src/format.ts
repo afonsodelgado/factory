@@ -30,7 +30,6 @@ export function day(iso: string | undefined): string {
 const statuses: Record<string, Look> = {
   running: { glyph: "●", tone: "grn" },
   starting: { glyph: "◌", tone: "cyn" },
-  "failed to start": { glyph: "✕", tone: "red" },
   "needs you": { glyph: "◆", tone: "org" },
   "on CI": { glyph: "⟳", tone: "mag" },
   "on agent": { glyph: "⋯", tone: "mag" },
@@ -51,6 +50,8 @@ const kinds: Record<string, Look> = {
   cap: { glyph: "⇥", tone: "yel" },
   failure: { glyph: "✕", tone: "red" },
   permission: { glyph: "◈", tone: "org" },
+  prompt: { glyph: "◈", tone: "org" },
+  silent: { glyph: "◌", tone: "yel" },
   handoff: { glyph: "✓", tone: "grn" },
   asleep: { glyph: "☾", tone: "yel" },
   unreadable: { glyph: "!", tone: "red" },
@@ -59,17 +60,24 @@ const kinds: Record<string, Look> = {
 export const kindLook = (kind: string): Look =>
   kinds[kind] ?? { glyph: "◆", tone: "org" };
 
+const kindWords: Record<string, string> = { silent: "not reporting" };
+
+export const kindWord = (kind: string) => kindWords[kind] ?? kind;
+
 export function itemTag(item: LocalItem): string {
   const questions = item.questions?.length ?? 0;
+  const choices = item.menu?.choices.length ?? 0;
   const extra =
     item.kind === "gate"
       ? item.stage
       : item.kind === "permission"
         ? item.permission?.tool
-        : questions > 1
-          ? `${questions} asks`
-          : undefined;
-  return extra ? `${item.kind} · ${extra}` : item.kind;
+        : choices > 0
+          ? `${choices} choices`
+          : questions > 1
+            ? `${questions} asks`
+            : undefined;
+  return extra ? `${kindWord(item.kind)} · ${extra}` : kindWord(item.kind);
 }
 
 export const openThreads = (factory: LocalFactory) =>
