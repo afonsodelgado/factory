@@ -142,7 +142,7 @@ Nothing else is copied: no credentials, `.env` files or logins. From then on, a 
 
 Because the server runs Linux, setup then asks whether it stays on all the time, to make it the phone app's home. Answer `y` for a server that does; see [the home node](#the-home-node). The default is no.
 
-**5. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`. `⏎` on one of the server's factories opens its live session in the hub, streamed over the same connection the hub already uses for the node. You need no ssh, Remote Login or keys for it.
+**5. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`. When you pick the server in New factory (`n`), it first checks what the repo needs there, such as a tool, a `.env` file or a variable `qa.sign_in` reads, and lists anything missing with the command that fixes it on the server. Nothing is copied or installed for you; `ctrl+y` starts anyway. `⏎` on one of the server's factories opens its live session in the hub, streamed over the same connection the hub already uses for the node. You need no ssh, Remote Login or keys for it.
 
 ## 3. Set up your phone
 
