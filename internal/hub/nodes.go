@@ -272,7 +272,7 @@ func nodeItem(l *nodeLink, lf host.LocalFactory) Item {
 		Remote: &factory.Location{Name: l.short(), Node: l.member.ID, Incarnation: lf.Incarnation, Repo: lf.RepoName},
 	}
 	status, _ := factory.ParseStatus(lf.Status)
-	unreported := slices.ContainsFunc(lf.Items, func(li host.LocalItem) bool { return li.Kind == "silent" })
+	unreported := lf.Status == factory.LegacyFailedToStart || slices.ContainsFunc(lf.Items, func(li host.LocalItem) bool { return li.Kind == "silent" })
 	return Item{Factory: f, Status: status, Unblocked: status, Unreported: unreported}
 }
 

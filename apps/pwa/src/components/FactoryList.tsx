@@ -169,7 +169,7 @@ function Counts(props: { factories: LocalFactory[] }) {
     ["mag", "⟳ {n} waiting", count(["on CI", "on agent"])],
     ["yel", "☾ {n} asleep", count(["stalled", "exited", "gone"])],
     ["cyn", "◌ {n} starting", count(["starting"])],
-    ["red", "✕ {n} failed", count(["unreachable"])],
+    ["red", "✕ {n} failed", count(["failed to start", "unreachable"])],
     ["dk", "↮ {n} unreachable", unreachable],
   ];
   return (

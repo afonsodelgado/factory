@@ -45,13 +45,15 @@ func (s Status) String() string {
 	return statusWords[s]
 }
 
+const LegacyFailedToStart = "failed to start"
+
 func ParseStatus(word string) (Status, bool) {
 	for s, w := range statusWords {
 		if w == word {
 			return s, true
 		}
 	}
-	return Running, false
+	return NeedsYou, word == LegacyFailedToStart
 }
 
 func (s Status) Asleep() bool {

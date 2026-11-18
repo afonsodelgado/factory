@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -179,15 +180,24 @@ func AttachCommand(ctx context.Context, c *Client, to StreamTarget, r host.Attac
 	return append(words, to.Machine, view), nil
 }
 
+var plainName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+
+func PlainName(name string) string {
+	if !plainName.MatchString(name) {
+		return ""
+	}
+	return name
+}
+
 func LoginUser(s Snapshot) string {
 	if s.User != "" {
-		return s.User
+		return PlainName(s.User)
 	}
 	for _, f := range s.Factories {
 		for _, homes := range []string{"/home/", "/Users/"} {
 			if rest, found := strings.CutPrefix(f.Repo, homes); found {
 				user, _, _ := strings.Cut(rest, "/")
-				return user
+				return PlainName(user)
 			}
 		}
 	}

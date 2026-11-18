@@ -663,3 +663,17 @@ func TestAHungPowerProbeCannotBlockNodeIdentityAndTimesOut(t *testing.T) {
 		t.Error("power probe has no bounded timeout")
 	}
 }
+
+func TestAPeersReportedLoginNeverBecomesAnSSHOption(t *testing.T) {
+	for _, s := range []Snapshot{
+		{User: "-oProxyCommand=touch /tmp/pwned"},
+		{Factories: []host.LocalFactory{{Repo: "/home/-oProxyCommand=x/cowork"}}},
+	} {
+		if got := LoginUser(s); got != "" {
+			t.Errorf("a peer reporting %+v gave the ssh login %q; want none, or ssh would read it as an option", s, got)
+		}
+	}
+	if got := LoginUser(Snapshot{Factories: []host.LocalFactory{{Repo: "/home/factory/cowork"}}}); got != "factory" {
+		t.Errorf("an old peer's /home/factory path gave the login %q; want factory", got)
+	}
+}

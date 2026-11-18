@@ -90,6 +90,10 @@ func streamView(ctx context.Context, h *http.Client, to node.StreamTarget, view 
 	defer signal.Stop(resized)
 	conn, err := node.DialStream(ctx, h, to.Machine, view, terminalSize(in), os.Getenv("TERM"))
 	if errors.Is(err, node.ErrNoStream) {
+		if node.PlainName(to.Machine) == "" {
+			return fmt.Errorf("%q is not a machine name ssh can reach", to.Machine)
+		}
+		to.User = node.PlainName(to.User)
 		words := sshWords(to, view)
 		fmt.Fprint(out, sshExplanation(ctx, h, to, words))
 		return ssh(words)
@@ -160,7 +164,7 @@ func sshWords(to node.StreamTarget, view string) []string {
 	if to.User != "" {
 		destination = to.User + "@" + to.Machine
 	}
-	return []string{"ssh", "-t", destination, "factory", "host", "attach", view}
+	return []string{"ssh", "-t", "-o", "ClearAllForwardings=yes", destination, "factory", "host", "attach", view}
 }
 
 func sshExplanation(ctx context.Context, h *http.Client, to node.StreamTarget, words []string) string {

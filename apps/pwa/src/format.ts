@@ -30,6 +30,7 @@ export function day(iso: string | undefined): string {
 const statuses: Record<string, Look> = {
   running: { glyph: "●", tone: "grn" },
   starting: { glyph: "◌", tone: "cyn" },
+  "failed to start": { glyph: "✕", tone: "red" },
   "needs you": { glyph: "◆", tone: "org" },
   "on CI": { glyph: "⟳", tone: "mag" },
   "on agent": { glyph: "⋯", tone: "mag" },

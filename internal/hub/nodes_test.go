@@ -276,3 +276,11 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestAnOlderNodesFactoryThatFailedToStartNeedsYouAndCanBeArchived(t *testing.T) {
+	l := &nodeLink{member: node.RosterMember{Member: node.Member{ID: "node-2", Name: "homelab.tail1234.ts.net"}}}
+	it := nodeItem(l, host.LocalFactory{Key: "/srv/cowork:csv", Repo: "/srv/cowork", ID: "csv", Status: factory.LegacyFailedToStart})
+	if it.Status != factory.NeedsYou || !archivable(it) {
+		t.Errorf("an older node's %q factory reads as %v (archivable %v); want needs you and archivable, not running", factory.LegacyFailedToStart, it.Status, archivable(it))
+	}
+}
