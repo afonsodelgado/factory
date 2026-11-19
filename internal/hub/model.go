@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -974,29 +975,35 @@ func (m *Model) publish() {
 }
 
 func (m *Model) pushFrame() {
-	title, path, stage := "", "", ""
-	if it, ok := m.snap.Find(m.selected); ok {
-		title, path = paneTitle(it.Factory), tilde(it.Factory.Worktree)
-		if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
-			path = tilde(it.Pane.Path)
-		}
-		if it.Factory.Remote != nil {
-			path = ""
-		}
-		if m.Layout.Stage != "" && it.Stage != nil {
-			stage = stageLabel(it.Stage.Run)
-		}
-	}
+	labels := m.frameLabels()
 	focused := m.focus == footer.Session
 	for _, side := range slices.Concat(FrameSides, []string{"split"}) {
 		pane := "frame-" + side
 		width, height := m.size(pane)
-		m.push(pane, frame.Render(side, width, height, frame.Labels{Title: title, Path: path, Stage: stage}, focused))
+		m.push(pane, frame.Render(side, width, height, labels, focused))
 	}
 }
 
-func stageLabel(run state.StageRun) string {
-	return strings.TrimSpace(run.Role + " · " + run.Setting.ToolName() + " " + run.Setting.Model)
+func (m *Model) frameLabels() frame.Labels {
+	it, ok := m.snap.Find(m.selected)
+	if !ok {
+		return frame.Labels{}
+	}
+	labels := frame.Labels{Title: paneTitle(it.Factory), Path: tilde(it.Factory.Worktree)}
+	if it.Pane != nil && !it.Pane.Dead && it.Pane.Path != "" {
+		labels.Path = tilde(it.Pane.Path)
+	}
+	stageShown := m.Layout.Stage != ""
+	switch {
+	case it.Factory.Remote != nil:
+		labels.Path = ""
+		if lf := m.nodeFactories[it.Factory.Key()]; stageShown {
+			labels.Stage = cmp.Or(lf.StageLabel, lf.StageRole)
+		}
+	case stageShown && it.Stage != nil:
+		labels.Stage = host.StageLabel(it.Stage.Run)
+	}
+	return labels
 }
 
 func (m *Model) size(pane string) (int, int) {

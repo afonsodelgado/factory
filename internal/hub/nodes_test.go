@@ -121,6 +121,24 @@ func TestAnActionOnAnotherNodeGoesOnlyThereWithItsGenerationAndItsOutageIsCounte
 	}
 }
 
+func TestAStageStreamedFromAnotherNodeIsNamedOverItsSplit(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
+	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/srv/cowork:csv", Incarnation: "inc-csv", ID: "csv", Repo: "/srv/cowork", RepoName: "cowork", Status: "running", Stage: "review", Pane: "t-sup", StageRole: "reviewer", StageLabel: "reviewer · claude opus", StagePane: "t-rev"})
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	m := hubOn(t, tn, macbook)
+	readRoster(t, m)
+	key := "node:" + homelab.ID + "/inc-csv"
+	until(t, m, func() bool { _, ok := m.snap.Find(key); return ok })
+
+	m.selected, m.Layout.Stage = key, "%9"
+	if got := m.frameLabels().Stage; got != "reviewer · claude opus" {
+		t.Errorf("the split over homelab's reviewer is labelled %q; want the agent that runs there", got)
+	}
+}
+
 func TestTheHubAnnouncesEachJoinOnceAndDropsARemovedNode(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()

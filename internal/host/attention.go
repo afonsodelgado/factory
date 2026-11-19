@@ -365,6 +365,7 @@ type LocalFactory struct {
 	CanWake     bool         `json:"can_wake"`
 	Pane        string       `json:"pane,omitempty"`
 	StageRole   string       `json:"stage_role,omitempty"`
+	StageLabel  string       `json:"stage_label,omitempty"`
 	StagePane   string       `json:"stage_pane,omitempty"`
 	Generation  int64        `json:"generation,omitempty"`
 	Unverified  string       `json:"unverified,omitempty"`
@@ -471,7 +472,7 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 		lf.Pane = it.Pane.Token
 	}
 	if s := it.Stage; s != nil && s.Pane != nil && !s.Pane.Dead {
-		lf.StageRole, lf.StagePane = s.Run.Role, s.Pane.Token
+		lf.StageRole, lf.StageLabel, lf.StagePane = s.Run.Role, StageLabel(s.Run), s.Pane.Token
 	}
 	for _, item := range AttentionItems(it, m.snap.At, m.threadCounter()) {
 		lf.Items = append(lf.Items, m.localItem(it, item, target))
