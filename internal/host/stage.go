@@ -66,6 +66,10 @@ type StageView struct {
 	Hook *state.HookFile
 }
 
+func StageLabel(run state.StageRun) string {
+	return strings.TrimSpace(run.Role + " · " + run.Setting.ToolName() + " " + run.Setting.Model)
+}
+
 func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if r.Action == "ci" {
 		return m.WaitForCI(r)
