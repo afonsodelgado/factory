@@ -494,14 +494,14 @@ func (m *NewFactoryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.PasteMsg:
-		m.Context.Notice = ""
+		m.Context.Notice, m.Context.Detail, m.Context.Warning = "", "", ""
 		m.typeText(DecodeKeys(msg.Content))
 	case promptEdited:
 		m.promptEdited(msg)
 	case probedMsg:
 		return m, m.probed(msg)
 	case tea.KeyPressMsg:
-		m.Context.Notice = ""
+		m.Context.Notice, m.Context.Detail, m.Context.Warning = "", "", ""
 		switch m.step {
 		case 1:
 			return m, m.nameKey(msg)
@@ -600,7 +600,7 @@ func (m *NewFactoryModel) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *NewFactoryModel) next() tea.Cmd {
 	if m.addingRepo() {
-		return m.prepareSettings(m.repoPath)
+		return m.addRepo(m.repoPath)
 	}
 	if m.id() == "" {
 		m.problem = "Type an id made of letters a–z, digits 0–9 and dashes, such as csv-export."
@@ -769,7 +769,10 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 			mark, ink = "● ", theme.Bright
 		}
 		qa := "terminal QA"
-		if r.Browser {
+		switch {
+		case r.NoQAMode:
+			qa = "QA not chosen yet"
+		case r.Browser:
 			qa = "browser QA"
 		}
 		x := c.Put(3, y, mark+r.Name, ink)
@@ -795,9 +798,13 @@ func (m *NewFactoryModel) drawName(c *theme.Canvas) {
 	y++
 	drawInput(c, 1, y, w, "", []string{m.name + "█"}, true, theme.Focused)
 	y += 3
-	if m.Context.Notice != "" {
-		c.PutMax(1, y, m.Context.Notice, theme.FgInk(theme.Green), w)
-		y++
+	for _, line := range []struct {
+		text string
+		ink  theme.Ink
+	}{{m.Context.Notice, theme.FgInk(theme.Green)}, {m.Context.Detail, theme.Text}, {m.Context.Warning, theme.FgInk(theme.Yellow)}} {
+		if line.text != "" {
+			y = paragraph(c, y, line.text, line.ink)
+		}
 	}
 	for _, l := range m.notice(w) {
 		c.Spans(1, y, l)
@@ -976,6 +983,8 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 		reason = "in a new worktree on worktree-" + m.slug() + "; QA opens its own Claude pane."
 	case repo.Browser:
 		reason = "QA opens its own Claude pane on headless Chrome: the " + repo.Name + " repo config uses browser QA."
+	case repo.NoQAMode:
+		reason = "The " + repo.Name + " repo config has no QA mode yet; this factory discovers it before QA."
 	}
 	c.Put(x, y, reason, theme.Muted)
 }

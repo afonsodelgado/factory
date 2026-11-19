@@ -2,6 +2,7 @@ package install
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/bundle"
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -263,8 +265,8 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 		t.Fatalf("init from a subdirectory wrote the profile in the wrong place: %v", err)
 	}
 	profile, err := state.ReadProfile(repo)
-	if err != nil || profile.Commands.Build != "" || profile.QA.Mode != "terminal" {
-		t.Errorf("profile for a go.mod repo reads as %+v, %v; want detected commands left unset and terminal QA", profile, err)
+	if err != nil || profile.Commands.Build != "" || profile.QA.Mode != "" {
+		t.Errorf("profile for a go.mod repo reads as %+v, %v; want detected commands and the QA mode left blank for discovery", profile, err)
 	}
 	if err := os.WriteFile(state.RepoConfigPath(repo), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -316,7 +318,7 @@ func TestInitCarriesARepoConfigFromBeforeTheFactoryDirectory(t *testing.T) {
 	}
 }
 
-func TestInitProfileDrivesAWebAppInTheBrowser(t *testing.T) {
+func TestInitLeavesAWebAppsQAModeToDiscoveryAndDesignsForTheWeb(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte(`{"scripts":{"dev":"vite"}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -332,7 +334,28 @@ func TestInitProfileDrivesAWebAppInTheBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile, err := state.ReadProfile(repo)
-	if err != nil || profile.QA.Mode != "browser" || profile.Design.Source != "web" {
-		t.Fatalf("profile for a repo with a dev script reads as %+v, %v; want browser QA and web design", profile, err)
+	if err != nil || profile.QA.Mode != "" || profile.Design.Source != "web" {
+		t.Fatalf("profile for a repo with a dev script reads as %+v, %v; want the QA mode blank, not guessed, and web design", profile, err)
+	}
+}
+
+func TestDoctorNamesOnlyALiveFactoryAsAskingForCommands(t *testing.T) {
+	repo := t.TempDir()
+	asking := `{"schema_version":2,"id":"%s","attention":[{"id":"c-1","kind":"commands","title":"Resolve repository commands","created_at":"2026-11-19T10:00:00Z"}]}`
+	archived := filepath.Join(factory.ArchiveDir(repo), "old-export")
+	os.MkdirAll(archived, 0o755)
+	os.WriteFile(filepath.Join(archived, "state.json"), []byte(fmt.Sprintf(asking, "old-export")), 0o644)
+	if got := askingFactory(repo, &state.Registry{}); got != "" {
+		t.Fatalf("doctor names %q as asking for commands; want no archived factory named", got)
+	}
+	live := filepath.Join(factory.WorktreesDir(repo), "csv", ".claude", "factory", "csv")
+	os.MkdirAll(live, 0o755)
+	os.WriteFile(filepath.Join(live, "state.json"), []byte(fmt.Sprintf(asking, "csv")), 0o644)
+	if got := askingFactory(repo, &state.Registry{}); got != "csv" {
+		t.Fatalf("doctor names %q; want csv, the live factory asking", got)
+	}
+	archivedInPlace := &state.Registry{Factories: []state.Entry{{Repo: repo, Slug: "csv", Archived: true}}}
+	if got := askingFactory(repo, archivedInPlace); got != "" {
+		t.Fatalf("doctor names %q though the registry archived it in place; want archived factories skipped", got)
 	}
 }

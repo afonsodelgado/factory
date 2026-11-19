@@ -136,8 +136,15 @@ func (m *Settings) typeText(text string) {
 
 func (m *Settings) help() string {
 	key := m.fields()[m.field]
-	if strings.Contains(m.values[key], "\n") {
+	_, optional := optionalKeys[key]
+	_, discovered := m.settings.Provenance[key]
+	switch {
+	case strings.Contains(m.values[key], "\n"):
 		return "Multi-line value: ↵ marks a line break. Typing appends; ctrl+u clears the whole value."
+	case discovered && m.values[key] != m.settings.Values[key]:
+		return "Saving makes this value yours: the found-by note goes, and discovery never changes it again. Clear it to let the next factory discover " + settingTitle(key) + " here."
+	case m.values[key] == "" && !optional:
+		return "Blank: " + filepath.Base(m.Context.Repo) + "'s first factory on this machine discovers it, runs it here and saves it with a note of who found it. Anything you type wins; discovery never changes it."
 	}
 	if !m.settings.Present[key] {
 		return "The file has no " + key + " yet. Saving adds it."
@@ -245,7 +252,7 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 		m.drawField(c, y, w, field, focused, edited)
 		y += heights[i]
 	}
-	if m.values["qa.mode"] != "browser" && slices.ContainsFunc(browserOnlyKeys, func(key string) bool { return m.settings.Present[key] }) {
+	if m.values["qa.mode"] == "terminal" && slices.ContainsFunc(browserOnlyKeys, func(key string) bool { return m.settings.Present[key] }) {
 		c.PutMax(1, y+1, "start, health, seed and sign_in stay in the file; terminal QA does not use them.", theme.Muted, w)
 	}
 	c.Unclip()
@@ -265,8 +272,20 @@ var optionalKeys = map[string]string{
 	"qa.sign_in": "not used · QA signs up or logs in through the app",
 }
 
+func settingTitle(key string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(key, "commands."), "qa.")
+}
+
+func (m *Settings) foundBy(key string) string {
+	found, ok := m.settings.Provenance[key]
+	if !ok {
+		return ""
+	}
+	return "found by " + found.Factory + " · " + found.Day.Format("2 Jan")
+}
+
 func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edited bool) {
-	title := strings.TrimPrefix(strings.TrimPrefix(key, "commands."), "qa.")
+	title := settingTitle(key)
 	ink := theme.Quiet
 	if focused {
 		ink = theme.Focused
@@ -286,11 +305,13 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 			}
 			x = c.Put(x, y, mark+option, style) + 3
 		}
-		if edited {
-			x = c.Put(x, y, "edited", theme.Bright.B()) + 2
-		}
-		if !m.settings.Present[key] {
-			c.Put(x, y, "not in the file yet", theme.Muted)
+		switch {
+		case edited:
+			c.Put(x, y, "edited", theme.Bright.B())
+		case current == "":
+			c.Put(x, y, "not chosen yet · discovered too", theme.Muted)
+		case m.foundBy(key) != "":
+			c.Put(x, y, m.foundBy(key), theme.Muted)
 		}
 		return
 	}
@@ -311,14 +332,15 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 		c.Put(6, y+1, "blank: not used", theme.Muted)
 	case blank && optional:
 		c.PutMax(3, y+1, unused, theme.Muted, w-4)
+	case blank && !focused && m.detected[key].Command == "":
+		c.PutMax(3, y+1, "blank · the first factory here discovers it", theme.Muted, w-4)
 	}
 	switch {
 	case edited:
 		c.Right(c.W-4, y, " edited ", theme.Bright.B())
 	case optional:
 		c.Right(c.W-4, y, " optional ", theme.Muted)
-	}
-	if !m.settings.Present[key] && blank && !focused && !optional {
-		c.Put(3, y+1, "not in the file yet", theme.Muted)
+	case m.foundBy(key) != "":
+		c.Right(c.W-4, y, " "+m.foundBy(key)+" ", theme.Muted)
 	}
 }

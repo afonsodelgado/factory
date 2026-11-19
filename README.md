@@ -86,7 +86,7 @@ At the end, setup says that this machine runs factories on its own. If it stops 
 factory
 ```
 
-**4. Add a repo.** In the hub, press `n`, choose `+ add a repo…`, type the path to a git repo and press Enter. Fill in its build, lint and test commands, or leave them blank and the factory finds them. Press `ctrl+s` to save.
+**4. Add a repo.** Clone it and add its secrets (`.env` files and the like) as you would to run it yourself. In the hub, press `n`, choose `+ add a repo…`, type the path to the repo and press Enter. There is nothing to fill in: its first factory on this machine works out how to build, lint, test and run it, runs each command here and saves the ones that work in the repo's `.factory/config.yml`. `ctrl+e` on the repo shows or edits them.
 
 **5. Start a factory.** Press `n` again, pick the repo, type an id such as `csv-export`, choose the stages, and write what you want. Or start from the repo itself:
 

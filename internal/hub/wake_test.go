@@ -278,3 +278,32 @@ func TestRepoSettingsWaitsForPopupCloseAndRefreshesTheSelectedRepo(t *testing.T)
 		t.Fatal("current repo lost Here on return")
 	}
 }
+
+func TestAddingARepoReturnsToNewFactoryWithItSelectedBeforeTheNodeListsIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
+	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	repo := t.TempDir()
+	os.MkdirAll(state.RepoDir(repo), 0o755)
+	os.WriteFile(state.RepoConfigPath(repo), []byte("qa: {mode: \"\"}\n"), 0o644)
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{t.TempDir()}}
+	model, _ := withNode(Model{Config: cfg, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }}, host.Runtime{Loader: &Loader{Config: cfg}})
+	model.Config = &state.Config{StateDir: cfg.StateDir, Repos: slices.Clone(cfg.Repos)}
+	model.window = [2]int{100, 40}
+	model.openDialog("new", model.newContext())
+	data, _ := json.Marshal(dialog.NewResult{Added: &dialog.RepoAdded{Repo: repo, Notice: "✓ Added it on this machine."}})
+	response := make(chan Message, 1)
+	model.dialogResult(Event{Message: Message{T: "result", Pane: "dialog:new", Data: data}, Reply: response})
+	if reply := <-response; reply.T != "done" {
+		t.Fatalf("adding answered %+v", reply)
+	}
+	if model.dialogClosed(dialogClosedMsg{kind: "new"}) == nil || model.dialog != "new" {
+		t.Fatalf("adding a repo opened %q; want New factory again, never the settings form", model.dialog)
+	}
+	var context dialog.NewContext
+	json.Unmarshal(model.dialogs["new"], &context)
+	if picked := context.Repos[context.Repo]; picked.Path != repo || !picked.NoQAMode || context.Notice != "✓ Added it on this machine." {
+		t.Fatalf("New factory came back on %+v with notice %q; want the added repo selected before the node's next update lists it", picked, context.Notice)
+	}
+}

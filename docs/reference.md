@@ -42,16 +42,16 @@ Restarting a node stops a browser QA run or walkthrough in progress, which recov
 
 ## Add a repo
 
-The factory works in any git repo. In the hub, press `n`, then `+ add a repo…`. Type a path (`~` expands and `tab` completes directories), then press Enter to set it up and open its settings:
+The factory works in any git repo. Clone it on the machine, add its secrets (`.env` files and the like) as you would to run it yourself, then in the hub press `n`, then `+ add a repo…`. Type a path (`~` expands and `tab` completes directories), then press Enter. Adding a repo sets it up on this machine only and lists it; the dialog returns to its first step with the repo selected and says that its first factory discovers the commands. There is nothing to fill in:
 
-- It writes `.factory/config.yml` with blank build, lint and test commands. A factory detects blank commands when it runs, from the root Makefile, package scripts, `go.mod` or unambiguous CI steps, and asks for the ones it cannot find.
+- It writes `.factory/config.yml` with blank build, lint and test commands and a blank QA mode. A factory first detects blank commands from the root Makefile, package scripts, `go.mod` or unambiguous CI steps; the repo's first factory on this machine discovers the rest (see [Repo config](#repo-config)).
 - It adds `.factory/` and the factory's other paths to `.git/info/exclude`.
 - It remembers the main checkout in the hub's list, even when you enter a worktree path.
 - It answers Claude Code's and Codex's one-time folder trust question for the repo (see [Folder trust](#folder-trust)).
 
-A non-git path or a setup failure stays in the dialog so you can correct it and retry. Adding a listed repo with a current config opens settings without repeating setup. A listed repo with no current config is set up first.
+A non-git path or a setup failure stays in the dialog so you can correct it and retry. Adding a listed repo with a current config changes nothing. A listed repo with no current config is set up first. A repo with no network git remote is added with a note that it stays on this machine.
 
-Press `ctrl+e` on any repo row to edit build, lint and test commands, QA mode, and browser start and health. A blank field shows the detected value and its source. `ctrl+s` saves; `esc` returns without saving. Both return to `n` with that repo selected. Saving preserves comments, existing key order and every other setting. Cleared commands remain as empty strings; terminal mode leaves start and health in the file.
+Press `ctrl+e` on any repo row to edit build, lint and test commands, QA mode, and browser start and health. A blank field shows the detected value and its source, or that the first factory here discovers it. A discovered value shows `found by <factory> · <day>` on its border; editing it makes it yours. `ctrl+s` saves; `esc` returns without saving. Both return to `n` with that repo selected. Saving preserves comments, existing key order and every other setting. Cleared commands remain as empty strings; terminal mode leaves start and health in the file.
 
 Running `factory` inside a repo still sets it up and opens the hub. In this Here mode, `n` shows that repo and the add row; `↑↓` opens the full list to pick another repo. From outside a repo, the dialog lists them all. With no repos, it starts on the path field.
 
@@ -73,7 +73,7 @@ A second `factory node run` for the same state directory refuses, and so does a 
 |---|---|
 | `factory` | opens the hub in this pane, or jumps to the hub that is already running, and sets up the repo you run it in |
 | `factory delete csv-export` | deletes the factory and everything local to it, so the id can be used again |
-| `factory init ~/dev/new-repo` | non-interactive equivalent for scripts and headless setups; add and configure repos interactively from the hub’s `n` dialog |
+| `factory init ~/dev/new-repo` | non-interactive equivalent for scripts and headless setups: adds the repo on this machine, and its first factory here discovers the commands |
 | `factory forget ~/dev/old-repo` | stops listing a repo in the hub; its files stay |
 
 Create a factory in the hub: `n` asks for the repo, the id, the stages and agents, and the prompt. An id is made of lowercase letters, digits and dashes; typing `CSV Export` uses `csv-export`. The command words (`open`, `init`, `doctor`, `setup`, `bootstrap`, `install-hooks`, `version`, `update`, `hub`, `host`, `node`, `move`, `view`, `dialog`, `hook`, `help`, `delete`, `forget`, `stage`, `review`) are refused as ids by the `n` dialog; a `/factory doctor` typed straight into Claude is not guarded. Ids match exactly, and an existing factory is selected, never duplicated. The factory reads an issue tracker only when the prompt asks it to, for example "read Linear issue ENG-1234".
@@ -246,7 +246,7 @@ State (registry, hook files, drafts, the hub socket) lives in `~/.local/state/fa
 
 ### Repo config
 
-Add and configure repos from the hub: press `n`, then `+ add a repo…`, or `ctrl+e` on a listed repo. `ctrl+s` saves only the form's keys; `esc` cancels. A malformed file is shown as an error and cannot be overwritten. If the file changes while settings are open, reopen the form before saving.
+Add repos from the hub with `n`, then `+ add a repo…`, and edit a repo's settings with `ctrl+e` on its row. `ctrl+s` saves only the form's keys; `esc` cancels. A malformed file is shown as an error and cannot be overwritten. If the file changes while settings are open, reopen the form before saving.
 
 Each repo's main checkout has its own config in `.factory/config.yml`. It is never committed: `.factory/` is listed in the repo's `.git/info/exclude`. It holds the repo's commands, QA and design settings, and it can override these global keys for that repo: `pipelines`, `default_pipeline`, `agents`, `supervisor`, `stalled_after` and `codex.writable_dirs`.
 
@@ -256,6 +256,18 @@ qa: {mode: terminal}
 supervisor: {effort: medium}
 stalled_after: 45m
 ```
+
+You never have to fill in the commands. A new repo's config leaves build, lint, test and the QA mode blank. A blank value that the deterministic detector cannot fill is discovered by the repo's first factory on this machine, which runs each candidate here and saves only the values that worked, each with a trailing comment naming the factory and the day:
+
+```yaml
+commands:
+  build: pnpm build # found by billing-export, 2026-11-19
+  test: pnpm test --reporter=dot
+qa:
+  mode: browser # found by billing-export, 2026-11-19
+```
+
+A value you typed, or one that is explicit in the file, always wins: discovery writes only blank keys, and replaces only its own earlier value when that value stopped working. Editing a discovered value in `ctrl+e` and saving drops its comment and makes it yours. Two factories of one repo discovering at once each write only the keys still blank. `factory doctor` names a factory that found the values and marks the ones you typed. A blank QA mode reads as not chosen yet; discovery chooses it.
 
 `agents` and `supervisor` override one field at a time, `pipelines` override by name, and `codex.writable_dirs` adds to the global list. A web repo can have the designer build prototypes from the app's real components:
 
@@ -277,7 +289,7 @@ qa: {mode: browser, url: 'http://localhost:${FACTORY_WEB_PORT}/', start: PORT=$F
 
 `qa.url` makes a stack portable: the node picks a free loopback port for each stack, exports it to `qa.start`, `qa.seed` and `qa.sign_in` as `FACTORY_WEB_PORT` and `FACTORY_API_PORT`, expands `${FACTORY_WEB_PORT}` and `${FACTORY_API_PORT}` in `qa.url` and `qa.health`, and runs the commands in the worktree. `FACTORY_PUBLIC_ORIGIN` holds the origin a browser uses: the review stack's tailnet HTTPS origin (its loopback origin on a node without Tailscale), or the local one for QA. Point the dev server's allowed hosts or public URL at it if the app checks them. Without `qa.url` the stack uses the fixed `qa.web_port` and `qa.api_port`, so only one stack per repo runs on a node at a time; `factory doctor` warns about it. `qa.url` must be an `http` URL on `localhost` with a port. Sign-in reads credentials from the node's own environment; its cookies go only into the job's temporary profile or the browser that opened the one-use link, never into the factory directory.
 
-`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. The repo config stays on its node: each node that has the repo keeps its own `.factory/config.yml`, and nothing syncs or moves it. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. In the hub, press `n`, then `+ add a repo…`, or use `ctrl+e` on its row: setup copies it to `.factory/config.yml` before opening settings, leaving the old file for factories already running there.
+`repos`, `hub`, `alerts`, `icons`, `tmux` and `review` belong to the machine; `factory doctor` reports them when a repo config sets them. The repo config stays on its node: each node that has the repo keeps its own `.factory/config.yml`, and nothing syncs or moves it. A repo set up before `.factory/` has `.claude/factory.yml`. The factory still reads it. Adding the repo from the hub (`n`, then `+ add a repo…`), `ctrl+e` on its row or `factory init` copies it to `.factory/config.yml`, leaving the old file for factories already running there.
 
 ## Pipelines
 
@@ -347,7 +359,7 @@ Deploy the binary, embedded phone app and bundled skills together. Node protocol
 
 The supervisor alone commits state proposals under a revision lock. Local implementation and review never publish. QA findings and regression gaps return to the original owning layer through review. Only the PR stage publishes drafts; CI fixes and follow-up work rerun independent review and enabled QA. Soft correction caps require explicit positive developer increments; refusal keeps the factory waiting. No skip bypasses a failing check or unreviewed change.
 
-Command discovery resolves explicit per-field overrides, root Make targets, declared package scripts, Go defaults, then unambiguous CI commands. Missing commands and startup prerequisites form one question. Detection is recorded with sources and a digest, never silently written as explicit config during init. Supervisor commits require python3 for the bundled OS-locked commit script.
+Command discovery resolves explicit per-field overrides, root Make targets, declared package scripts, Go defaults, then unambiguous CI commands. Missing commands and startup prerequisites form one question. Detection is recorded with sources and a digest, never written as explicit config during init; only values a factory verified on this node are saved, each with a comment naming that factory. Supervisor commits require python3 for the bundled OS-locked commit script.
 
 Handoff requires current local checks, review, enabled QA, open ready PRs, CI and repository policy. Confirmed empty check sets pass after the discovery grace as “Passed — no CI checks”; unknown or incomplete responses never pass. Required human approvals remain notes. Optional review comments default off; opt-in applies to all authors. Only the developer confirms done, bound to final head SHAs. Later head/base changes invalidate verification.
 

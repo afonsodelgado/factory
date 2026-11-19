@@ -1,11 +1,15 @@
 package state
 
 import (
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 )
@@ -416,5 +420,120 @@ func TestSharedSettingsMoveBetweenConfigsWithoutTouchingMachineKeysOrComments(t 
 	}
 	if written != shared {
 		t.Errorf("homebox reads back %q after writing %q, so the next sync tick would see a local edit and send it back", written, shared)
+	}
+}
+
+func TestDiscoveryRecordsOnlyBlankKeysWithItsNameAndNeverChangesYours(t *testing.T) {
+	repo := t.TempDir()
+	os.MkdirAll(RepoDir(repo), 0o755)
+	os.WriteFile(RepoConfigPath(repo), []byte("# header\ncommands:\n  build: make # yours\n  lint: \"\" # golangci once it is installed\nqa:\n  mode: \"\"\npipelines: {quick: [plan]}\n"), 0o644)
+	day := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	found := Found{Factory: "csv", Day: day}
+
+	var verified map[string]string
+	verify := func(effective map[string]string, _ []string) error { verified = effective; return nil }
+	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"commands.build": "go build ./...", "commands.lint": "go vet ./...", "qa.mode": "terminal"}, []string{"commands.build"}, verify)
+	if err != nil || !slices.Equal(got.Recorded, []string{"commands.lint", "qa.mode"}) || !slices.Equal(got.Kept, []string{"commands.build"}) {
+		t.Fatalf("recording gave %+v, %v; want only the blank keys written and the typed build kept", got, err)
+	}
+	if verified["commands.build"] != "make" || verified["commands.lint"] != "go vet ./..." {
+		t.Errorf("verification saw %v; want the kept build and the new lint together, as they will be saved", verified)
+	}
+	data, _ := os.ReadFile(RepoConfigPath(repo))
+	for _, want := range []string{"# header", "build: make # yours", "lint: go vet ./... # golangci once it is installed · found by csv, 2026-11-19", "mode: terminal # found by csv, 2026-11-19", "pipelines: {quick: [plan]}"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the config lost %q:\n%s", want, data)
+		}
+	}
+	if s, _ := ReadRepoSettings(repo); s.Provenance["commands.lint"] != found || s.Discovered("commands.build") {
+		t.Errorf("provenance reads %+v; want lint found by csv and build the developer's", s.Provenance)
+	}
+
+	if again, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, nil, nil); len(again.Recorded) > 0 {
+		t.Errorf("a second discovery without --replace wrote %v over csv's value", again.Recorded)
+	}
+	if replaced, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, []string{"commands.lint"}, nil); !slices.Equal(replaced.Recorded, []string{"commands.lint"}) {
+		t.Errorf("replacing discovery's own value recorded %v", replaced.Recorded)
+	}
+
+	s, _ := ReadRepoSettings(repo)
+	values := maps.Clone(s.Values)
+	values["commands.lint"] = "make lint"
+	if err := s.Save(values); err != nil {
+		t.Fatal(err)
+	}
+	if mine, _ := ReadRepoSettings(repo); mine.Discovered("commands.lint") || !mine.Discovered("qa.mode") {
+		t.Errorf("after an edit provenance reads %+v; want lint the developer's and qa.mode still discovered", mine.Provenance)
+	}
+	if _, err := RecordYours(repo, map[string]string{"commands.build": "make all"}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(RepoConfigPath(repo)); !strings.Contains(string(data), "lint: make lint # golangci once it is installed\n") || !strings.Contains(string(data), "build: make all # yours\n") {
+		t.Errorf("edits and typed commands left:\n%s\nwant the developer's own comments kept and only the found-by note gone", data)
+	}
+	if after, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "go vet ./..."}, []string{"commands.lint"}, nil); len(after.Recorded) > 0 {
+		t.Errorf("discovery replaced a value the developer edited: %+v", after)
+	}
+
+	var wg sync.WaitGroup
+	for _, key := range []string{"commands.test", "qa.start"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RecordDiscovered(repo, "csv", day, map[string]string{key: key + " found"}, nil, nil)
+		}()
+	}
+	wg.Wait()
+	if s, _ := ReadRepoSettings(repo); s.Values["commands.test"] != "commands.test found" || s.Values["qa.start"] != "qa.start found" || s.Values["commands.lint"] != "make lint" {
+		t.Errorf("two factories recording at once left %v; want both blank keys written and nothing else changed", s.Values)
+	}
+}
+
+func TestStackVerificationRunsWithoutTheConfigLockAndRepeatsWhenTheConfigChanged(t *testing.T) {
+	repo := t.TempDir()
+	os.MkdirAll(RepoDir(repo), 0o755)
+	os.WriteFile(RepoConfigPath(repo), []byte("commands:\n  build: \"\"\nqa:\n  mode: browser\n"), 0o644)
+	day := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	verifications := 0
+	verify := func(effective map[string]string, _ []string) error {
+		verifications++
+		if verifications > 1 {
+			return nil
+		}
+		saved := make(chan error, 1)
+		go func() {
+			_, err := RecordYours(repo, map[string]string{"commands.build": "make"})
+			saved <- err
+		}()
+		select {
+		case err := <-saved:
+			return err
+		case <-time.After(5 * time.Second):
+			t.Fatal("saving the config waited on discovery's stack check; the lock must not be held while the stack starts")
+		}
+		return nil
+	}
+	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"qa.start": "pnpm dev"}, nil, verify)
+	if err != nil || verifications != 2 || !slices.Equal(got.Recorded, []string{"qa.start"}) {
+		t.Fatalf("recording during a concurrent edit gave %+v, %v after %d verifications; want it verified again with the new config, then saved", got, err, verifications)
+	}
+	if s, _ := ReadRepoSettings(repo); s.Values["commands.build"] != "make" || s.Values["qa.start"] != "pnpm dev" {
+		t.Errorf("the config holds %v; want both the developer's edit and the verified start", s.Values)
+	}
+}
+
+func TestRecordGivesUpWithoutAVerificationItWouldThrowAway(t *testing.T) {
+	repo := t.TempDir()
+	os.MkdirAll(RepoDir(repo), 0o755)
+	os.WriteFile(RepoConfigPath(repo), []byte("commands:\n  build: \"\"\nqa:\n  mode: browser\n"), 0o644)
+	verifications := 0
+	verify := func(map[string]string, []string) error {
+		verifications++
+		_, err := RecordYours(repo, map[string]string{"commands.build": fmt.Sprint("make ", verifications)})
+		return err
+	}
+	_, err := RecordDiscovered(repo, "csv", time.Now(), map[string]string{"qa.start": "pnpm dev"}, nil, verify)
+	if err == nil || verifications != verifyAttempts-1 {
+		t.Fatalf("a config that changed during every verification gave %v after %d verifications; want a refusal after %d, never a stack check whose result is thrown away", err, verifications, verifyAttempts-1)
 	}
 }

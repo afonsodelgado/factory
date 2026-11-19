@@ -195,7 +195,11 @@ func tryRecipe(ctx context.Context, repo, branch string, profile state.Profile) 
 		return failed(host.FailStack, err)
 	}
 	defer gitclone.Git(context.Background(), repo, "worktree", "remove", "--force", checkout)
-	recipe, err := RecipeOf(profile, checkout)
+	return TryStack(ctx, checkout, profile)
+}
+
+func TryStack(ctx context.Context, dir string, profile state.Profile) error {
+	recipe, err := RecipeOf(profile, dir)
 	if err != nil {
 		return failed(host.FailRecipe, err)
 	}
