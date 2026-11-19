@@ -2604,12 +2604,17 @@ func TestTwoNodesTakingOverAtOnceLeaveExactlyOneHolder(t *testing.T) {
 	cp.Manifest.Slug, cp.Manifest.Branch = "csv", "worktree-csv"
 	cp.Manifest.Stack = []node.StackBranch{{Branch: "worktree-csv", SHA: g.run(g.worktree, "rev-parse", "worktree-csv")}}
 	log := &hostLog{}
+	var arrived sync.WaitGroup
+	arrived.Add(len(claimants))
 	for _, n := range claimants {
 		if _, err := macbook.Add(n.Short()); err != nil {
 			t.Fatal(err)
 		}
 		n.Nodes.Clone = cloneWithOwnCredentials(n.Dir)
-		n.Runtime.Behind(newMoveHost(n.Short(), log))
+		h := newMoveHost(n.Short(), log)
+		var leaseRead sync.Once
+		h.onAdopt = func() { leaseRead.Do(func() { arrived.Done(); arrived.Wait() }) }
+		n.Runtime.Behind(h)
 		if status, _, body := tn.Request(macbook.Machine, n.Machine, "POST", "/api/node/transfer/stage", "", cp); status != http.StatusOK {
 			t.Fatalf("staging on %s answered %d %s", n.Short(), status, body)
 		}
