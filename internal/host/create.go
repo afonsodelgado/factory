@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +12,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/trust"
 )
 
 type CreateRequest struct {
@@ -23,6 +23,8 @@ type CreateRequest struct {
 	Stages     []string
 	Agents     map[string]state.AgentSetting
 	Supervisor state.AgentSetting
+
+	WatchComments bool `json:",omitempty"`
 }
 
 func (m *Runtime) Create(r CreateRequest) (string, error) {
@@ -69,7 +71,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	supervisor = catalogs.WithDefault(supervisor)
 	earlier := m.RetiredFactories(r.Repo, r.Slug)
 	r.Slug = factory.FreshSlug(r.Slug, m.SlugTaken(r.Repo))
-	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: pipeline.Stages, Agents: withToolNamed(agents), Supervisor: supervisor}
+	launch := factory.Launch{Repo: r.Repo, Slug: r.Slug, Prompt: r.Prompt, Pipeline: pipeline.Name, Stages: pipeline.Stages, Agents: withToolNamed(agents), Supervisor: supervisor, WatchComments: r.WatchComments}
 	if supervisor.OnClaude() {
 		launch.SessionID = uuid.NewString()
 	} else {
@@ -87,6 +89,7 @@ func (m *Runtime) Create(r CreateRequest) (string, error) {
 	if m.Engine == nil {
 		return "", errors.New("the hub is not attached to tmux")
 	}
+	trust.Managed(r.Repo, filepath.Join(factory.WorktreesDir(r.Repo), r.Slug))
 	pane, err := m.Engine.NewFactoryPane(NewPane{Repo: r.Repo, Slug: r.Slug, Dir: r.Repo, Env: supervisorEnv(supervisor)})
 	if err != nil {
 		return "", err
@@ -133,16 +136,6 @@ func Retired(f factory.Factory) bool {
 
 func Named(f factory.Factory, id string) bool {
 	return f.Slug == id || strings.ToLower(f.Label()) == id
-}
-
-func (m *Runtime) RetiredMatch(repos []string, id string) (string, bool) {
-	for _, it := range m.snap.Items {
-		f := it.Factory
-		if Retired(f) && slices.Contains(repos, f.Repo) && Named(f, id) {
-			return f.Repo, true
-		}
-	}
-	return "", false
 }
 
 func (m *Runtime) RetiredFactories(repo, id string) []factory.Factory {

@@ -8,14 +8,17 @@ import (
 	"path/filepath"
 )
 
-const PrefixHeader = "X-Factory-Phone-Prefix"
+const (
+	PrefixHeader = "X-Factory-Phone-Prefix"
+	NoBackHeader = "X-Factory-No-Back"
+)
 
 func (s *Server) MobileHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_review/overlay.js", s.serveOverlay)
 	mux.HandleFunc("GET /r/{key}/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		prefix := r.Header.Get(PrefixHeader)
-		s.servePage(func(f Factory, rel, revision string) []byte { return s.mobileTag(prefix, f, rel, revision) })(w, r)
+		prefix, back := r.Header.Get(PrefixHeader), r.Header.Get(NoBackHeader) == ""
+		s.servePage(func(f Factory, rel, revision string) []byte { return s.mobileTag(prefix, back, f, rel, revision) })(w, r)
 	})
 	mux.HandleFunc("GET /r/{key}/_api/threads", s.listThreads)
 	mux.HandleFunc("POST /r/{key}/_api/threads", s.createThread)
@@ -32,11 +35,15 @@ func (s *Server) MobileHandler() http.Handler {
 	})
 }
 
-func (s *Server) mobileTag(prefix string, f Factory, rel, revision string) []byte {
+func (s *Server) mobileTag(prefix string, back bool, f Factory, rel, revision string) []byte {
 	key := url.PathEscape(f.Key)
+	pages := ""
+	if back {
+		pages = "/f/" + key + "/pages"
+	}
 	return fmt.Appendf(nil, `<script src="%s" data-factory-review data-mobile data-theme="dark" data-events="%s" data-access="%s" data-api="%s" data-page="%s" data-file="%s" data-label="%s" data-back="%s" data-revision="%s" defer></script>`,
 		html.EscapeString(prefix+"/_review/overlay.js"), html.EscapeString(prefix+"/r/"+key+"/_api/events"), html.EscapeString(prefix+"/_access"),
-		html.EscapeString(prefix+"/r/"+key+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), html.EscapeString(f.Label), html.EscapeString("/f/"+key+"/pages"), revision)
+		html.EscapeString(prefix+"/r/"+key+"/_api"), html.EscapeString(f.Key+"/"+rel), html.EscapeString(rel), html.EscapeString(f.Label), html.EscapeString(pages), revision)
 }
 
 const AppPrefix = "/__factory"

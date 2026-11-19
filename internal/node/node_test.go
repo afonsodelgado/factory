@@ -520,6 +520,61 @@ func TestAReviewPageScriptWithALiveGrantCannotReachTheControlAPI(t *testing.T) {
 	}
 }
 
+func TestAnOwnerlessNodeOpensOnlyHubLinkedReviewPagesToThisMachinesBrowser(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plan.html"), []byte("<body>plan</body>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := review.New("token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	pages.SetFactories([]review.Factory{{Key: "k", Label: "csv", Dir: dir}})
+	door := &LocalDoor{Port: 7418, Review: pages.MobileHandler()}
+	const here = "127.0.0.1:7418"
+	get := func(host, path string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "http://"+host+path, nil)
+		r.RemoteAddr = "127.0.0.1:50000"
+		for _, c := range cookies {
+			r.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		door.ServeHTTP(w, r)
+		return w
+	}
+	link, err := door.Link("/r/k/plan.html")
+	if err != nil || !strings.HasPrefix(link, "http://"+here+"/open/") {
+		t.Fatalf("the hub got the link %q, %v; want a one-use loopback link", link, err)
+	}
+	ticket := strings.TrimPrefix(link, "http://"+here)
+	entered := get(here, ticket)
+	cookies := entered.Result().Cookies()
+	scoped := len(cookies) > 0 && !slices.ContainsFunc(cookies, func(c *http.Cookie) bool { return !c.HttpOnly || (c.Path != "/r/" && c.Path != "/w/") })
+	if entered.Code != http.StatusSeeOther || entered.Header().Get("Location") != "/r/k/plan.html" || !scoped {
+		t.Fatalf("the link answered %d to %q with cookies %v; want HttpOnly sessions scoped to the review paths, since cookies reach every port on 127.0.0.1", entered.Code, entered.Header().Get("Location"), cookies)
+	}
+	grant := get(here, "/r/k/plan.html", cookies...).Header().Get("Location")
+	if opened := get(here, grant); opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), "data-mobile") || !strings.Contains(opened.Body.String(), `data-back=""`) {
+		t.Fatalf("the page through its link answered %d %q; want it with the comment overlay and no back link to phone routes the door refuses", opened.Code, opened.Body)
+	}
+	for _, refused := range []struct {
+		name string
+		got  *httptest.ResponseRecorder
+	}{
+		{"a reused link", get(here, ticket)},
+		{"the page without the cookie", get(here, "/r/k/plan.html")},
+		{"the page under another Host", get("macbook.tail1234.ts.net", "/r/k/plan.html", cookies...)},
+		{"the snapshot", get(here, "/api/snapshot", cookies...)},
+		{"another node's hello", get(here, "/api/node/hello", cookies...)},
+		{"the phone app", get(here, "/", cookies...)},
+	} {
+		if refused.got.Code < 400 {
+			t.Errorf("%s answered %d; an ownerless node must refuse it", refused.name, refused.got.Code)
+		}
+	}
+}
+
 func TestKeepAwakeHoldsOnlyWhileFactoriesAreActiveOnExternalPowerAndReleasesOnShutdown(t *testing.T) {
 	onPower, holds, releases := true, 0, 0
 	a := &Awake{
@@ -607,5 +662,19 @@ func TestAHungPowerProbeCannotBlockNodeIdentityAndTimesOut(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Error("power probe has no bounded timeout")
+	}
+}
+
+func TestAPeersReportedLoginNeverBecomesAnSSHOption(t *testing.T) {
+	for _, s := range []Snapshot{
+		{User: "-oProxyCommand=touch /tmp/pwned"},
+		{Factories: []host.LocalFactory{{Repo: "/home/-oProxyCommand=x/cowork"}}},
+	} {
+		if got := LoginUser(s); got != "" {
+			t.Errorf("a peer reporting %+v gave the ssh login %q; want none, or ssh would read it as an option", s, got)
+		}
+	}
+	if got := LoginUser(Snapshot{Factories: []host.LocalFactory{{Repo: "/home/factory/cowork"}}}); got != "factory" {
+		t.Errorf("an old peer's /home/factory path gave the login %q; want factory", got)
 	}
 }

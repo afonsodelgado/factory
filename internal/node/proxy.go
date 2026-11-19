@@ -23,9 +23,12 @@ var loopbackNames = []string{"localhost", "127.0.0.1", "::1"}
 func (s *Stacks) proxy(run *liveStack) http.Handler {
 	lease := run.record.StackLease
 	upstream, _ := upstreamOf(run.recipe.URL)
-	public := &url.URL{Scheme: "https", Host: s.Host + ":" + strconv.Itoa(run.record.HTTPS)}
+	public, _ := url.Parse(s.origin(run.record))
 	page := review.Factory{Key: lease.Route, Label: lease.Label}
 	back := s.Origin + "/f/" + url.PathEscape(lease.Route) + "/pages"
+	if s.loopback() {
+		back = ""
+	}
 	tag := func(r *http.Request) []byte {
 		return review.AppTag(page, lease.Page, strings.Contains(r.UserAgent(), "Mobi"), back)
 	}
@@ -36,6 +39,12 @@ func (s *Stacks) proxy(run *liveStack) http.Handler {
 	mux.HandleFunc(review.AppPrefix+"/api/{rest...}", s.bridge(lease.Route, public.String()))
 	mux.Handle("/", appProxy(upstream, public, tag))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.loopback() {
+			if s.admitLocal(w, r, run, public.Host) {
+				mux.ServeHTTP(w, r)
+			}
+			return
+		}
 		if s.admit(w, r, public.Host) {
 			mux.ServeHTTP(w, r.WithContext(s.Gate.untilExposed(r.Context())))
 		}
@@ -52,6 +61,25 @@ func (s *Stacks) admit(w http.ResponseWriter, r *http.Request, appHost string) b
 	case s.Gate.exposed(w, r):
 	case r.Host != appHost:
 		fail(w, http.StatusMisdirectedRequest, "this review stack answers only at https://"+appHost)
+	default:
+		return true
+	}
+	return false
+}
+
+func (s *Stacks) browserCookie(run *liveStack) string {
+	return "factory_stack_" + strconv.Itoa(run.record.HTTPS)
+}
+
+func (s *Stacks) admitLocal(w http.ResponseWriter, r *http.Request, run *liveStack, appHost string) bool {
+	signsIn := r.URL.Path == review.AppPrefix+"/sign-in"
+	c, err := r.Cookie(s.browserCookie(run))
+	signedIn := err == nil && c.Value == run.browser
+	switch {
+	case !fromLoopback(r.RemoteAddr) || r.Host != appHost:
+		fail(w, http.StatusMisdirectedRequest, "this review stack answers only this machine's browser, at http://"+appHost)
+	case !signsIn && !signedIn:
+		phone.FromTheHub(w)
 	default:
 		return true
 	}
@@ -161,8 +189,12 @@ func (s *Stacks) signIn(run *liveStack, upstream, public *url.URL) http.HandlerF
 			phone.Notice(w, http.StatusConflict, "The review stack cannot sign this browser in ("+host.FailPhoneSignIn+")", err.Error())
 			return
 		}
+		secure := !s.loopback()
 		for _, c := range cookies {
-			http.SetCookie(w, &http.Cookie{Name: c.Name, Value: c.Value, Path: cmp.Or(c.Path, "/"), Secure: true, SameSite: http.SameSiteLaxMode})
+			http.SetCookie(w, &http.Cookie{Name: c.Name, Value: c.Value, Path: cmp.Or(c.Path, "/"), Secure: secure, SameSite: http.SameSiteLaxMode})
+		}
+		if s.loopback() {
+			http.SetCookie(w, &http.Cookie{Name: s.browserCookie(run), Value: run.browser, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
 		}
 		app, _ := url.Parse(run.recipe.URL)
 		http.Redirect(w, r, app.RequestURI(), http.StatusSeeOther)

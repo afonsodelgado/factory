@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/trust"
 )
 
 type Model struct {
@@ -70,8 +71,12 @@ func CodexTrusts(home, repo string) bool {
 	if err != nil {
 		return false
 	}
-	trustedRepo := regexp.MustCompile(`\[projects\."` + regexp.QuoteMeta(repo) + `"\]\s*\n\s*trust_level\s*=\s*"trusted"`)
-	return trustedRepo.Match(data)
+	for _, header := range trust.CodexHeaders(repo) {
+		if regexp.MustCompile(regexp.QuoteMeta(header) + `\s*\n\s*trust_level\s*=\s*"trusted"`).Match(data) {
+			return true
+		}
+	}
+	return false
 }
 
 func OpenCodeCachePath(stateDir string) string {

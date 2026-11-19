@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
@@ -17,6 +18,8 @@ const (
 )
 
 type PhoneContext struct {
+	Machine       string `json:"machine"`
+	Tailscale     bool   `json:"tailscale"`
 	Running       bool   `json:"running"`
 	Hostname      string `json:"hostname"`
 	Port          int    `json:"port"`
@@ -93,6 +96,12 @@ func (p *Phone) key(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		return tea.Quit
+	case "t", "h":
+		if !p.Context.Tailscale {
+			return nil
+		}
+	}
+	switch msg.String() {
 	case "t":
 		p.busy = "Sending a test notification…"
 		fallback := p.Context
@@ -135,6 +144,10 @@ func (p *Phone) View() tea.View {
 
 func (p *Phone) drawMain(c *theme.Canvas) {
 	c.Put(1, 0, "Phone", theme.Bright.B())
+	if !p.Context.Tailscale {
+		p.drawWithoutTailscale(c)
+		return
+	}
 	running, runningInk := "not running; start it with factory node run", theme.FgInk(theme.Yellow)
 	if p.Context.Running {
 		running, runningInk = "running", theme.FgInk(theme.Green)
@@ -159,6 +172,39 @@ func (p *Phone) drawMain(c *theme.Canvas) {
 		paragraph(c, y+1, text, ink)
 	}
 	c.Put(1, c.H-1, "t test push   h checks   esc close", theme.Text)
+}
+
+func (p *Phone) drawWithoutTailscale(c *theme.Canvas) {
+	running, runningInk := "not running; start it with factory node run", theme.FgInk(theme.Yellow)
+	if p.Context.Running {
+		running, runningInk = "running", theme.FgInk(theme.Green)
+	}
+	rows := []struct {
+		label, value string
+		ink          theme.Ink
+	}{
+		{"node", running, runningInk},
+		{"url", "none: " + node.NeedsTailscale(node.PhoneFeature, p.Context.Machine), theme.FgInk(theme.Yellow)},
+		{"port", fmt.Sprintf("127.0.0.1:%d, this machine only", p.Context.Port), theme.Text},
+		{"notify", "off: no phone can reach this machine yet", theme.Muted},
+	}
+	for i, row := range rows {
+		c.Put(1, 2+i, row.label, theme.Muted)
+		c.PutMax(8, 2+i, row.value, row.ink, c.W-9)
+	}
+	y := paragraph(c, 7, "The phone app opens over Tailscale, on a phone signed in to it as you. It lists every factory, answers what needs you and notifies you.", theme.Muted)
+	addTailscale(c, y+1, "installs and logs in Tailscale, turns on HTTPS for your tailnet and serves the app at "+p.Context.Machine+"'s ts.net name. Factories keep running.")
+	c.Put(1, c.H-1, "esc close", theme.Text)
+}
+
+func addTailscale(c *theme.Canvas, y int, does string) int {
+	c.Put(1, y, node.AddTailscale, theme.Bright)
+	x := 3 + theme.Width(node.AddTailscale)
+	for _, line := range theme.Wrap(does, c.W-x-1) {
+		c.Put(x, y, line, theme.Muted)
+		y++
+	}
+	return y
 }
 
 func (c PhoneContext) url() (string, theme.Ink) {

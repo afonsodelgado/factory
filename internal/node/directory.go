@@ -22,6 +22,7 @@ import (
 const (
 	opAdd    = "add"
 	opRemove = "remove"
+	opHome   = "home"
 )
 
 type Member struct {
@@ -138,6 +139,49 @@ func (l Ledger) lastKnown(id string) Member {
 	return m
 }
 
+func (l Ledger) homes() []Op {
+	return slices.DeleteFunc(slices.Clone(l.Ops), func(op Op) bool { return op.Kind != opHome })
+}
+
+func clockSum(c Clock) int64 {
+	var sum int64
+	for _, n := range c {
+		sum += n
+	}
+	return sum
+}
+
+func laterHome(a, b Op) int {
+	return cmp.Or(cmp.Compare(clockSum(a.Clock), clockSum(b.Clock)), strings.Compare(a.Author, b.Author), strings.Compare(a.ID, b.ID))
+}
+
+func (l Ledger) home() string {
+	homes := l.homes()
+	if len(homes) == 0 {
+		return l.Home
+	}
+	return "https://" + slices.MaxFunc(homes, laterHome).Member.Name
+}
+
+func (l Ledger) previousHomes() []string {
+	current := l.home()
+	var previous []string
+	for _, origin := range append([]string{l.Home}, homeOrigins(l.homes())...) {
+		if origin != "" && origin != current && !slices.Contains(previous, origin) {
+			previous = append(previous, origin)
+		}
+	}
+	return previous
+}
+
+func homeOrigins(ops []Op) []string {
+	origins := make([]string, len(ops))
+	for i, op := range ops {
+		origins[i] = "https://" + op.Member.Name
+	}
+	return origins
+}
+
 type RosterMember struct {
 	Member
 	Self    bool `json:"self,omitempty"`
@@ -145,12 +189,13 @@ type RosterMember struct {
 }
 
 type Roster struct {
-	ID      string         `json:"id"`
-	Home    string         `json:"home"`
-	Self    string         `json:"self"`
-	Removed bool           `json:"removed,omitempty"`
-	Members []RosterMember `json:"members"`
-	Leaving []RosterMember `json:"leaving,omitempty"`
+	ID            string         `json:"id"`
+	Home          string         `json:"home"`
+	PreviousHomes []string       `json:"previous_homes,omitempty"`
+	Self          string         `json:"self"`
+	Removed       bool           `json:"removed,omitempty"`
+	Members       []RosterMember `json:"members"`
+	Leaving       []RosterMember `json:"leaving,omitempty"`
 }
 
 type book struct {
@@ -222,7 +267,18 @@ func (d *Directory) Seed(self Member, home string) error {
 func (d *Directory) Home() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.book.Home
+	return d.book.home()
+}
+
+func (d *Directory) MoveHome(m Member, op string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if slices.ContainsFunc(d.book.Ops, func(o Op) bool { return o.ID == op }) {
+		return nil
+	}
+	b := d.book
+	b.Ledger = b.with(b.author(d.self, opHome, op, m, d.now()))
+	return d.save(b)
 }
 
 func (d *Directory) Ledger() Ledger {
@@ -270,7 +326,7 @@ func (d *Directory) Roster() Roster {
 	defer d.mu.Unlock()
 	b := d.book
 	present := b.present()
-	r := Roster{ID: b.Roster, Home: b.Home, Self: d.self}
+	r := Roster{ID: b.Roster, Home: b.home(), PreviousHomes: b.previousHomes(), Self: d.self}
 	if _, here := present[d.self]; !here && len(b.removals(d.self)) > 0 {
 		r.Removed = true
 		r.Members = []RosterMember{{Member: b.lastKnown(d.self), Self: true}}

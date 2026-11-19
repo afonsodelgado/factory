@@ -1,0 +1,9 @@
+⏺ Bash(git log --oneline -3)
+  ⎿  a77c105 feat(node): add the shared contract for nodes without Tailscale
+     6552e7a fix(review): kill Chrome helpers before removing a headless profile
+     781e2bb feat(node): set up a node with one command and keep nodes in sync
+
+⏺ The stack lands in three steps:
+  1. Tailscale node record, ownerless node, setup and doctor
+  2. Local review door and loopback stacks
+  3. Session stream

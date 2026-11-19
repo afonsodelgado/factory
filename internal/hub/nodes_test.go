@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os/exec"
 	"slices"
@@ -254,12 +255,16 @@ func TestCreatingOnANodeThatHasTheRepoUsesItsCheckoutAndClonesNothing(t *testing
 	readRoster(t, m)
 	until(t, m, func() bool { l, ok := m.nodes[homelab.ID]; return ok && l.answered })
 
-	if err := m.createOnNode(dialog.NewResult{Node: homelab.Name, Repo: repo, Slug: "csv", Prompt: "Export contacts."}); err != nil {
+	if err := m.createOnNode(dialog.NewResult{Node: homelab.Name, Repo: repo, Slug: "csv", Prompt: "Export contacts.", WatchComments: true}); err != nil {
 		t.Fatal(err)
 	}
 	got := m.flushLater()().(noticeMsg)
 	if !strings.Contains(got.text, "csv started on homelab") || len(homelab.Clones()) > 0 || !slices.Contains(homelab.Runtime.Calls(), "create") {
 		t.Fatalf("creating on homelab said %q, cloned %v and called %v; want it started in homelab's own checkout with no clone", got.text, homelab.Clones(), homelab.Runtime.Calls())
+	}
+	var created host.CreateRequest
+	if sent := homelab.Runtime.Sent("create"); len(sent) != 1 || json.Unmarshal(sent[0], &created) != nil || !created.WatchComments {
+		t.Errorf("homelab was asked to create %+v; want comment watching on, as chosen in New factory", created)
 	}
 }
 
@@ -270,4 +275,12 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestAnOlderNodesFactoryThatFailedToStartNeedsYouAndCanBeArchived(t *testing.T) {
+	l := &nodeLink{member: node.RosterMember{Member: node.Member{ID: "node-2", Name: "homelab.tail1234.ts.net"}}}
+	it := nodeItem(l, host.LocalFactory{Key: "/srv/cowork:csv", Repo: "/srv/cowork", ID: "csv", Status: factory.LegacyFailedToStart})
+	if it.Status != factory.NeedsYou || !archivable(it) {
+		t.Errorf("an older node's %q factory reads as %v (archivable %v); want needs you and archivable, not running", factory.LegacyFailedToStart, it.Status, archivable(it))
+	}
 }

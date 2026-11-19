@@ -33,6 +33,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 	cdp "github.com/chromedp/chromedp/remote"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
@@ -43,6 +45,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/phone"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 )
 
 func names(n ...string) []string { return n }
@@ -57,6 +60,30 @@ func eventually(t *testing.T, what string, ok func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestMovingThePhoneHomeOnOneNodeReachesEveryNodesList(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	studio := tn.Machine("studio").Start()
+	for _, name := range []string{"homelab", "studio"} {
+		if _, err := macbook.Add(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tn.Settle(macbook, homelab, studio)
+	var moved node.Roster
+	if err := studio.Local.Do(context.Background(), "POST", "/api/nodes/home", node.HomeRequest{Operation: uuid.NewString(), Node: homelab.ID}, &moved); err != nil {
+		t.Fatal(err)
+	}
+	tn.Settle(macbook, homelab, studio)
+	for _, n := range []*nodetest.Node{macbook, homelab, studio} {
+		roster := n.Roster()
+		if n.Nodes.Dir.Home() != "https://"+homelab.Name || roster.Home != "https://"+homelab.Name || !slices.Equal(roster.PreviousHomes, []string{"https://" + macbook.Name}) {
+			t.Errorf("%s has the home %s (roster %s, previous %v); want homelab, with macbook's address sending phones there", n.Short(), n.Nodes.Dir.Home(), roster.Home, roster.PreviousHomes)
+		}
 	}
 }
 
@@ -457,6 +484,37 @@ func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOn
 	}
 }
 
+func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFix(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook := tn.Machine("macbook").Start()
+	homelab := tn.Machine("homelab").Start()
+	cowork := "git@github.com:alice/cowork.git"
+	homelab.SetRepos(map[string]string{cowork: t.TempDir()})
+	t.Setenv("QA_NEEDS_TEST_PASSWORD", "")
+	needs := []node.Need{
+		{Name: "factory-needs-test-absent-tool", Kind: node.NeedTool, Why: "qa.start runs it"},
+		{Name: ".env.local", Kind: node.NeedFile, Why: "compose.yml reads it"},
+		{Name: "QA_NEEDS_TEST_PASSWORD", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
+	}
+	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: cowork, Needs: needs}}})
+	if status != http.StatusOK {
+		t.Fatalf("homelab answered %d %s", status, body)
+	}
+	var report node.NeedsReport
+	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 {
+		t.Fatalf("homelab reported %s; want one report for cowork", body)
+	}
+	missing := report.Repos[0].Missing()
+	if len(missing) != len(needs) {
+		t.Fatalf("homelab reported %+v missing; want the tool, the file and the variable", missing)
+	}
+	for i, c := range missing {
+		if c.Name != needs[i].Name || c.Fix == "" || c.On != "homelab" || !strings.Contains(c.Detail, needs[i].Why) {
+			t.Errorf("homelab reported %+v for %s; want it named, with why and a fix on homelab", c, needs[i].Name)
+		}
+	}
+}
+
 func rosterFiles(t *testing.T, nodes ...*nodetest.Node) []string {
 	var files []string
 	for _, n := range nodes {
@@ -511,13 +569,8 @@ func TestANodeMissingAToolJoinsButRefusesToCreateFactories(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "gh extension install github/gh-stack") {
 		t.Errorf("creating a factory on homelab answered %v; want a refusal naming the fix", err)
 	}
-	if calls := homelab.Runtime.Calls(); slices.Contains(calls, "create") || slices.Contains(calls, "open") {
+	if calls := homelab.Runtime.Calls(); slices.Contains(calls, "create") {
 		t.Errorf("the runtime received a new factory before homelab was runnable: %v", calls)
-	}
-	homelab.Runtime.SetFactories(host.LocalFactory{Key: "/r/app:csv", ID: "csv", Repo: "/r/app"})
-	eventually(t, "homelab to publish its factory", func() bool { return homelab.API.Holds("/r/app", "csv") })
-	if err := homelab.Local.Request(context.Background(), "open", uuid.NewString(), host.OpenRequest{Name: "csv", Repo: "/r/app"}, nil); err != nil {
-		t.Errorf("opening an existing factory on homelab was refused: %v", err)
 	}
 }
 
@@ -720,20 +773,95 @@ func TestAJoinChallengeWorksOnceAndExpires(t *testing.T) {
 	}
 }
 
-func TestAttachingToAnotherNodesPaneRunsSSHOnlyForThePreparedView(t *testing.T) {
+func TestAttachingToAnotherNodesPaneStreamsOnlyThePreparedView(t *testing.T) {
 	tn := nodetest.New(t)
 	tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
 	remote := node.Remote(homelab.Name, tn.Client(tn.Machine("laptop")))
-	if _, err := node.AttachCommand(context.Background(), remote, homelab.Name, host.AttachRequest{}); err == nil {
-		t.Error("an attach the node refused still produced an ssh command")
+	to := node.StreamTarget{Machine: homelab.Name, User: "factory"}
+	if _, err := node.AttachCommand(context.Background(), remote, to, host.AttachRequest{}); err == nil {
+		t.Error("an attach the node refused still produced a stream command")
 	}
-	args, err := node.AttachCommand(context.Background(), remote, homelab.Name, host.AttachRequest{Key: "/r/app:csv", Role: "supervisor", Token: "%12"})
+	args, err := node.AttachCommand(context.Background(), remote, to, host.AttachRequest{Key: "/r/app:csv", Role: "supervisor", Token: "%12"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args[0] != "ssh" || !slices.Contains(args, homelab.Name) || args[len(args)-1] != "view-/r/app:csv-%12" {
-		t.Errorf("attach ran %v; want ssh to homelab opening the view the node prepared", args)
+	if !slices.Equal(args[1:3], []string{"host", "stream"}) || !slices.Contains(args, homelab.Name) || args[len(args)-1] != "view-/r/app:csv-%12" {
+		t.Errorf("attach ran %v; want a stream from homelab of the view the node prepared", args)
+	}
+}
+
+func TestNodesStreamEachOthersSessionsBothWaysAndNeverToABrowser(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		if os.Getenv("CI") == "" {
+			t.Skip("tmux not installed")
+		}
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", "")
+	tm := tmux.Client{Socket: "node-stream-" + uuid.NewString(), ConfigFile: "/dev/null"}
+	t.Cleanup(func() { tm.Run("kill-server") })
+	tn := nodetest.New(t)
+	macbook, homelab := tn.Machine("macbook"), tn.Machine("homelab")
+	macbook.Tmux, homelab.Tmux = &tm, &tm
+	macbook.Start()
+	homelab.Start()
+	for _, pair := range [][2]*nodetest.Machine{{macbook, homelab}, {homelab, macbook}} {
+		from, to := pair[0], pair[1]
+		view := uuid.NewString()
+		session := host.ViewSession(view)
+		if _, err := tm.NewSession(session, "agent", 80, 24, `exec sh -c 'while read line; do echo "got $line"; done'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tm.Run("set-option", "-t", session, "status", "off"); err != nil {
+			t.Fatal(err)
+		}
+		address := "https://" + to.Name + "/api/node/stream/" + view
+		if _, resp, err := websocket.Dial(context.Background(), address, &websocket.DialOptions{HTTPClient: tn.Client(from), HTTPHeader: http.Header{"Origin": {"https://" + to.Name}}}); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s opened %s's session for a page from its own origin", from.Short(), to.Short())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, err := node.DialStream(ctx, tn.Client(from), to.Name, view, node.Resize{Cols: 80, Rows: 24}, "xterm-256color")
+		if err != nil {
+			t.Fatalf("%s could not stream %s's session: %v", from.Short(), to.Short(), err)
+		}
+		var mu sync.Mutex
+		var screen strings.Builder
+		go func() {
+			for {
+				_, data, err := conn.Read(ctx)
+				if err != nil {
+					return
+				}
+				mu.Lock()
+				screen.Write(data)
+				mu.Unlock()
+			}
+		}()
+		if err := conn.Write(ctx, websocket.MessageBinary, []byte("ping from "+from.Short()+"\r")); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, "the answer to "+from.Short()+"'s typing", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return strings.Contains(screen.String(), "got ping from "+from.Short())
+		})
+		if err := wsjson.Write(ctx, conn, node.Resize{Cols: 100, Rows: 30}); err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, from.Short()+"'s resize reaching the pane", func() bool {
+			size, _ := tm.Display("="+session+":", "#{pane_width}x#{pane_height}")
+			return size == "100x30"
+		})
+		conn.Close(websocket.StatusNormalClosure, "")
+		eventually(t, "the attach client leaving "+to.Short()+"'s session", func() bool {
+			clients, err := tm.Clients("=" + session)
+			return err == nil && len(clients) == 0
+		})
+		if !tm.HasSession(session) {
+			t.Errorf("closing %s's stream ended the session on %s", from.Short(), to.Short())
+		}
 	}
 }
 
@@ -1143,6 +1271,8 @@ func TestTwoNodesWithoutADisplayEachRunOnlyTheirOwnQAAndRemoveItOnPauseAndAfterA
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DISPLAY", "")
 	t.Setenv("WAYLAND_DISPLAY", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusNoContent)
@@ -1710,6 +1840,7 @@ func newGitFixture(t *testing.T) gitFixture {
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	g := gitFixture{t: t, repo: filepath.Join(root, "app")}
 	g.run(root, "init", "-q", "--bare", bare)
 	g.run(root, "init", "-q", g.repo)

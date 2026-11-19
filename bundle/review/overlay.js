@@ -440,7 +440,8 @@ function start(config) {
 
   function renderTop() {
     if (!ui.top) return;
-    ui.top.innerHTML = `<a class="back" href="${escapeHTML(config.back)}" aria-label="Back to ${escapeHTML(config.label)} pages">‹</a>
+    const back = config.back ? `<a class="back" href="${escapeHTML(config.back)}" aria-label="Back to ${escapeHTML(config.label)} pages">‹</a>` : "";
+    ui.top.innerHTML = `${back}
       <span class="sect"><span class="dim">${escapeHTML(config.label)} / </span>${escapeHTML(config.file)}</span>
       ${state.status.gate ? `<span class="where"><span class="flag">⚑</span>gate open</span>` : ""}`;
   }

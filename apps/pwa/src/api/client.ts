@@ -196,10 +196,15 @@ export const api = {
     call<Roster>("POST", `/api/nodes/${encodeURIComponent(id)}/remove`, {
       operation: crypto.randomUUID(),
     }),
-  subscribe: (subscription: PushSubscriptionJSON, installation: string) =>
+  subscribe: (
+    subscription: PushSubscriptionJSON,
+    installation: string,
+    replaces?: string,
+  ) =>
     call<PushState>("POST", "/api/push/subscription", {
       ...subscription,
       installation,
+      ...(replaces ? { replaces } : {}),
     }),
   unsubscribe: (endpoint: string) =>
     call<PushState>("DELETE", "/api/push/subscription", { endpoint }),

@@ -13,7 +13,7 @@ type Status int
 const (
 	Running Status = iota
 	Starting
-	FailedToStart
+	retiredFailedToStart
 	NeedsYou
 	WaitingCI
 	WaitingAgent
@@ -31,7 +31,6 @@ var statusWords = map[Status]string{
 	AnswerQueued:        "answer queued",
 	Running:             "running",
 	Starting:            "starting",
-	FailedToStart:       "failed to start",
 	NeedsYou:            "needs you",
 	WaitingCI:           "on CI",
 	WaitingAgent:        "on agent",
@@ -46,13 +45,15 @@ func (s Status) String() string {
 	return statusWords[s]
 }
 
+const LegacyFailedToStart = "failed to start"
+
 func ParseStatus(word string) (Status, bool) {
 	for s, w := range statusWords {
 		if w == word {
 			return s, true
 		}
 	}
-	return Running, false
+	return NeedsYou, word == LegacyFailedToStart
 }
 
 func (s Status) Asleep() bool {
@@ -86,8 +87,10 @@ func StatusOf(f Factory, live Live, now time.Time, stalledAfter time.Duration) S
 		return Gone
 	case live.Pane.Shell && !launching(f, live, now):
 		return Exited
+	case Unreported(f, live, now):
+		return NeedsYou
 	case f.State == nil && live.Hook == nil:
-		return startingStatus(f, now)
+		return Starting
 	case needsYou(f, live), PermissionPrompt(live.Stage):
 		return NeedsYou
 	case stalled(f, live, now, stalledAfter):
@@ -104,11 +107,12 @@ func launching(f Factory, live Live, now time.Time) bool {
 	return f.State == nil && live.Hook == nil && now.Sub(f.CreatedAt()) < LaunchGrace
 }
 
-func startingStatus(f Factory, now time.Time) Status {
-	if now.Sub(f.CreatedAt()) > StartTimeout {
-		return FailedToStart
-	}
-	return Starting
+func Unreported(f Factory, live Live, now time.Time) bool {
+	return f.State == nil && live.Hook == nil && !now.Before(UnreportedSince(f))
+}
+
+func UnreportedSince(f Factory) time.Time {
+	return f.CreatedAt().Add(StartTimeout)
 }
 
 func needsYou(f Factory, live Live) bool {

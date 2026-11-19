@@ -272,7 +272,8 @@ func nodeItem(l *nodeLink, lf host.LocalFactory) Item {
 		Remote: &factory.Location{Name: l.short(), Node: l.member.ID, Incarnation: lf.Incarnation, Repo: lf.RepoName},
 	}
 	status, _ := factory.ParseStatus(lf.Status)
-	return Item{Factory: f, Status: status, Unblocked: status}
+	unreported := lf.Status == factory.LegacyFailedToStart || slices.ContainsFunc(lf.Items, func(li host.LocalItem) bool { return li.Kind == "silent" })
+	return Item{Factory: f, Status: status, Unblocked: status, Unreported: unreported}
 }
 
 func (m *Model) nodeOf(f factory.Factory) (*nodeLink, bool) {
@@ -457,8 +458,13 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 		return err
 	}
 	client := m.peer(l.member.Name)
-	create := host.CreateRequest{Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor}
-	m.notice = news("Creating " + r.Slug + " on " + short + ". It appears under ↔ " + short + " once it starts.")
+	create := host.CreateRequest{Slug: r.Slug, Prompt: r.Prompt, Pipeline: r.Pipeline, Stages: r.Stages, Agents: r.Agents, Supervisor: r.Supervisor, WatchComments: r.WatchComments}
+	creating := "Creating " + r.Slug + " on " + short + ". It appears under ↔ " + short + " once it starts."
+	if r.WatchComments && !l.snap.Supports(node.CanWatchComments) {
+		create.WatchComments = false
+		creating += fmt.Sprintf(" %s runs factory %s, which does not record comment watching, so %s leaves review comments to you.", short, l.snap.Version, r.Slug)
+	}
+	m.notice = news(creating)
 	m.later = append(m.later, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), createWait)
 		defer cancel()
@@ -527,13 +533,26 @@ func (m *Model) attachNodePane(it Item, lf host.LocalFactory, role, token string
 		return nil
 	}
 	l, _ := m.nodeOf(it.Factory)
-	client, name := m.peer(l.member.Name), l.member.Name
+	client := m.peer(l.member.Name)
+	to := node.StreamTarget{Machine: l.member.Name, User: node.LoginUser(l.snap), Label: it.Factory.Label()}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 		defer cancel()
-		words, err := node.AttachCommand(ctx, client, name, host.AttachRequest{Key: lf.Key, Role: role, Token: token})
+		words, err := node.AttachCommand(ctx, client, to, host.AttachRequest{Key: lf.Key, Role: role, Token: token})
 		return attachedMsg{key: key, role: role, token: token, words: words, err: err}
 	}
+}
+
+func (m *Model) streamNotice() notice {
+	it, ok := m.snap.Find(m.selected)
+	if !ok || it.Factory.Remote == nil {
+		return notice{}
+	}
+	l, ok := m.nodeOf(it.Factory)
+	if !ok || !l.snap.Supports(node.CanStream) {
+		return notice{}
+	}
+	return news("live from " + l.short() + " over the tailnet")
 }
 
 func (m *Model) nodeAttachProblem(it Item) string {
@@ -624,6 +643,10 @@ func presented(item panel.Item, status factory.Status) panel.Item {
 	switch item.Kind {
 	case "permission":
 		item.ID, item.Body, item.Action = "", host.PermissionBody, host.AnswerInSession
+	case "prompt":
+		item.ID, item.Action = "", host.AnswerItInSession
+	case "silent":
+		item.ID, item.Action = "", host.OpenSession
 	case "asleep":
 		item.Status, item.Action = status, host.WakeKey
 	}

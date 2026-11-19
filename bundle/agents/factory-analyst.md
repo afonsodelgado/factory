@@ -22,7 +22,7 @@ End every turn with:
 {"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"questions":[],"needs_design":false,"summary":"one sentence","data":{}}
 ```
 
-Ask once: “Should the factory watch review comments and address them?” Default off. Record the actual answer in requirements.md and return its reference; the supervisor records watch_comments.
+Ask only when the state's `comments_asked` is false, because the developer may have chosen at creation: “Should the factory watch review comments and address them?” Default off. Record the actual answer in requirements.md and return its reference; the supervisor records watch_comments.
 
 Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.
 

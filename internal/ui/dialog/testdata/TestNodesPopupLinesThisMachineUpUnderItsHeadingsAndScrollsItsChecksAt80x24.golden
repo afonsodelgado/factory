@@ -10,7 +10,7 @@
  [38;2;169;177;214mtravels, and this hub and your phone list them next to these.[m                          
                                                                                         
  [1;38;2;125;207;255ma[m[38;2;169;177;214m  add one from the machines on your tailnet[m                                           
- [38;2;86;95;137mor, on the other machine:  [m[38;2;192;202;245mfactory setup[m[38;2;86;95;137m  installs what it needs and joins macbook[m     
+ [38;2;86;95;137mor, on the other machine:  [m[38;2;192;202;245mfactory setup --tailscale[m[38;2;86;95;137m  installs what it needs and joins [m
                                                                                         
  [1;38;2;192;202;245mPhone app[m    [38;2;192;202;245mhttps://macbook.tail5e2c.ts.net[m   [38;2;86;95;137mlives on macbook[m                        
    [38;2;169;177;214mnotify[m     [38;2;158;206;106mon for 1 phone[m                                                            

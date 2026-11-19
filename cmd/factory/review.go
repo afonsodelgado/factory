@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/google/uuid"
@@ -143,8 +145,24 @@ func runReviewStack(args []string) int {
 		fmt.Fprintf(os.Stderr, "factory review: the review stack failed at %s: %s\n", s.Failure, s.Reason)
 		return 1
 	}
+	if link, ok := localReviewLink(reply.Stack.Href); ok {
+		fmt.Printf("The review stack runs at %s, on this machine only. This link opens it signed in, once, within 2 minutes; factory review stack prints a new one:\n  %s\nComments made on it come back here.\n", reply.Stack.URL, link)
+		return 0
+	}
 	fmt.Printf("The review stack runs at %s, for your tailnet only. The factory's Pages tab in the phone app opens it signed in; comments made on it come back here.\n", reply.Stack.URL)
 	return 0
+}
+
+func localReviewLink(path string) (string, bool) {
+	cfg, err := state.LoadConfig()
+	if err != nil || cfg.TailscaleNode() {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
+	defer cancel()
+	var link node.ReviewLink
+	err = node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodPost, "/api/review/links", node.ReviewLink{Path: path}, &link)
+	return link.URL, err == nil
 }
 
 const stackPoll = time.Second

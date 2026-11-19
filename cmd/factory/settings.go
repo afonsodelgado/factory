@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -68,6 +70,13 @@ func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) nod
 		}
 	}
 	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write, Cloned: clonedHere(cfg), Authored: reload}
+}
+
+func withGitHint(err error) error {
+	if hint := install.GitHint(err.Error()); hint != "" {
+		return fmt.Errorf("%w\nfix  %s", err, hint)
+	}
+	return err
 }
 
 func clonedHere(cfg *state.Config) func(string) bool {

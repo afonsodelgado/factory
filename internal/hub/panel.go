@@ -1,9 +1,12 @@
 package hub
 
 import (
+	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -375,6 +378,7 @@ func (m *Model) panelView() panel.View {
 	}
 	f := it.Factory
 	v.Label = f.Placed()
+	v.LocalPages = f.Remote == nil && m.Config.NodeOrigin() == ""
 	if f.State != nil && f.State.Loops.Active != "" {
 		v.Label += " · " + loopStage(f)
 	}
@@ -518,12 +522,16 @@ func (m *Model) panelKey(key, text string) tea.Cmd {
 		return m.listKey(key)
 	}
 	switch {
-	case hasItem && item.Kind == "permission" && key == "enter":
+	case hasItem && opensTheSession(item) && key == "enter":
 		m.focusSession()
 	case !hasItem && key == "enter":
 		m.nextNeedingYou()
 	}
 	return nil
+}
+
+func opensTheSession(item panel.Item) bool {
+	return item.Kind == "permission" || item.Kind == "prompt" || item.Kind == "silent"
 }
 
 func (m *Model) moveItem(delta int) {
@@ -636,7 +644,7 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 	case "ctrl+k":
 		m.deliver("handled")
 	case "ctrl+o":
-		return m.openCmd(m.reviewURL(itemURL(item, d))), true
+		return m.openReview(itemURL(item, d), itemTitle(item, d)), true
 	case "ctrl+d":
 		m.discardDraft()
 	case "ctrl+u":
@@ -772,6 +780,13 @@ func moveInQuestions(item panel.Item, d *panel.Draft, key string) {
 	}
 }
 
+func itemTitle(item panel.Item, d *panel.Draft) string {
+	if d.Artifact < len(item.Artifacts) {
+		return item.Artifacts[d.Artifact].Title
+	}
+	return ""
+}
+
 func itemURL(item panel.Item, d *panel.Draft) string {
 	if d.Artifact < len(item.Artifacts) {
 		return item.Artifacts[d.Artifact].URL
@@ -837,21 +852,44 @@ func (m *Model) openRow(v panel.View) tea.Cmd {
 	case m.panel.tab == panel.PRs && m.panel.row < len(v.PRs):
 		return m.openCmd(v.PRs[m.panel.row].URL)
 	case m.panel.tab == panel.Artifacts && m.panel.row < len(v.Artifacts):
-		return m.openCmd(m.reviewURL(v.Artifacts[m.panel.row].URL))
+		return m.openReview(v.Artifacts[m.panel.row].URL, v.Artifacts[m.panel.row].Title)
 	}
 	return nil
 }
 
-func (m *Model) reviewURL(url string) string {
+const doorWait = 5 * time.Second
+
+func (m *Model) openReview(url, title string) tea.Cmd {
 	it, ok := m.selectedItem()
+	if !ok || it.Factory.Remote != nil {
+		return m.openCmd(url)
+	}
+	page, served := review.MobilePath(host.ReviewFactory(it), url)
 	origin := m.Config.NodeOrigin()
-	if !ok || it.Factory.Remote != nil || origin == "" {
-		return url
+	switch {
+	case !served:
+		return m.openCmd(url)
+	case origin != "":
+		return m.openCmd(origin + page)
 	}
-	if page, served := review.MobilePath(host.ReviewFactory(it), url); served {
-		return origin + page
+	return m.openThroughDoor(page, cmp.Or(title, path.Base(page)))
+}
+
+func (m *Model) openThroughDoor(page, title string) tea.Cmd {
+	if m.ReviewLink == nil || m.Open == nil {
+		return nil
 	}
-	return url
+	link, open := m.ReviewLink, m.Open
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), doorWait)
+		defer cancel()
+		url, err := link(ctx, page)
+		if err != nil {
+			return noticeMsg(problem("The page did not open: " + withFullStop(err.Error())))
+		}
+		open(url)
+		return noticeMsg(news("Opened " + title + " in your browser. The link works once."))
+	}
 }
 
 func (m *Model) openCmd(url string) tea.Cmd {

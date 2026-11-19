@@ -231,22 +231,25 @@ const (
 )
 
 type nodeSetup struct {
-	cfg       *state.Config
-	tailscale node.Tailscale
-	service   node.Service
-	app       func() error
-	wait      time.Duration
-	out       io.Writer
-	in        io.Reader
-	tty       bool
-	join      joinChoice
+	cfg           *state.Config
+	withTailscale bool
+	tailscale     node.Tailscale
+	service       node.Service
+	app           func() error
+	wait          time.Duration
+	out           io.Writer
+	in            io.Reader
+	tty           bool
+	join          joinChoice
+	yes           bool
+	system        string
 }
 
 func newNodeSetup(cfg *state.Config, out io.Writer) nodeSetup {
 	home, _ := os.UserHomeDir()
 	return nodeSetup{
-		cfg: cfg, tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
-		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out,
+		cfg: cfg, withTailscale: cfg.TailscaleNode(), tailscale: node.Tailscale{Run: node.System}, service: node.NewService(cfg, binaryPath(), home, node.System),
+		app: func() error { _, err := phone.App(bundle.Files); return err }, wait: healthWait, out: out, system: runtime.GOOS,
 	}
 }
 
@@ -285,6 +288,9 @@ func runNodeSetup(args []string) int {
 	switch args[0] {
 	case "install":
 		err = s.install(ctx)
+		if err == nil && !s.withTailscale {
+			printOnItsOwn(s.out, cfg.NodeName())
+		}
 	case "uninstall":
 		err = s.uninstall(ctx)
 	case "status":
@@ -300,7 +306,35 @@ func runNodeSetup(args []string) int {
 	return 0
 }
 
+func printOnItsOwn(out io.Writer, name string) {
+	fmt.Fprintf(out, "\n%s runs factories on its own. Open the hub with factory.\n%s connects your phone and your other machines.\n", name, node.AddTailscale)
+}
+
 func (s nodeSetup) install(ctx context.Context) error {
+	if !s.withTailscale {
+		return s.installService(ctx)
+	}
+	return s.installTailnet(ctx)
+}
+
+func (s nodeSetup) installService(ctx context.Context) error {
+	record, err := node.LoadInstall(s.cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(s.out, "factory node install · %s\n\n", s.cfg.NodeName())
+	record.Binary = s.service.Binary
+	if err := node.SaveInstall(s.cfg.StateDir, record); err != nil {
+		return err
+	}
+	if err := s.startService(ctx); err != nil {
+		return err
+	}
+	record.Complete = true
+	return node.SaveInstall(s.cfg.StateDir, record)
+}
+
+func (s nodeSetup) installTailnet(ctx context.Context) error {
 	record, err := node.LoadInstall(s.cfg.StateDir)
 	if err != nil {
 		return err
@@ -386,7 +420,46 @@ func (s nodeSetup) offerJoin(ctx context.Context, c *node.Client, here string) (
 	s.passed("joined", fmt.Sprintf("%s lists %s, and %s lists %s", target.Short, here, here, target.Short))
 	printPush(s.out, result.Push, target.Short, here)
 	s.passed("phone app", "trusts "+result.Roster.Home+", where your phone app lives")
+	if s.system == "linux" {
+		return true, true, s.offerHome(ctx, c, result.Roster, here)
+	}
 	return true, true, nil
+}
+
+func (s nodeSetup) offerHome(ctx context.Context, c *node.Client, roster node.Roster, here string) error {
+	i := slices.IndexFunc(roster.Members, func(m node.RosterMember) bool { return m.Self })
+	if i < 0 {
+		return nil
+	}
+	self := roster.Members[i]
+	origin, home := "https://"+self.Name, shortName(strings.TrimPrefix(roster.Home, "https://"))
+	if roster.Home == origin {
+		return nil
+	}
+	fmt.Fprintf(s.out, "\nDoes %s stay on all the time? Only then make it the phone app's home. The app then\ninstalls, opens and adds nodes while %s sleeps. Each phone opens\n%s once, adds it to the Home Screen again and turns\nnotifications on again; until then, %s's address sends it there. [y/N] ", here, home, origin, home)
+	if !s.confirmsHome() {
+		fmt.Fprintf(s.out, "  The phone app stays on %s. To move it later: press N in the hub, pick %s,\n  then h.\n", home, here)
+		return nil
+	}
+	if err := c.Do(ctx, http.MethodPost, "/api/nodes/home", node.HomeRequest{Operation: uuid.NewString(), Node: self.ID}, nil); err != nil {
+		return fmt.Errorf("the phone app stays on %s: %w", home, err)
+	}
+	s.passed("phone app", fmt.Sprintf("lives on %s now; %s and every other node know", here, home))
+	return nil
+}
+
+func (s nodeSetup) confirmsHome() bool {
+	switch {
+	case s.yes:
+		fmt.Fprintln(s.out, "n (--yes)")
+		return false
+	case !s.tty:
+		fmt.Fprintln(s.out, "n (no terminal)")
+		return false
+	}
+	line, _ := bufio.NewReader(s.in).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 func printPush(out io.Writer, push node.PushOutcome, from, to string) {
@@ -500,7 +573,11 @@ func (s nodeSetup) startService(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.passed("service", s.service.Loaded(persists))
+	reach := "; answers this machine only"
+	if s.withTailscale {
+		reach = ""
+	}
+	s.passed("service", s.service.Loaded(persists)+reach)
 	if !persists {
 		install.WriteCheck(s.out, install.Check{Name: "at boot", Mark: install.Warn, Detail: detail, Fix: fix})
 	}
@@ -579,7 +656,7 @@ func (s nodeSetup) welcome(self node.Self, firstInstall, foundNodes bool) error 
 	url := "https://" + self.DNSName
 	fmt.Fprintf(s.out, "\n%s is a factory node. It keeps running with the hub closed.\n\n", self.Short())
 	if !foundNodes {
-		fmt.Fprintf(s.out, "No other factory nodes on your tailnet yet. To add another machine, run this there:\n  %s\nIt sets that machine up and joins %s.\n\n", installLine, self.Short())
+		fmt.Fprintf(s.out, "No other factory nodes on your tailnet yet. To add another machine, run this there:\n  %s\n  %s\nIt sets that machine up and joins %s.\n\n", installLine, node.AddTailscale, self.Short())
 	}
 	fmt.Fprintf(s.out, "Next\n  hub      factory\n  phone    open %s with Tailscale on, then add it to\n           the Home Screen. Tailscale already says it's you: no code, no pairing.\n", url)
 	if !firstInstall {
@@ -657,6 +734,9 @@ func (s nodeSetup) status(ctx context.Context) {
 		}
 	}
 	tailnet, url := "unknown until factory node install or factory node run learns it", "unknown"
+	if !s.cfg.TailscaleNode() {
+		tailnet, url = "none: "+node.AddTailscale+" adds it", "none: this machine only"
+	}
 	if host := s.cfg.NodeHostname(); host != "" {
 		_, tailnet, _ = strings.Cut(host, ".")
 		url = "https://" + host

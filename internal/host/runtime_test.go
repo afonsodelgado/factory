@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -46,6 +47,7 @@ func newFixture(t *testing.T) fixture {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("FACTORY_CONFIG_DIR", filepath.Join(root, "config"))
 	t.Setenv("FACTORY_STATE_DIR", filepath.Join(root, "state"))
 	t.Setenv("FACTORY_TMUX_SOCKET", "host-test-"+uuid.NewString())
@@ -641,6 +643,51 @@ func TestAPermissionAnswerTypesOnlyIntoTheUnchangedPromptItWasPickedFrom(t *test
 	if _, err := r.Act(pick(item, "3", "use the staging data")); err != nil || strings.Join(typist.typed, ",") != "%5: use the staging data" {
 		t.Fatalf("the refusal typed %q; want the instruction once Claude shows its prompt", typist.typed)
 	}
+
+	clock := phoneNow
+	promptOn := func(screen, after string) (*Runtime, *fakeConsole, func() []LocalItem) {
+		unhooked := phoneSnapshot("Stop")
+		unhooked.Items[0].Hook = nil
+		r := phoneRuntime(t.TempDir(), &paneTypist{}, unhooked)
+		console := &fakeConsole{screens: map[string]string{"%1": screen}, after: map[string]string{"%1": after}}
+		r.Console, r.Now = console, func() time.Time { return clock }
+		return r, console, func() []LocalItem {
+			r.ReadScreens()
+			return slices.DeleteFunc(r.Local().Factories[0].Items, func(li LocalItem) bool { return li.Kind != "prompt" })
+		}
+	}
+	choose := func(item LocalItem, option string) ActionRequest {
+		return ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActPrompt, Item: item.ID, Since: item.Since, Option: option, Fingerprint: item.Menu.Fingerprint}
+	}
+
+	mcp := fixtureScreen(t, "mcp.txt")
+	r, console, prompts := promptOn(mcp, "")
+	first := prompts()
+	clock = clock.Add(6 * time.Second)
+	again := prompts()
+	if len(first) != 1 || len(again) != 1 || first[0].Key != again[0].Key || first[0].Menu == nil || len(first[0].Menu.Choices) != 3 {
+		t.Fatalf("a pane with no hooks showing a menu gave %+v, then %+v; want one prompt item with three choices and the same key on every tick, or the phone is notified again", first, again)
+	}
+	r.readings, r.promptsSeen = nil, nil
+	clock = clock.Add(time.Minute)
+	if restarted := prompts(); len(restarted) != 1 || restarted[0].Key != first[0].Key || !restarted[0].Since.Equal(first[0].Since) {
+		t.Fatalf("after a node restart the unchanged menu became %+v; want the same key and wait time, or every update notifies the phone again", restarted)
+	}
+	console.screens["%1"] = strings.Replace(mcp, "playwright", "filesystem", 1)
+	if receipt, _ := r.Act(choose(first[0], "2")); receipt.Status != StatusStale || len(console.pressed) != 0 {
+		t.Fatalf("a menu that changed after it was loaded got %+v and presses %v; want nothing typed", receipt, console.pressed)
+	}
+	console.screens["%1"] = mcp
+	if receipt, err := r.Act(choose(first[0], "2")); err != nil || receipt.Status == StatusStale || strings.Join(console.pressed, ",") != "%1: 2" {
+		t.Fatalf("choosing 2 on the unchanged menu pressed %v with %+v, %v; want only 2 typed into the supervisor's pane", console.pressed, receipt, err)
+	}
+
+	codex := fixtureScreen(t, "codex-update.txt")
+	cursorOnSkip := strings.Replace(strings.Replace(codex, "› 1.", "  1.", 1), "  2. Skip\n", "› 2. Skip\n", 1)
+	r, console, prompts = promptOn(codex, cursorOnSkip)
+	if _, err := r.Act(choose(prompts()[0], "2")); err != nil || strings.Join(console.pressed, ",") != "%1: 2,%1: Enter" {
+		t.Fatalf("a menu whose digit only moves the cursor got presses %v, %v; want 2 then Enter, or the choice is never made", console.pressed, err)
+	}
 }
 
 func TestPauseMarksTheFactoryOnlyWhenThePauseWorked(t *testing.T) {
@@ -857,6 +904,7 @@ func TestAMovedFactoryStartsAFreshSupervisorAndItsOldHolderRefusesStaleOrUncheck
 
 func TestANewFactoryTellsItsSupervisorEveryStageAndRoleAsTheAppResolvedThem(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	repo := t.TempDir()
 	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}, Agents: map[string]state.AgentSetting{
 		"reviewer": {Model: "sonnet"},
@@ -873,6 +921,52 @@ func TestANewFactoryTellsItsSupervisorEveryStageAndRoleAsTheAppResolvedThem(t *t
 		if !strings.Contains(launched, flag) {
 			t.Errorf("the supervisor was started with %q; want %s, so it never has to resolve the config itself", launched, flag)
 		}
+	}
+}
+
+func TestCreatingAFactoryTrustsItsRepoAndWorktreeAndNoOtherFolder(t *testing.T) {
+	claudeDir, codexHome := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+	claudeFile, codexFile := filepath.Join(claudeDir, ".claude.json"), filepath.Join(codexHome, "config.toml")
+	os.WriteFile(claudeFile, []byte(`{"oauthAccount":{"emailAddress":"alice@example.com"}}`), 0o600)
+	os.WriteFile(codexFile, []byte(`model = "gpt-6-astra"`), 0o600)
+	repo := t.TempDir()
+	worktree := filepath.Join(factory.WorktreesDir(repo), "csv")
+	cfg := &state.Config{StateDir: t.TempDir(), Repos: []string{repo}}
+	registry, _ := state.LoadRegistry(cfg.RegistryPath())
+	r := New(Runtime{Config: cfg, Loader: &Loader{Config: cfg, Registry: registry, Now: time.Now}, Engine: &wakingEngine{}, Now: time.Now})
+	if _, err := r.Create(CreateRequest{Repo: repo, Slug: "csv", Prompt: "Export contacts."}); err != nil {
+		t.Fatal(err)
+	}
+
+	var claude struct {
+		OAuthAccount map[string]string `json:"oauthAccount"`
+		Projects     map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	data, _ := os.ReadFile(claudeFile)
+	if err := json.Unmarshal(data, &claude); err != nil || claude.OAuthAccount["emailAddress"] == "" {
+		t.Fatalf("Claude's config lost its unrelated keys (%v):\n%s", err, data)
+	}
+	managed := map[string]bool{repo: true, worktree: true, resolved(repo): true, filepath.Join(resolved(repo), ".claude", "worktrees", "csv"): true}
+	for _, dir := range []string{resolved(repo), filepath.Join(resolved(repo), ".claude", "worktrees", "csv")} {
+		if !claude.Projects[dir].HasTrustDialogAccepted {
+			t.Errorf("Claude Code would ask whether to trust %s:\n%s", dir, data)
+		}
+	}
+	for dir := range claude.Projects {
+		if !managed[dir] {
+			t.Errorf("Claude Code now trusts %s, which factory does not manage", dir)
+		}
+	}
+	codex, _ := os.ReadFile(codexFile)
+	if !strings.Contains(string(codex), `model = "gpt-6-astra"`) || !catalog.CodexTrusts(codexHome, repo) || !catalog.CodexTrusts(codexHome, worktree) {
+		t.Errorf("Codex's config should keep its model and trust the repo and worktree:\n%s", codex)
+	}
+	if strings.Count(string(codex), "[projects.") > len(managed) {
+		t.Errorf("Codex now trusts a folder factory does not manage:\n%s", codex)
 	}
 }
 

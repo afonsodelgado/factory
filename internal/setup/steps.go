@@ -1,17 +1,20 @@
 package setup
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/state"
 )
 
 const (
@@ -27,8 +30,18 @@ curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo 
 sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null`
 
-func Machine() []Step {
-	steps := []Step{packages(), tailscaleApp(), tailscaleOperator(), linger(), tailscaleLogin(), tailnetHTTPS(), sshKey(), githubLogin(), githubKey(), gitIdentity(), commitSigning(), claudeCode(), claudeLogin(), ghStack(), revmux()}
+func WantsTailscale(adding bool, m state.Machine) bool { return adding || m.TailscaleNode() }
+
+func Machine(withTailscale bool) []Step {
+	steps := []Step{packages()}
+	if withTailscale {
+		steps = append(steps, tailscaleApp(), tailscaleOperator())
+	}
+	steps = append(steps, linger())
+	if withTailscale {
+		steps = append(steps, tailscaleLogin(), tailnetHTTPS())
+	}
+	steps = append(steps, sshKey(), githubLogin(), githubKey(), gitIdentity(), commitSigning(), claudeCode(), claudeLogin(), ghStack(), revmux())
 	for _, p := range install.Plugins {
 		steps = append(steps, plugin(p))
 	}
@@ -131,7 +144,9 @@ func tailscaleApp() Step {
 		},
 		Apply: func(ctx context.Context, s *Session) error {
 			if !onLinux(s) {
-				return errors.New("install the Tailscale app from https://tailscale.com/download, open it and log in, then run factory setup again")
+				fmt.Fprintln(s.Out, "Install the Tailscale app from https://tailscale.com/download and open it.")
+				s.confirm("Press Enter once it is installed. ", true)
+				return nil
 			}
 			return s.shell(ctx, tailscaleInstall)
 		},
@@ -235,18 +250,46 @@ func tailnetHTTPS() Step {
 	}
 }
 
+const (
+	keyName           = "~/.ssh/id_ed25519"
+	passphraseRemoval = `ssh-keygen -p -f ~/.ssh/id_ed25519 -N ""`
+)
+
+type Manual struct{ Reason, Command string }
+
+func (m Manual) Error() string { return m.Reason + "\n  " + m.Command }
+
 func (s *Session) keyPath() string { return filepath.Join(s.Home, ".ssh", "id_ed25519") }
+
+func (s *Session) hasKey() bool {
+	_, err := os.Stat(s.keyPath())
+	return err == nil
+}
+
+func hasPassphrase(ctx context.Context, s *Session) bool {
+	_, err := s.Run(ctx, "ssh-keygen", "-y", "-P", "", "-f", s.keyPath())
+	return err != nil
+}
 
 func sshKey() Step {
 	return Step{
 		Name: "ssh key",
 		Needed: func(ctx context.Context, s *Session) string {
-			if _, err := os.Stat(s.keyPath()); err == nil || sshAuthenticated(ctx, s) {
+			if s.hasKey() {
+				if hasPassphrase(ctx, s) {
+					return keyName + " has a passphrase, so the node cannot use it"
+				}
+				return ""
+			}
+			if authenticated, _ := sshAuthenticated(ctx, s); authenticated {
 				return ""
 			}
 			return "creates the SSH key this machine's node clones and pushes with"
 		},
 		Apply: func(ctx context.Context, s *Session) error {
+			if s.hasKey() {
+				return removePassphrase(ctx, s)
+			}
 			if err := os.MkdirAll(filepath.Dir(s.keyPath()), 0o700); err != nil {
 				return err
 			}
@@ -254,6 +297,18 @@ func sshKey() Step {
 			return err
 		},
 	}
+}
+
+func removePassphrase(ctx context.Context, s *Session) error {
+	_, answer := sshAuthenticated(ctx, s, "-o", "StrictHostKeyChecking=accept-new")
+	fmt.Fprintf(s.Out, "%s has a passphrase. The node clones and pushes with nobody at the\nkeyboard, so ssh can never ask for it. ssh answered: %s\n", keyName, answer)
+	if s.Yes {
+		return Manual{Reason: "--yes never types a passphrase. Remove it with", Command: passphraseRemoval}
+	}
+	if !s.confirm("\nRemove the passphrase now? ssh-keygen asks for it once. The key stays the same key,\nso GitHub needs no change. It runs:\n  "+passphraseRemoval+"\n[Y/n] ", true) {
+		return nil
+	}
+	return s.Interact(ctx, "ssh-keygen", "-p", "-f", s.keyPath(), "-N", "")
 }
 
 func githubLogin() Step {
@@ -284,21 +339,29 @@ func publicKey(s *Session) string {
 	return fields[0] + " " + fields[1]
 }
 
-func sshAuthenticated(ctx context.Context, s *Session, options ...string) bool {
+func sshAuthenticated(ctx context.Context, s *Session, options ...string) (bool, string) {
 	args := append(append([]string{"-o", "BatchMode=yes"}, options...), "-T", "git@github.com")
 	out, err := s.Run(ctx, "ssh", args...)
-	said := string(out)
-	if err != nil {
-		said += err.Error()
+	answer := strings.TrimSpace(string(out) + "\n" + stderrOf(err))
+	return strings.Contains(answer, "successfully authenticated"), answer
+}
+
+func stderrOf(err error) string {
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit):
+		return string(exit.Stderr)
+	case err != nil:
+		return err.Error()
 	}
-	return strings.Contains(said, "successfully authenticated")
+	return ""
 }
 
 func githubKey() Step {
 	return Step{
 		Name: "github ssh",
 		Needed: func(ctx context.Context, s *Session) string {
-			if sshAuthenticated(ctx, s) {
+			if authenticated, _ := sshAuthenticated(ctx, s); authenticated {
 				return ""
 			}
 			return "adds this machine's SSH key to your GitHub account"
@@ -309,11 +372,14 @@ func githubKey() Step {
 				if err := s.addKey(ctx, "authentication", "admin:public_key"); err != nil {
 					return err
 				}
+				install.WriteCheck(s.Out, install.Check{Name: "key", Mark: install.Pass, Detail: "added to GitHub as factory " + s.Host})
 			}
-			if !sshAuthenticated(ctx, s, "-o", "StrictHostKeyChecking=accept-new") {
-				fmt.Fprintln(s.Out, "If your organisation uses SSO, open github.com/settings/keys and authorise this key with Configure SSO.")
+			authenticated, answer := sshAuthenticated(ctx, s, "-o", "StrictHostKeyChecking=accept-new")
+			if authenticated {
+				return nil
 			}
-			return nil
+			install.WriteCheck(s.Out, install.Check{Name: "github ssh", Mark: install.Fail, Detail: "GitHub still refuses this machine's key. ssh answered:", Lines: strings.Split(answer, "\n"), Fix: cmp.Or(install.GitHint(answer), "ssh -v -T git@github.com  shows which keys ssh offered")})
+			return errors.New("GitHub refuses " + keyName)
 		},
 	}
 }

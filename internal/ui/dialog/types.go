@@ -70,17 +70,20 @@ type ToolOption struct {
 }
 
 type NewResult struct {
-	Settings   *SettingsContext              `json:"settings,omitempty"`
-	Repo       string                        `json:"repo"`
-	Slug       string                        `json:"slug,omitempty"`
-	Prompt     string                        `json:"prompt,omitempty"`
-	Pipeline   string                        `json:"pipeline,omitempty"`
-	Stages     []string                      `json:"stages,omitempty"`
-	Agents     map[string]state.AgentSetting `json:"agents,omitempty"`
-	Supervisor state.AgentSetting            `json:"supervisor,omitzero"`
-	Select     string                        `json:"select,omitempty"`
-	Wake       bool                          `json:"wake,omitempty"`
-	Node       string                        `json:"node,omitempty"`
+	Settings    *SettingsContext              `json:"settings,omitempty"`
+	Repo        string                        `json:"repo"`
+	Slug        string                        `json:"slug,omitempty"`
+	Prompt      string                        `json:"prompt,omitempty"`
+	Pipeline    string                        `json:"pipeline,omitempty"`
+	Stages      []string                      `json:"stages,omitempty"`
+	Agents      map[string]state.AgentSetting `json:"agents,omitempty"`
+	Supervisor  state.AgentSetting            `json:"supervisor,omitzero"`
+	Select      string                        `json:"select,omitempty"`
+	Wake        bool                          `json:"wake,omitempty"`
+	Node        string                        `json:"node,omitempty"`
+	StartAnyway bool                          `json:"start_anyway,omitempty"`
+
+	WatchComments bool `json:"watch_comments,omitempty"`
 }
 
 type SettingsContext struct {

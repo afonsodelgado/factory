@@ -235,6 +235,8 @@ func git(t *testing.T, dir string, args ...string) {
 func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	repo := filepath.Join(home, "dev", "svc")
 	subdir := filepath.Join(repo, "internal", "api")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
@@ -294,6 +296,8 @@ func TestInitWritesOnceFromAnywhereInTheRepoAndTheHubListsIt(t *testing.T) {
 
 func TestInitCarriesARepoConfigFromBeforeTheFactoryDirectory(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	repo := t.TempDir()
 	git(t, repo, "init", "-q")
 	os.MkdirAll(filepath.Dir(state.LegacyProfilePath(repo)), 0o755)

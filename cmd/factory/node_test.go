@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
+	"github.com/afonsodelgado/factory/internal/node/nodetest"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -68,6 +70,7 @@ func newStandIn(t *testing.T) standIn {
 		"FACTORY_CONFIG_DIR="+filepath.Join(client, "config"),
 		"FACTORY_STATE_DIR="+filepath.Join(client, "state"),
 		"CLAUDE_CONFIG_DIR="+filepath.Join(client, "claude"),
+		"CODEX_HOME="+filepath.Join(client, "codex"),
 		"FACTORY_TMUX_SOCKET=frc-client-unused",
 		"TMUX=",
 	)
@@ -84,7 +87,7 @@ func newStandIn(t *testing.T) standIn {
 
 func (s standIn) onServer() []string {
 	return []string{"HOME=" + filepath.Join(s.server, "home"), "FACTORY_CONFIG_DIR=" + filepath.Join(s.server, "config"), "FACTORY_STATE_DIR=" + filepath.Join(s.server, "state"),
-		"CLAUDE_CONFIG_DIR=" + filepath.Join(s.server, "claude"), "FACTORY_TMUX_SOCKET=" + s.tmux}
+		"CLAUDE_CONFIG_DIR=" + filepath.Join(s.server, "claude"), "CODEX_HOME=" + filepath.Join(s.server, "codex"), "FACTORY_TMUX_SOCKET=" + s.tmux}
 }
 
 func (s standIn) serverNode(t *testing.T) {
@@ -140,7 +143,7 @@ func (s standIn) startFactory(t *testing.T, runtime *node.Client, id string) str
 	if err := runtime.Request(ctx, "repo", "", host.RepoRequest{Repo: repo}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Request(ctx, "open", uuid.NewString(), host.OpenRequest{Name: id, Repo: repo, Prompt: "Export contacts."}, nil); err != nil {
+	if err := runtime.Request(ctx, "create", uuid.NewString(), host.CreateRequest{Slug: id, Repo: repo, Prompt: "Export contacts."}, nil); err != nil {
 		t.Fatalf("creating %s: %v", id, err)
 	}
 	return repo
@@ -230,6 +233,38 @@ func TestClosingTheHubLeavesTheNodeRunningStages(t *testing.T) {
 	waitFor(t, "the engineer's stage window", func() bool { return strings.Contains(windows(), host.StageParkName("csv", "engineer")) })
 }
 
+func TestStreamingFromANodeWithoutTheRouteExplainsSSHBeforeRunningIt(t *testing.T) {
+	tn := nodetest.New(t)
+	laptop := tn.Machine("laptop")
+	homebox := tn.Machine("homebox").Start()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\necho \"ssh ran: $*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	view := uuid.NewString()
+	var pane strings.Builder
+	to := node.StreamTarget{Machine: homebox.Name, User: "factory", Label: "csv-export"}
+	err := streamView(context.Background(), tn.Client(laptop), to, view, &pane, func(words []string) error {
+		ssh := exec.Command(words[0], words[1:]...)
+		ssh.Stdout = &pane
+		return ssh.Run()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "ssh -t -o ClearAllForwardings=yes factory@" + homebox.Name + " factory host attach " + view
+	said, ran, found := strings.Cut(pane.String(), "ssh ran: ")
+	if !found || strings.TrimSpace(ran) != strings.TrimPrefix(command, "ssh ") {
+		t.Fatalf("the pane showed:\n%s\nwant ssh to run %q after the explanation", pane.String(), command)
+	}
+	for _, want := range []string{"homebox runs factory " + nodetest.Version + ", which cannot stream sessions to this hub", command, "it is the password of factory on homebox"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("before ssh ran, the pane said:\n%s\nwant it to say %q", said, want)
+		}
+	}
+}
+
 func TestAttachingFromAnotherNodeShowsThePreparedPaneAndClosingItLeavesTheAgentRunning(t *testing.T) {
 	s := newStandIn(t)
 	s.serverTmux(t, "set-option", "-g", "base-index", "1")
@@ -248,10 +283,10 @@ func TestAttachingFromAnotherNodeShowsThePreparedPaneAndClosingItLeavesTheAgentR
 	pane := s.serverTmux(t, "display-message", "-p", "-t", "=factory:"+host.ParkName("csv"), "#{pane_id}")
 
 	ctx := context.Background()
-	if _, err := node.AttachCommand(ctx, runtime, "homelab", host.AttachRequest{Key: csv.Key, Token: "%999"}); err == nil {
+	if _, err := node.AttachCommand(ctx, runtime, node.StreamTarget{Machine: "homelab"}, host.AttachRequest{Key: csv.Key, Token: "%999"}); err == nil {
 		t.Fatal("the node prepared a view for a pane token it does not have")
 	}
-	words, err := node.AttachCommand(ctx, runtime, "homelab", host.AttachRequest{Key: csv.Key, Token: csv.Pane})
+	words, err := node.AttachCommand(ctx, runtime, node.StreamTarget{Machine: "homelab"}, host.AttachRequest{Key: csv.Key, Token: csv.Pane})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,6 +354,24 @@ func TestTheNodeStartsFactorysTmuxServerWithItsOwnConfig(t *testing.T) {
 		out, err := exec.Command("tmux", "-L", socket, "show-options", "-gv", option).Output()
 		if got := strings.TrimSpace(string(out)); err != nil || got != want {
 			t.Errorf("factory's tmux server has %s %q (%v); want %q from factory's own tmux.conf", option, got, err, want)
+		}
+	}
+}
+
+func TestAskingAnotherNodeWhatReposNeedNeverSendsAnOriginWithCredentials(t *testing.T) {
+	withToken, plain := t.TempDir(), t.TempDir()
+	for repo, origin := range map[string]string{withToken: "https://alice:ghp_secret@github.com/alice/private.git", plain: "git@github.com:alice/cowork.git"} {
+		for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "remote", "add", "origin", origin}} {
+			if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+	}
+	asked, _ := json.Marshal(repoNeeds([]string{withToken, plain}))
+	served, _ := json.Marshal(originsOf([]string{withToken, plain}))
+	for what, sent := range map[string][]byte{"the needs request to another node": asked, "the repos this node lists to others": served} {
+		if strings.Contains(string(sent), "ghp_secret") || !strings.Contains(string(sent), "alice/cowork.git") {
+			t.Errorf("%s holds %s; want only the origin without credentials", what, sent)
 		}
 	}
 }

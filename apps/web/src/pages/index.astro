@@ -296,7 +296,7 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
         <div
           class="win full"
           role="img"
-          aria-label="A shell in ~/dev/shop: factory open csv-export creates the factory csv-export, with its prompt, worktree, branch, supervisor session and the full ten-stage pipeline."
+          aria-label="A shell in ~/dev/shop: factory opens the hub, and n there creates the factory csv-export, with its prompt, worktree, branch, supervisor session and the full ten-stage pipeline."
         >
           <div class="bar">
             <span class="lights" aria-hidden="true">
@@ -309,7 +309,8 @@ const otherBuilds = PLATFORMS.filter((p) => p.id !== DEFAULT_PLATFORM)
           </div>
           <pre
             class="shell tree"
-            set:html={`<span class="pr">❯ </span>factory open csv-export Export contacts as CSV for ops.
+            set:html={`<span class="pr">❯ </span>factory
+<span class="t-dim">hub</span> <span class="t-key">n</span>  csv-export  Export contacts as CSV for ops.
 
 <span class="t-id">csv-export</span>
 <span class="t-dim">├──</span> <span class="t-key">prompt  </span>  Export contacts as CSV for ops.

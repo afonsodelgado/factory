@@ -63,7 +63,7 @@ func TestStatusOf(t *testing.T) {
 		{"no pane", Factory{State: v2("agent")}, Live{Pane: Pane{}, Hook: nil}, Gone},
 		{"done", Factory{State: &state.State{SchemaVersion: 2, Stages: map[string]state.Stage{"handoff": {Status: "done"}}}}, Live{Pane: Pane{}, Hook: nil}, Done},
 		{"created a minute ago", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{Pane: alive, Hook: nil}, Starting},
-		{"no state five minutes after creation, claude still up", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(6 * time.Minute)}}, Live{Pane: alive, Hook: nil}, FailedToStart},
+		{"no hook and no state two minutes after creation, claude still up", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(StartTimeout)}}, Live{Pane: alive, Hook: nil}, NeedsYou},
 		{"claude exited right after launch, so wake can reuse the shell", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(time.Minute)}}, Live{Pane: Pane{Found: true, Shell: true}, Hook: nil}, Exited},
 		{"login shell still loading before claude starts", Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(2 * time.Second)}}, Live{Pane: Pane{Found: true, Shell: true}, Hook: nil}, Starting},
 	}
@@ -73,6 +73,11 @@ func TestStatusOf(t *testing.T) {
 				t.Errorf("status = %s, want %s", got, c.want)
 			}
 		})
+	}
+
+	silent := Factory{Entry: &state.Entry{Created: true, CreatedAt: ago(StartTimeout)}}
+	if !Unreported(silent, Live{Pane: alive}, now) {
+		t.Error("a factory with no hook and no state two minutes after creation is not marked unreported, so it needs you without saying why")
 	}
 
 	if !IdleAtPrompt(subagentBusy) {

@@ -1,7 +1,7 @@
 ---
 name: factory
 description: Drive an iterative factory through requirements, design, plan, local implementation, independent review, QA, publication and verified handoff.
-argument-hint: "<id> [--pipeline <name>] [--stages <a,b,c>] [--agent <role=tool/model:effort>…] [prompt] | status | resume | approve <requirements|design|plan> <item id> | checkpoint <operation>"
+argument-hint: "<id> [--pipeline <name>] [--stages <a,b,c>] [--agent <role=tool/model:effort>…] [--comments on|off] [prompt] | status | resume | approve <requirements|design|plan> <item id> | checkpoint <operation>"
 ---
 
 # Factory supervisor
@@ -22,7 +22,7 @@ Resolve commands with `factory workflow commands <worktree>`. Record the returne
 
 For a blocked result with questions, persist the result and use an `answers` event with the exact item/revision, developer text and receipt to resume that role. Gate revision requests use `changes`; never use transport retries for interview turns. The analyst result records `needs_design` from the selected pipeline.
 
-The analyst asks once whether to watch and address review comments, default off. Record the developer's answer through a comments_preference event and in requirements.md before accepting the requirements result.
+When the launch line carries `--comments on` or `--comments off`, the developer chose at creation: right after start, record a comments_preference event with watch_comments true for on and false for off, answer `on` or `off` and receipt `launch`. Otherwise the analyst asks once whether to watch and address review comments, default off; record the developer's answer through a comments_preference event and in requirements.md before accepting the requirements result. On resume, ignore `--comments`.
 
 ## Commit then dispatch
 

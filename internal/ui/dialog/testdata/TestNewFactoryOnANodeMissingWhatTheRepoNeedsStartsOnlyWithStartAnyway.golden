@@ -1,0 +1,30 @@
+ [1;38;2;192;202;245mRepo[m                                                                            [38;2;86;95;137m1 of 3[m 
+ [1;38;2;122;162;247m❯[m [38;2;192;202;245m● cowork[m                                 [38;2;115;122;162mterminal QA[m                                 
+     [38;2;115;122;162m+ add a repo…[m                                                                      
+                                                                                        
+ [1;38;2;192;202;245mRuns on[m                                                                                
+   [38;2;169;177;214m○ this machine[m   [38;2;192;202;245m● homebox[m  [38;2;86;95;137mdefault[m                                                  
+   [38;2;247;118;142m✗ homebox is missing 2 things cowork needs. Nothing is installed for you.[m            
+                                                                                        
+   [38;2;247;118;142m✗[m [38;2;169;177;214mpnpm[m         [38;2;169;177;214mnot installed; package.json asks for pnpm@10.33.0[m                     
+                  [38;2;86;95;137mfix[m  [38;2;86;95;137mon homebox  [m[38;2;192;202;245mnpm install -g pnpm@10.33.0[m                          
+   [38;2;247;118;142m✗[m [38;2;169;177;214mQA_PASSWORD[m  [38;2;169;177;214mnot set for homebox's node; qa.sign_in reads it[m                       
+                  [38;2;86;95;137mfix[m  [38;2;86;95;137mon homebox  [m[38;2;192;202;245mset it in the node's environment[m                     
+   [38;2;158;206;106m✓[m [38;2;169;177;214malso there[m   [38;2;169;177;214mnode 24.22.1[m                                                          
+                                                                                        
+ [1;38;2;192;202;245mFactory id[m                                                                             
+ [38;2;122;162;247m╭────────────────────────────────────────────────────────────────────────────────────╮[m 
+ [38;2;122;162;247m│ [m[38;2;192;202;245mcsv-export█[m                                                                        [38;2;122;162;247m│[m 
+ [38;2;122;162;247m╰────────────────────────────────────────────────────────────────────────────────────╯[m 
+ [38;2;86;95;137mcsv-export is a new factory. It starts on homebox when these pass, or now with ctrl+y.[m 
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;169;177;214mctrl+y start anyway   ctrl+r check again   ←→ runs on   ↑↓ repo   esc cancel[m           

@@ -331,8 +331,7 @@ function Empty() {
       <h2>No factories on {where}</h2>
       <p>
         Factories are started from the hub, not from the phone. Press{" "}
-        <code>n</code> in the hub, or run{" "}
-        <code>factory open &lt;id&gt; &lt;prompt&gt;</code> in a repo.
+        <code>n</code> in the hub.
       </p>
       <p className="hint">
         A new factory shows up here as soon as its supervisor starts, and you

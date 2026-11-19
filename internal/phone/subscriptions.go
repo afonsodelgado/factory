@@ -108,7 +108,7 @@ func (s Store) SubscriptionOf(installation string) (Subscription, bool) {
 	return first(subs, func(sub Subscription) bool { return installation != "" && sub.Installation == installation })
 }
 
-func (s Store) Subscribe(sub Subscription) (Subscription, error) {
+func (s Store) Subscribe(sub Subscription, replaces string) (Subscription, error) {
 	sub.P256dh, sub.Auth = strings.TrimRight(sub.P256dh, "="), strings.TrimRight(sub.Auth, "=")
 	if err := validSubscription(sub); err != nil {
 		return Subscription{}, err
@@ -122,8 +122,9 @@ func (s Store) Subscribe(sub Subscription) (Subscription, error) {
 			sub.Since, sub.LastSent, sub.Problem = known.Since, known.LastSent, known.Problem
 		}
 		for i, other := range subs.Subscriptions {
-			renewed := !other.Removed && other.Endpoint != sub.Endpoint && sub.Installation != "" && other.Installation == sub.Installation
-			if renewed {
+			sameCopy := sub.Installation != "" && other.Installation == sub.Installation
+			reinstalled := replaces != "" && other.Installation == replaces
+			if !other.Removed && other.Endpoint != sub.Endpoint && (sameCopy || reinstalled) {
 				replaced = append(replaced, other.Endpoint)
 				subs.Subscriptions[i] = tombstone(other, nextRevision(sub.Since, other.Revision))
 			}

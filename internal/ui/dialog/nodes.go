@@ -53,6 +53,8 @@ type RepoURL struct {
 
 type NodesContext struct {
 	Machine   string
+	Self      string
+	Offer     string
 	Tailnet   string
 	Version   string
 	Factories int
@@ -69,6 +71,7 @@ type NodesContext struct {
 type NodeAnswer struct {
 	Snapshot node.Snapshot
 	Report   node.Report
+	Needs    node.NeedsReport
 }
 
 type NodeActions interface {
@@ -80,6 +83,7 @@ type NodeActions interface {
 	Inspect(ctx context.Context, name string) (node.CheckReport, error)
 	Add(ctx context.Context, op, name string, replaceKey bool) (node.AddResult, error)
 	Remove(op, id string) (node.Roster, error)
+	MoveHome(op, id string) (node.Roster, error)
 	SetTarget(name string) error
 	Clone(ctx context.Context, name, op, url string) error
 	MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error)
@@ -192,6 +196,9 @@ type Nodes struct {
 
 	confirmingMove bool
 	batch          node.BatchProgress
+
+	homing    *homeChoice
+	movedFrom string
 }
 
 func NewNodes(c NodesContext, actions NodeActions) *Nodes {
@@ -342,6 +349,10 @@ func (n *Nodes) key(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	key := msg.String()
+	if n.homing != nil {
+		n.homeKey(key)
+		return nil
+	}
 	switch n.screen {
 	case selfDetailsScreen:
 		return n.selfDetailsKey(key)
@@ -385,9 +396,14 @@ func (n *Nodes) listKey(key string) tea.Cmd {
 	case "enter":
 		return n.openDetails()
 	case "a":
+		if !n.Context.Phone.Tailscale {
+			return nil
+		}
 		return n.openPick()
 	case "d":
 		n.makeDefault(row.Name)
+	case "h":
+		n.askHome()
 	case "x":
 		n.askRemoval(onPeer)
 	case "r":
@@ -459,6 +475,8 @@ func (n *Nodes) selfDetailsKey(key string) tea.Cmd {
 		n.checks = nil
 		n.checkRun++
 		return runChecks(n.actions, n.checkRun)
+	case "h":
+		n.askHome()
 	default:
 		n.scrollKey(key)
 	}
@@ -494,6 +512,8 @@ func (n *Nodes) peerDetailsKey(key string) tea.Cmd {
 		return n.clone(row)
 	case "d":
 		n.makeDefault(row.Name)
+	case "h":
+		n.askHome()
 	case "x":
 		n.screen, n.removing = nodesListScreen, true
 	default:
@@ -804,6 +824,9 @@ func (n *Nodes) drawList(c *theme.Canvas) {
 			title = fmt.Sprintf("%s · asking %d %s…", n.domain(), asking, nounFor(asking, "node"))
 		}
 	}
+	if !n.Context.Phone.Tailscale {
+		title = "this machine only"
+	}
 	c.Right(c.W-2, 0, title, theme.Muted)
 	newOnesX := min(defaultX, c.W-1-theme.Width("● default"))
 	for x, heading := range map[int]string{nodeX: "node", nodeStateX: "state", versionX: "version", countX: "factories", newOnesX: "new ones"} {
@@ -813,7 +836,11 @@ func (n *Nodes) drawList(c *theme.Canvas) {
 	for i, row := range n.Context.Others {
 		n.drawPeerRow(c, 4+i, i+1, row, newOnesX)
 	}
-	if len(n.Context.Others) == 0 {
+	switch {
+	case !n.Context.Phone.Tailscale:
+		n.drawWithoutTailscale(c)
+		return
+	case len(n.Context.Others) == 0:
 		n.drawAlone(c)
 		return
 	}
@@ -891,10 +918,22 @@ func (n *Nodes) drawAlone(c *theme.Canvas) {
 	c.Put(1, 5, "No other nodes yet. Every factory runs on this machine.", theme.Text)
 	y := paragraph(c, 7, "A node is any machine of yours that ran factory setup or factory node install, such as a home server that stays on. Its factories keep running while this laptop sleeps or travels, and this hub and your phone list them next to these.", theme.Text)
 	c.Spans(1, y+1, []theme.Span{{Text: "a", Ink: theme.Key}, {Text: "  add one from the machines on your tailnet", Ink: theme.Text}})
-	c.Spans(1, y+2, []theme.Span{{Text: "or, on the other machine:  ", Ink: theme.Muted}, {Text: "factory setup", Ink: theme.Bright}, {Text: "  installs what it needs and joins " + n.Context.Machine, Ink: theme.Muted}})
+	c.Spans(1, y+2, []theme.Span{{Text: "or, on the other machine:  ", Ink: theme.Muted}, {Text: node.AddTailscale, Ink: theme.Bright}, {Text: "  installs what it needs and joins " + n.Context.Machine, Ink: theme.Muted}})
 	y = n.drawPhoneApp(c, y+4, false)
 	n.drawProblem(c, y+1)
 	n.hint(c, "⏎ details   a add a node   esc close")
+}
+
+func (n *Nodes) drawWithoutTailscale(c *theme.Canvas) {
+	missing := node.NeedsTailscale(node.NodesFeature, n.Context.Machine)
+	y := paragraph(c, 5, "Every factory runs on this machine. "+strings.ToUpper(missing[:1])+missing[1:]+".", theme.Text)
+	y = paragraph(c, y+1, "A node is any machine of yours that runs factory, such as a home server that stays on. Its factories keep running while this laptop sleeps, and this hub and your phone list them next to these.", theme.Text)
+	y = addTailscale(c, y+1, "installs and logs in Tailscale and serves this node on your tailnet. Every factory, setting and repo here stays as it is.")
+	c.Spans(1, y, []theme.Span{{Text: "then, on the other machine:  ", Ink: theme.Muted}, {Text: node.AddTailscale, Ink: theme.Bright}, {Text: "  joins " + n.Context.Machine, Ink: theme.Muted}})
+	c.Put(1, y+2, "Phone app", theme.Bright.B())
+	c.Put(valueX, y+2, "off: the phone app needs Tailscale too", theme.Muted)
+	n.drawProblem(c, y+4)
+	n.hint(c, "⏎ details   esc close")
 }
 
 func (n *Nodes) targetName() string {
@@ -914,6 +953,14 @@ func (n *Nodes) drawLeaving(c *theme.Canvas, y int) int {
 func (n *Nodes) drawMany(c *theme.Canvas, y int) {
 	y = n.drawLeaving(c, y)
 	y = paragraph(c, y, "New factories run on "+n.targetName()+". Pick another node in New factory for a one-off.", theme.Text) + 1
+	y = n.drawHomeNews(c, y)
+	if n.homing != nil {
+		c.Clip(0, c.H-10)
+		n.drawPhoneApp(c, y, true)
+		c.Unclip()
+		n.drawHomeConfirm(c)
+		return
+	}
 	if n.added != nil {
 		y = n.drawAdded(c, y)
 	}
@@ -936,7 +983,7 @@ func (n *Nodes) drawMany(c *theme.Canvas, y int) {
 	}
 	y = n.drawPhoneApp(c, y, true)
 	n.drawProblem(c, y+1)
-	n.hint(c, "⏎ details   a add   d make default   x remove   r check again   esc close")
+	n.hint(c, "⏎ details   a add   d make default   h home   x remove   r check again   esc close")
 }
 
 func (n *Nodes) noAnswer(row NodeRow) string {
@@ -1074,8 +1121,11 @@ func (n *Nodes) drawFactories(c *theme.Canvas, x, y int, none string) {
 func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 	c.Put(1, y, "Phone app", theme.Bright.B())
 	url, urlInk := n.Context.Phone.url()
+	if n.Context.Home != "" {
+		url, urlInk = n.Context.Home, theme.Bright
+	}
 	end := c.PutMax(valueX, y, url, urlInk, c.W-valueX-1)
-	where := "lives on " + n.Context.Machine
+	where := "lives on " + n.homeShort()
 	if many {
 		where += ", reaches every node"
 	}
@@ -1098,9 +1148,15 @@ func (n *Nodes) drawPhoneApp(c *theme.Canvas, y int, many bool) int {
 
 func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	n.drawHeading(c)
+	problem := theme.Wrap("✗ "+n.problem, c.W-2)
 	bottom := c.H - 1
-	if n.confirmingMove {
+	switch {
+	case n.confirmingMove:
 		bottom = c.H - 6
+	case n.homing != nil:
+		bottom = c.H - 10
+	case n.problem != "":
+		bottom = c.H - 2 - len(problem)
 	}
 	c.Clip(1, bottom)
 	n.drawBody(c, 2-n.scroll)
@@ -1108,6 +1164,13 @@ func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	if n.confirmingMove {
 		n.drawMoveAllConfirm(c)
 		return
+	}
+	if n.homing != nil {
+		n.drawHomeConfirm(c)
+		return
+	}
+	if n.problem != "" {
+		paragraph(c, c.H-1-len(problem), "✗ "+n.problem, theme.FgInk(theme.Red))
 	}
 	hints := n.hints()
 	if n.maxScroll() > 0 {
@@ -1156,7 +1219,10 @@ func (n *Nodes) hints() string {
 		if n.checks == nil {
 			return "esc back"
 		}
-		return "r check again   esc back"
+		if !n.Context.Phone.Tailscale {
+			return "r check again   esc back"
+		}
+		return "r check again   h home   esc back"
 	case peerDetailsScreen:
 		return n.peerHints()
 	}
@@ -1166,6 +1232,10 @@ func (n *Nodes) hints() string {
 func (n *Nodes) drawSelfDetails(c *theme.Canvas, y int) int {
 	url, urlInk := n.Context.Phone.url()
 	notify, notifyInk := n.Context.Phone.notify()
+	if !n.Context.Phone.Tailscale {
+		url, urlInk = "none: Tailscale is not added; "+node.AddTailscale+" adds it", theme.FgInk(theme.Yellow)
+		notify, notifyInk = "off: the phone app needs Tailscale too", theme.Muted
+	}
 	c.Put(3, y, "address", theme.Text)
 	c.PutMax(fieldX, y, url, urlInk, c.W-fieldX-1)
 	c.Put(3, y+1, "factories", theme.Text)
@@ -1237,7 +1307,8 @@ func (n *Nodes) drawPeerDetails(c *theme.Canvas, y int) int {
 	if p.cloneErr != nil {
 		y = paragraph(c, y+1, "✗ "+p.cloneErr.Error(), theme.FgInk(theme.Red))
 	}
-	return paragraph(c, y+1, readySummary(row.Short(), p.answer.Report.Problems), theme.Text)
+	y = paragraph(c, y+1, readySummary(row.Short(), p.answer.Report.Problems), theme.Text)
+	return n.drawNeeds(c, y+1, row, p.answer)
 }
 
 func readySummary(short string, problems int) string {
@@ -1312,7 +1383,7 @@ func (n *Nodes) peerHints() string {
 	if n.takesFactories(row) {
 		hints += "m move all here   "
 	}
-	return hints + "d make default   x remove   esc back"
+	return hints + "d make default   h home   x remove   esc back"
 }
 
 func checkRows(checks []node.Check) []CheckRow {

@@ -42,7 +42,7 @@ func fleet() hub.Snapshot {
 	needs := item(cowork, "ENG-7452", "requirements", factory.NeedsYou, 6*time.Minute)
 	needs.Factory.State.Attention = []state.Attention{{ID: "q-1"}, {ID: "q-2"}}
 	starting := hub.Item{Factory: factory.Factory{Repo: cowork, Slug: "csv-dedupe-preview", Entry: &state.Entry{Created: true, CreatedAt: now.Add(-40 * time.Second)}}, Status: factory.Starting}
-	failed := hub.Item{Factory: factory.Factory{Repo: cowork, Slug: "never-started", Entry: &state.Entry{Created: true, CreatedAt: now.Add(-7 * time.Minute)}}, Status: factory.FailedToStart}
+	failed := hub.Item{Factory: factory.Factory{Repo: cowork, Slug: "never-started", Entry: &state.Entry{Created: true, CreatedAt: now.Add(-7 * time.Minute)}}, Status: factory.NeedsYou, Unreported: true}
 	archived := item(cowork, "ENG-7341", "handoff", factory.Done, 72*time.Hour)
 	archived.Factory.Entry.Archived = true
 	return hub.Snapshot{At: now, Items: []hub.Item{

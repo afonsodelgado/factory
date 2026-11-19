@@ -72,6 +72,8 @@ func (m Machine) NodeName() string {
 	return name
 }
 
+func (m Machine) TailscaleNode() bool { return m.Node.Owner != "" && m.NodeHostname() != "" }
+
 func (m Machine) NodeOrigin() string {
 	if m.NodeHostname() == "" {
 		return ""

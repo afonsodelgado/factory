@@ -1,3 +1,4 @@
+import { cache } from "./api/cache.ts";
 import { api } from "./api/client.ts";
 import type { PushState } from "./api/types.ts";
 
@@ -57,7 +58,14 @@ export async function turnOn(
       userVisibleOnly: true,
       applicationServerKey: keyBytes(key),
     }));
-  return api.subscribe(subscription.toJSON(), installation);
+  const replaces = await cache.movedFrom();
+  const state = await api.subscribe(
+    subscription.toJSON(),
+    installation,
+    replaces,
+  );
+  if (replaces) await cache.forgetMovedFrom();
+  return state;
 }
 
 export async function turnOff(endpoint: string): Promise<PushState> {

@@ -40,7 +40,7 @@ func hubMain() error {
 	}
 	self := os.Getenv("TMUX_PANE")
 	if self == "" {
-		return errors.New("not inside tmux; start the hub with factory open")
+		return errors.New("not inside tmux; start the hub with factory")
 	}
 	unlock, err := lockHub(cfg.HubViewLock())
 	if err != nil {
@@ -97,6 +97,11 @@ func hubMain() error {
 			var roster node.Roster
 			err := runtime.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster)
 			return roster, err
+		},
+		ReviewLink: func(ctx context.Context, path string) (string, error) {
+			var link node.ReviewLink
+			err := runtime.Do(ctx, http.MethodPost, "/api/review/links", node.ReviewLink{Path: path}, &link)
+			return link.URL, err
 		},
 		Bell:   os.Stderr,
 		Notify: notify,

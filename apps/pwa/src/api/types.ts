@@ -17,6 +17,11 @@ export type PermissionMenu = {
   fingerprint: string;
 };
 
+export type PromptMenu = {
+  choices: { id: string; label: string }[];
+  fingerprint: string;
+};
+
 export type ReceiptStatus =
   "queued" | "sending" | "delivered" | "refused" | "unknown" | "stale";
 
@@ -61,6 +66,9 @@ export type LocalItem = {
   answer?: Receipt;
   send: Eligibility;
   permission?: PermissionMenu;
+  screen?: string[];
+  node?: string;
+  menu?: PromptMenu;
 };
 
 export type LocalPage = {
@@ -138,6 +146,7 @@ export type Member = {
 export type Roster = {
   id: string;
   home: string;
+  previous_homes?: string[];
   self: string;
   removed?: boolean;
   members: Member[];
@@ -237,7 +246,8 @@ export type Action =
   | "message"
   | "pause"
   | "wake"
-  | "permission";
+  | "permission"
+  | "prompt";
 
 export type ActionBody = {
   action: Action;

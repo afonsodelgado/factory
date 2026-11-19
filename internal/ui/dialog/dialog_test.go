@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
@@ -206,7 +207,7 @@ func (f *fakePhoneActions) Check() []CheckRow {
 }
 
 func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *testing.T) {
-	actions := &fakePhoneActions{status: PhoneContext{Running: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Subscriptions: 2}}
+	actions := &fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "devbox.tail1234.ts.net", Port: 7418, Subscriptions: 2}}
 	p := NewPhone(actions.status, actions)
 	p.Update(tea.WindowSizeMsg{Width: 74, Height: 18})
 	press := func(key string) {
@@ -225,8 +226,21 @@ func TestPhonePopupShowsTheNodeURLATestPushFailureAndFailingChecksAt80x24(t *tes
 	}
 }
 
+func TestThisMachineWithoutTailscaleNamesTheSetupStepAndOffersNoPhoneHome(t *testing.T) {
+	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Machine: "macbook", Running: true, Port: 7418}}}
+	n := NewNodes(NodesContext{Machine: "macbook", Version: "0.9.4", Phone: actions.status}, actions)
+	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
+	_, check := n.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	n.Update(check())
+	n.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	details := ansi.Strip(n.View().Content)
+	if strings.Contains(details, "node.hostname") || !strings.Contains(details, "factory setup --tailscale") || n.homing != nil || !strings.Contains(details, "the phone app needs Tailscale") {
+		t.Errorf("this machine's details without Tailscale, after h, show:\n%s\nwant factory setup --tailscale named, no node.hostname advice that stops the node, and h refused with the reason", details)
+	}
+}
+
 func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(t *testing.T) {
-	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}}
+	actions := &fakeNodeActions{fakePhoneActions: fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}}}
 	n := NewNodes(NodesContext{Machine: "macbook", Tailnet: "tail5e2c.ts.net", Version: "0.9.4", Factories: 2, NeedsYou: 1, Phone: actions.status}, actions)
 	n.Update(tea.WindowSizeMsg{Width: 88, Height: 28})
 	golden.RequireEqual(t, n.View().Content)
@@ -240,7 +254,7 @@ func TestNodesPopupLinesThisMachineUpUnderItsHeadingsAndScrollsItsChecksAt80x24(
 	for range 30 {
 		n.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	}
-	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   esc back") {
+	if details := n.View().Content; !strings.Contains(details, "fix number 9") || !strings.Contains(details, "Nothing was changed") || !strings.Contains(details, "j/k scroll   r check again   h home   esc back") {
 		t.Fatalf("⏎ on this machine in an 80×24 terminal, scrolled down, shows:\n%s\nwant the last fix, the summary and every key", details)
 	}
 }
@@ -289,6 +303,8 @@ func (f *fakeNodeActions) Remove(_, id string) (node.Roster, error) {
 	f.removed = append(f.removed, id)
 	return node.Roster{Leaving: []node.RosterMember{{Member: node.Member{ID: id, Name: "build-box.tail5e2c.ts.net"}, Pending: 1}}}, nil
 }
+
+func (f *fakeNodeActions) MoveHome(string, string) (node.Roster, error) { return node.Roster{}, nil }
 
 func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
 func (f *fakeNodeActions) Clone(context.Context, string, string, string) error { return nil }
@@ -448,7 +464,7 @@ var nodesNow = time.Date(2026, 11, 16, 12, 10, 0, 0, time.Local)
 func threeNodes(t *testing.T) (*Nodes, *fakeNodeActions) {
 	t.Helper()
 	actions := &fakeNodeActions{
-		fakePhoneActions: fakePhoneActions{status: PhoneContext{Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}},
+		fakePhoneActions: fakePhoneActions{status: PhoneContext{Tailscale: true, Running: true, Hostname: "macbook.tail5e2c.ts.net", Port: 7418, Subscriptions: 1}},
 		answers: map[string]NodeAnswer{"homelab.tail5e2c.ts.net": {
 			Snapshot: node.Snapshot{Version: "0.9.4", Factories: []host.LocalFactory{{ID: "rate-limits"}, {ID: "doctor-json", NeedsSince: nodesNow}}},
 			Report:   node.Report{At: nodesNow},
@@ -620,7 +636,7 @@ func TestNewFactoryStartsOnTheDefaultNodeAndNeverFallsBackFromAnUnreachableOne(t
 		t.Fatalf("⏎ with the unreachable default node went to step %d on %q; want it held there, never moved to this machine", m.step, m.node())
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-	m.Update(probedMsg{node: "homelab.tail5e2c.ts.net", text: "homelab is ready"})
+	m.Update(probedMsg{key: m.probeKey()})
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.prompt.text = "Export contacts."
 	m.start()
@@ -629,11 +645,68 @@ func TestNewFactoryStartsOnTheDefaultNodeAndNeverFallsBackFromAnUnreachableOne(t
 	}
 }
 
+func TestNewFactoryOnANodeMissingWhatTheRepoNeedsStartsOnlyWithStartAnyway(t *testing.T) {
+	context := NewContext{
+		Repos:  []RepoOption{{Name: "cowork", Path: "/r/cowork", GitURL: "git@github.com:acme/cowork.git"}},
+		Nodes:  []NodeChoice{{Name: "homebox.tail5e2c.ts.net"}},
+		Target: "homebox.tail5e2c.ts.net",
+	}
+	missing := NodeReadiness{Needs: node.RepoReport{URL: "git@github.com:acme/cowork.git", Checks: []node.Check{
+		{Name: "pnpm", Mark: node.MarkFail, Detail: "not installed; package.json asks for pnpm@10.33.0", Fix: "npm install -g pnpm@10.33.0", On: "homebox"},
+		{Name: "QA_PASSWORD", Mark: node.MarkFail, Detail: "not set for homebox's node; qa.sign_in reads it", Fix: "set it in the node's environment", On: "homebox"},
+		{Name: "node", Mark: node.MarkOK, Detail: "24.22.1", On: "homebox"},
+	}}}
+	press := func(m *NewFactoryModel, keys ...tea.KeyPressMsg) {
+		for _, k := range keys {
+			if _, cmd := m.Update(k); cmd != nil {
+				m.Update(cmd())
+			}
+		}
+	}
+	enter, startAnyway, start := tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	opened := func() (*NewFactoryModel, tea.Msg) {
+		m := NewFactory(context)
+		m.ProbeNode = func(string, RepoOption) (NodeReadiness, error) { return missing, nil }
+		m.Update(tea.WindowSizeMsg{Width: 88, Height: 30})
+		checked := m.Init()()
+		m.name = "csv-export"
+		return m, checked
+	}
+
+	m, checked := opened()
+	m.Update(checked)
+	press(m, enter)
+	golden.RequireEqual(t, m.View().Content)
+	if m.step != 1 {
+		t.Fatal("⏎ went on although homebox is missing 2 things cowork needs; want it held on step 1")
+	}
+	press(m, startAnyway, enter)
+	m.prompt.text = "Export contacts as CSV."
+	press(m, start)
+	if r, ok := m.Result(); !ok || !r.(NewResult).StartAnyway || r.(NewResult).Node != "homebox.tail5e2c.ts.net" {
+		t.Errorf("ctrl+y then ctrl+s gave %+v; want a start on homebox with StartAnyway", r)
+	}
+
+	m, checked = opened()
+	press(m, enter, enter)
+	m.prompt.text = "Export contacts as CSV."
+	press(m, start)
+	m.Update(checked)
+	if r, ok := m.Result(); ok || !strings.Contains(m.View().Content, "so csv-export did not start") {
+		t.Fatalf("ctrl+s before the check answered started %+v; want it to wait, then refuse with the missing items:\n%s", r, m.View().Content)
+	}
+	press(m, startAnyway)
+	if r, ok := m.Result(); !ok || !r.(NewResult).StartAnyway {
+		t.Errorf("ctrl+y on the refusal gave %+v; want a start with StartAnyway", r)
+	}
+}
+
 func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("FACTORY_CONFIG_DIR", t.TempDir())
 	t.Setenv("FACTORY_STATE_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	for _, route := range []string{"add", "ctrl+e"} {
 		for _, config := range []string{"missing", "legacy", "current", "partial failure", "malformed"} {
 			t.Run(route+"/"+config, func(t *testing.T) {

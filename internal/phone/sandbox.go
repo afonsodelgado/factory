@@ -21,7 +21,40 @@ const (
 
 type grant struct {
 	factory string
+	session string
 	expires time.Time
+}
+
+type Reviews struct {
+	Review  http.Handler
+	Now     func() time.Time
+	Session func(*http.Request) (string, bool)
+	Live    func(session string) bool
+
+	grants grants
+}
+
+func (v *Reviews) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/r/", v.openReview)
+	mux.HandleFunc(GrantPrefix+"{token}/{rest...}", v.sandboxed)
+}
+
+func (v *Reviews) now() time.Time {
+	if v.Now == nil {
+		return time.Now()
+	}
+	return v.Now()
+}
+
+func (v *Reviews) session(r *http.Request) (string, bool) {
+	if v.Session == nil {
+		return "", true
+	}
+	return v.Session(r)
+}
+
+func (v *Reviews) live(held grant) bool {
+	return v.Live == nil || v.Live(held.session)
 }
 
 type grants struct {
@@ -29,7 +62,7 @@ type grants struct {
 	tokens map[string]grant
 }
 
-func (g *grants) mint(factory string, now time.Time) string {
+func (g *grants) mint(factory, session string, now time.Time) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.tokens == nil {
@@ -41,12 +74,12 @@ func (g *grants) mint(factory string, now time.Time) string {
 		}
 	}
 	for token, held := range g.tokens {
-		if held.factory == factory && held.expires.Sub(now) > grantLifetime/2 {
+		if held.factory == factory && held.session == session && held.expires.Sub(now) > grantLifetime/2 {
 			return token
 		}
 	}
 	token := base64.RawURLEncoding.EncodeToString(randomBytes(24))
-	g.tokens[token] = grant{factory: factory, expires: now.Add(grantLifetime)}
+	g.tokens[token] = grant{factory: factory, session: session, expires: now.Add(grantLifetime)}
 	return token
 }
 
@@ -75,7 +108,7 @@ func factoryOf(escapedPath string) (string, bool) {
 	return factory, err == nil && factory != ""
 }
 
-func (s *Server) openReview(w http.ResponseWriter, r *http.Request) {
+func (v *Reviews) openReview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		fail(w, http.StatusMethodNotAllowed, "open review pages with GET")
 		return
@@ -85,7 +118,12 @@ func (s *Server) openReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such review page")
 		return
 	}
-	target := GrantPrefix + s.grants.mint(factory, s.now()) + r.URL.EscapedPath()
+	session, admitted := v.session(r)
+	if !admitted {
+		page(w, http.StatusForbidden, fromTheHubPage, nil)
+		return
+	}
+	target := GrantPrefix + v.grants.mint(factory, session, v.now()) + r.URL.EscapedPath()
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -94,7 +132,7 @@ func (s *Server) openReview(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
+func (v *Reviews) sandboxed(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", "null")
 	h.Set("Access-Control-Expose-Headers", "X-Factory-Revision")
@@ -109,13 +147,14 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := r.PathValue("token")
-	held, live := s.grants.held(token, s.now())
+	held, live := v.grants.held(token, v.now())
+	live = live && v.live(held)
 	escaped := strings.TrimPrefix(r.URL.EscapedPath(), GrantPrefix+token)
 	path, err := url.PathUnescape(escaped)
 	switch {
 	case !live:
 		if opensPage(r.Method, path) {
-			page(w, http.StatusUnauthorized, expiredPage, nil)
+			page(w, http.StatusUnauthorized, v.expired(), nil)
 			return
 		}
 		fail(w, http.StatusUnauthorized, "This review page expired.")
@@ -129,7 +168,10 @@ func (s *Server) sandboxed(w http.ResponseWriter, r *http.Request) {
 		forward := r.Clone(r.Context())
 		forward.URL.Path, forward.URL.RawPath = path, escaped
 		forward.Header.Set(review.PrefixHeader, GrantPrefix+token)
-		s.review(w, forward)
+		if v.Session != nil {
+			forward.Header.Set(review.NoBackHeader, "1")
+		}
+		v.review(w, forward)
 	}
 }
 
@@ -138,3 +180,30 @@ var expiredPage = template.Must(template.New("expired").Parse(pageHead + `<h1>Th
 <p><a href="/">Open factory</a></p>
 </body></html>
 `))
+
+func (v *Reviews) expired() *template.Template {
+	if v.Session != nil {
+		return doorExpiredPage
+	}
+	return expiredPage
+}
+
+var doorExpiredPage = template.Must(template.New("door expired").Parse(pageHead + `<h1>This review page expired</h1>
+<p>In the hub, press <code>ctrl+o</code> on the page again for a new link.</p>
+</body></html>
+`))
+
+var fromTheHubPage = template.Must(template.New("from the hub").Parse(pageHead + `<h1>Open this page from the hub</h1>
+<p>This address answers only a browser that came through a link from the hub on this machine. Select the factory in the hub and press <code>ctrl+o</code> on its page.</p>
+</body></html>
+`))
+
+var usedLinkPage = template.Must(template.New("used").Parse(pageHead + `<h1>This link was already used</h1>
+<p>Each link from the hub opens its page once. In the hub, press <code>ctrl+o</code> on the page again for a new link.</p>
+<p>factory shows review pages only to this machine's browser, after a link from its hub.</p>
+</body></html>
+`))
+
+func FromTheHub(w http.ResponseWriter) { page(w, http.StatusForbidden, fromTheHubPage, nil) }
+
+func UsedLink(w http.ResponseWriter) { page(w, http.StatusGone, usedLinkPage, nil) }

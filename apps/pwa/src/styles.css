@@ -972,6 +972,21 @@ code {
   color: var(--accent);
 }
 
+.opt.send {
+  border-color: var(--line-strong);
+  background: var(--raise);
+  color: var(--ink);
+}
+
+.opt.send .mk {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.opt.send .mk::before {
+  content: none;
+}
+
 .opt .rec {
   grid-column: 2;
   color: var(--mute);

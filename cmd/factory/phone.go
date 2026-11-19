@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -37,12 +39,16 @@ func runPhone(args []string) int {
 		fmt.Fprintln(os.Stderr, "factory phone:", err)
 		return 1
 	}
-	switch args[0] {
-	case "status":
+	needsTailscale := (args[0] == "test" || args[0] == "check") && !cfg.TailscaleNode()
+	switch {
+	case needsTailscale:
+		fmt.Fprintln(os.Stderr, "factory phone: "+node.NeedsTailscale(node.PhoneFeature, cfg.NodeName())+".\n"+node.AddTailscale+" adds it. Every factory keeps running.")
+		return 1
+	case args[0] == "status":
 		err = printPhoneStatus(os.Stdout, cfg)
-	case "test":
+	case args[0] == "test":
 		err = printTestPush(os.Stdout, cfg)
-	case "check":
+	case args[0] == "check":
 		if summarize("factory phone check · checks only, changes nothing", phoneDoctor(cfg)) > 0 {
 			return 1
 		}
@@ -59,7 +65,7 @@ func runPhone(args []string) int {
 
 func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
 	subs, err := phone.Open(cfg.StateDir).Subscriptions()
-	return dialog.PhoneContext{Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
+	return dialog.PhoneContext{Machine: cfg.NodeName(), Tailscale: cfg.TailscaleNode(), Running: node.Answers(cfg.NodeSocket()), Hostname: cfg.NodeHostname(), Port: cfg.NodePort(), Subscriptions: len(subs)}, err
 }
 
 func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.NodesContext) dialog.NodesContext {
@@ -72,7 +78,7 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	if local.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap) != nil {
 		return c
 	}
-	c.Version, c.Factories = snap.Version, len(snap.Factories)
+	c.Self, c.Version, c.Factories = snap.Node, snap.Version, len(snap.Factories)
 	for _, f := range snap.Factories {
 		if !f.NeedsSince.IsZero() {
 			c.NeedsYou++
@@ -81,8 +87,42 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	if snap.Roster != nil {
 		c.Home, c.Others = snap.Roster.Home, rosterRows(*snap.Roster, known.Others)
 		c.Leaving = snap.Roster.Leaving
+		c.Offer = offerHomeOnce(cfg.StateDir, *snap.Roster)
 	}
 	return c
+}
+
+func rosterHome(cfg *state.Config) string {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeAsk)
+	defer cancel()
+	var roster node.Roster
+	if node.Unix(cfg.NodeSocket()).Do(ctx, http.MethodGet, "/api/nodes", nil, &roster) != nil {
+		return ""
+	}
+	return roster.Home
+}
+
+func homeOfferedPath(stateDir string) string {
+	return filepath.Join(stateDir, "hub", "home-offered.json")
+}
+
+func offerHomeOnce(stateDir string, roster node.Roster) string {
+	var offered []string
+	if data, err := os.ReadFile(homeOfferedPath(stateDir)); err == nil {
+		json.Unmarshal(data, &offered)
+	}
+	i := slices.IndexFunc(roster.Members, func(m node.RosterMember) bool {
+		return !m.Self && m.OS == "linux" && "https://"+m.Name != roster.Home && !slices.Contains(offered, m.ID)
+	})
+	if i < 0 {
+		return ""
+	}
+	id := roster.Members[i].ID
+	data, _ := json.Marshal(append(offered, id))
+	if os.MkdirAll(filepath.Dir(homeOfferedPath(stateDir)), 0o700) != nil || state.WriteFileAtomic(homeOfferedPath(stateDir), data) != nil {
+		return ""
+	}
+	return id
 }
 
 func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
@@ -101,10 +141,18 @@ func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
 	return rows
 }
 
+func shareableOrigin(repo string) string {
+	url := gitclone.Origin(repo)
+	if url == "" || gitclone.CheckURL(url) != nil {
+		return ""
+	}
+	return url
+}
+
 func repoURLs(repos []string) []dialog.RepoURL {
 	var urls []dialog.RepoURL
 	for _, repo := range repos {
-		if url := gitclone.Origin(repo); url != "" {
+		if url := shareableOrigin(repo); url != "" {
 			urls = append(urls, dialog.RepoURL{Name: strings.TrimSuffix(path.Base(url), ".git"), URL: url})
 		}
 	}
@@ -120,9 +168,16 @@ func printPhoneStatus(w io.Writer, cfg *state.Config) error {
 	if status.Hostname != "" {
 		url = "https://" + status.Hostname
 	}
+	if home := rosterHome(cfg); home != "" && home != url {
+		url = home + ", the phone app's home"
+	}
 	running := "not running; start it with factory node run"
 	if status.Running {
 		running = "running"
+	}
+	if !cfg.TailscaleNode() {
+		fmt.Fprintf(w, "node      %s\nurl       none: %s\nport      127.0.0.1:%d, this machine only\nnotify    %d subscribed\n%s serves the app on your tailnet. Every factory keeps running.\n", running, node.NeedsTailscale(node.PhoneFeature, cfg.NodeName()), status.Port, status.Subscriptions, node.AddTailscale)
+		return nil
 	}
 	fmt.Fprintf(w, "node      %s\nurl       %s\nport      127.0.0.1:%d\nnotify    %d subscribed\n", running, url, status.Port, status.Subscriptions)
 	keys, err := phone.Open(cfg.StateDir).KeyState()
@@ -178,7 +233,7 @@ func (a phoneActions) Test() (string, error) {
 	return outcome, err
 }
 
-var checkMarks = map[install.Mark]string{install.Pass: "ok", install.Fail: "fail", install.Skip: "skip", install.Warn: "warn"}
+var checkMarks = map[install.Mark]string{install.Pass: "ok", install.Fail: "fail", install.Skip: "skip", install.Off: "skip", install.Warn: "warn"}
 
 func (a phoneActions) Check() []dialog.CheckRow {
 	var rows []dialog.CheckRow
@@ -210,7 +265,30 @@ func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dial
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, node.ReadyWait+node.ProbeWait)
 	defer cancel()
-	return answer, peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report)
+	if err := peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report); err != nil {
+		return answer, err
+	}
+	if answer.Snapshot.Supports(node.CanNeeds) {
+		answer.Needs, _ = askNeeds(ctx, peer, repoNeeds(a.cfg.Repos))
+	}
+	return answer, nil
+}
+
+func repoNeeds(repos []string) []node.RepoNeeds {
+	var asked []node.RepoNeeds
+	for _, repo := range repos {
+		if url := shareableOrigin(repo); url != "" {
+			asked = append(asked, node.RepoNeeds{URL: url, Needs: install.RepoNeeds(repo)})
+		}
+	}
+	return asked
+}
+
+func askNeeds(ctx context.Context, peer *node.Client, repos []node.RepoNeeds) (node.NeedsReport, error) {
+	ctx, cancel := context.WithTimeout(ctx, node.ReadyWait)
+	defer cancel()
+	var report node.NeedsReport
+	return report, peer.Do(ctx, http.MethodPost, node.NeedsRoute, node.NeedsRequest{Repos: repos}, &report)
 }
 
 func (a nodeActions) Seen(ctx context.Context, name string) (node.Peer, error) {
@@ -255,6 +333,14 @@ func (a nodeActions) Remove(op, id string) (node.Roster, error) {
 	return roster, err
 }
 
+func (a nodeActions) MoveHome(op, id string) (node.Roster, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), nodeWait)
+	defer cancel()
+	var roster node.Roster
+	err := a.local.Do(ctx, http.MethodPost, "/api/nodes/home", node.HomeRequest{Operation: op, Node: id}, &roster)
+	return roster, err
+}
+
 func (a nodeActions) SetTarget(name string) error {
 	return state.UpdateMachine(a.cfg.ConfigDir, func(m *state.Machine) error {
 		m.Node.Target = name
@@ -262,20 +348,39 @@ func (a nodeActions) SetTarget(name string) error {
 	})
 }
 
-func probeNode(name string) (string, error) {
+func probeNode(name string, repo dialog.RepoOption) (dialog.NodeReadiness, error) {
 	short, _, _ := strings.Cut(name, ".")
 	ctx, cancel := context.WithTimeout(context.Background(), node.ReadyWait+node.ProbeWait)
 	defer cancel()
+	peer := node.Remote(name, node.PeerHTTP())
+	unanswered := func(err error) (dialog.NodeReadiness, error) {
+		return dialog.NodeReadiness{}, fmt.Errorf("%s did not answer its readiness check: %w", short, err)
+	}
+	var snap node.Snapshot
+	if err := peer.Do(ctx, http.MethodGet, "/api/snapshot", nil, &snap); err != nil {
+		return unanswered(err)
+	}
 	var report node.Report
-	if err := node.Remote(name, node.PeerHTTP()).Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
-		return "", fmt.Errorf("%s did not answer its readiness check: %w", short, err)
+	if err := peer.Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
+		return unanswered(err)
 	}
 	for _, c := range report.Checks {
 		if c.Mark == node.MarkFail {
-			return "", fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
+			return dialog.NodeReadiness{}, fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
 		}
 	}
-	return short + " is ready: every check passes", nil
+	if !snap.Supports(node.CanNeeds) {
+		return dialog.NodeReadiness{Unchecked: true, PeerVersion: snap.Version, HubVersion: version}, nil
+	}
+	needs, err := askNeeds(context.Background(), peer, []node.RepoNeeds{{URL: repo.GitURL, Needs: install.RepoNeeds(repo.Path)}})
+	if err != nil {
+		return unanswered(err)
+	}
+	readiness := dialog.NodeReadiness{}
+	if len(needs.Repos) > 0 {
+		readiness.Needs = needs.Repos[0]
+	}
+	return readiness, nil
 }
 
 func (a nodeActions) Clone(ctx context.Context, name, op, repo string) error {

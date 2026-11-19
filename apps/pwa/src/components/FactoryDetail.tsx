@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LocalFactory, Receipt } from "../api/types.ts";
-import { clock, hostName, kindLook, statusLook } from "../format.ts";
+import { clock, hostName, kindLook, kindWord, statusLook } from "../format.ts";
 import { useBlocked, useNow, useSend } from "../hooks.ts";
 import { age, needsSince } from "../order.ts";
 import { paths, type Tab } from "../route.ts";
@@ -273,7 +273,12 @@ function Attention({ factory }: { factory: LocalFactory }) {
                 {look.glyph}
               </span>
               <span className={`w ${look.tone}`}>
-                {[item.kind, item.id].filter(Boolean).join(" · ")}
+                {[
+                  kindWord(item.kind),
+                  item.id.startsWith(item.kind) ? undefined : item.id,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
               <span className="age">
                 {clock(item.since)} · {age(item.since, now)}

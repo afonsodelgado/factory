@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	StartTimeout = 5 * time.Minute
+	StartTimeout = 2 * time.Minute
 	LaunchGrace  = 30 * time.Second
 )
 

@@ -61,6 +61,9 @@ export const cache = {
     await write("installation", fresh);
     return fresh;
   },
+  movedFrom: () => read<string>("moved-from"),
+  setMovedFrom: (installation: string) => write("moved-from", installation),
+  forgetMovedFrom: () => remove("moved-from"),
   account: () => read<string>("account"),
   setAccount: (account: string) => write("account", account),
 
