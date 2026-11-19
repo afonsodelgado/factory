@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -179,8 +180,12 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	failed.Stack = reviewing.Stack
 	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack}
 	retrying := step(t, reviewing, failed)
-	if _, err := Next("testdata", retrying, recipe(retrying, "new-recipe")); err == nil {
-		t.Fatal("a changed recipe under a review failure item stranded the retried review")
+	rerun := step(t, retrying, recipe(retrying, "new-recipe"))
+	if rerun.Stage != "implement" || rerun.Workflow.ActiveRun == "" || len(rerun.OpenAttention()) != 0 {
+		t.Fatal("rediscovered commands after a review failure did not re-run implementation for fresh evidence", rerun.Stage, rerun.Workflow, rerun.OpenAttention())
+	}
+	if reviewed := complete(t, rerun); reviewed.Stage != "review" || reviewed.Evidence.Local.RecipeDigest != "new-recipe" {
+		t.Fatal("the review after rediscovered commands has no local checks on the new recipe to pass with", reviewed.Stage, reviewed.Evidence.Local.RecipeDigest)
 	}
 	layered := offeredHandoff(t)
 	layered.Stack = append(layered.Stack, state.StackBranch{Branch: "feature-2", Parent: "feature", Head: "c", Base: "a"})
@@ -204,11 +209,91 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack}
 	broken := step(t, implementing, failed)
 	corrected := step(t, broken, recipe(broken, "new-recipe"))
-	item := corrected.OpenAttention()[0]
-	again := eventFor(corrected, "retry")
-	again.ItemID, again.ArtifactRevision, again.Answer, again.Receipt = item.ID, item.Revision, "retry", "conversation:1"
-	if retried := complete(t, step(t, corrected, again)); retried.Stage != "review" || retried.Evidence.Local.RecipeDigest != "new-recipe" {
+	if run := corrected.Workflow.Runs[len(corrected.Workflow.Runs)-1]; run.Stage != "implement" || corrected.Loops.Used[RediscoveryLoop] != 1 || len(corrected.OpenAttention()) != 0 {
+		t.Fatal("rediscovered commands after a setup failure did not re-run implementation under the retry cap", run, corrected.OpenAttention())
+	}
+	if retried := complete(t, corrected); retried.Stage != "review" || retried.Evidence.Local.RecipeDigest != "new-recipe" {
 		t.Fatal("the retried implementation did not run on the corrected recipe", retried.Stage, retried.Evidence.Local.RecipeDigest)
+	}
+}
+
+func TestADiscoveryNoteOnlyAddsOneActivityRow(t *testing.T) {
+	s := workflowState()
+	if err := dispatch(&s, eventFor(s, "start"), "requirements"); err != nil {
+		t.Fatal(err)
+	}
+	e := eventFor(s, "discovery")
+	e.Note = &Note{Event: "commands recorded", Detail: "build, lint, test"}
+	next := step(t, s, e)
+	if len(next.History) != len(s.History)+1 || next.History[len(next.History)-1].Event != "commands recorded" {
+		t.Fatalf("a discovery note left history %+v; want exactly one commands recorded row", next.History)
+	}
+	next.History, next.Revision, next.ProcessedEvents, next.UpdatedAt = s.History, s.Revision, s.ProcessedEvents, s.UpdatedAt
+	before, _ := json.Marshal(s)
+	after, _ := json.Marshal(next)
+	if string(before) != string(after) {
+		t.Fatalf("a discovery note moved the workflow:\n%s\n%s", before, after)
+	}
+	e.Note = &Note{Event: "dispatch", Detail: "qa"}
+	if _, err := Next("testdata", s, e); err == nil {
+		t.Fatal("a discovery note named another event")
+	}
+}
+
+func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t *testing.T) {
+	s := workflowState()
+	s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
+	if err := dispatch(&s, eventFor(s, "result"), "qa"); err != nil {
+		t.Fatal(err)
+	}
+	failed := eventFor(s, "result")
+	failed.Stack = s.Stack
+	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+	challenged := step(t, s, failed)
+	unresolved := eventFor(challenged, "commands")
+	r := challenged.Recipe
+	r.Digest, r.Unresolved = "no-sign-in", []string{"qa.sign_in: billing emails a one-time code"}
+	unresolved.Recipe, unresolved.Detail = &r, "qa.sign_in  stopped QA round 1 at sign-in"
+	asking := step(t, challenged, unresolved)
+	if open := asking.OpenAttention(); len(open) != 1 || open[0].Kind != "commands" || open[0].Body != unresolved.Detail {
+		t.Fatalf("after QA's interactive_challenge the factory asks %+v; want only one commands item with discovery's report", open)
+	}
+	resolved := eventFor(asking, "commands")
+	r.Digest, r.Unresolved = "sign-in-script", nil
+	resolved.Recipe = &r
+	rerun := step(t, asking, resolved)
+	if rerun.Stage != "implement" || rerun.Workflow.ActiveRun == "" || rerun.Loops.Used[RediscoveryLoop] != 1 {
+		t.Fatalf("resolving the commands item gave stage %s, run %+v; want implementation, review and QA run again on the new recipe, charged once", rerun.Stage, rerun.Workflow)
+	}
+
+	again := complete(t, complete(t, rerun))
+	if again.Stage != "qa" {
+		t.Fatalf("after the re-run the factory is at %s; want QA again", again.Stage)
+	}
+	failedAgain := eventFor(again, "result")
+	failedAgain.Stack = again.Stack
+	failedAgain.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "failed", InputHeads: again.Stack, OutputHeads: again.Stack}
+	spent := step(t, again, failedAgain)
+	rediscovered := eventFor(spent, "commands")
+	r.Digest = "another-sign-in-script"
+	rediscovered.Recipe = &r
+	waiting := step(t, spent, rediscovered)
+	failure := slices.IndexFunc(waiting.Attention, func(a state.Attention) bool { return a.Kind == "failure" && a.Open() })
+	if failure < 0 || waiting.Workflow.ActiveRun != "" || waiting.Loops.Used[RediscoveryLoop] != 1 {
+		t.Fatalf("with the rediscovery budget spent, corrected commands left run %q, open %+v, rediscoveries %d; want them saved, nothing re-run by itself and the failure waiting for the developer", waiting.Workflow.ActiveRun, waiting.OpenAttention(), waiting.Loops.Used[RediscoveryLoop])
+	}
+	retry := eventFor(waiting, "retry")
+	item := waiting.Attention[failure]
+	retry.ItemID, retry.ArtifactRevision, retry.Answer, retry.Receipt, retry.Increment = item.ID, item.Revision, "retry with the new sign-in script", "conversation:2", 1
+	retried := step(t, waiting, retry)
+	if retried.Stage != "implement" || retried.Limits.StageRetries != 2 {
+		t.Fatalf("the developer's retry with an increment gave stage %s and stage_retries %d; want work re-run from implementation on the corrected commands and the budget raised once", retried.Stage, retried.Limits.StageRetries)
+	}
+	if reviewed := complete(t, retried); reviewed.Stage != "review" || reviewed.Evidence.Local.RecipeDigest != "another-sign-in-script" {
+		t.Fatalf("after the retry the factory is at %s with local checks on %q; want review on the corrected commands", reviewed.Stage, reviewed.Evidence.Local.RecipeDigest)
+	}
+	if qa := complete(t, complete(t, retried)); qa.Stage != "qa" {
+		t.Fatalf("after review the factory is at %s; want QA on the corrected commands", qa.Stage)
 	}
 }
 
@@ -447,5 +532,44 @@ func TestCheckpointRefusesUnpublishedWorkBeforeAnyExternalEffect(t *testing.T) {
 	s = step(t, s, e)
 	if s.Checkpoint.Status != state.CheckpointRefused || s.Workflow.Pending != nil {
 		t.Fatal(s)
+	}
+}
+
+func TestDiscoverySettlesOnlyFailuresOfStagesThatRunCommandsAndKeepsTheRetryOnAnOpenItem(t *testing.T) {
+	failing := func(stage string, implemented bool) state.State {
+		s := workflowState()
+		if implemented {
+			s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
+		}
+		if err := dispatch(&s, eventFor(s, "result"), stage); err != nil {
+			t.Fatal(err)
+		}
+		failed := eventFor(s, "result")
+		failed.Stack = s.Stack
+		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+		return step(t, s, failed)
+	}
+	unresolved := func(s state.State, digest string) Event {
+		e := eventFor(s, "commands")
+		r := s.Recipe
+		r.Digest, r.Unresolved = digest, []string{"test: DATABASE_URL is not set"}
+		e.Recipe = &r
+		return e
+	}
+	analyst := failing("requirements", false)
+	if asked := step(t, analyst, unresolved(analyst, "partial")); !slices.ContainsFunc(asked.OpenAttention(), func(a state.Attention) bool { return a.Kind == "failure" }) {
+		t.Fatalf("discovery swallowed a requirements failure into the commands wait: %+v", asked.OpenAttention())
+	}
+
+	qa := failing("qa", true)
+	qa.Evidence.Local = passed(qa)
+	qa.Attention = append(qa.Attention, state.Attention{ID: "earlier-commands", Kind: "commands", Title: "Resolve repository commands", StageKey: "requirements", CreatedAt: qa.UpdatedAt})
+	asked := step(t, qa, unresolved(qa, qa.Recipe.Digest))
+	resolved := eventFor(asked, "commands")
+	r := asked.Recipe
+	r.Unresolved = nil
+	resolved.Recipe = &r
+	if rerun := step(t, asked, resolved); rerun.Workflow.ActiveRun == "" || rerun.Stage != "qa" {
+		t.Fatalf("after the developer set up what QA needed (same recipe), resolving the already open commands item left stage %s and run %q; want QA run again", rerun.Stage, rerun.Workflow.ActiveRun)
 	}
 }

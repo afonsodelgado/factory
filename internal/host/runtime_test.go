@@ -1045,3 +1045,64 @@ func TestOnlyACodexStageIsToldItsSandboxCannotStartChrome(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
+	repo, stateDir := t.TempDir(), t.TempDir()
+	worktree := filepath.Join(repo, "wt")
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	analyst := state.StageRun{ID: "csv-start-analyst-1", Role: "analyst", Token: uuid.NewString(), Result: filepath.Join(f.Dir, "stages", "csv-start-analyst-1.result.json")}
+	runs.Runs = append(runs.Runs, analyst)
+	if err := runs.Save(); err != nil {
+		t.Fatal(err)
+	}
+	engine := &wakingEngine{}
+	r := New(Runtime{Config: &state.Config{StateDir: stateDir}, Engine: engine})
+	r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}})
+
+	reply, err := r.Stage(StageRequest{Action: "discover", Factory: "csv", Text: "Discover build, lint and test."})
+	if err != nil || !strings.HasSuffix(reply.Result, "stages/csv-discover-1.result.json") {
+		t.Fatalf("discovery beside the analyst answered %+v, %v; want it started with its own result file", reply, err)
+	}
+	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	running := RunningStage(f, after, nil, nil)
+	if _, discovering := after.Discovering(); running == nil || running.Run.Role != "analyst" || !discovering {
+		t.Fatalf("with discovery running the factory shows %+v; want the analyst's stage, with discovery beside it", running)
+	}
+	if prompt, _ := os.ReadFile(filepath.Join(f.Dir, "stages", "csv-discover-1.prompt.md")); !bytes.Contains(prompt, []byte("factory workflow record")) {
+		t.Fatalf("the discoverer's prompt is:\n%s\nwant the discoverer agent's instructions", prompt)
+	}
+	if again, err := r.Stage(StageRequest{Action: "discover", Factory: "csv", Text: "Discover again."}); err != nil || again.Result != reply.Result {
+		t.Fatalf("a second discover while the first runs answered %+v, %v; want the running one, never two discoverers", again, err)
+	}
+
+	quiet := 20 * time.Minute
+	discovery := DiscoveryStage(f, after, nil, []*state.HookFile{{Token: after.Runs[1].Token, Prompt: &state.PendingPrompt{At: time.Now()}}}, quiet)
+	items := AttentionItems(Item{Factory: f, Stage: running, Discovery: discovery}, time.Now(), nil)
+	if !slices.ContainsFunc(items, func(a AttentionItem) bool { return a.Kind == "permission" && a.Role == state.Discoverer }) {
+		t.Fatalf("a discoverer waiting on a permission prompt shows %+v; want a permission item, or discovery stalls unseen", items)
+	}
+	later := time.Now().Add(2 * time.Minute)
+	if messages := InboxMessages(stateDir, Item{Factory: f, Discovery: discovery}, nil, later); !slices.ContainsFunc(messages, func(m InboxMessage) bool { return strings.HasPrefix(m.Text, "stage discoverer lost:") }) {
+		t.Fatalf("a discoverer whose pane is gone sent %+v; want the supervisor told to run discovery again", messages)
+	}
+
+	run := after.Runs[1]
+	pane := tmux.Pane{ID: "%7", Repo: repo, StageOf: "csv", Stage: state.Discoverer, Token: run.Token, Command: "claude"}
+	working := DiscoveryStage(f, after, []tmux.Pane{pane}, []*state.HookFile{{Token: run.Token, Main: &state.HookEvent{Event: "PreToolUse", At: run.StartedAt.Add(time.Minute)}}}, quiet)
+	if working.Lost(later) {
+		t.Fatal("a discoverer still working in its live pane after the grace counts as lost; want long discoveries left alone, never a second discoverer")
+	}
+	stop := state.HookEvent{Event: "StopFailure", At: run.StartedAt.Add(time.Minute)}
+	stuck := DiscoveryStage(f, after, []tmux.Pane{pane}, []*state.HookFile{{Token: run.Token, Main: &stop, Last: stop}}, quiet)
+	switch {
+	case stuck.Lost(run.StartedAt.Add(5 * time.Minute)):
+		t.Fatal("a discoverer that stopped 4 minutes ago counts as lost; want it given stalled_after before it is replaced")
+	case !stuck.Lost(run.StartedAt.Add(30 * time.Minute)):
+		t.Fatal("a discoverer whose turn ended without a result and stayed quiet past stalled_after counts as running; want it reported lost")
+	}
+	busy := DiscoveryStage(f, after, []tmux.Pane{pane}, []*state.HookFile{{Token: run.Token, Main: &stop, Last: state.HookEvent{Event: "SubagentStop", At: run.StartedAt.Add(25 * time.Minute)}}}, quiet)
+	if busy.Lost(run.StartedAt.Add(30 * time.Minute)) {
+		t.Fatal("a discoverer whose background work was still reporting 5 minutes ago counts as lost; want later hook activity respected")
+	}
+}

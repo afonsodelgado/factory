@@ -227,7 +227,7 @@ func TestMalformedStageResultsDoNotWakeTheSupervisor(t *testing.T) {
 	if err := runs.Save(); err != nil {
 		t.Fatal(err)
 	}
-	messages := host.InboxMessages(stateDir, Item{Factory: f}, nil)
+	messages := host.InboxMessages(stateDir, Item{Factory: f}, nil, time.Now())
 	if len(messages) != 1 || !strings.HasSuffix(messages[0].Text, "designer-1.result.json") {
 		t.Errorf("inbox %+v; want only the valid result", messages)
 	}

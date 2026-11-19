@@ -152,8 +152,10 @@ func permissionItems(it Item) []AttentionItem {
 	if factory.PermissionPrompt(it.Hook) {
 		items = append(items, permissionItem(it.Hook.Prompt, "", it.Pane))
 	}
-	if it.Stage != nil && factory.PermissionPrompt(it.Stage.Hook) {
-		items = append(items, permissionItem(it.Stage.Hook.Prompt, it.Stage.Run.Role, it.Stage.Pane))
+	for _, stage := range []*StageView{it.Stage, it.Discovery} {
+		if stage != nil && factory.PermissionPrompt(stage.Hook) {
+			items = append(items, permissionItem(stage.Hook.Prompt, stage.Run.Role, stage.Pane))
+		}
 	}
 	return items
 }

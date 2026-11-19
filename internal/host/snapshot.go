@@ -19,6 +19,7 @@ type Item struct {
 	Hook       *state.HookFile
 	Pane       *tmux.Pane
 	Stage      *StageView
+	Discovery  *StageView
 	Revising   map[string]string
 	Screen     *Screen
 	Unreported bool
@@ -110,14 +111,15 @@ func (l *Loader) Load() Snapshot {
 		l.rememberSession(f, PaneHook(TokenOf(pane), hooks))
 		l.rememberBranches(f)
 		stage := RunningStage(f, runs[f.Key()], panes, hooks)
+		discovery := DiscoveryStage(f, runs[f.Key()], panes, hooks, stalledAfter[f.Repo])
 		revising := RevisingGates(f, runs[f.Key()], panes, hooks)
-		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: stage.HookValue(), Revising: revising}
+		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: promptingFirst(stage.HookValue(), discovery.HookValue()), Revising: revising}
 		status := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		live.Answered = true
 		unblocked := factory.StatusOf(f, live, now, stalledAfter[f.Repo])
 		l.logHook(f, hook)
 		unreported := status == factory.NeedsYou && factory.Unreported(f, live, now)
-		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage, Revising: revising, Unreported: unreported})
+		snap.Items = append(snap.Items, Item{Factory: f, Status: status, Unblocked: unblocked, Hook: hook, Pane: pane, Stage: stage, Discovery: discovery, Revising: revising, Unreported: unreported})
 	}
 	return snap
 }
@@ -149,6 +151,55 @@ func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, h
 		view.Pane = &p
 	}
 	return view
+}
+
+const discoveryGrace = time.Minute
+
+func DiscoveryStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile, patience time.Duration) *StageView {
+	if runs == nil {
+		return nil
+	}
+	run, ok := runs.Discovering()
+	if !ok {
+		return nil
+	}
+	view := &StageView{Run: run, Hook: PaneHook(run.Token, hooks), patience: patience}
+	if p, found := stagePaneOf(panes, f, run.Role, run.Token); found {
+		view.Pane = &p
+	}
+	return view
+}
+
+func promptingFirst(stage, discovery *state.HookFile) *state.HookFile {
+	if factory.PermissionPrompt(discovery) && !factory.PermissionPrompt(stage) {
+		return discovery
+	}
+	return stage
+}
+
+func (v *StageView) Lost(now time.Time) bool {
+	if v == nil || now.Sub(v.Run.StartedAt) <= discoveryGrace {
+		return false
+	}
+	if _, live := LiveStagePane(v.paneValue()); !live {
+		return true
+	}
+	stoppedWithoutResult := v.Hook != nil && v.Hook.Main != nil && v.Hook.Main.At.After(v.Run.StartedAt) && stopped(*v.Hook.Main)
+	return stoppedWithoutResult && now.Sub(v.lastActivity()) > v.patience
+}
+
+func (v *StageView) lastActivity() time.Time {
+	if v.Hook.Last.At.After(v.Hook.Main.At) {
+		return v.Hook.Last.At
+	}
+	return v.Hook.Main.At
+}
+
+func (v *StageView) paneValue() (tmux.Pane, bool) {
+	if v == nil || v.Pane == nil {
+		return tmux.Pane{}, false
+	}
+	return *v.Pane, true
 }
 
 func RevisingGates(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile) map[string]string {

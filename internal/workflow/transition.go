@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,33 +100,12 @@ func apply(s *state.State, e Event, dir string) error {
 		s.Workflow.Gate = ""
 		return dispatch(s, e, "design")
 	case "commands":
-		if e.Recipe == nil || e.Recipe.Digest == "" {
-			return errors.New("missing command recipe")
+		return commands(s, e)
+	case "discovery":
+		if e.Note == nil || !slices.Contains(DiscoveryNotes, e.Note.Event) || e.Note.Detail == "" {
+			return fmt.Errorf("a discovery note needs one of %s and a detail", strings.Join(DiscoveryNotes, ", "))
 		}
-		if s.Recipe.Digest != e.Recipe.Digest {
-			if !recipeChangeable(s) {
-				return errors.New("changed commands wait until no run is active and no developer item resumes a stage other than implementation")
-			}
-			invalidate(s, e.At)
-		}
-		s.Recipe = *e.Recipe
-		if len(s.Recipe.Unresolved) > 0 {
-			if !slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "commands" }) {
-				attention(s, e, "commands", "Resolve repository commands", strings.Join(s.Recipe.Unresolved, "\n"))
-			}
-			return nil
-		}
-		for i := range s.Attention {
-			if s.Attention[i].Kind == "commands" && s.Attention[i].Open() {
-				s.Attention[i].ResolvedAt = e.At
-			}
-		}
-		if stranded(s) {
-			if len(s.PRs) > 0 {
-				return dispatch(s, e, "pr")
-			}
-			return dispatch(s, e, "implement")
-		}
+		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Note.Event, Detail: e.Note.Detail})
 	case "observe":
 		wasDone := s.Done()
 		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
@@ -182,6 +162,118 @@ func apply(s *state.State, e Event, dir string) error {
 	default:
 		return fmt.Errorf("unknown workflow event %q", e.Kind)
 	}
+	return nil
+}
+
+const RediscoveryLoop = "rediscovery"
+
+func commands(s *state.State, e Event) error {
+	if e.Recipe == nil || e.Recipe.Digest == "" {
+		return errors.New("missing command recipe")
+	}
+	changed := s.Recipe.Digest != e.Recipe.Digest
+	if changed {
+		if !recipeChangeable(s) {
+			return errors.New("changed commands wait until no run is active and no developer item resumes a stage other than implementation")
+		}
+		invalidate(s, e.At)
+	}
+	s.Recipe = *e.Recipe
+	failure := settleable(s)
+	if len(s.Recipe.Unresolved) > 0 {
+		if failure != nil {
+			settle(s, failure, e.At)
+		}
+		if openCommands(s) == nil {
+			attention(s, e, "commands", "Resolve repository commands", cmp.Or(e.Detail, strings.Join(s.Recipe.Unresolved, "\n")))
+		}
+		if failure != nil {
+			openCommands(s).LimitKey = RediscoveryLoop
+		}
+		return nil
+	}
+	rerun := false
+	for i := range s.Attention {
+		if s.Attention[i].Kind == "commands" && s.Attention[i].Open() {
+			s.Attention[i].ResolvedAt = e.At
+			rerun = rerun || s.Attention[i].LimitKey == RediscoveryLoop
+		}
+	}
+	if changed && failure != nil {
+		settle(s, failure, e.At)
+		rerun = true
+	}
+	switch {
+	case rerun:
+		s.Workflow.ActiveRun, s.Workflow.Pending = "", nil
+		return dispatch(s, e, rerunStage(s))
+	case stranded(s) && len(s.PRs) > 0:
+		return dispatch(s, e, "pr")
+	case stranded(s):
+		return dispatch(s, e, "implement")
+	}
+	return nil
+}
+
+var recipeStages = []string{"implement", "review", "qa", "pr"}
+
+func openCommands(s *state.State) *state.Attention {
+	for i := range s.Attention {
+		if s.Attention[i].Kind == "commands" && s.Attention[i].Open() {
+			return &s.Attention[i]
+		}
+	}
+	return nil
+}
+
+func openFailure(s *state.State) *state.Attention {
+	if len(s.Workflow.Runs) == 0 || s.Workflow.ActiveRun != "" {
+		return nil
+	}
+	stage := s.Workflow.Runs[len(s.Workflow.Runs)-1].Stage
+	if !slices.Contains(recipeStages, stage) {
+		return nil
+	}
+	for i := range s.Attention {
+		if s.Attention[i].Kind == "failure" && s.Attention[i].StageKey == stage && s.Attention[i].Open() {
+			return &s.Attention[i]
+		}
+	}
+	return nil
+}
+
+func settleable(s *state.State) *state.Attention {
+	if s.Loops.Used[RediscoveryLoop] >= s.Limits.StageRetries {
+		return nil
+	}
+	return openFailure(s)
+}
+
+func settle(s *state.State, failure *state.Attention, at state.Time) {
+	failure.ResolvedAt, failure.Answer = at, "commands rediscovered"
+	s.Loops.Used[RediscoveryLoop]++
+}
+
+var afterImplementation = []string{"review", "qa", "pr"}
+
+func rerunStage(s *state.State) string {
+	stage := s.Workflow.Runs[len(s.Workflow.Runs)-1].Stage
+	switch {
+	case !slices.Contains(afterImplementation, stage) || LocalChecks(*s, s.Evidence.Local):
+		return stage
+	case len(s.PRs) > 0:
+		return "pr"
+	}
+	return "implement"
+}
+
+func retry(s *state.State, e Event, stage string) error {
+	last := s.Workflow.Runs[len(s.Workflow.Runs)-1]
+	s.Workflow.ActiveRun, s.Workflow.Pending = "", nil
+	if err := dispatch(s, e, stage); err != nil {
+		return err
+	}
+	s.Workflow.Runs[len(s.Workflow.Runs)-1].Retries = last.Retries + 1
 	return nil
 }
 
@@ -387,8 +479,10 @@ func recipeChangeable(s *state.State) bool {
 		return true
 	}
 	running := s.Workflow.ActiveRun != "" || s.Workflow.Pending != nil
+	failure := openFailure(s)
 	resumesAnotherStage := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool {
-		return a.Kind != "handoff" && a.Kind != "commands" && !resumesImplementation(a)
+		settled := failure != nil && a.ID == failure.ID
+		return a.Kind != "handoff" && a.Kind != "commands" && !resumesImplementation(a) && !settled
 	})
 	return !running && !resumesAnotherStage
 }
@@ -499,22 +593,18 @@ func answer(s *state.State, e Event) error {
 			return errors.New("retry needs a failed run")
 		}
 		last := s.Workflow.Runs[len(s.Workflow.Runs)-1]
-		if last.Retries >= s.Limits.StageRetries {
+		if e.Increment != 0 || last.Retries >= s.Limits.StageRetries {
 			if e.Increment <= 0 || e.Increment > int(^uint(0)>>1)-s.Limits.StageRetries {
 				return errors.New("stage retries are exhausted: retry needs the developer's positive increment")
 			}
 			s.Limits.StageRetries += e.Increment
 		}
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
-		if s.Workflow.ActiveRun != "" {
-			s.Workflow.ActiveRun = ""
-			s.Workflow.Pending = nil
+		stage := last.Stage
+		if s.Workflow.ActiveRun == "" {
+			stage = rerunStage(s)
 		}
-		if err := dispatch(s, e, last.Stage); err != nil {
-			return err
-		}
-		s.Workflow.Runs[len(s.Workflow.Runs)-1].Retries = last.Retries + 1
-		return nil
+		return retry(s, e, stage)
 	}
 	if e.Kind == "cap" {
 		if a.Kind != "cap" || s.Workflow.Correction == nil {

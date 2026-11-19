@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -92,7 +93,7 @@ func (m *Runtime) undelivered(it Item) []string {
 		}
 	}
 	record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)
-	if pending := len(InboxMessages(m.Config.StateDir, it, ReadDelivered(record))); pending > 0 {
+	if pending := len(InboxMessages(m.Config.StateDir, it, ReadDelivered(record), m.Now())); pending > 0 {
 		blockers = append(blockers, fmt.Sprintf("%d inbox messages have not reached the supervisor yet", pending))
 	}
 	return blockers
@@ -113,7 +114,7 @@ func (m *Runtime) QueueInbox() {
 			continue
 		}
 		record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)
-		for _, msg := range InboxMessages(m.Config.StateDir, it, ReadDelivered(record)) {
+		for _, msg := range InboxMessages(m.Config.StateDir, it, ReadDelivered(record), m.Now()) {
 			if m.inboxQueued[msg.Key] {
 				continue
 			}
@@ -126,13 +127,18 @@ func (m *Runtime) QueueInbox() {
 	}
 }
 
-func InboxMessages(stateDir string, it Item, delivered []string) []InboxMessage {
+const lostSuffix = ".lost"
+
+func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) []InboxMessage {
 	var messages []InboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
 	for _, run := range runs.Runs {
 		if run.Finished() && !slices.Contains(delivered, run.Result) {
 			messages = append(messages, InboxMessage{Key: run.Result, Text: "stage " + run.Role + " done: " + run.Result})
 		}
+	}
+	if lost := it.Discovery; lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
+		messages = append(messages, InboxMessage{Key: lost.Run.Result + lostSuffix, Text: "stage discoverer lost: it stopped or its pane closed without writing " + lost.Run.Result + "; run factory stage discover again"})
 	}
 	files, _ := filepath.Glob(filepath.Join(it.Factory.Dir, "inbox", "*.json"))
 	sort.Strings(files)
