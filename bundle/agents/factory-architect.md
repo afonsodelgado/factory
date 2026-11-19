@@ -60,8 +60,10 @@ A message, or a file a message tells you to read, that starts with `review-<id>-
 End every turn with:
 
 ```factory-result
-{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"artifacts":[{"url":"<path relative to the factory dir>","title":"<title>"}],"summary":"one sentence","data":{}}
 ```
+
+List every page the developer must review in `artifacts`: `plan.html`, and `schematic.html` when you wrote one. The engine rejects a `done` result without them.
 
 Return design-affecting findings explicitly, with severity `design`. Never silently change approved design. The supervisor asks whether to return to design; refusal must record the exact finding as an accepted risk in plan.md.
 

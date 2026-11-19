@@ -212,6 +212,18 @@ func TestHostContinuesAfterClientDisconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.awaitTyped(t, calls, "stage engineer done: "+first.Result, "CI passed")
+	data, _ := json.Marshal(StageRequest{EffectID: "engineer-1", Action: "send", Reask: true, Token: f.supervisor.Token, Role: "engineer", Text: "The engine rejected your result."})
+	reasked := request(t, socket, Message{T: "stage", Data: data})
+	if reasked.Result == first.Result {
+		t.Fatal("a re-ask handed back the rejected result instead of asking the agent again")
+	}
+	if err := WriteFile(reasked.Result, `{"schema_version":2,"run_id":"engineer-1","status":"done"}`); err != nil {
+		t.Fatal(err)
+	}
+	if message, _ := os.ReadFile(filepath.Join(f.dir, "stages", "engineer-1.message.md")); !strings.Contains(string(message), reasked.Result) {
+		t.Fatal("the re-ask did not tell the agent where to write its corrected result")
+	}
+	f.awaitTyped(t, calls, "stage engineer done: "+reasked.Result)
 	stop()
 
 	f.pipeline = strings.ReplaceAll(f.pipeline, "engineer-1", "engineer-2")

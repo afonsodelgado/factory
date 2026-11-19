@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,7 +13,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-func Next(snapshot state.State, event Event) (Proposal, error) {
+func Next(dir string, snapshot state.State, event Event) (Proposal, error) {
 	if err := state.ValidateState(snapshot); err != nil {
 		return Proposal{}, err
 	}
@@ -39,7 +41,7 @@ func Next(snapshot state.State, event Event) (Proposal, error) {
 	if s.Loops.Used == nil {
 		s.Loops.Used = map[string]int{}
 	}
-	if err := apply(&s, event); err != nil {
+	if err := apply(&s, event, dir); err != nil {
 		return Proposal{}, err
 	}
 	s.Revision++
@@ -49,7 +51,7 @@ func Next(snapshot state.State, event Event) (Proposal, error) {
 	return proposal, nil
 }
 
-func apply(s *state.State, e Event) error {
+func apply(s *state.State, e Event, dir string) error {
 	switch e.Kind {
 	case "checkpoint":
 		if e.Checkpoint == nil || e.Checkpoint.Operation == "" || e.Receipt == "" || !slices.Contains([]string{state.CheckpointReady, state.CheckpointRefused}, e.Checkpoint.Status) {
@@ -79,7 +81,7 @@ func apply(s *state.State, e Event) error {
 		}
 		s.Workflow.Pending = nil
 	case "result":
-		return result(s, e)
+		return result(s, e, dir)
 	case "approval", "cap", "handoff", "continue", "design_return", "retry", "answers", "changes":
 		return answer(s, e)
 	case "design_comments":
@@ -208,7 +210,7 @@ func dispatch(s *state.State, e Event, stage string) error {
 	return nil
 }
 
-func result(s *state.State, e Event) error {
+func result(s *state.State, e Event, dir string) error {
 	r := e.Result
 	if r == nil || r.SchemaVersion != 2 || r.RunID == "" || r.RunID != s.Workflow.ActiveRun || len(s.Workflow.Runs) == 0 {
 		return errors.New("result does not match active run")
@@ -221,6 +223,11 @@ func result(s *state.State, e Event) error {
 		return errors.New("invalid result outcome")
 	}
 	stage := run.Stage
+	if r.Status == "done" && (stage == "design" || stage == "plan") {
+		if err := reviewPages(dir, stage, r.Artifacts); err != nil {
+			return err
+		}
+	}
 	readOnly := stage == "review" || stage == "qa"
 	if readOnly && !SameHeads(r.InputHeads, r.OutputHeads) {
 		return errors.New("read-only stage changed the stack")
@@ -332,6 +339,23 @@ func result(s *state.State, e Event) error {
 			return fmt.Errorf("handoff is not ready: %s", strings.Join(reasons, "; "))
 		}
 		offerHandoff(s, e)
+	}
+	return nil
+}
+
+func reviewPages(dir, stage string, artifacts []state.Artifact) error {
+	const form = `{"url":"design/variant-a.html","title":"..."}`
+	if len(artifacts) == 0 {
+		return fmt.Errorf("a done %s result needs an \"artifacts\" field listing every page the developer reviews, each as %s with its url relative to the factory directory", stage, form)
+	}
+	for _, a := range artifacts {
+		if !state.Portable(a.URL) || !strings.HasSuffix(a.URL, ".html") {
+			return fmt.Errorf("%s artifact url %q must be an .html path relative to the factory directory, as %s", stage, a.URL, form)
+		}
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(a.URL)))
+		if err != nil || info.IsDir() {
+			return fmt.Errorf("%s artifact %q is not a file in the factory directory %s; list each page as %s", stage, a.URL, dir, form)
+		}
 	}
 	return nil
 }
