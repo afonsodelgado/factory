@@ -1,6 +1,10 @@
 package workflow
 
-import "github.com/afonsodelgado/factory/internal/state"
+import (
+	"encoding/json"
+
+	"github.com/afonsodelgado/factory/internal/state"
+)
 
 const (
 	DesignLoop = "design_plan"
@@ -35,7 +39,7 @@ type Event struct {
 }
 
 type Result struct {
-	Questions     []string            `json:"questions,omitempty"`
+	Questions     []Question          `json:"questions,omitempty"`
 	NeedsDesign   *bool               `json:"needs_design,omitempty"`
 	Artifacts     []state.Artifact    `json:"artifacts,omitempty"`
 	SchemaVersion int                 `json:"schema_version"`
@@ -46,6 +50,20 @@ type Result struct {
 	Findings      []state.Finding     `json:"findings"`
 	Evidence      state.Verification  `json:"evidence"`
 	Outputs       []string            `json:"outputs"`
+}
+
+type Question struct {
+	Text        string   `json:"text"`
+	Options     []string `json:"options,omitempty"`
+	Recommended string   `json:"recommended,omitempty"`
+}
+
+func (q *Question) UnmarshalJSON(data []byte) error {
+	if json.Unmarshal(data, &q.Text) == nil {
+		return nil
+	}
+	type plain Question
+	return json.Unmarshal(data, (*plain)(q))
 }
 
 type Proposal struct {

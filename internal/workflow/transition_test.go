@@ -337,12 +337,28 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 func TestInterviewAnswersDoNotConsumeTransportRetriesOrSkipSelectedDesign(t *testing.T) {
 	s := workflowState()
 	s = step(t, s, eventFor(s, "start"))
-	for range 3 {
+	batches := []string{
+		`[{"text":"Which behaviour?","options":["keep","replace"],"recommended":"keep"},"Anything else?"]`,
+		`["Which behaviour?"]`,
+		`["Which behaviour?","Anything else?"]`,
+	}
+	for _, batch := range batches {
 		e := eventFor(s, "result")
 		e.Stack = s.Stack
-		e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "blocked", InputHeads: s.Stack, OutputHeads: s.Stack, Questions: []string{"Which behaviour?"}}
+		e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "blocked", InputHeads: s.Stack, OutputHeads: s.Stack}
+		if err := json.Unmarshal([]byte(batch), &e.Result.Questions); err != nil {
+			t.Fatal(err)
+		}
 		s = step(t, s, e)
-		a := s.Attention[len(s.Attention)-1]
+		var a state.Attention
+		if encoded, err := json.Marshal(s.Attention[len(s.Attention)-1]); err != nil || json.Unmarshal(encoded, &a) != nil {
+			t.Fatal(string(encoded), err)
+		}
+		for i, q := range e.Result.Questions {
+			if a.Questions[i] != q.Text || strings.Join(a.Options[i], "|") != strings.Join(q.Options, "|") || a.Recommended[i] != q.Recommended {
+				t.Fatalf("question %d of %s became %q %q %q", i, batch, a.Questions, a.Options, a.Recommended)
+			}
+		}
 		e = eventFor(s, "answers")
 		e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "chosen behaviour", "conversation-answer"
 		s = step(t, s, e)
