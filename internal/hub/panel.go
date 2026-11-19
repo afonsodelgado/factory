@@ -395,6 +395,9 @@ func (m *Model) panelView() panel.View {
 			v.Artifacts = append(v.Artifacts, artifactRow(a, m.threadCounter(f)))
 		}
 	}
+	for _, p := range m.nodeFactories[f.Key()].Pages {
+		v.Artifacts = append(v.Artifacts, panel.ArtifactRow{Name: p.Name, Title: p.Title, URL: p.URL, OpenThreads: p.OpenThreads})
+	}
 	v.PRs = m.prsFor(f)
 	v.Checked = m.prsChecked
 	v.Counts = [3]int{len(v.Items), len(v.PRs), len(v.Artifacts)}
@@ -861,8 +864,11 @@ const doorWait = 5 * time.Second
 
 func (m *Model) openReview(url, title string) tea.Cmd {
 	it, ok := m.selectedItem()
-	if !ok || it.Factory.Remote != nil {
+	if !ok {
 		return m.openCmd(url)
+	}
+	if it.Factory.Remote != nil {
+		return m.openCmd(m.remotePage(it.Factory, url))
 	}
 	page, served := review.MobilePath(host.ReviewFactory(it), url)
 	origin := m.Config.NodeOrigin()
@@ -873,6 +879,19 @@ func (m *Model) openReview(url, title string) tea.Cmd {
 		return m.openCmd(origin + page)
 	}
 	return m.openThroughDoor(page, cmp.Or(title, path.Base(page)))
+}
+
+func (m *Model) remotePage(f factory.Factory, url string) string {
+	l, ok := m.nodeOf(f)
+	if !ok {
+		return url
+	}
+	for _, p := range m.nodeFactories[f.Key()].Pages {
+		if p.URL == url && p.Href != "" {
+			return "https://" + l.member.Name + p.Href
+		}
+	}
+	return url
 }
 
 func (m *Model) openThroughDoor(page, title string) tea.Cmd {

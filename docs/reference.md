@@ -184,7 +184,7 @@ Upgrading from a release with pairing: the first `factory node run` moves `phone
 
 ### Reviewing designs and plans
 
-Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `ctrl+o` opens one in your browser on the node's review page at `https://<machine>.<tailnet>.ts.net/r/…`, the same page the phone app opens. The node never opens a browser itself.
+Designs and plans are HTML pages in the factory directory, listed in the panel's Artifacts tab and on its gates. `ctrl+o` opens one in your browser on the review page of the node the factory runs on, at `https://<machine>.<tailnet>.ts.net/r/…`, the same page the phone app opens. This works for a factory on another node too. The node never opens a browser itself.
 
 On a node without Tailscale, `ctrl+o` asks the node for a link and opens the page in this machine's browser at `http://127.0.0.1:<node.port>`. The link works once, within 2 minutes. It sets an HttpOnly cookie for that port, `factory_door_<port>`, for 12 hours, and only that cookie lets the browser in. A used or expired link shows *This link was already used*, and a page reached without the cookie shows *Open this page from the hub*; `ctrl+o` again gives a new link. The page is the same, with its comments, reload and Send.
 
