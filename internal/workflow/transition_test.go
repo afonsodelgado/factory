@@ -28,7 +28,7 @@ func passed(s state.State) state.Verification {
 
 func step(t *testing.T, s state.State, e Event) state.State {
 	t.Helper()
-	p, err := Next(s, e)
+	p, err := Next("testdata", s, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +40,12 @@ func complete(t *testing.T, s state.State, findings ...state.Finding) state.Stat
 	e := eventFor(s, "result")
 	e.Stack = s.Stack
 	e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "done", InputHeads: s.Stack, OutputHeads: s.Stack, Findings: findings, Evidence: passed(s)}
+	switch s.Workflow.Runs[len(s.Workflow.Runs)-1].Stage {
+	case "design":
+		e.Result.Artifacts = []state.Artifact{{URL: "design/variant-a.html", Title: "Variant A"}}
+	case "plan":
+		e.Result.Artifacts = []state.Artifact{{URL: "plan.html", Title: "Plan"}}
+	}
 	return step(t, s, e)
 }
 
@@ -152,11 +158,11 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 			}
 			partial := eventFor(s, "observe")
 			partial.Stack, partial.Observations = s.Stack, s.Evidence.PRs
-			if _, err := Next(s, partial); err == nil {
+			if _, err := Next("testdata", s, partial); err == nil {
 				t.Fatal("an observation without PRs wiped the published records")
 			}
 			partial.PRs, partial.Stack = s.PRs, nil
-			if _, err := Next(s, partial); err == nil {
+			if _, err := Next("testdata", s, partial); err == nil {
 				t.Fatal("an observation without a stack wiped the published heads")
 			}
 		})
@@ -166,14 +172,14 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	if err := dispatch(&reviewing, eventFor(reviewing, "result"), "review"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Next(reviewing, recipe(reviewing, "new-recipe")); err == nil {
+	if _, err := Next("testdata", reviewing, recipe(reviewing, "new-recipe")); err == nil {
 		t.Fatal("a changed recipe during review stranded the review result")
 	}
 	failed := eventFor(reviewing, "result")
 	failed.Stack = reviewing.Stack
 	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack}
 	retrying := step(t, reviewing, failed)
-	if _, err := Next(retrying, recipe(retrying, "new-recipe")); err == nil {
+	if _, err := Next("testdata", retrying, recipe(retrying, "new-recipe")); err == nil {
 		t.Fatal("a changed recipe under a review failure item stranded the retried review")
 	}
 	layered := offeredHandoff(t)
@@ -181,12 +187,12 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	layered.PRs = append(layered.PRs, state.PR{Number: 2, Branch: "feature-2", Base: "feature", HeadSHA: "c", BaseSHA: "a", URL: "https://example.test/2"})
 	someOf := eventFor(layered, "observe")
 	someOf.Stack, someOf.PRs, someOf.Observations = layered.Stack, layered.PRs[:1], layered.Evidence.PRs
-	if _, err := Next(layered, someOf); err == nil {
+	if _, err := Next("testdata", layered, someOf); err == nil {
 		t.Fatal("an observation with only some published PRs dropped the others")
 	}
 	removed := eventFor(layered, "observe")
 	removed.Stack, removed.PRs, removed.Observations = layered.Stack[:1], layered.PRs[:1], layered.Evidence.PRs
-	if _, err := Next(layered, removed); err != nil {
+	if _, err := Next("testdata", layered, removed); err != nil {
 		t.Fatal("a factory whose top layer was removed could no longer be observed:", err)
 	}
 	implementing := workflowState()
@@ -221,17 +227,17 @@ func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 	e.Approved = true
 	e.Stack = []state.StackBranch{{Branch: "feature", Parent: "main", Head: "changed", Base: "b"}}
 	e.Observations = s.Evidence.PRs
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("stale head accepted")
 	}
 	e.Stack = s.Stack
 	e.Observations[0].CI = "unknown"
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("unknown CI accepted")
 	}
 	e.Observations[0].CI = "pass"
 	e.Observations[0].At = state.Time{Time: time.Unix(50, 0)}
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("evidence older than the handoff offer accepted")
 	}
 	e.Observations[0].At = state.Time{Time: time.Unix(200, 0)}
@@ -264,14 +270,14 @@ func TestStaleGateItemsCannotApproveAnotherStage(t *testing.T) {
 	quick.PipelineStages = []string{"requirements", "plan", "implement", "review", "pr", "handoff"}
 	e = eventFor(s, "design_comments")
 	e.Receipt, e.Answer = "batch:1", "tighten the header"
-	if _, err := Next(quick, e); err == nil {
+	if _, err := Next("testdata", quick, e); err == nil {
 		t.Fatal("design comments dispatched a designer in a pipeline without design")
 	}
 	s = step(t, s, e)
 	s = complete(t, s)
 	e = eventFor(s, "approval")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = plan.ID, plan.Revision, "approved", "conversation:2", true
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("the plan item approved while a revised design waits")
 	}
 	design := s.Attention[len(s.Attention)-1]
@@ -295,13 +301,13 @@ func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerifi
 	broken := step(t, s, failed)
 	e = eventFor(broken, "approval")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = old.ID, old.Revision, "approved", "old-answer", true
-	if _, err := Next(broken, e); err == nil {
+	if _, err := Next("testdata", broken, e); err == nil {
 		t.Fatal("the stale design gate approved over a failed revision")
 	}
 	s = complete(t, s)
 	e = eventFor(s, "approval")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = old.ID, old.Revision, "approved", "old-answer", true
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("old design approval accepted")
 	}
 	s = workflowState()
@@ -359,7 +365,19 @@ func TestInterviewAnswersDoNotConsumeTransportRetriesOrSkipSelectedDesign(t *tes
 	if s.Stage != "design" {
 		t.Fatal(s.Stage)
 	}
+	e = eventFor(s, "result")
+	e.Stack = s.Stack
+	e.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "done", InputHeads: s.Stack, OutputHeads: s.Stack, Evidence: passed(s)}
+	for _, missing := range [][]state.Artifact{nil, {{URL: "design/missing.html"}}, {{URL: "file:///tmp/design/variant-a.html"}}} {
+		e.Result.Artifacts = missing
+		if _, err := Next("testdata", s, e); err == nil {
+			t.Fatalf("design gate opened on artifacts %v, so the developer has no page to review", missing)
+		}
+	}
 	s = complete(t, s)
+	if got := s.Stages["design"].Artifacts; len(got) != 1 || got[0].URL != "design/variant-a.html" {
+		t.Fatal("the design page is missing from stages.design.artifacts", got)
+	}
 	a = s.Attention[len(s.Attention)-1]
 	e = eventFor(s, "changes")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "revise navigation", "changes-receipt"
@@ -370,7 +388,7 @@ func TestInterviewAnswersDoNotConsumeTransportRetriesOrSkipSelectedDesign(t *tes
 	s = complete(t, s)
 	e = eventFor(s, "approval")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = a.ID, a.Revision, "old approval", "stale-receipt", true
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("old design approval accepted")
 	}
 }
@@ -391,7 +409,7 @@ func TestExhaustedRetriesResumeOnlyWithTheDevelopersIncrement(t *testing.T) {
 	}
 	e = eventFor(s, "retry")
 	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = a.ID, a.Revision, "retry", "conversation:1"
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("retry past the allowance without an increment accepted")
 	}
 	e.Increment = 1
@@ -406,7 +424,7 @@ func TestCheckpointRefusesUnpublishedWorkBeforeAnyExternalEffect(t *testing.T) {
 	e := eventFor(s, "checkpoint")
 	e.Receipt = "node-operation"
 	e.Checkpoint = &state.Checkpoint{Operation: "move", Status: state.CheckpointReady}
-	if _, err := Next(s, e); err == nil {
+	if _, err := Next("testdata", s, e); err == nil {
 		t.Fatal("unpublished stack checkpointed")
 	}
 	e.Checkpoint.Status, e.Checkpoint.Reason = state.CheckpointRefused, "unpublished branch"

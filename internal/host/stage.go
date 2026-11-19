@@ -39,6 +39,7 @@ type StageRequest struct {
 	Text     string   `json:"text"`
 	PRs      []string `json:"prs,omitempty"`
 	Factory  string   `json:"factory,omitempty"`
+	Reask    bool     `json:"reask,omitempty"`
 }
 
 type StageReply struct {
@@ -71,6 +72,9 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	}
 	if !slices.Contains(state.AgentRoles, r.Role) {
 		return StageReply{}, fmt.Errorf("%q is not a role; roles are %s", r.Role, strings.Join(state.AgentRoles, ", "))
+	}
+	if r.Reask && r.Action != "send" {
+		return StageReply{}, errors.New("only factory stage send can re-ask a run")
 	}
 	it, ok := m.stageItem(r)
 	if !ok {
@@ -108,6 +112,9 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
 	if err != nil {
 		return StageReply{}, err
+	}
+	if r.Reask {
+		return m.Reask(it, runs, r)
 	}
 	for i := len(runs.Runs) - 1; i >= 0; i-- {
 		previous := runs.Runs[i]
@@ -243,7 +250,25 @@ func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (St
 	return m.Record(it, runs, run, "started")
 }
 
+func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
+	latest, ok := runs.Latest(r.Role)
+	if !ok || latest.ID != r.EffectID {
+		return StageReply{}, fmt.Errorf("no %s run of %s to re-ask; start it with factory stage start", r.Role, r.EffectID)
+	}
+	if !latest.Finished() {
+		if _, live := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, latest.Token)); live {
+			return StageReply{Result: latest.Result}, nil
+		}
+		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
+	}
+	return m.sendStage(it, runs, r, strings.TrimSuffix(latest.Result, ".result.json")+".reask-"+uuid.NewString()[:8]+".result.json")
+}
+
 func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
+	return m.sendStage(it, runs, r, "")
+}
+
+func (m *Runtime) sendStage(it Item, runs *state.StageRuns, r StageRequest, result string) (StageReply, error) {
 	latest, ok := runs.Latest(r.Role)
 	if !ok {
 		return StageReply{}, fmt.Errorf("no %s stage has run in %s; start one with factory stage start", r.Role, it.Factory.Label())
@@ -253,14 +278,18 @@ func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (Sta
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
-	if err := WriteFile(run.Prompt, r.Text+"\n\n## Your result\n\n"+ResultContract(run.Result)); err != nil {
+	if result != "" {
+		run.Result = result
+		runs.Runs = slices.DeleteFunc(runs.Runs, func(old state.StageRun) bool { return old.ID == run.ID && old.Attempt == run.Attempt })
+	}
+	if err := WriteFile(run.Prompt, r.Text+"\n\n## Your result\n\n"+ResultContract(r.Role, run.Result)); err != nil {
 		return StageReply{}, err
 	}
 	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
 		return StageReply{}, err
 	}
 	kickoff := KickoffFor(run)
-	if pane, alive := LiveStagePane(stagePaneOf(m.snap.Panes, it.Factory, r.Role, run.Token)); alive {
+	if pane, alive := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, run.Token)); alive {
 		m.QueueType(QueuedType{Pane: pane.ID, Token: run.Token, Label: r.Role, Text: kickoff})
 		return m.Record(it, runs, run, "sent a follow-up to")
 	}
@@ -546,8 +575,17 @@ func KickoffFor(run state.StageRun) string {
 
 const findingContract = `Each entry in "findings" is {"id":"<stable id, reused when you report the same finding again>","stage":"<the stage this run belongs to>","severity":"minor|major|blocker|regression|design","layer":"<owning stack branch>","disposition":"open|closed","description":"<the defect and its mechanism>","evidence":"<file, command or repro>"}. Any other severity or disposition rejects the whole result. major, blocker, regression and design gate the loop; minor is listed and never loops. Use design only for a finding that should send the work back to the designer. Close a finding only once it is fixed and verified.`
 
-func ResultContract(path string) string {
-	return "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file.\n\n" + findingContract
+var reviewPagesByRole = map[string]string{
+	"designer":  "every design page the developer reviews, such as design/variant-a.html, including pages you did not change this turn",
+	"architect": "plan.html, and schematic.html when you wrote one, even when you did not change them this turn",
+}
+
+func ResultContract(role, path string) string {
+	contract := "End this turn with your factory-result block as the instructions above say. As your very last action of this turn, also write the same JSON object, and nothing else, to " + path + ". The supervisor waits for that file.\n\n" + findingContract
+	if pages, ok := reviewPagesByRole[role]; ok {
+		contract += "\n\nA done result must also have \"artifacts\" listing " + pages + `, each as {"url":"<path relative to the factory directory>","title":"<title>"}, for example {"url":"design/variant-a.html","title":"Variant A"}. The engine rejects a done result without them, and the developer cannot open a page that is not listed.`
+	}
+	return contract
 }
 
 const elsewhereNote = "These instructions were written for Claude Code. Skip any skill or tool you do not have; for HTML without the factory-artifact skill, write one self-contained page with its colours as tokens on :root, a dark-mode version under prefers-color-scheme, and no external assets beyond a pinned CDN script. Never publish anything: the factory app serves the files you write."
@@ -580,7 +618,7 @@ func StagePrompt(role, task, result, rules string, setting state.AgentSetting) (
 	if len(meta.Skills) > 0 {
 		b.WriteString("\nLoad these skills before you start: " + strings.Join(meta.Skills, ", ") + ".\n")
 	}
-	b.WriteString("\n## Your task\n\n" + strings.TrimSpace(task) + "\n\n## Your result\n\n" + ResultContract(result) + "\n")
+	b.WriteString("\n## Your task\n\n" + strings.TrimSpace(task) + "\n\n## Your result\n\n" + ResultContract(role, result) + "\n")
 	return b.String(), nil
 }
 

@@ -186,12 +186,15 @@ func (s *State) Anchor(dir string) {
 }
 
 func Anchored(dir, ref string) string {
-	u, err := url.Parse(ref)
-	portable := err == nil && u.Scheme == "" && ref != "" && filepath.IsLocal(filepath.FromSlash(ref))
-	if !portable {
+	if !Portable(ref) {
 		return ref
 	}
 	return "file://" + filepath.Join(dir, filepath.FromSlash(ref))
+}
+
+func Portable(ref string) bool {
+	u, err := url.Parse(ref)
+	return err == nil && u.Scheme == "" && ref != "" && filepath.IsLocal(filepath.FromSlash(ref))
 }
 
 func ReadState(path string) (*State, error) {

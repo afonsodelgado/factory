@@ -48,8 +48,10 @@ A message, or a file a message tells you to read, that starts with `review-<id>-
 End every turn with:
 
 ```factory-result
-{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"summary":"one sentence","data":{}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"artifacts":[{"url":"<path relative to the factory dir>","title":"<title>"}],"summary":"one sentence","data":{}}
 ```
+
+List every page the developer must review in `artifacts`, such as `design/variant-a.html`: the engine rejects a `done` result without them.
 
 A design revision after architect feedback requires a fresh artifact revision and developer approval. A comment follow-up never approves its own design.
 

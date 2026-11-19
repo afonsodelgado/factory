@@ -56,7 +56,7 @@ func runWorkflow(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	proposal, err := workflow.Next(*snapshot, event)
+	proposal, err := workflow.Next(filepath.Dir(args[1]), *snapshot, event)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
