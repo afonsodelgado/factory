@@ -3,6 +3,7 @@ package dialog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -67,10 +68,64 @@ func (n *Nodes) moveAllKey(key string) tea.Cmd {
 	return nil
 }
 
-func (n *Nodes) drawMoveAllConfirm(c *theme.Canvas) {
+type stranded struct {
+	factories []string
+	repos     []string
+	fix       string
+}
+
+func (n *Nodes) stranded(row NodeRow) stranded {
+	var s stranded
+	urls, answer := n.repoURLs(), n.peer(row.ID).answer
+	for _, f := range n.Context.Movable {
+		i := slices.Index(urls, f.GitURL)
+		if i < 0 || i >= len(answer.Repos) || answer.Repos[i].Mark != node.MarkFail {
+			continue
+		}
+		s.factories = append(s.factories, f.ID)
+		if !slices.Contains(s.repos, f.Repo) {
+			s.repos = append(s.repos, f.Repo)
+		}
+		s.fix = answer.Repos[i].Fix
+	}
+	return s
+}
+
+func (n *Nodes) confirmParagraphs() []string {
 	row, _ := n.selected()
-	text := fmt.Sprintf("Move every factory on %s to %s? Each one stops at its next checkpoint and resumes on %s. One that can't move stays on %s, with the reason.", n.Context.Machine, row.Short(), row.Short(), n.Context.Machine)
-	paragraph(c, c.H-5, text, theme.FgInk(theme.Yellow))
+	short, machine := row.Short(), n.Context.Machine
+	paragraphs := []string{fmt.Sprintf("Move every factory on %s to %s? Each one stops at its next checkpoint and resumes on %s. One that can't move stays on %s, with the reason.", machine, short, short, machine)}
+	s := n.stranded(row)
+	if len(s.factories) == 0 {
+		return paragraphs
+	}
+	verb, which, stays := "belong", "isn't", "They stay"
+	if len(s.factories) == 1 {
+		verb, stays = "belongs", "It stays"
+	}
+	if len(s.repos) > 1 {
+		which = "aren't"
+	}
+	return append(paragraphs, fmt.Sprintf("%d of %d can't move now: %s %s to %s, which %s added on %s. %s on %s.", len(s.factories), len(n.Context.Movable), joinNames(s.factories), verb, joinNames(s.repos), which, short, stays, machine))
+}
+
+func (n *Nodes) confirmHeight(w int) int {
+	lines := 0
+	for _, p := range n.confirmParagraphs() {
+		lines += len(theme.Wrap(p, w-2)) + 1
+	}
+	return lines
+}
+
+func (n *Nodes) drawMoveAllConfirm(c *theme.Canvas) {
+	y := c.H - 1 - n.confirmHeight(c.W)
+	for i, p := range n.confirmParagraphs() {
+		ink := theme.FgInk(theme.Yellow)
+		if i > 0 {
+			ink = theme.Text
+		}
+		y = paragraph(c, y, p, ink) + 1
+	}
 	c.Spans(1, c.H-1, []theme.Span{{Text: "y", Ink: theme.Key}, {Text: " move all   ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: " keep them here", Ink: theme.Text}})
 }
 
@@ -88,6 +143,11 @@ func (n *Nodes) drawMoveAll(c *theme.Canvas) {
 		c.PutMax(3, y, item.Factory, theme.Bright, batchOutcomeX-4)
 		c.PutMax(batchOutcomeX, y, text, ink, c.W-batchOutcomeX-1)
 		y++
+	}
+	if row, _ := n.selected(); !b.Running {
+		if s := n.stranded(row); len(s.repos) > 0 {
+			y = paragraph(c, y+1, "To move the others, add "+joinNames(s.repos)+" on "+b.TargetName+": "+s.fix+".", theme.Text)
+		}
 	}
 	y = paragraph(c, y+1, "Each factory moves on its own; a finished move is never undone.", theme.Muted) + 1
 	n.drawProblem(c, y)

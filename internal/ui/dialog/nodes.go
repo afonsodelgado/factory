@@ -46,9 +46,10 @@ func shortName(name string) string {
 	return short
 }
 
-type RepoURL struct {
-	Name string
-	URL  string
+type MovableFactory struct {
+	ID     string
+	Repo   string
+	GitURL string
 }
 
 type NodesContext struct {
@@ -65,13 +66,14 @@ type NodesContext struct {
 	Target    string
 	Leaving   []node.RosterMember
 	Others    []NodeRow
-	Repos     []RepoURL
+	Movable   []MovableFactory
 }
 
 type NodeAnswer struct {
 	Snapshot node.Snapshot
 	Report   node.Report
 	Needs    node.NeedsReport
+	Repos    []node.Check
 }
 
 type NodeActions interface {
@@ -219,8 +221,10 @@ func (n *Nodes) peer(id string) *peerState {
 
 func (n *Nodes) repoURLs() []string {
 	var urls []string
-	for _, r := range n.Context.Repos {
-		urls = append(urls, r.URL)
+	for _, f := range n.Context.Movable {
+		if f.GitURL != "" && !slices.Contains(urls, f.GitURL) {
+			urls = append(urls, f.GitURL)
+		}
 	}
 	return urls
 }
@@ -1093,7 +1097,7 @@ func (n *Nodes) drawScrolled(c *theme.Canvas) {
 	bottom := c.H - 1
 	switch {
 	case n.confirmingMove:
-		bottom = c.H - 6
+		bottom = c.H - 2 - n.confirmHeight(c.W)
 	case n.homing != nil:
 		bottom = c.H - 10
 	case n.problem != "":

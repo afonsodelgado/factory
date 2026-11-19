@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -15,7 +16,10 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
-const recipeWait = 10 * time.Minute
+const (
+	recipeWait = 10 * time.Minute
+	qaBlank    = "QA commands are blank on this node; discovered before QA"
+)
 
 type PreflightRequest struct {
 	Operation   string `json:"operation"`
@@ -127,13 +131,12 @@ func freeBytes(dir string) (uint64, error) {
 }
 
 func (ts *Transfers) checkRepo(r PreflightRequest, p *Preflight) (string, bool) {
-	repo, err := ts.repoFor(r.GitURL)
-	if err != nil {
-		missing := MissingRepo(r.GitURL, ts.Nodes.Self.short())
-		p.refuse(ts.Nodes, missing.Name, missing.Detail, missing.Fix)
+	repo, check := ts.Nodes.repoCheck(r.GitURL)
+	if check.Mark == MarkFail {
+		p.refuse(ts.Nodes, check.Name, check.Detail, check.Fix)
 		return "", false
 	}
-	p.pass(ts.Nodes, "repo", RepoName(r.GitURL)+" at "+repo)
+	p.pass(ts.Nodes, check.Name, check.Detail)
 	return repo, true
 }
 
@@ -148,7 +151,7 @@ func (ts *Transfers) checkRecipe(ctx context.Context, repo string, r PreflightRe
 		p.pass(ts.Nodes, "stack", "terminal QA needs no stack")
 		return
 	case undiscovered(profile):
-		p.pass(ts.Nodes, "stack", "QA commands are blank on this node; discovered before QA")
+		p.pass(ts.Nodes, "stack", qaBlank)
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, recipeWait)
@@ -158,6 +161,18 @@ func (ts *Transfers) checkRecipe(ctx context.Context, repo string, r PreflightRe
 		return
 	}
 	p.pass(ts.Nodes, "stack", "this node's qa.start, qa.health, qa.seed and qa.sign_in ran in a scratch checkout")
+}
+
+func (t Transfer) MissingRepo() (Check, bool) {
+	i := slices.IndexFunc(t.Checks, func(c Check) bool { return c.Name == "repo" && c.Mark == MarkFail })
+	if i < 0 {
+		return Check{}, false
+	}
+	return t.Checks[i], true
+}
+
+func (p Preflight) discoversQA() bool {
+	return slices.ContainsFunc(p.Checks, func(c Check) bool { return c.Name == "stack" && c.Detail == qaBlank })
 }
 
 func undiscovered(p state.Profile) bool {

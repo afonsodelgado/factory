@@ -43,8 +43,7 @@ type Report struct {
 }
 
 type Scope struct {
-	Repo   string
-	Wanted []string
+	Repo string
 }
 
 type Readiness struct {
@@ -60,6 +59,8 @@ func RepoName(gitURL string) string {
 func MissingRepo(gitURL, on string) Check {
 	return Check{Name: "repo", Mark: MarkFail, Detail: RepoName(gitURL) + " isn't added on " + on, Fix: "clone it there, then run factory init in it or add it from that node's hub (n → + add a repo…)"}
 }
+
+func (c Check) Sentence() string { return c.Detail + ": " + c.Fix }
 
 func (r Readiness) now() time.Time {
 	if r.Now == nil {
@@ -108,6 +109,26 @@ func (r Readiness) within(ctx context.Context, p Probe) Check {
 	case <-ctx.Done():
 		return Check{Name: p.Name, Mark: MarkFail, Detail: fmt.Sprintf("no result within %s, so this node does not count it as ready", wait), At: r.now()}
 	}
+}
+
+func (rep *Report) add(c Check) {
+	rep.Checks = append(rep.Checks, c)
+	if c.Mark == MarkFail {
+		rep.Problems++
+	}
+}
+
+func (rep Report) WithoutRepos() (Report, []Check) {
+	var repos []Check
+	rest := Report{Node: rep.Node, At: rep.At}
+	for _, c := range rep.Checks {
+		if c.Name == "repo" {
+			repos = append(repos, c)
+			continue
+		}
+		rest.add(c)
+	}
+	return rest, repos
 }
 
 func (rep Report) Runnable(short string) error {

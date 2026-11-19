@@ -486,11 +486,10 @@ func repoOn(ctx context.Context, client *node.Client, gitURL, short string) (str
 	if err := client.Do(ctx, http.MethodGet, "/api/repos", nil, &repos); err != nil {
 		return "", err
 	}
-	if repo, present := repos[gitURL]; present {
+	if repo, present := gitclone.Find(repos, gitURL); present {
 		return repo, nil
 	}
-	missing := node.MissingRepo(gitURL, short)
-	return "", fmt.Errorf("%s: %s", missing.Detail, missing.Fix)
+	return "", errors.New(node.MissingRepo(gitURL, short).Sentence())
 }
 
 func (m *Model) nodeTargets(it Item) (string, string) {
@@ -820,15 +819,25 @@ func (m *Model) askMove() tea.Cmd {
 
 func (m *Model) moveContext(it Item) (dialog.MoveContext, error) {
 	f := it.Factory
-	c := dialog.MoveContext{Key: f.Key(), Label: f.Label(), Factory: f.Key(), HolderShort: m.Config.NodeName()}
+	c := dialog.MoveContext{Key: f.Key(), Label: f.Label(), Factory: f.Key(), HolderShort: m.Config.NodeName(), Repo: f.RepoName()}
 	holder := ""
+	if f.Remote == nil {
+		gitURL, err := gitclone.RemoteURL(f.Repo)
+		if err != nil && !errors.Is(err, gitclone.ErrNoNetworkRemote) {
+			return c, fmt.Errorf("%s can't move: %w.", f.Label(), err)
+		}
+		c.GitURL, c.NoRemote = gitURL, err != nil
+	}
 	if f.Remote != nil {
 		l, ok := m.nodeOf(f)
 		if !ok {
 			return c, fmt.Errorf("%s is not in the node list any more, so %s can't move from there.", f.Remote.Name, f.Label())
 		}
 		lf := m.nodeFactories[f.Key()]
-		c.Factory, c.Incarnation, c.Holder, c.HolderShort = lf.Key, lf.Incarnation, l.member.Name, l.short()
+		if lf.RemoteProblem != "" {
+			return c, fmt.Errorf("%s can't move: %s.", f.Label(), lf.RemoteProblem)
+		}
+		c.Factory, c.Incarnation, c.Holder, c.HolderShort, c.GitURL, c.NoRemote = lf.Key, lf.Incarnation, l.member.Name, l.short(), lf.GitURL, lf.NoRemote
 		c.Lost, holder = l.state(m.Now()) == unreachable, l.member.ID
 		c.Targets = append(c.Targets, dialog.NodeChoice{Name: m.selfName(), Here: true})
 	}

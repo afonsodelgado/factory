@@ -56,6 +56,7 @@ type Transfer struct {
 	Checkpoint  string    `json:"checkpoint,omitempty"`
 	Waiting     string    `json:"waiting,omitempty"`
 	Checks      []Check   `json:"checks,omitempty"`
+	DiscoversQA bool      `json:"discovers_qa,omitempty"`
 	Lease       string    `json:"lease,omitempty"`
 	Generation  int64     `json:"generation,omitempty"`
 	Forced      bool      `json:"forced,omitempty"`
@@ -259,6 +260,7 @@ func (ts *Transfers) preflight(ctx context.Context, t Transfer, peer Member, m h
 		t.Checks = report.Checks
 		return ts.refused(t, RefusedPreflight{Node: peer.short(), Report: report})
 	}
+	t.DiscoversQA = report.discoversQA()
 	return t, nil
 }
 

@@ -375,3 +375,45 @@ func TestAskingAnotherNodeWhatReposNeedNeverSendsAnOriginWithCredentials(t *test
 		}
 	}
 }
+
+type onlyMovable struct {
+	movable host.Movable
+	calls   chan string
+}
+
+func (o onlyMovable) Call(_ context.Context, m host.Message) (host.Message, error) {
+	o.calls <- m.T
+	var value any = host.Local{Factories: []host.LocalFactory{}}
+	if m.T == "movable" {
+		value = o.movable
+	}
+	data, _ := json.Marshal(value)
+	return host.Message{T: "done", Data: data}, nil
+}
+
+func TestMovingToANodeWithoutTheRepoIsRefusedBeforeAnythingChanges(t *testing.T) {
+	repo := gitRepo(t, t.TempDir(), "git@github.com:acme/cowork.git")
+	tn := nodetest.New(t)
+	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	source := onlyMovable{movable: host.Movable{Key: state.Key(repo, "csv"), Incarnation: uuid.NewString(), ID: "csv", Slug: "csv", Repo: repo, Branch: "worktree-csv"}, calls: make(chan string, 64)}
+	macbook.Runtime.Behind(source)
+
+	var out strings.Builder
+	err := moveFlags{to: "homelab", args: []string{"csv"}}.run(context.Background(), macbook.Local, nil, &out)
+	want := "cowork isn't added on homelab: clone it there, then run factory init in it or add it from that node's hub (n → + add a repo…). Nothing moved; csv still runs here"
+	if err == nil || err.Error() != want {
+		t.Fatalf("moving csv to a homelab without cowork answered %v after:\n%s\nwant %q", err, out.String(), want)
+	}
+	close(source.calls)
+	for call := range source.calls {
+		if call != "movable" && call != "local" {
+			t.Errorf("the refused move still asked macbook's host to %s; want nothing stopped or checkpointed", call)
+		}
+	}
+	if _, err := os.Stat(node.StagedDir(homelab.Dir, source.movable.Incarnation)); !os.IsNotExist(err) {
+		t.Errorf("homelab staged a checkpoint (%v) for a repo it lacks", err)
+	}
+}

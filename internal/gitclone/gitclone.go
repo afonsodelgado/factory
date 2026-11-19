@@ -5,20 +5,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 )
 
-func Origin(repo string) string {
-	url, err := Git(context.Background(), repo, "config", "--get", "remote.origin.url")
-	if err != nil {
-		return ""
-	}
-	return url
-}
+var ErrNoNetworkRemote = errors.New("no network git remote")
+
+type localOnly string
+
+func (e localOnly) Error() string        { return string(e) }
+func (e localOnly) Is(target error) bool { return target == ErrNoNetworkRemote }
 
 func RemoteURL(repo string) (string, error) {
 	names, err := Git(context.Background(), repo, "remote")
@@ -32,7 +33,7 @@ func RemoteURL(repo string) (string, error) {
 	case len(remotes) == 1:
 		name = remotes[0]
 	case len(remotes) == 0:
-		return "", fmt.Errorf("%s has no git remote, so it stays on this machine. Push it somewhere other nodes can read, add that with git remote add origin <url>, and try again", repo)
+		return "", localOnly(filepath.Base(repo) + " has no network git remote, so no other node can have it and its factories can't move. Push it to a remote, clone it on another node and run factory init there")
 	default:
 		return "", fmt.Errorf("%s has the git remotes %s and none is origin; rename the one other nodes clone from to origin with git remote rename", repo, strings.Join(remotes, ", "))
 	}
@@ -40,7 +41,10 @@ func RemoteURL(repo string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return raw, CheckURL(raw)
+	if err := CheckURL(raw); err != nil {
+		return "", err
+	}
+	return raw, nil
 }
 
 func CheckURL(raw string) error {
@@ -50,7 +54,7 @@ func CheckURL(raw string) error {
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
 		switch {
 		case u.Scheme == "file":
-			return fmt.Errorf("%s is a path on this machine, which the server can't read; use a network git remote", raw)
+			return localOnly(raw + " is a path on this machine, which the server can't read; use a network git remote")
 		case u.User != nil && (u.Scheme == "http" || u.Scheme == "https"):
 			return fmt.Errorf("the git remote URL carries credentials, which would be copied to the server; remove them from the URL and give the server its own git credentials")
 		}
@@ -58,9 +62,46 @@ func CheckURL(raw string) error {
 	}
 	host, _, scpLike := strings.Cut(raw, ":")
 	if !scpLike || strings.ContainsAny(host, "/\\") {
-		return fmt.Errorf("%s is a path on this machine, which the server can't read; use a network git remote", raw)
+		return localOnly(raw + " is a path on this machine, which the server can't read; use a network git remote")
 	}
 	return nil
+}
+
+func SameRemote(a, b string) bool {
+	hostA, pathA, okA := remoteParts(a)
+	hostB, pathB, okB := remoteParts(b)
+	return a == b || (okA && okB && hostA == hostB && pathA == pathB)
+}
+
+func Find(repos map[string]string, gitURL string) (string, bool) {
+	if repo, exact := repos[gitURL]; exact {
+		return repo, true
+	}
+	for _, origin := range slices.Sorted(maps.Keys(repos)) {
+		if repo := repos[origin]; SameRemote(origin, gitURL) {
+			return repo, true
+		}
+	}
+	return "", false
+}
+
+func remoteParts(raw string) (host, path string, ok bool) {
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && u.Host != "" {
+		return strings.ToLower(u.Hostname()), repoPath(u.Path), true
+	}
+	login, rest, scpLike := strings.Cut(raw, ":")
+	if !scpLike || strings.ContainsAny(login, "/\\") {
+		return "", "", false
+	}
+	host = login
+	if at := strings.LastIndex(login, "@"); at >= 0 {
+		host = login[at+1:]
+	}
+	return strings.ToLower(host), repoPath(rest), true
+}
+
+func repoPath(path string) string {
+	return strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 }
 
 func Git(ctx context.Context, dir string, args ...string) (string, error) {

@@ -784,8 +784,21 @@ func (n *Nodes) removeRoute(w http.ResponseWriter, r *http.Request, _ string) {
 }
 
 func (n *Nodes) readiness(r *http.Request) Report {
-	wanted := slices.DeleteFunc(r.URL.Query()["repo"], func(url string) bool { return gitclone.CheckURL(url) != nil })
-	return n.Ready.Run(r.Context(), n.Self.Name, Scope{Wanted: wanted})
+	report := n.Ready.Run(r.Context(), n.Self.Name, Scope{})
+	for _, url := range r.URL.Query()["repo"] {
+		_, check := n.repoCheck(url)
+		report.add(check)
+	}
+	return report
+}
+
+func (n *Nodes) repoCheck(gitURL string) (string, Check) {
+	if repo, ok := gitclone.Find(n.repos(), gitURL); ok {
+		return repo, Check{Name: "repo", Mark: MarkOK, Detail: RepoName(gitURL) + " at " + repo, At: n.now()}
+	}
+	missing := MissingRepo(gitURL, n.Self.short())
+	missing.On, missing.At = n.Self.short(), n.now()
+	return "", missing
 }
 
 func (n *Nodes) readinessRoute(w http.ResponseWriter, r *http.Request, _ string) {

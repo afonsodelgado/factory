@@ -486,14 +486,14 @@ func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFixOnlyForItsOwnRepos
 		{Name: ".env.local", Kind: node.NeedFile, Why: "compose.yml reads it"},
 		{Name: "QA_NEEDS_TEST_PASSWORD", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
 	}
-	billing := "git@github.com:alice/billing.git"
-	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: cowork, Needs: needs}, {URL: billing, Needs: needs}}})
+	coworkOverHTTPS, billing := "https://github.com/alice/cowork", "git@github.com:alice/billing.git"
+	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: coworkOverHTTPS, Needs: needs}, {URL: billing, Needs: needs}}})
 	if status != http.StatusOK {
 		t.Fatalf("homelab answered %d %s", status, body)
 	}
 	var report node.NeedsReport
-	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 || report.Repos[0].URL != cowork {
-		t.Fatalf("homelab reported %s; want one report for cowork and none for billing, which it has not added", body)
+	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 || report.Repos[0].URL != coworkOverHTTPS {
+		t.Fatalf("homelab reported %s; want one report for cowork, asked over https for its ssh checkout, and none for billing, which it has not added", body)
 	}
 	missing := report.Repos[0].Missing()
 	if len(missing) != len(needs) {
@@ -2151,6 +2151,14 @@ func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
 		t.Errorf("preflight with qa.start detected from the Makefile answered %q; want the stack tried and refused, never skipped as still to be discovered", report.Refusal)
 	}
 	os.Remove(filepath.Join(clone, "Makefile"))
+	writeFiles(t, clone, map[string]string{".factory/config.yml": "qa:\n  mode: browser\n"})
+	blank := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: appRemote, Branch: "worktree-csv", Protocol: node.Protocol}
+	discoveredThere := func(c node.Check) bool {
+		return c.Name == "stack" && strings.Contains(c.Detail, "discovered before QA")
+	}
+	if report := homelab.Transfers.Preflight(context.Background(), blank); report.Refusal != "" || !slices.ContainsFunc(report.Checks, discoveredThere) {
+		t.Errorf("preflight on a node whose QA commands are blank gave %q with %+v; want it to pass and say they are discovered there", report.Refusal, report.Checks)
+	}
 	if entries, _ := os.ReadDir(filepath.Join(homelab.Dir, "repos")); len(entries) != 1 || entries[0].Name() != "app" {
 		t.Errorf("after preflight homelab's repos are %v; want only its own app checkout, nothing cloned", entries)
 	}

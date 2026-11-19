@@ -135,7 +135,11 @@ func describeMove(p node.Progress) string {
 	case node.StateReleased:
 		return fmt.Sprintf("%s is stopped here; %s is starting it", p.Factory, p.TargetName)
 	case node.StateActive:
-		return fmt.Sprintf("%s runs on %s now. Its files stay here until factory delete %s.", p.Factory, p.TargetName, p.Factory)
+		line := fmt.Sprintf("%s runs on %s now. Its files stay here until factory delete %s.", p.Factory, p.TargetName, p.Factory)
+		if p.DiscoversQA {
+			line += fmt.Sprintf("\n%s kept its own repo config for %s. Its QA commands are blank, so %s discovers them there before QA.", p.TargetName, node.RepoName(p.GitURL), p.Factory)
+		}
+		return line
 	case node.StateMoving:
 		if p.Phase == node.PhaseCheckpoint {
 			return fmt.Sprintf("sending the checkpoint of %s to %s", p.Factory, p.TargetName)
@@ -150,6 +154,9 @@ func finished(p node.Progress, out io.Writer) (bool, error) {
 	case node.StateActive:
 		return true, nil
 	case node.StatePreflightFailed:
+		if missing, ok := p.MissingRepo(); ok {
+			return true, fmt.Errorf("%s. Nothing moved; %s still runs here", missing.Sentence(), p.Factory)
+		}
 		printChecks(out, slices.DeleteFunc(slices.Clone(p.Checks), func(c node.Check) bool { return c.Mark == node.MarkOK }))
 		return true, fmt.Errorf("%s; %s still runs here", p.Refusal, p.Factory)
 	case node.StateRefused, node.StateCancelled:
@@ -256,10 +263,30 @@ func itemLine(item node.ItemOutcome, target string) string {
 func batchSummary(b node.BatchProgress, out io.Writer) error {
 	moved := len(slices.DeleteFunc(slices.Clone(b.Items), func(i node.ItemOutcome) bool { return i.State != node.StateActive }))
 	fmt.Fprintf(out, "%s moved to %s, %d not moved.\n", count(moved, "factory"), b.TargetName, len(b.Items)-moved)
+	if repos, fix := missingRepos(b); len(repos) > 0 {
+		fmt.Fprintf(out, "To move the others, add %s on %s: %s.\n", strings.Join(repos, " and "), b.TargetName, fix)
+	}
 	if moved < len(b.Items) {
 		return errors.New("some factories stayed here; the reasons are above")
 	}
 	return nil
+}
+
+func missingRepos(b node.BatchProgress) ([]string, string) {
+	var repos []string
+	fix := ""
+	for _, item := range b.Items {
+		if item.Progress == nil {
+			continue
+		}
+		if missing, ok := item.Progress.MissingRepo(); ok {
+			if name := node.RepoName(item.Progress.GitURL); !slices.Contains(repos, name) {
+				repos = append(repos, name)
+			}
+			fix = missing.Fix
+		}
+	}
+	return repos, fix
 }
 
 func moveChecks(cfg *state.Config) []install.Check {
