@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -492,5 +493,74 @@ func TestClosingAFactoryWithoutTheHubStopsItsStagesAndStrayProcesses(t *testing.
 			t.Fatalf("process %s started from the factory pane outlived the delete", strconv.Itoa(stray))
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestAViewStreamsOnlyTheFactoryPaneAndOnlyAHubOnScreenTakesItBack(t *testing.T) {
+	e, l := hubFixture(t)
+	created, err := e.NewFactoryPane(l, NewPane{Repo: "/repo", Slug: "x", Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panes := &host.Panes{TM: e.TM, Session: e.Session}
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/repo"}, StateDir: t.TempDir()}, Engine: e, Layout: l}, host.Runtime{Engine: panes, Typist: panes, TM: e.TM})
+	f := factory.Factory{Repo: "/repo", Slug: "x"}
+	refresh := func() {
+		live, err := e.TM.Panes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := pane(t, e.TM, created)
+		node.show(model, Snapshot{At: time.Now(), Panes: live, Items: []Item{{Factory: f, Pane: &p}}})
+	}
+	refresh()
+	if pane(t, e.TM, created).WindowID != l.Window {
+		t.Fatal("the hub did not show x")
+	}
+	split, err := e.TM.Run("split-window", "-d", "-h", "-t", created, "-P", "-F", "#{pane_id}", "exec sleep 600")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{created, split}
+	slices.Sort(want)
+
+	id, err := host.PrepareView(e.TM, f, "", pane(t, e.TM, created).Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := host.ViewSession(id)
+	streamed := func() []string {
+		out, _ := e.TM.Run("list-panes", "-s", "-t", "="+view, "-F", "#{pane_id}")
+		ids := strings.Fields(out)
+		slices.Sort(ids)
+		return ids
+	}
+	if got := streamed(); !slices.Equal(got, want) {
+		t.Fatalf("the view streams %q; want only x's pane and its split %q, never the hub around them", got, want)
+	}
+	refresh()
+	if got := streamed(); !slices.Equal(got, want) {
+		t.Fatalf("after the idle hub refreshed, the view streams %q; want x's panes %q, not the pane the hub swapped in", got, want)
+	}
+
+	outer := tmux.Client{Socket: e.TM.Socket + "-outer", ConfigFile: "/dev/null"}
+	t.Cleanup(func() { outer.Run("kill-server") })
+	if _, err := outer.NewSession("terminal", "hub", 150, 50, "exec env TMUX= tmux -L "+e.TM.Socket+" -f /dev/null attach -t =factory"); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if clients, _ := e.TM.Clients("=factory"); len(clients) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no terminal attached to the hub")
+		}
+	}
+	refresh()
+	if e.TM.HasSession(view) || pane(t, e.TM, created).WindowID != l.Window {
+		t.Fatal("a hub on screen with x selected did not end the remote view and show x itself")
+	}
+	if _, err := host.PrepareView(e.TM, f, "", pane(t, e.TM, created).Token); err == nil {
+		t.Error("the node streamed x while it was on screen in its hub")
 	}
 }

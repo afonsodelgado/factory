@@ -17,6 +17,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
+	"github.com/afonsodelgado/factory/internal/tmux"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/frame"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
@@ -460,6 +461,10 @@ func (m *Model) showSelected() {
 	if target == m.Layout.Slot && stage == m.Layout.Stage {
 		return
 	}
+	target, stage = m.shareWithViews(target, stage)
+	if target == m.Layout.Slot && stage == m.Layout.Stage {
+		return
+	}
 	m.Engine.HideStage(&m.Layout)
 	if target != "" && target != m.Layout.Slot {
 		m.Engine.Select(&m.Layout, target)
@@ -467,6 +472,30 @@ func (m *Model) showSelected() {
 	if stage != "" {
 		m.Engine.ShowStage(&m.Layout, stage)
 	}
+}
+
+func (m *Model) shareWithViews(target, stage string) (string, string) {
+	panes, err := m.Engine.TM.Panes()
+	if err != nil {
+		panes = m.snap.Panes
+	}
+	if m.onScreen(panes) {
+		host.EndViews(m.Engine.TM, panes, target, stage)
+		return target, stage
+	}
+	if host.Viewed(panes, target) {
+		return m.slotViewer(), ""
+	}
+	if host.Viewed(panes, stage) {
+		return target, ""
+	}
+	return target, stage
+}
+
+func (m *Model) onScreen(panes []tmux.Pane) bool {
+	return slices.ContainsFunc(panes, func(p tmux.Pane) bool {
+		return p.ID == m.Layout.Selector && m.Engine.Owns(p) && p.Attached
+	})
 }
 
 func (m *Model) shownStage(it Item, supervisorShown bool) string {
