@@ -293,27 +293,32 @@ func runLater(m *Model) {
 	}
 }
 
-func TestCreatingOnANodeThatHasTheRepoUsesItsCheckoutAndClonesNothing(t *testing.T) {
+func TestANodeWithoutTheRepoCreatesNothingAndOneWithItUsesItsOwnCheckout(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
 	origin := "git@github.com:alice/cowork.git"
 	repo := t.TempDir()
 	gitIn(t, repo, "init", "-q")
 	gitIn(t, repo, "remote", "add", "origin", origin)
-	homelab.SetRepos(map[string]string{origin: "/srv/cowork"})
 	if _, err := macbook.Add("homelab"); err != nil {
 		t.Fatal(err)
 	}
 	m := hubOn(t, tn, macbook)
 	readRoster(t, m)
 	until(t, m, func() bool { l, ok := m.nodes[homelab.ID]; return ok && l.answered })
-
-	if err := m.createOnNode(dialog.NewResult{Node: homelab.Name, Repo: repo, Slug: "csv", Prompt: "Export contacts.", WatchComments: true}); err != nil {
-		t.Fatal(err)
+	create := func() string {
+		if err := m.createOnNode(dialog.NewResult{Node: homelab.Name, Repo: repo, Slug: "csv", Prompt: "Export contacts.", WatchComments: true}); err != nil {
+			t.Fatal(err)
+		}
+		return m.flushLater()().(noticeMsg).text
 	}
-	got := m.flushLater()().(noticeMsg)
-	if !strings.Contains(got.text, "csv started on homelab") || len(homelab.Clones()) > 0 || !slices.Contains(homelab.Runtime.Calls(), "create") {
-		t.Fatalf("creating on homelab said %q, cloned %v and called %v; want it started in homelab's own checkout with no clone", got.text, homelab.Clones(), homelab.Runtime.Calls())
+
+	if got := create(); !strings.Contains(got, "cowork isn't added on homelab: clone it there") || slices.Contains(homelab.Runtime.Calls(), "create") {
+		t.Fatalf("creating on a homelab without cowork said %q and called %v; want the refusal and nothing created", got, homelab.Runtime.Calls())
+	}
+	homelab.SetRepos(map[string]string{origin: "/srv/cowork"})
+	if got := create(); !strings.Contains(got, "csv started on homelab") || !slices.Contains(homelab.Runtime.Calls(), "create") {
+		t.Fatalf("creating on homelab said %q and called %v; want it started in homelab's own checkout", got, homelab.Runtime.Calls())
 	}
 	var created host.CreateRequest
 	if sent := homelab.Runtime.Sent("create"); len(sent) != 1 || json.Unmarshal(sent[0], &created) != nil || !created.WatchComments {

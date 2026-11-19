@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -390,11 +389,6 @@ func Readiness(o Options, origins map[string]string, scope node.Scope) []node.Pr
 		return node.Probe{Name: name, Run: func(ctx context.Context) node.Check { return combined(name, run(ctx)) }}
 	}
 	remotes := slices.Sorted(maps.Keys(origins))
-	for _, url := range scope.Wanted {
-		if _, cloned := origins[url]; !cloned {
-			remotes = append(remotes, url)
-		}
-	}
 	probes := []node.Probe{
 		probe("tools", func(context.Context) []Check {
 			return []Check{tool("tmux", "3.3", "tmux", []string{"-V"}, installCommand("tmux")), tool("git", "2.31", "git", []string{"--version"}, installCommand("git")), ghCheck(), ghStack(), browserQA(o, false)}
@@ -411,7 +405,7 @@ func Readiness(o Options, origins map[string]string, scope node.Scope) []node.Pr
 		}),
 	}
 	if scope.Repo == "" {
-		probes = append(probes, probe("repos", func(context.Context) []Check { return cloned(o.Repos, origins, scope.Wanted) }))
+		probes = append(probes, probe("repos", func(context.Context) []Check { return ownRepos(o.Repos) }))
 	}
 	if o.Config == nil {
 		return probes
@@ -422,7 +416,7 @@ func Readiness(o Options, origins map[string]string, scope node.Scope) []node.Pr
 	return probes
 }
 
-func cloned(repos []string, origins map[string]string, wanted []string) []Check {
+func ownRepos(repos []string) []Check {
 	var checks []Check
 	for _, repo := range repos {
 		name := filepath.Base(repo)
@@ -430,12 +424,6 @@ func cloned(repos []string, origins map[string]string, wanted []string) []Check 
 			checks = append(checks, Check{Mark: Pass, Detail: name + " at " + tilde(repo)})
 		} else {
 			checks = append(checks, Check{Mark: Warn, Detail: name + " is missing at " + tilde(repo)})
-		}
-	}
-	for _, url := range wanted {
-		if _, ok := origins[url]; !ok {
-			name := strings.TrimSuffix(path.Base(url), ".git")
-			checks = append(checks, Check{Mark: Warn, Detail: name + " not cloned yet; c clones it with this machine's git login, or it clones when a factory first starts or moves here"})
 		}
 	}
 	return checks

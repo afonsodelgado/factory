@@ -306,8 +306,7 @@ func (f *fakeNodeActions) Remove(_, id string) (node.Roster, error) {
 
 func (f *fakeNodeActions) MoveHome(string, string) (node.Roster, error) { return node.Roster{}, nil }
 
-func (f *fakeNodeActions) SetTarget(string) error                              { return nil }
-func (f *fakeNodeActions) Clone(context.Context, string, string, string) error { return nil }
+func (f *fakeNodeActions) SetTarget(string) error { return nil }
 func (f *fakeNodeActions) MoveAll(context.Context, string, string) (node.BatchProgress, error) {
 	return node.BatchProgress{}, nil
 }

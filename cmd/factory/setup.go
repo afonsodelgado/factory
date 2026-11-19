@@ -229,7 +229,7 @@ func awaitSettings(ctx context.Context, cfg *state.Config, s *setup.Session) {
 	if local.Do(ctx, http.MethodGet, "/api/nodes", nil, &roster) != nil || len(roster.Members) < 2 {
 		return
 	}
-	fmt.Fprintln(s.Out, "\nCopying your shared settings and repos from your other nodes…")
+	fmt.Fprintln(s.Out, "\nCopying your shared settings from your other nodes…")
 	deadline := time.Now().Add(settingsWait)
 	for time.Now().Before(deadline) {
 		var status node.SettingsStatus

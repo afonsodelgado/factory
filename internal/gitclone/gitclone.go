@@ -3,21 +3,14 @@ package gitclone
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
-	"time"
 )
-
-const Timeout = 10 * time.Minute
 
 func Origin(repo string) string {
 	url, err := Git(context.Background(), repo, "config", "--get", "remote.origin.url")
@@ -39,9 +32,9 @@ func RemoteURL(repo string) (string, error) {
 	case len(remotes) == 1:
 		name = remotes[0]
 	case len(remotes) == 0:
-		return "", fmt.Errorf("%s has no git remote, and another node clones from one. Push it somewhere that node can read, add that with git remote add origin <url>, and try again", repo)
+		return "", fmt.Errorf("%s has no git remote, so it stays on this machine. Push it somewhere other nodes can read, add that with git remote add origin <url>, and try again", repo)
 	default:
-		return "", fmt.Errorf("%s has the git remotes %s and none is origin; rename the one other nodes should clone to origin with git remote rename", repo, strings.Join(remotes, ", "))
+		return "", fmt.Errorf("%s has the git remotes %s and none is origin; rename the one other nodes clone from to origin with git remote rename", repo, strings.Join(remotes, ", "))
 	}
 	raw, err := Git(context.Background(), repo, "config", "--get", "remote."+name+".url")
 	if err != nil {
@@ -68,53 +61,6 @@ func CheckURL(raw string) error {
 		return fmt.Errorf("%s is a path on this machine, which the server can't read; use a network git remote", raw)
 	}
 	return nil
-}
-
-func Dir(stateDir, gitURL string) string {
-	sum := sha256.Sum256([]byte(gitURL))
-	return filepath.Join(resolved(stateDir), "repos", hex.EncodeToString(sum[:8]))
-}
-
-func resolved(path string) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
-	}
-	return filepath.Clean(path)
-}
-
-func Ensure(ctx context.Context, stateDir, gitURL string) (string, error) {
-	if err := CheckURL(gitURL); err != nil {
-		return "", err
-	}
-	dir := Dir(stateDir, gitURL)
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return "", err
-	}
-	lock, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return "", err
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return "", err
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if _, err := Git(ctx, dir, "fetch", "--prune", "origin"); err != nil {
-			return "", err
-		}
-		_, err := Git(ctx, dir, "merge", "--ff-only", "@{upstream}")
-		return dir, err
-	}
-	partial := dir + ".partial"
-	os.RemoveAll(partial)
-	if _, err := Git(ctx, filepath.Dir(dir), "clone", "--", gitURL, partial); err != nil {
-		if ctx.Err() != nil {
-			return "", err
-		}
-		answer, _ := strings.CutPrefix(err.Error(), "git clone: ")
-		return "", fmt.Errorf("could not clone %s. git answered: %s", gitURL, answer)
-	}
-	return dir, os.Rename(partial, dir)
 }
 
 func Git(ctx context.Context, dir string, args ...string) (string, error) {

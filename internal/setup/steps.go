@@ -284,7 +284,7 @@ func sshKey() Step {
 			if authenticated, _ := sshAuthenticated(ctx, s); authenticated {
 				return ""
 			}
-			return "creates the SSH key this machine's node clones and pushes with"
+			return "creates the SSH key this machine's node fetches and pushes with"
 		},
 		Apply: func(ctx context.Context, s *Session) error {
 			if s.hasKey() {
@@ -301,7 +301,7 @@ func sshKey() Step {
 
 func removePassphrase(ctx context.Context, s *Session) error {
 	_, answer := sshAuthenticated(ctx, s, "-o", "StrictHostKeyChecking=accept-new")
-	fmt.Fprintf(s.Out, "%s has a passphrase. The node clones and pushes with nobody at the\nkeyboard, so ssh can never ask for it. ssh answered: %s\n", keyName, answer)
+	fmt.Fprintf(s.Out, "%s has a passphrase. The node fetches and pushes with nobody at the\nkeyboard, so ssh can never ask for it. ssh answered: %s\n", keyName, answer)
 	if s.Yes {
 		return Manual{Reason: "--yes never types a passphrase. Remove it with", Command: passphraseRemoval}
 	}

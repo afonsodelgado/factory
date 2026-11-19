@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"net/http"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/gitclone"
@@ -55,11 +53,7 @@ type NeedsReport struct {
 	Repos []RepoReport `json:"repos"`
 }
 
-type NeedsCheck func(ctx context.Context, on, repo, clone string, needs []Need) []Check
-
-func RepoName(gitURL string) string {
-	return strings.TrimSuffix(path.Base(gitURL), ".git")
-}
+type NeedsCheck func(ctx context.Context, on, repo, checkout string, needs []Need) []Check
 
 func (n *Nodes) needsRoute(w http.ResponseWriter, r *http.Request, _ string) {
 	var body NeedsRequest
@@ -75,12 +69,13 @@ func (n *Nodes) CheckNeeds(ctx context.Context, body NeedsRequest) NeedsReport {
 	if n.Needs == nil {
 		return report
 	}
-	on, clones := cmp.Or(n.Self.short(), "this node"), n.repos()
+	on, checkouts := cmp.Or(n.Self.short(), "this node"), n.repos()
 	for _, repo := range body.Repos {
-		if gitclone.CheckURL(repo.URL) != nil {
+		checkout, added := checkouts[repo.URL]
+		if !added || gitclone.CheckURL(repo.URL) != nil {
 			continue
 		}
-		checks := n.Needs(ctx, on, RepoName(repo.URL), clones[repo.URL], repo.Needs)
+		checks := n.Needs(ctx, on, RepoName(repo.URL), checkout, repo.Needs)
 		report.Repos = append(report.Repos, RepoReport{URL: repo.URL, Checks: checks})
 	}
 	return report

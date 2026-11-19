@@ -468,7 +468,7 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 	m.later = append(m.later, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), createWait)
 		defer cancel()
-		repo, err := repoOn(ctx, client, gitURL)
+		repo, err := repoOn(ctx, client, gitURL, short)
 		if err != nil {
 			return noticeMsg(problem(fmt.Sprintf("%s was not created on %s: %s", r.Slug, short, withFullStop(err.Error()))))
 		}
@@ -481,7 +481,7 @@ func (m *Model) createOnNode(r dialog.NewResult) error {
 	return nil
 }
 
-func repoOn(ctx context.Context, client *node.Client, gitURL string) (string, error) {
+func repoOn(ctx context.Context, client *node.Client, gitURL, short string) (string, error) {
 	var repos map[string]string
 	if err := client.Do(ctx, http.MethodGet, "/api/repos", nil, &repos); err != nil {
 		return "", err
@@ -489,9 +489,8 @@ func repoOn(ctx context.Context, client *node.Client, gitURL string) (string, er
 	if repo, present := repos[gitURL]; present {
 		return repo, nil
 	}
-	var cloned node.Cloned
-	err := client.Do(ctx, http.MethodPost, "/api/clone", node.CloneRequest{Operation: uuid.NewString(), URL: gitURL}, &cloned)
-	return cloned.Repo, err
+	missing := node.MissingRepo(gitURL, short)
+	return "", fmt.Errorf("%s: %s", missing.Detail, missing.Fix)
 }
 
 func (m *Model) nodeTargets(it Item) (string, string) {
