@@ -373,13 +373,14 @@ type LocalFactory struct {
 type LocalPage struct {
 	Name        string `json:"name"`
 	Title       string `json:"title"`
+	URL         string `json:"url,omitempty"`
 	OpenThreads *int   `json:"open_threads,omitempty"`
 	Href        string `json:"href,omitempty"`
 	Unavailable string `json:"unavailable,omitempty"`
 }
 
 func localPage(f review.Factory, row ArtifactRow) LocalPage {
-	page := LocalPage{Name: row.Name, Title: row.Title, OpenThreads: row.OpenThreads}
+	page := LocalPage{Name: row.Name, Title: row.Title, URL: row.URL, OpenThreads: row.OpenThreads}
 	href, static := review.MobilePath(f, row.URL)
 	switch {
 	case static:

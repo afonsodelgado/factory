@@ -154,6 +154,11 @@ func askingOn(t *testing.T, n *nodetest.Node, typed host.Typist) {
 		return state.Attention{ID: id, Kind: "question", Questions: []string{question}, Options: state.OptionLists{{"eu-west", "us-east"}}, Recommended: state.Strings{"eu-west"}, CreatedAt: state.Time{Time: now.Add(-age)}}
 	}
 	f := factory.Factory{Repo: "/srv/cowork", Slug: "csv", Entry: &state.Entry{Incarnation: "inc-csv"}, State: &state.State{SchemaVersion: 2, ID: "csv", Stage: "plan", Attention: []state.Attention{ask("q1", "Which region?", 2*time.Minute), ask("q2", "Which bucket region?", time.Minute)}}}
+	runningOn(t, n, typed, f, now)
+}
+
+func runningOn(t *testing.T, n *nodetest.Node, typed host.Typist, f factory.Factory, now time.Time) {
+	t.Helper()
 	pane := tmux.Pane{ID: "%1", Command: "claude", Token: "sup"}
 	idle := state.HookEvent{Event: "Stop", At: now.Add(-time.Minute)}
 	supervisorNeverAcknowledges := now.Add(host.ReceiptWait + time.Second)
@@ -168,6 +173,36 @@ func askingOn(t *testing.T, n *nodetest.Node, typed host.Typist) {
 		<-stopped
 	})
 	n.Runtime.Behind(queue)
+}
+
+func TestCtrlOOnAnotherNodesDesignOpensThatNodesReviewPage(t *testing.T) {
+	tn := nodetest.New(t)
+	macbook, homelab := tn.Machine("macbook").Start(), tn.Machine("homelab").Start()
+	dir := "/srv/cowork/.claude/factory/csv"
+	design := state.Stage{Artifacts: []state.Artifact{{URL: "file://" + dir + "/design/variant-a.html", Title: "Variant A"}}}
+	gate := state.Attention{ID: "gate-design", Kind: "gate", StageKey: "design", Title: "Approve the design"}
+	f := factory.Factory{Repo: "/srv/cowork", Slug: "csv", Dir: dir, Entry: &state.Entry{Incarnation: "inc-csv"}, State: &state.State{SchemaVersion: 2, ID: "csv", Stage: "design", Stages: map[string]state.Stage{"design": design}, Attention: []state.Attention{gate}}}
+	runningOn(t, homelab, &fakeTypist{}, f, time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC))
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	m := hubOn(t, tn, macbook)
+	readRoster(t, m)
+	key := "node:" + homelab.ID + "/inc-csv"
+	until(t, m, func() bool { it, ok := m.snap.Find(key); return ok && len(m.attentionItems(it, nil)) == 1 })
+	var opened []string
+	m.Open = func(url string) { opened = append(opened, url) }
+	m.choose(key)
+	for _, tab := range []panel.Tab{panel.Attention, panel.Artifacts} {
+		m.panel.tab = tab
+		if _, cmd := m.Update(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: "ctrl+o"}})); cmd != nil {
+			cmd()
+		}
+	}
+	want := "https://" + homelab.Name + "/r/" + state.FileStem(f.Repo, f.Slug) + "/design/variant-a.html"
+	if !slices.Equal(opened, []string{want, want}) {
+		t.Errorf("ctrl+o on homelab's design gate and its Artifacts row opened %q; want homelab's review page %s both times, as the phone opens it", opened, want)
+	}
 }
 
 func TestAnAnswerToAnotherNodeIsTypedThereOnceComesBackWhenUnreceivedAndIsUncertainNotRedirectedWhenTheNodeIsLost(t *testing.T) {
