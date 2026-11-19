@@ -38,11 +38,11 @@ func TestABrowserJobRunsItsRecipeInOrderAndNamesWhatIsMissing(t *testing.T) {
 	healthy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(healthy.Close)
 
-	t.Run("an undeclared sign-in is a named failure, not an unattended guess", func(t *testing.T) {
+	t.Run("blank seed and sign-in are not used, not missing", func(t *testing.T) {
 		var p state.Profile
-		p.QA.Seed, p.QA.Health, p.QA.WebPort = state.NotNeeded, healthy.URL, 3001
-		if _, err := RecipeOf(p, t.TempDir()); err == nil || !strings.Contains(err.Error(), "qa.sign_in") {
-			t.Fatalf("a recipe without sign-in gave %v; want the missing key named", err)
+		p.QA.Health, p.QA.WebPort = healthy.URL, 3001
+		if _, err := RecipeOf(p, t.TempDir()); err != nil {
+			t.Fatalf("a recipe with blank seed and sign-in gave %v; want it accepted", err)
 		}
 	})
 
@@ -413,17 +413,9 @@ func TestBrowserQAStartsOnlyOnHeadlessChromeThroughAPerStageMCPConfig(t *testing
 		return r.Stage(host.StageRequest{EffectID: id, Role: "qa", Factory: "csv", Text: "Test the export."})
 	}
 
-	configure("  seed: none\n")
-	if _, err := startQA(); err == nil || !strings.Contains(err.Error(), "qa.sign_in") || !strings.Contains(err.Error(), "no browser was launched") {
-		t.Fatalf("browser QA without a declared sign-in gave %v; want a failure naming qa.sign_in before any browser", err)
-	}
-	if len(engine.typed) != 0 || len(queue.Events()) != 0 {
-		t.Fatal("browser QA without a recipe still started a pane or a browser job")
-	}
-
-	configure("  seed: none\n  sign_in: none\n")
+	configure("")
 	if _, err := startQA(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("browser QA with blank seed and sign-in gave %v; want it started, because both are optional", err)
 	}
 	reply, err := startQA()
 	if err != nil {

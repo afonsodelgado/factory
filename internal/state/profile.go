@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -109,6 +110,11 @@ func (p Profile) BrowserQA() bool {
 }
 
 const NotNeeded = "none"
+
+func Unused(command string) bool {
+	command = strings.TrimSpace(command)
+	return command == "" || command == NotNeeded
+}
 
 func (c *Config) WithProfile(p Profile) *Config {
 	merged := *c

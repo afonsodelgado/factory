@@ -36,14 +36,15 @@ type StackLease struct {
 }
 
 type StackStatus struct {
-	Factory string    `json:"factory"`
-	State   string    `json:"state"`
-	At      time.Time `json:"at"`
-	Origin  string    `json:"origin,omitempty"`
-	URL     string    `json:"url,omitempty"`
-	Href    string    `json:"href,omitempty"`
-	Failure string    `json:"failure,omitempty"`
-	Reason  string    `json:"reason,omitempty"`
+	Factory  string    `json:"factory"`
+	State    string    `json:"state"`
+	At       time.Time `json:"at"`
+	Origin   string    `json:"origin,omitempty"`
+	URL      string    `json:"url,omitempty"`
+	Href     string    `json:"href,omitempty"`
+	SignedIn bool      `json:"signed_in,omitempty"`
+	Failure  string    `json:"failure,omitempty"`
+	Reason   string    `json:"reason,omitempty"`
 }
 
 type Stacks interface {
