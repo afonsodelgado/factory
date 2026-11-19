@@ -43,7 +43,7 @@ Check each dimension. Skip the ones that clearly do not apply:
 
 **Interactive:** ask with AskUserQuestion.
 
-**Inside the factory** (you are the `factory-analyst` agent): you cannot ask directly. End your turn with a `factory-result` block with `status: "blocked"` and the batch as `questions`, each written as `"Q: … Recommended: … because …"`. The answers arrive in your next message.
+**Inside the factory** (you are the `factory-analyst` agent): you cannot ask directly. End your turn with a `factory-result` block with `status: "blocked"` and the batch as `questions`, each `{"text": "<question>, recommended: … because …", "options": ["…", "…"], "recommended": "<one option, verbatim>"}`. The developer picks an option in the factory panel, so keep options out of `text`; leave `options` empty only for free text. The answers arrive in your next message.
 
 ## 4 · Write the document
 

@@ -19,7 +19,7 @@ A message in the factory panel's answer format (`<item id> answers:`, `<item id>
 End every turn with:
 
 ```factory-result
-{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"questions":[],"needs_design":false,"summary":"one sentence","data":{}}
+{"schema_version":2,"run_id":"<task run id>","input_heads":[],"output_heads":[],"status":"done|blocked|failed","findings":[],"evidence":{"status":"pass|fail|unknown","heads":[],"recipe_digest":"<saved digest>","at":"<UTC>","checks":[],"notes":[]},"outputs":[],"questions":[{"text":"<question and why you recommend that answer>","options":["<option>","<option>"],"recommended":"<option>"}],"needs_design":false,"summary":"one sentence","data":{}}
 ```
 
 Ask only when the state's `comments_asked` is false, because the developer may have chosen at creation: “Should the factory watch review comments and address them?” Default off. Record the actual answer in requirements.md and return its reference; the supervisor records watch_comments.

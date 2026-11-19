@@ -260,7 +260,7 @@ func result(s *state.State, e Event, dir string) error {
 	s.Stages[stage] = st
 	if r.Status == "blocked" && len(r.Questions) > 0 {
 		attention(s, e, "question", "Stage needs answers", "Answer this batch to resume the owning stage.")
-		s.Attention[len(s.Attention)-1].Questions = r.Questions
+		ask(&s.Attention[len(s.Attention)-1], r.Questions)
 		return nil
 	}
 	if r.Status != "done" {
@@ -427,6 +427,14 @@ func withFindings(body string, findings []state.Finding, include func(state.Find
 func attention(s *state.State, e Event, kind, title, body string) {
 	s.Attention = append(s.Attention, state.Attention{ID: e.ID + "-" + kind, Revision: s.Revision + 1, Kind: kind, Title: title, Body: body, StageKey: s.Stage, CreatedAt: e.At})
 	s.WaitingOn, s.WaitingReason = "user", title
+}
+
+func ask(item *state.Attention, questions []Question) {
+	for _, q := range questions {
+		item.Questions = append(item.Questions, q.Text)
+		item.Options = append(item.Options, append([]string{}, q.Options...))
+		item.Recommended = append(item.Recommended, q.Recommended)
+	}
 }
 
 func allowance(s *state.State, loop string) *int {
