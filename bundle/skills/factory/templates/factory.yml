@@ -8,7 +8,7 @@ design:
   source: terminal
   files: []
 qa:
-  mode: terminal
+  mode: ""
   notes: ""
   url: ""
   start: ""

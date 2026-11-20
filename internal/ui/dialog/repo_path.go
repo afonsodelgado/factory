@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
@@ -42,73 +43,122 @@ func sameRepo(a, b string) bool {
 }
 
 func (m *NewFactoryModel) prepareSettings(path string) tea.Cmd {
-	context, err := m.prepareRepo(path)
+	setup, err := m.setUpRepo(path)
 	if err != nil {
 		m.problem = err.Error()
 		return nil
 	}
-	m.result = &NewResult{Repo: context.Repo, Settings: &context}
+	context := SettingsContext{Repo: setup.repo, Banner: setup.banner()}
+	m.result = &NewResult{Repo: setup.repo, Settings: &context}
 	return tea.Quit
 }
 
-func (m *NewFactoryModel) prepareRepo(path string) (SettingsContext, error) {
-	var context SettingsContext
+func (m *NewFactoryModel) addRepo(path string) tea.Cmd {
+	setup, err := m.setUpRepo(path)
+	if err != nil {
+		m.problem = err.Error()
+		return nil
+	}
+	added := setup.added()
+	m.result = &NewResult{Repo: setup.repo, Added: &added}
+	return tea.Quit
+}
+
+type repoSetup struct {
+	repo, typed string
+	listed      bool
+	ran         bool
+	retrying    bool
+	result      install.InitResult
+}
+
+func (m *NewFactoryModel) setUpRepo(path string) (repoSetup, error) {
 	path = state.ExpandHome(path)
+	s := repoSetup{typed: path}
 	info, err := os.Stat(path)
 	if err != nil {
-		return context, err
+		return s, err
 	}
 	if !info.IsDir() {
-		return context, fmt.Errorf("%s is not a directory", path)
+		return s, fmt.Errorf("%s is not a directory", path)
 	}
 	repo, _, err := install.MainCheckout(path)
 	if err != nil {
-		return context, err
+		return s, fmt.Errorf("%s is not a git repository. Clone the repo there first, or type the path of one that is", install.HomeRelative(path))
 	}
-	listed := false
 	for _, known := range m.Context.Repos {
 		if sameRepo(repo, known.Path) {
-			repo, listed = known.Path, true
+			repo, s.listed = known.Path, true
 			break
 		}
 	}
-	context.Repo = repo
+	s.repo = repo
 	_, statErr := os.Stat(state.RepoConfigPath(repo))
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return context, statErr
+		return s, statErr
 	}
-	needsSetup := !listed || errors.Is(statErr, os.ErrNotExist) || m.setupRetry[repo]
-	if !needsSetup {
-		context.Banner = filepath.Base(repo) + " is already in the hub, so nothing was set up again."
-		return context, nil
+	if s.listed && statErr == nil && !m.setupRetry[repo] {
+		return s, nil
 	}
 	if m.setupRetry == nil {
 		m.setupRetry = map[string]bool{}
 	}
-	retrying := m.setupRetry[repo]
+	s.retrying = m.setupRetry[repo]
 	m.setupRetry[repo] = true
-	result, err := install.Init(repo, m.Context.StateDir)
-	if err != nil {
-		return context, err
+	if s.result, err = install.Init(repo, m.Context.StateDir); err != nil {
+		return s, err
 	}
 	delete(m.setupRetry, repo)
-	repo = result.Repo
-	context.Repo = repo
-	context.Banner = "✓ Added " + filepath.Base(repo) + " to the hub. Setup wrote these values; check them, then save."
-	top, err := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel").Output()
+	s.repo, s.ran = s.result.Repo, true
+	return s, nil
+}
+
+func (s repoSetup) fromWorktree() bool {
+	top, err := exec.Command("git", "-C", s.typed, "rev-parse", "--show-toplevel").Output()
+	return err == nil && !sameRepo(strings.TrimSpace(string(top)), s.repo)
+}
+
+func (s repoSetup) banner() string {
+	name := filepath.Base(s.repo)
 	switch {
-	case err == nil && !sameRepo(strings.TrimSpace(string(top)), repo):
-		context.Banner = "✓ Added " + filepath.Base(repo) + ", the main checkout of the worktree you typed."
-	case result.CopiedFrom != "":
-		context.Banner = "✓ Copied .claude/factory.yml to .factory/config.yml. The form edits the new file."
-	case retrying:
-		context.Banner = "✓ Finished setting up " + filepath.Base(repo) + ". Check these values, then save."
-	case listed:
-		context.Banner = "✓ Set up the missing repo config. Check these values, then save."
-	case !result.ProfileWritten:
-		context.Banner = "✓ Added " + filepath.Base(repo) + " to the hub. It already had a config; these are its values."
+	case !s.ran:
+		return name + " is already in the hub, so nothing was set up again."
+	case s.fromWorktree():
+		return "✓ Added " + name + ", the main checkout of the worktree you typed."
+	case s.result.CopiedFrom != "":
+		return "✓ Copied .claude/factory.yml to .factory/config.yml. The form edits the new file."
+	case s.retrying:
+		return "✓ Finished setting up " + name + ". Check these values, then save."
+	case s.listed:
+		return "✓ Set up the missing repo config. Check these values, then save."
+	case !s.result.ProfileWritten:
+		return "✓ Added " + name + " to the hub. It already had a config; these are its values."
 	}
-	return context, nil
+	return "✓ Added " + name + " on this machine. Blank commands are discovered by its first factory here."
+}
+
+func (s repoSetup) added() RepoAdded {
+	name, config := filepath.Base(s.repo), install.HomeRelative(state.RepoConfigPath(s.repo))
+	added := RepoAdded{Repo: s.repo, Notice: "✓ Added " + name + " on this machine."}
+	_, remoteErr := gitclone.RemoteURL(s.repo)
+	switch {
+	case !s.ran:
+		added.Notice = name + " is already in the hub, so nothing was set up again."
+	case s.result.ProfileWritten && s.result.CopiedFrom == "":
+		added.Detail = "Its first factory here works out how to build, lint, test and run it, runs each command on this machine and saves the ones that work in " + config + ". ctrl+e shows or edits them."
+	default:
+		added.Notice += " It already had a repo config, so its commands stay as they are; a factory discovers only the ones left blank."
+	}
+	if s.fromWorktree() {
+		added.Notice = "✓ Added " + name + ", the main checkout of the worktree you typed."
+	}
+	switch {
+	case errors.Is(remoteErr, gitclone.ErrNoNetworkRemote):
+		added.Warning = "! " + name + " has no network git remote, so it stays on this machine: no other node can add it, and its factories can't move. Push it to a remote to change that."
+	case remoteErr != nil:
+		added.Warning = "! Other nodes can't use " + name + " yet: " + remoteErr.Error() + "."
+	}
+	return added
 }
 
 type directoryCompletion struct {
@@ -196,5 +246,6 @@ func (m *NewFactoryModel) drawRepoPath(c *theme.Canvas, y, w int) {
 			y++
 		}
 	}
-	c.Put(1, c.H-1, "⏎ add and configure   tab complete   ↑↓ repo   esc cancel", theme.Text)
+	paragraph(c, y+1, "Adds the repo on this machine only. Clone it and add its secrets on each machine that should run it. Its first factory here works out how to build, lint, test and run it, so there is nothing to fill in.", theme.Muted)
+	c.Put(1, c.H-1, "⏎ add   tab complete   ↑↓ repo   esc cancel", theme.Text)
 }

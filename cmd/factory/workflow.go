@@ -10,9 +10,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/install"
+	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/workflow"
@@ -25,20 +28,23 @@ func runWorkflow(args []string) int {
 	if len(args) > 0 && args[0] == "watch" {
 		return watchWorkflow(args[1:])
 	}
-	if len(args) == 2 && args[0] == "commands" {
-		resolved, err := recipe.Resolve(args[1])
+	if len(args) > 0 && args[0] == "record" {
+		return recordCommands(args[1:])
+	}
+	if (len(args) == 2 || (len(args) == 3 && args[2] == "--qa")) && args[0] == "commands" {
+		resolved, err := resolveRecipe(args[1], len(args) == 3)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(resolved.Recipe); err != nil {
+		if err := json.NewEncoder(os.Stdout).Encode(resolved); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
 		return 0
 	}
 	if len(args) != 3 || args[0] != "next" {
-		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json> | commands <repo> | comments <state.json> [<dispositions.json>] | watch --dir <factory dir> --run <run id> <pr number>...")
+		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json> | commands <worktree> [--qa] | record --worktree <worktree> --factory <id> [--replace <key>]... [--yours] <key>=<value>... | comments <state.json> [<dispositions.json>] | watch --dir <factory dir> --run <run id> <pr number>...")
 		return 2
 	}
 	snapshot, err := state.ReadState(args[1])
@@ -66,6 +72,102 @@ func runWorkflow(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func resolveRecipe(worktree string, qa bool) (state.Recipe, error) {
+	resolved, err := recipe.Resolve(worktree)
+	if qa && resolved.Profile.QA.Mode == "" {
+		resolved.Recipe.Unresolved = append(resolved.Recipe.Unresolved, "qa.mode: not chosen")
+	}
+	return resolved.Recipe, err
+}
+
+type keys []string
+
+func (k *keys) String() string     { return strings.Join(*k, ",") }
+func (k *keys) Set(v string) error { *k = append(*k, v); return nil }
+
+const recordUsage = "usage: factory workflow record --worktree <worktree> --factory <id> [--replace <key>]... [--yours] <key>=<value>..."
+
+var stackKeys = []string{"qa.start", "qa.url", "qa.health", "qa.seed", "qa.sign_in"}
+
+func recordCommands(args []string) int {
+	flags := flag.NewFlagSet("workflow record", flag.ContinueOnError)
+	worktree := flags.String("worktree", "", "the factory's worktree")
+	id := flags.String("factory", "", "the factory that found the values")
+	yours := flags.Bool("yours", false, "the developer typed these values")
+	var replace keys
+	flags.Var(&replace, "replace", "a key whose discovered value stopped working")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	values := map[string]string{}
+	for _, arg := range flags.Args() {
+		key, value, ok := strings.Cut(arg, "=")
+		if !ok {
+			fmt.Fprintln(os.Stderr, recordUsage)
+			return 2
+		}
+		values[key] = value
+	}
+	if *worktree == "" || (*id == "" && !*yours) || len(values) == 0 {
+		fmt.Fprintln(os.Stderr, recordUsage)
+		return 2
+	}
+	recorded, err := record(*worktree, *id, *yours, values, replace)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory workflow record:", err)
+		return 1
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(recorded); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+type recordedCommands struct {
+	state.Recorded
+	Recipe state.Recipe `json:"recipe"`
+}
+
+func record(worktree, id string, yours bool, values map[string]string, replace []string) (recordedCommands, error) {
+	var out recordedCommands
+	repo, _, err := install.MainCheckout(worktree)
+	if err != nil {
+		return out, err
+	}
+	verify := func(effective map[string]string, written []string) error {
+		if !slices.ContainsFunc(written, func(key string) bool { return slices.Contains(stackKeys, key) }) {
+			return nil
+		}
+		if err := stackAnswers(repo, worktree, effective); err != nil {
+			return fmt.Errorf("recorded nothing: the stack did not come up in %s with these values and the ones already saved: %w", worktree, err)
+		}
+		return nil
+	}
+	if yours {
+		out.Recorded, err = state.RecordYours(repo, values)
+	} else {
+		out.Recorded, err = state.RecordDiscovered(repo, id, time.Now(), values, replace, verify)
+	}
+	if err != nil {
+		return out, err
+	}
+	out.Recipe, err = resolveRecipe(worktree, false)
+	return out, err
+}
+
+func stackAnswers(repo, worktree string, values map[string]string) error {
+	profile, err := state.ReadProfile(repo)
+	if err != nil {
+		return err
+	}
+	qa := &profile.QA
+	qa.Start, qa.URL, qa.Health, qa.Seed, qa.SignIn = values["qa.start"], values["qa.url"], values["qa.health"], values["qa.seed"], values["qa.sign_in"]
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	return node.TryStack(ctx, worktree, profile)
 }
 
 func watchWorkflow(args []string) int {

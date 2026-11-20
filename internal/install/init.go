@@ -91,8 +91,7 @@ func detectProfile(repo string) ([]byte, error) {
 	if err != nil || !servesWeb(repo) {
 		return template, err
 	}
-	template = bytes.Replace(template, []byte("  source: terminal\n"), []byte("  source: web\n"), 1)
-	return bytes.Replace(template, []byte("  mode: terminal\n"), []byte("  mode: browser\n"), 1), nil
+	return bytes.Replace(template, []byte("  source: terminal\n"), []byte("  source: web\n"), 1), nil
 }
 
 func servesWeb(repo string) bool {

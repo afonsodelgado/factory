@@ -2,11 +2,16 @@ package state
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -14,10 +19,57 @@ import (
 )
 
 type RepoSettings struct {
-	Values   map[string]string
-	Present  map[string]bool
-	path     string
-	original []byte
+	Values     map[string]string
+	Present    map[string]bool
+	Provenance map[string]Found
+	path       string
+	original   []byte
+}
+
+type Found struct {
+	Factory string
+	Day     time.Time
+}
+
+type Recorded struct {
+	Recorded []string `json:"recorded"`
+	Kept     []string `json:"kept"`
+}
+
+const provenanceMark = " · "
+
+var foundComment = regexp.MustCompile(`(?:^|` + provenanceMark + `)found by (\S+), (\d{4}-\d{2}-\d{2})$`)
+
+func commentText(node ast.Node) string {
+	if node == nil || node.GetComment() == nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(node.GetComment().String()), "#"))
+}
+
+func foundBy(node ast.Node) (Found, bool) {
+	match := foundComment.FindStringSubmatch(commentText(node))
+	if match == nil {
+		return Found{}, false
+	}
+	day, err := time.Parse(time.DateOnly, match[2])
+	return Found{Factory: match[1], Day: day}, err == nil
+}
+
+func ownComment(node ast.Node) string {
+	return strings.TrimSpace(foundComment.ReplaceAllString(commentText(node), ""))
+}
+
+func lineComment(own, provenance string) *ast.CommentGroupNode {
+	text := own + provenanceMark + provenance
+	if own == "" || provenance == "" {
+		text = own + provenance
+	}
+	if text == "" {
+		return nil
+	}
+	file, _ := parser.ParseBytes([]byte("x: y # "+text+"\n"), parser.ParseComments)
+	return settingsNode(file, "x").GetComment()
 }
 
 func ReadRepoSettings(repo string) (*RepoSettings, error) {
@@ -33,7 +85,7 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	s := &RepoSettings{path: path, original: data, Values: map[string]string{}, Present: map[string]bool{}}
+	s := &RepoSettings{path: path, original: data, Values: map[string]string{}, Present: map[string]bool{}, Provenance: map[string]Found{}}
 	for _, key := range SettingsKeys("browser") {
 		node := settingsNode(file, key)
 		s.Present[key] = node != nil
@@ -43,12 +95,130 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%s: %s: %w", path, key, err)
 			}
-		} else if key == "qa.mode" {
-			value = "terminal"
+			if found, ok := foundBy(node); ok {
+				s.Provenance[key] = found
+			}
 		}
 		s.Values[key] = value
 	}
 	return s, nil
+}
+
+type Verify func(effective map[string]string, written []string) error
+
+func RecordDiscovered(repo, factory string, day time.Time, values map[string]string, replace []string, verify Verify) (Recorded, error) {
+	provenance := "found by " + factory + ", " + day.Format(time.DateOnly)
+	return record(repo, values, verify, func(s *RepoSettings, key string) (bool, string) {
+		return s.Values[key] == "" || (s.Discovered(key) && slices.Contains(replace, key)), provenance
+	})
+}
+
+func RecordYours(repo string, values map[string]string) (Recorded, error) {
+	return record(repo, values, nil, func(*RepoSettings, string) (bool, string) { return true, "" })
+}
+
+const verifyAttempts = 3
+
+func record(repo string, values map[string]string, verify Verify, writable func(*RepoSettings, string) (bool, string)) (Recorded, error) {
+	none := Recorded{Recorded: []string{}, Kept: []string{}}
+	for key := range values {
+		if !slices.Contains(SettingsKeys("browser"), key) {
+			return none, fmt.Errorf("%s is not a repo setting factory records; use one of %s", key, strings.Join(SettingsKeys("browser"), ", "))
+		}
+	}
+	path, err := filepath.EvalSymlinks(RepoConfigPath(repo))
+	if err != nil {
+		return none, err
+	}
+	var verified map[string]string
+	for attempt := range verifyAttempts {
+		var p recordPlan
+		written := false
+		err := locked(path+".lock", func() error {
+			if p, err = planRecord(repo, values, writable); err != nil || len(p.outcome.Recorded) == 0 {
+				return err
+			}
+			if verify != nil && !maps.Equal(verified, p.effective) {
+				return nil
+			}
+			written = true
+			return p.write()
+		})
+		if err != nil || written || len(p.outcome.Recorded) == 0 {
+			return p.outcome, err
+		}
+		if attempt == verifyAttempts-1 {
+			break
+		}
+		if err := verify(p.effective, p.outcome.Recorded); err != nil {
+			return none, err
+		}
+		verified = p.effective
+	}
+	return none, errors.New("the repo config kept changing while its commands were verified; run factory workflow record again")
+}
+
+type recordPlan struct {
+	outcome    Recorded
+	settings   *RepoSettings
+	effective  map[string]string
+	provenance map[string]string
+}
+
+func planRecord(repo string, values map[string]string, writable func(*RepoSettings, string) (bool, string)) (recordPlan, error) {
+	s, err := ReadRepoSettings(repo)
+	if err != nil {
+		return recordPlan{}, err
+	}
+	p := recordPlan{outcome: Recorded{Recorded: []string{}, Kept: []string{}}, settings: s, effective: maps.Clone(s.Values), provenance: map[string]string{}}
+	for _, key := range SettingsKeys("browser") {
+		value, asked := values[key]
+		if !asked {
+			continue
+		}
+		ok, found := writable(s, key)
+		if !ok {
+			p.outcome.Kept = append(p.outcome.Kept, key)
+			continue
+		}
+		p.effective[key], p.provenance[key] = value, found
+		p.outcome.Recorded = append(p.outcome.Recorded, key)
+	}
+	return p, nil
+}
+
+func (p recordPlan) write() error {
+	file, empty, err := p.settings.parsed()
+	if err != nil {
+		return err
+	}
+	for _, key := range p.outcome.Recorded {
+		comment := lineComment(ownComment(settingsNode(file, key)), p.provenance[key])
+		if err := setSetting(file, key, p.effective[key], comment); err != nil {
+			return err
+		}
+	}
+	return p.settings.write(file, empty)
+}
+
+func locked(path string, do func() error) error {
+	unlock, err := lockFile(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return do()
+}
+
+func setSetting(file *ast.File, key, value string, comment *ast.CommentGroupNode) error {
+	encoded, err := encodeSetting(value)
+	if err != nil {
+		return err
+	}
+	if err := editSetting(file, key, encoded); err != nil {
+		return err
+	}
+	return settingsNode(file, key).SetComment(comment)
 }
 
 func SettingsKeys(mode string) []string {
@@ -143,33 +313,50 @@ func settingsNode(file *ast.File, key string) ast.Node {
 	return node
 }
 
-func (s *RepoSettings) Save(values map[string]string) error {
-	normalized := bytes.ReplaceAll(s.original, []byte("\r\n"), []byte("\n"))
-	file, err := parseRepoSettings(normalized)
+func (s *RepoSettings) Discovered(key string) bool {
+	_, found := s.Provenance[key]
+	return found
+}
+
+func (s *RepoSettings) parsed() (*ast.File, bool, error) {
+	file, err := parseRepoSettings(s.normalized())
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	empty := isEmptyDocument(file)
 	if empty {
 		file, _ = parser.ParseBytes([]byte("{}\n"), parser.ParseComments)
 	}
-	for _, key := range s.Changes(values) {
-		var value any = values[key]
-		encoded, err := encodeSetting(value)
-		if err != nil {
-			return err
-		}
-		if err := editSetting(file, key, encoded); err != nil {
-			return err
-		}
-	}
-	data := []byte(file.String())
-	if empty {
-		data = append(append(bytes.Clone(normalized), '\n'), data...)
-	}
-	if _, err := parseRepoSettings(data); err != nil {
+	return file, empty, nil
+}
+
+func (s *RepoSettings) normalized() []byte {
+	return bytes.ReplaceAll(s.original, []byte("\r\n"), []byte("\n"))
+}
+
+func (s *RepoSettings) Save(values map[string]string) error {
+	unlock, err := lockFile(s.path + ".lock")
+	if err != nil {
 		return err
 	}
+	defer unlock()
+	file, empty, err := s.parsed()
+	if err != nil {
+		return err
+	}
+	changes := s.Changes(values)
+	for _, key := range changes {
+		if err := setSetting(file, key, values[key], lineComment(ownComment(settingsNode(file, key)), "")); err != nil {
+			return err
+		}
+	}
+	if len(changes) == 0 {
+		return s.unchangedSince()
+	}
+	return s.write(file, empty)
+}
+
+func (s *RepoSettings) unchangedSince() error {
 	current, err := os.ReadFile(s.path)
 	if err != nil {
 		return err
@@ -177,8 +364,19 @@ func (s *RepoSettings) Save(values map[string]string) error {
 	if !bytes.Equal(current, s.original) {
 		return fmt.Errorf("the config changed since opening; reopen settings before saving")
 	}
-	if len(s.Changes(values)) == 0 {
-		return nil
+	return nil
+}
+
+func (s *RepoSettings) write(file *ast.File, empty bool) error {
+	data := []byte(file.String())
+	if empty {
+		data = append(append(s.normalized(), '\n'), data...)
+	}
+	if _, err := parseRepoSettings(data); err != nil {
+		return err
+	}
+	if err := s.unchangedSince(); err != nil {
+		return err
 	}
 	if bytes.Contains(s.original, []byte("\r\n")) {
 		data = bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n"))

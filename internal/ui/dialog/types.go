@@ -27,6 +27,7 @@ type RepoOption struct {
 	Path     string     `json:"path"`
 	Display  string     `json:"display"`
 	Browser  bool       `json:"browser"`
+	NoQAMode bool       `json:"no_qa_mode,omitempty"`
 	Existing []Existing `json:"existing"`
 
 	Pipelines       []state.Pipeline `json:"pipelines"`
@@ -48,6 +49,8 @@ type AgentOption struct {
 type NewContext struct {
 	StateDir  string       `json:"state_dir"`
 	Notice    string       `json:"notice,omitempty"`
+	Detail    string       `json:"detail,omitempty"`
+	Warning   string       `json:"warning,omitempty"`
 	Repos     []RepoOption `json:"repos"`
 	Repo      int          `json:"repo"`
 	Here      bool         `json:"here,omitempty"`
@@ -72,6 +75,7 @@ type ToolOption struct {
 
 type NewResult struct {
 	Settings    *SettingsContext              `json:"settings,omitempty"`
+	Added       *RepoAdded                    `json:"added,omitempty"`
 	Repo        string                        `json:"repo"`
 	Slug        string                        `json:"slug,omitempty"`
 	Prompt      string                        `json:"prompt,omitempty"`
@@ -85,6 +89,13 @@ type NewResult struct {
 	StartAnyway bool                          `json:"start_anyway,omitempty"`
 
 	WatchComments bool `json:"watch_comments,omitempty"`
+}
+
+type RepoAdded struct {
+	Repo    string `json:"repo"`
+	Notice  string `json:"notice"`
+	Detail  string `json:"detail,omitempty"`
+	Warning string `json:"warning,omitempty"`
 }
 
 type SettingsContext struct {

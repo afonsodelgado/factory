@@ -836,8 +836,11 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 					press()
 				}
 				result, ok := m.Result()
-				if !ok || !sameRepo(result.(NewResult).Settings.Repo, repo) {
-					t.Fatalf("no settings intent: %v, %s", result, m.problem)
+				if !ok || !sameRepo(addedOrOpened(result.(NewResult)).Repo, repo) {
+					t.Fatalf("no repo set up: %v, %s", result, m.problem)
+				}
+				if added := result.(NewResult); route == "add" && (added.Settings != nil || added.Added == nil) {
+					t.Fatalf("adding a repo gave %+v; want it listed and the settings form left closed, because discovery fills the commands", added)
 				}
 				if config == "legacy" {
 					data, _ := os.ReadFile(state.RepoConfigPath(repo))
@@ -865,8 +868,8 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 		m.repoPath = repo
 		m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		result, ok := m.Result()
-		if !ok || strings.Contains(result.(NewResult).Settings.Banner, "wrote") {
-			t.Fatalf("banner claims setup wrote an existing config: %+v, %s", result, m.problem)
+		if !ok || !strings.Contains(addedOrOpened(result.(NewResult)).Notice, "already had a repo config") {
+			t.Fatalf("adding a repo with its own config said %+v, %s; want its commands kept", result, m.problem)
 		}
 	})
 	t.Run("submodule add lists the remembered repo", func(t *testing.T) {
@@ -883,13 +886,13 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 		run(repo, "-c", "protocol.file.allow=always", "submodule", "add", source, "sub")
 		stateDir := t.TempDir()
 		m := NewFactory(NewContext{StateDir: stateDir})
-		settings, err := m.prepareRepo(filepath.Join(repo, "sub"))
+		setup, err := m.setUpRepo(filepath.Join(repo, "sub"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		known, err := state.LoadKnownRepos(stateDir)
-		if err != nil || len(known) != 1 || !sameRepo(settings.Repo, known[0]) {
-			t.Fatalf("hub repo %q differs from remembered repos %v: %v", settings.Repo, known, err)
+		if err != nil || len(known) != 1 || !sameRepo(setup.repo, known[0]) {
+			t.Fatalf("hub repo %q differs from remembered repos %v: %v", setup.repo, known, err)
 		}
 	})
 	t.Run("unlisted worktree and invalid paths", func(t *testing.T) {
@@ -918,9 +921,9 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 		if !ok {
 			t.Fatal(m.problem)
 		}
-		settings := result.(NewResult).Settings
-		if !sameRepo(settings.Repo, repo) || !strings.Contains(settings.Banner, "worktree") {
-			t.Fatalf("worktree: %+v", settings)
+		added := result.(NewResult).Added
+		if !sameRepo(added.Repo, repo) || !strings.Contains(added.Notice, "worktree") {
+			t.Fatalf("worktree: %+v", added)
 		}
 		nested := filepath.Join(repo, "nested")
 		os.Mkdir(nested, 0o755)
@@ -928,10 +931,17 @@ func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {
 		m.repo, m.repoPath = 1, nested
 		m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		result, ok = m.Result()
-		if !ok || result.(NewResult).Settings.Repo != repo || strings.Contains(result.(NewResult).Settings.Banner, "worktree") {
+		if !ok || result.(NewResult).Added.Repo != repo || strings.Contains(result.(NewResult).Added.Notice, "worktree") {
 			t.Fatalf("nested duplicate: %+v, %s", result, m.problem)
 		}
 	})
+}
+
+func addedOrOpened(r NewResult) RepoAdded {
+	if r.Added != nil {
+		return *r.Added
+	}
+	return RepoAdded{Repo: r.Settings.Repo, Notice: r.Settings.Banner}
 }
 
 func TestRepoSettingsRoundTripKeepsInputAndUnsavedFiles(t *testing.T) {

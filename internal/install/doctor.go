@@ -12,10 +12,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/review"
@@ -139,18 +141,7 @@ func repoChecks(o Options) []Check {
 			checks = append(checks, Check{Name: "repo config", Mark: Fail, Detail: tilde(repo) + ": no repo config", Fix: "in the hub, press n, then + add a repo… and enter " + tilde(repo)})
 			continue
 		}
-		if resolved, err := recipe.Resolve(repo); err != nil {
-			checks = append(checks, Check{Name: "commands", Mark: Fail, Detail: err.Error()})
-		} else if len(resolved.Recipe.Unresolved) > 0 {
-			checks = append(checks, Check{Name: "commands", Mark: Warn, Detail: "Repository commands need clarification", Lines: resolved.Recipe.Unresolved})
-		} else {
-			var lines []string
-			for _, name := range []string{"build", "lint", "test"} {
-				c := resolved.Recipe.Commands[name]
-				lines = append(lines, name+": "+c.Command+" ("+c.Source+")")
-			}
-			checks = append(checks, Check{Name: "commands", Mark: Pass, Detail: "Effective repository commands", Lines: lines})
-		}
+		checks = append(checks, commandsCheck(repo, registryOf(o)))
 		if o.Config == nil {
 			continue
 		}
@@ -163,6 +154,106 @@ func repoChecks(o Options) []Check {
 		}
 	}
 	return checks
+}
+
+func registryOf(o Options) *state.Registry {
+	if o.Config != nil {
+		if registry, err := state.LoadRegistry(o.Config.RegistryPath()); err == nil {
+			return registry
+		}
+	}
+	return &state.Registry{}
+}
+
+func commandsCheck(repo string, registry *state.Registry) Check {
+	resolved, err := recipe.Resolve(repo)
+	if err != nil {
+		return Check{Name: "commands", Mark: Fail, Detail: err.Error()}
+	}
+	name := filepath.Base(repo)
+	if unresolved := resolved.Recipe.Unresolved; len(unresolved) > 0 {
+		asking := askingFactory(repo, registry)
+		if asking == "" {
+			return Check{Name: "commands", Mark: Skip, Detail: name + "'s commands are blank; its first factory here discovers them", Lines: unresolved}
+		}
+		var lines []string
+		for _, field := range unresolved {
+			key, _, _ := strings.Cut(field, ":")
+			lines = append(lines, fmt.Sprintf("%-11s %s asks for it in Resolve repository commands", key, asking))
+		}
+		return Check{Name: "commands", Mark: Warn, Detail: fmt.Sprintf("%d of %s's commands could not be verified on this machine", len(unresolved), name), Lines: lines}
+	}
+	settings, _ := state.ReadRepoSettings(repo)
+	detail, lines := name+"'s commands on this machine", commandLines(resolved, settings)
+	if found, ok := firstFound(settings); ok {
+		detail += ", found by " + found.Factory + " on " + found.Day.Format("2 Jan")
+	}
+	return Check{Name: "commands", Mark: Pass, Detail: detail, Lines: lines}
+}
+
+func commandLines(resolved recipe.Resolution, settings *state.RepoSettings) []string {
+	_, anyFound := firstFound(settings)
+	line := func(key string, c state.Command) string {
+		text := fmt.Sprintf("%-11s %s", strings.TrimPrefix(key, "commands."), c.Command)
+		switch {
+		case !fromRepoConfig(c.Source):
+			return text + "   (" + c.Source + ")"
+		case anyFound && !settings.Discovered(key):
+			return text + "   (yours)"
+		}
+		return text
+	}
+	var lines []string
+	for _, name := range []string{"build", "lint", "test"} {
+		lines = append(lines, line("commands."+name, resolved.Recipe.Commands[name]))
+	}
+	if resolved.Profile.QA.Mode != "" {
+		lines = append(lines, line("qa.mode", resolved.Recipe.QA["mode"]))
+	}
+	if !resolved.Profile.BrowserQA() {
+		return lines
+	}
+	for _, key := range []string{"start", "health", "url"} {
+		lines = append(lines, line("qa."+key, resolved.Recipe.QA[key]))
+	}
+	optional := []struct{ key, value, unused string }{
+		{"seed", resolved.Profile.QA.Seed, "not used"},
+		{"sign_in", resolved.Profile.QA.SignIn, "not used: QA signs up or logs in through the app"},
+	}
+	for _, o := range optional {
+		if state.Unused(o.value) {
+			lines = append(lines, fmt.Sprintf("%-11s %s", "qa."+o.key, o.unused))
+		} else {
+			lines = append(lines, line("qa."+o.key, resolved.Recipe.QA[o.key]))
+		}
+	}
+	return lines
+}
+
+func fromRepoConfig(source string) bool {
+	path, _, _ := strings.Cut(source, ":")
+	return strings.HasSuffix(path, "config.yml") && filepath.Base(filepath.Dir(path)) == ".factory" || strings.HasSuffix(path, "factory.yml")
+}
+
+func firstFound(settings *state.RepoSettings) (state.Found, bool) {
+	if settings == nil {
+		return state.Found{}, false
+	}
+	for _, key := range state.SettingsKeys("browser") {
+		if found, ok := settings.Provenance[key]; ok {
+			return found, true
+		}
+	}
+	return state.Found{}, false
+}
+
+func askingFactory(repo string, registry *state.Registry) string {
+	for _, f := range factory.Discover([]string{repo}, registry) {
+		if f.State != nil && !f.Archived() && slices.ContainsFunc(f.State.OpenAttention(), func(a state.Attention) bool { return a.Kind == "commands" }) {
+			return f.Label()
+		}
+	}
+	return ""
 }
 
 func stackProblems(repo string) []string {

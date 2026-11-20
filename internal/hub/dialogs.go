@@ -91,6 +91,7 @@ func (m *Model) openDialog(kind string, context any) tea.Cmd {
 type dialogTransition struct {
 	settings *dialog.SettingsContext
 	back     *dialog.SettingsResult
+	added    *dialog.RepoAdded
 }
 
 func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
@@ -117,14 +118,22 @@ func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
 	}
 	context := m.newContext()
 	context.Here = false
+	back := ""
+	switch {
+	case next.added != nil:
+		back = next.added.Repo
+		context.Notice, context.Detail, context.Warning = next.added.Notice, next.added.Detail, next.added.Warning
+	case next.back != nil:
+		back = next.back.Repo
+		if next.back.Saved {
+			context.Notice = "✓ Saved repo settings."
+		}
+	}
 	for i, repo := range context.Repos {
-		if repo.Path == next.back.Repo {
+		if repo.Path == back {
 			context.Repo, context.Here = i, repo.Path == m.here
 			break
 		}
-	}
-	if next.back.Saved {
-		context.Notice = "✓ Saved repo settings."
 	}
 	return m.openDialog("new", context)
 }
@@ -149,10 +158,17 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 	case "new":
 		var r dialog.NewResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
-			if r.Settings != nil {
+			switch {
+			case r.Settings != nil:
 				err = m.ask("repo", RepoRequest{Repo: r.Settings.Repo}, nil)
 				m.dialogNext = &dialogTransition{settings: r.Settings}
-			} else {
+			case r.Added != nil:
+				err = m.ask("repo", RepoRequest{Repo: r.Added.Repo}, nil)
+				m.dialogNext = &dialogTransition{added: r.Added}
+				if err == nil && !slices.Contains(m.Config.Repos, r.Added.Repo) {
+					m.Config.Repos = append(m.Config.Repos, r.Added.Repo)
+				}
+			default:
 				cmd, err = m.newResult(r)
 			}
 		}
@@ -199,7 +215,7 @@ func (m *Model) newContext() dialog.NewContext {
 	}
 	for i, repo := range m.Config.Repos {
 		cfg, profile := m.repoConfig(repo)
-		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), Supervisor: cfg.Supervisor}
+		option := dialog.RepoOption{Name: filepath.Base(repo), Path: repo, Display: tilde(repo), Browser: profile.BrowserQA(), NoQAMode: profile.QA.Mode == "", Supervisor: cfg.Supervisor}
 		if pipelines, err := m.Config.PipelinesFor(repo); err != nil {
 			option.PipelineProblem = err.Error()
 		} else {
