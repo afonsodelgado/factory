@@ -1137,7 +1137,7 @@ func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
 		t.Fatalf("discovery beside the analyst answered %+v, %v; want it started with its own result file", reply, err)
 	}
 	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
-	running := RunningStage(f, after, nil, nil)
+	running := RunningStage(f, after, nil, nil, 0)
 	if _, discovering := after.Discovering(); running == nil || running.Run.Role != "analyst" || !discovering {
 		t.Fatalf("with discovery running the factory shows %+v; want the analyst's stage, with discovery beside it", running)
 	}
@@ -1158,6 +1158,31 @@ func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
 	if messages := InboxMessages(stateDir, Item{Factory: f, Discovery: discovery}, nil, later); !slices.ContainsFunc(messages, func(m InboxMessage) bool { return strings.HasPrefix(m.Text, "stage discoverer lost:") }) {
 		t.Fatalf("a discoverer whose pane is gone sent %+v; want the supervisor told to run discovery again", messages)
 	}
+	stageLost := func(activeRun string) bool {
+		f.State.Workflow.ActiveRun = activeRun
+		messages := InboxMessages(stateDir, Item{Factory: f, Stage: RunningStage(f, after, nil, nil, quiet)}, nil, later)
+		return slices.ContainsFunc(messages, func(m InboxMessage) bool { return strings.HasPrefix(m.Text, "stage analyst lost:") })
+	}
+	if !stageLost(analyst.ID) {
+		t.Fatal("a stage whose pane closed without a result never reached the supervisor, so the factory waited on it silently")
+	}
+	if stageLost("csv-other-run") {
+		t.Fatal("a run the engine no longer waits on was reported lost")
+	}
+	f.State.Workflow.ActiveRun = ""
+	analystPane := tmux.Pane{ID: "%8", Repo: repo, StageOf: "csv", Stage: "analyst", Token: analyst.Token, Command: "claude"}
+	waiting := state.HookEvent{Event: "Stop", At: later.Add(-30 * time.Minute)}
+	lostWhileWatching := func(heartbeat time.Time) bool {
+		f.Heartbeat = heartbeat
+		return RunningStage(f, after, []tmux.Pane{analystPane}, []*state.HookFile{{Token: analyst.Token, Main: &waiting, Last: waiting}}, quiet).Lost(later)
+	}
+	if lostWhileWatching(later.Add(-time.Minute)) {
+		t.Fatal("a stage whose turn ended while its CI watch keeps beating was reported lost, so the supervisor would kill a healthy watch")
+	}
+	if !lostWhileWatching(time.Time{}) {
+		t.Fatal("a stage that ended its turn without a result 30 minutes ago was not reported lost")
+	}
+	f.Heartbeat = time.Time{}
 
 	run := after.Runs[1]
 	pane := tmux.Pane{ID: "%7", Repo: repo, StageOf: "csv", Stage: state.Discoverer, Token: run.Token, Command: "claude"}

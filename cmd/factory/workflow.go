@@ -44,7 +44,7 @@ func runWorkflow(args []string) int {
 		return 0
 	}
 	if len(args) != 3 || args[0] != "next" {
-		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json> | commands <worktree> [--qa] | record --worktree <worktree> --factory <id> [--replace <key>]... [--yours] <key>=<value>... | comments <state.json> [<dispositions.json>] | watch --dir <factory dir> --run <run id> <pr number>...")
+		fmt.Fprintln(os.Stderr, "usage: factory workflow next <state.json> <event.json> | commands <worktree> [--qa] | record --worktree <worktree> --factory <id> [--replace <key>]... [--supersede <key>]... [--yours] <key>=<value>... | comments <state.json> [<dispositions.json>] | watch --dir <factory dir> --run <run id> <pr number>...")
 		return 2
 	}
 	snapshot, err := state.ReadState(args[1])
@@ -87,7 +87,7 @@ type keys []string
 func (k *keys) String() string     { return strings.Join(*k, ",") }
 func (k *keys) Set(v string) error { *k = append(*k, v); return nil }
 
-const recordUsage = "usage: factory workflow record --worktree <worktree> --factory <id> [--replace <key>]... [--yours] <key>=<value>..."
+const recordUsage = "usage: factory workflow record --worktree <worktree> --factory <id> [--replace <key>]... [--supersede <key>]... [--yours] <key>=<value>..."
 
 var stackKeys = []string{"qa.start", "qa.url", "qa.health", "qa.seed", "qa.sign_in"}
 
@@ -98,6 +98,8 @@ func recordCommands(args []string) int {
 	yours := flags.Bool("yours", false, "the developer typed these values")
 	var replace keys
 	flags.Var(&replace, "replace", "a key whose discovered value stopped working")
+	var supersede keys
+	flags.Var(&supersede, "supersede", "a key whose developer-typed value fails on the base commit too")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -114,7 +116,7 @@ func recordCommands(args []string) int {
 		fmt.Fprintln(os.Stderr, recordUsage)
 		return 2
 	}
-	recorded, err := record(*worktree, *id, *yours, values, replace)
+	recorded, err := record(*worktree, *id, *yours, values, replace, supersede)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "factory workflow record:", err)
 		return 1
@@ -131,7 +133,7 @@ type recordedCommands struct {
 	Recipe state.Recipe `json:"recipe"`
 }
 
-func record(worktree, id string, yours bool, values map[string]string, replace []string) (recordedCommands, error) {
+func record(worktree, id string, yours bool, values map[string]string, replace, supersede []string) (recordedCommands, error) {
 	var out recordedCommands
 	repo, _, err := install.MainCheckout(worktree)
 	if err != nil {
@@ -149,7 +151,7 @@ func record(worktree, id string, yours bool, values map[string]string, replace [
 	if yours {
 		out.Recorded, err = state.RecordYours(repo, values)
 	} else {
-		out.Recorded, err = state.RecordDiscovered(repo, id, time.Now(), values, replace, verify)
+		out.Recorded, err = state.RecordDiscovered(repo, id, time.Now(), values, replace, supersede, verify)
 	}
 	if err != nil {
 		return out, err

@@ -126,13 +126,27 @@ func needsYou(f Factory, live Live) bool {
 	return idle(live.Hook) && waitingOnUser
 }
 
+const hungAfterStalls = 3
+
 func stalled(f Factory, live Live, now time.Time, after time.Duration) bool {
 	waitingOn := f.WaitingOn()
-	if waitingOn != "agent" && waitingOn != "ci" {
+	nothingOpen := f.State != nil && f.State.HasAttentionField() && len(f.State.OpenAttention()) == 0
+	waitingOnNobody := (waitingOn == "user" || waitingOn == "") && nothingOpen
+	if waitingOn != "agent" && waitingOn != "ci" && !waitingOnNobody {
 		return false
 	}
-	stageWorking := live.Stage != nil && !idle(live.Stage)
-	return idle(live.Hook) && !stageWorking && now.Sub(lastSign(f, live)) > after
+	return idle(live.Hook) && !stageWorking(live.Stage, now, after) && now.Sub(lastSign(f, live)) > after
+}
+
+func stageWorking(stage *state.HookFile, now time.Time, after time.Duration) bool {
+	if idle(stage) {
+		return false
+	}
+	lastActive := stage.Last.At
+	if stage.Main.At.After(lastActive) {
+		lastActive = stage.Main.At
+	}
+	return now.Sub(lastActive) <= hungAfterStalls*after
 }
 
 func lastSign(f Factory, live Live) time.Time {

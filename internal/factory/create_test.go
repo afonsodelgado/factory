@@ -70,3 +70,28 @@ func TestCodexInAWorktreeCanWriteTheWorktreesOwnGitDir(t *testing.T) {
 		t.Errorf("codex writable dirs %q lack %s; Codex keeps a worktree's gitdir read-only unless it is named, so stages cannot commit, rebase or run gh stack", dirs, gitDir)
 	}
 }
+
+func TestStagesGetTheMainCheckoutsIgnoredEnvFilesWithoutOverwritingTheWorktrees(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	repo, _ := filepath.EvalSymlinks(t.TempDir())
+	gitRun(t, repo, "init", "-q")
+	writeFile(t, filepath.Join(repo, ".gitignore"), ".env*\nnode_modules/\n")
+	writeFile(t, filepath.Join(repo, "apps", "server", ".env"), "OPENROUTER_API_KEY=main\n")
+	writeFile(t, filepath.Join(repo, ".env.local"), "PORT=main\n")
+	writeFile(t, filepath.Join(repo, "node_modules", "pkg", ".env"), "VENDORED=1\n")
+	worktree := filepath.Join(WorktreesDir(repo), "evals")
+	writeFile(t, filepath.Join(worktree, ".env.local"), "PORT=worktree\n")
+
+	if _, err := CopyEnvFiles(repo, worktree); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(worktree, "apps", "server", ".env")); string(got) != "OPENROUTER_API_KEY=main\n" {
+		t.Errorf("the worktree's apps/server/.env reads %q; QA cannot reach keys the main checkout has", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(worktree, ".env.local")); string(got) != "PORT=worktree\n" {
+		t.Errorf("copying overwrote the worktree's own env file with %q", got)
+	}
+	if nested, _ := filepath.Glob(filepath.Join(worktree, ".claude", "*")); len(nested) > 0 {
+		t.Errorf("copying reached into the worktrees directory and made %v", nested)
+	}
+}

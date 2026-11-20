@@ -432,7 +432,7 @@ func TestDiscoveryRecordsOnlyBlankKeysWithItsNameAndNeverChangesYours(t *testing
 
 	var verified map[string]string
 	verify := func(effective map[string]string, _ []string) error { verified = effective; return nil }
-	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"commands.build": "go build ./...", "commands.lint": "go vet ./...", "qa.mode": "terminal"}, []string{"commands.build"}, verify)
+	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"commands.build": "go build ./...", "commands.lint": "go vet ./...", "qa.mode": "terminal"}, []string{"commands.build"}, nil, verify)
 	if err != nil || !slices.Equal(got.Recorded, []string{"commands.lint", "qa.mode"}) || !slices.Equal(got.Kept, []string{"commands.build"}) {
 		t.Fatalf("recording gave %+v, %v; want only the blank keys written and the typed build kept", got, err)
 	}
@@ -449,10 +449,10 @@ func TestDiscoveryRecordsOnlyBlankKeysWithItsNameAndNeverChangesYours(t *testing
 		t.Errorf("provenance reads %+v; want lint found by csv and build the developer's", s.Provenance)
 	}
 
-	if again, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, nil, nil); len(again.Recorded) > 0 {
+	if again, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, nil, nil, nil); len(again.Recorded) > 0 {
 		t.Errorf("a second discovery without --replace wrote %v over csv's value", again.Recorded)
 	}
-	if replaced, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, []string{"commands.lint"}, nil); !slices.Equal(replaced.Recorded, []string{"commands.lint"}) {
+	if replaced, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "golangci-lint run"}, []string{"commands.lint"}, nil, nil); !slices.Equal(replaced.Recorded, []string{"commands.lint"}) {
 		t.Errorf("replacing discovery's own value recorded %v", replaced.Recorded)
 	}
 
@@ -471,7 +471,7 @@ func TestDiscoveryRecordsOnlyBlankKeysWithItsNameAndNeverChangesYours(t *testing
 	if data, _ := os.ReadFile(RepoConfigPath(repo)); !strings.Contains(string(data), "lint: make lint # golangci once it is installed\n") || !strings.Contains(string(data), "build: make all # yours\n") {
 		t.Errorf("edits and typed commands left:\n%s\nwant the developer's own comments kept and only the found-by note gone", data)
 	}
-	if after, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "go vet ./..."}, []string{"commands.lint"}, nil); len(after.Recorded) > 0 {
+	if after, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "go vet ./..."}, []string{"commands.lint"}, nil, nil); len(after.Recorded) > 0 {
 		t.Errorf("discovery replaced a value the developer edited: %+v", after)
 	}
 
@@ -480,12 +480,18 @@ func TestDiscoveryRecordsOnlyBlankKeysWithItsNameAndNeverChangesYours(t *testing
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			RecordDiscovered(repo, "csv", day, map[string]string{key: key + " found"}, nil, nil)
+			RecordDiscovered(repo, "csv", day, map[string]string{key: key + " found"}, nil, nil, nil)
 		}()
 	}
 	wg.Wait()
 	if s, _ := ReadRepoSettings(repo); s.Values["commands.test"] != "commands.test found" || s.Values["qa.start"] != "qa.start found" || s.Values["commands.lint"] != "make lint" {
 		t.Errorf("two factories recording at once left %v; want both blank keys written and nothing else changed", s.Values)
+	}
+	if superseded, _ := RecordDiscovered(repo, "pdf", day, map[string]string{"commands.lint": "go vet ./..."}, nil, []string{"commands.lint"}, nil); !slices.Equal(superseded.Recorded, []string{"commands.lint"}) {
+		t.Errorf("discovery could not supersede a typed command that fails on the base: %+v", superseded)
+	}
+	if data, _ := os.ReadFile(RepoConfigPath(repo)); !strings.Contains(string(data), `lint: go vet ./... # replaced "make lint", which failed on the base too · found by pdf, 2026-11-19`) {
+		t.Errorf("a superseded command left no trace of the developer's value:\n%s", data)
 	}
 }
 
@@ -513,7 +519,7 @@ func TestStackVerificationRunsWithoutTheConfigLockAndRepeatsWhenTheConfigChanged
 		}
 		return nil
 	}
-	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"qa.start": "pnpm dev"}, nil, verify)
+	got, err := RecordDiscovered(repo, "csv", day, map[string]string{"qa.start": "pnpm dev"}, nil, nil, verify)
 	if err != nil || verifications != 2 || !slices.Equal(got.Recorded, []string{"qa.start"}) {
 		t.Fatalf("recording during a concurrent edit gave %+v, %v after %d verifications; want it verified again with the new config, then saved", got, err, verifications)
 	}
@@ -532,7 +538,7 @@ func TestRecordGivesUpWithoutAVerificationItWouldThrowAway(t *testing.T) {
 		_, err := RecordYours(repo, map[string]string{"commands.build": fmt.Sprint("make ", verifications)})
 		return err
 	}
-	_, err := RecordDiscovered(repo, "csv", time.Now(), map[string]string{"qa.start": "pnpm dev"}, nil, verify)
+	_, err := RecordDiscovered(repo, "csv", time.Now(), map[string]string{"qa.start": "pnpm dev"}, nil, nil, verify)
 	if err == nil || verifications != verifyAttempts-1 {
 		t.Fatalf("a config that changed during every verification gave %v after %d verifications; want a refusal after %d, never a stack check whose result is thrown away", err, verifications, verifyAttempts-1)
 	}

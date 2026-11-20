@@ -61,10 +61,11 @@ type QueuedType struct {
 }
 
 type StageView struct {
-	Run      state.StageRun
-	Pane     *tmux.Pane
-	Hook     *state.HookFile
-	patience time.Duration
+	Run       state.StageRun
+	Pane      *tmux.Pane
+	Hook      *state.HookFile
+	patience  time.Duration
+	heartbeat time.Time
 }
 
 func StageLabel(run state.StageRun) string {
@@ -276,6 +277,9 @@ func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
 	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	trust.Managed(it.Factory.Repo, it.Factory.Worktree)
+	if _, err := factory.CopyEnvFiles(it.Factory.Repo, it.Factory.Worktree); err != nil {
+		m.notice = "could not copy env files into the worktree: " + err.Error()
+	}
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
 	}

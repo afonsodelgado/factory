@@ -133,7 +133,7 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 		case strings.Contains(command, "rules/branches"):
 			return []byte(`[[]]`), nil
 		case strings.Contains(command, "branches/main"):
-			return []byte(`{"protected":false,"commit":{"sha":"b"}}`), nil
+			return []byte(`{"protected":false,"commit":{"sha":"trunk-moved-on"}}`), nil
 		case strings.Contains(command, "check-runs"):
 			return []byte(`[{"total_count":0,"check_runs":` + checkRuns + `}]`), nil
 		case strings.Contains(command, "statuses"):
@@ -196,6 +196,16 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 	failed := gh.Observe(dir, 1, saved.Window, now)
 	if failed.CI != "unknown" || failed.Reason == "no_checks" {
 		t.Fatal(failed)
+	}
+	clock, slept := now, 0
+	tick := func(context.Context, time.Duration) error {
+		slept++
+		clock = clock.Add(GHEvery)
+		return nil
+	}
+	gaveUp, err := WatchPRs(context.Background(), dir, dir, "run", []int{1}, gh, func() time.Time { return clock }, tick)
+	if err != nil || gaveUp[0].CI != "unknown" || slept < int(ErrorGrace/GHEvery) {
+		t.Fatal("the watcher did not retry a GitHub error through its grace before reporting it", slept, gaveUp, err)
 	}
 	if calls == 0 {
 		t.Fatal("no GitHub observations")

@@ -424,15 +424,15 @@ func TestRecordSavesOnlyCommandsThatRanAndNeverAStackThatDidNotComeUp(t *testing
 	writeFile(t, state.RepoConfigPath(repo), config)
 	url := "http://localhost:${FACTORY_WEB_PORT}/"
 
-	_, err := record(repo, "csv", false, map[string]string{"commands.lint": "go vet ./...", "qa.start": "exit 3", "qa.url": url, "qa.health": url}, nil)
+	_, err := record(repo, "csv", false, map[string]string{"commands.lint": "go vet ./...", "qa.start": "exit 3", "qa.url": url, "qa.health": url}, nil, nil)
 	if data := readOr(state.RepoConfigPath(repo)); err == nil || !strings.Contains(err.Error(), "recorded nothing") || data != config {
 		t.Fatalf("recording a stack whose start exits 3 answered %v and left:\n%s\nwant it refused with the config untouched", err, data)
 	}
-	got, err := record(repo, "csv", false, map[string]string{"commands.build": "go build ./...", "commands.lint": "go vet ./..."}, nil)
+	got, err := record(repo, "csv", false, map[string]string{"commands.build": "go build ./...", "commands.lint": "go vet ./..."}, nil, nil)
 	if err != nil || !slices.Equal(got.Recorded.Recorded, []string{"commands.lint"}) || got.Recipe.Commands["build"].Command != "make" {
 		t.Fatalf("recording build and lint gave %+v, %v; want only the blank lint saved and the developer's build kept", got, err)
 	}
-	if _, err := record(repo, "", true, map[string]string{"commands.lint": "make lint"}, nil); err != nil || !strings.Contains(readOr(state.RepoConfigPath(repo)), "lint: make lint\n") {
+	if _, err := record(repo, "", true, map[string]string{"commands.lint": "make lint"}, nil, nil); err != nil || !strings.Contains(readOr(state.RepoConfigPath(repo)), "lint: make lint\n") {
 		t.Fatalf("typed commands gave %v and:\n%s\nwant the developer's value saved without a found-by note", err, readOr(state.RepoConfigPath(repo)))
 	}
 }

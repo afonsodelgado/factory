@@ -22,7 +22,7 @@ const (
 	revisedBody  = "Revised from your comments. Tap to review it again."
 )
 
-var notifiable = []string{"question", "gate", "comment", "cap", "failure", "permission", "prompt", "silent", "handoff", "commands"}
+var notifiable = []string{"question", "gate", "design_return", "comment", "cap", "failure", "permission", "prompt", "silent", "asleep", "stack", "unreadable", "handoff", "commands"}
 
 type Link struct {
 	Route       string `json:"route"`
@@ -36,6 +36,7 @@ type tracked struct {
 	Title    string    `json:"title"`
 	Body     string    `json:"body,omitempty"`
 	Alerted  bool      `json:"alerted,omitempty"`
+	Owed     bool      `json:"owed,omitempty"`
 	Revision int64     `json:"revision"`
 	Changed  time.Time `json:"changed"`
 }
@@ -96,7 +97,7 @@ func alertsOf(factories []host.LocalFactory) (open map[string]alert, active, wor
 	return open, active, working
 }
 
-var kindWords = map[string]string{"prompt": "waits at a prompt", "silent": "not reporting"}
+var kindWords = map[string]string{"prompt": "waits at a prompt", "silent": "not reporting", "asleep": "stopped", "stack": "review stack failed", "unreadable": "state unreadable", "design_return": "design question"}
 
 func kindWord(kind string) string {
 	if word, ok := kindWords[kind]; ok {
@@ -128,6 +129,11 @@ func (s Store) Reconcile(node string, factories []host.LocalFactory, connected f
 			switch {
 			case seen && !a.active:
 				l.cancel(key)
+				known.Owed = false
+			case seen && known.Open && known.Owed:
+				known.Alerted = l.queue(node, subs, key, known, nil, now)
+				known.Owed = !known.Alerted
+				queued = known.Alerted || queued
 			case seen && !known.Open && a.reopens:
 				known.Open, known.Body, known.Revision, known.Changed = true, revisedBody, known.Revision+1, now
 				if l.Baseline {
@@ -138,8 +144,9 @@ func (s Store) Reconcile(node string, factories []host.LocalFactory, connected f
 				item := a.tracked
 				item.Changed = now
 				l.Items[key] = &item
-				if l.Baseline && a.active {
-					item.Alerted = l.queue(node, subs, key, &item, nil, now)
+				if l.Baseline {
+					item.Alerted = a.active && l.queue(node, subs, key, &item, nil, now)
+					item.Owed = a.active && !item.Alerted
 					queued = item.Alerted || queued
 				}
 			}

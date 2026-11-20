@@ -110,7 +110,7 @@ func (l *Loader) Load() Snapshot {
 		hook := HookFor(f, TokenOf(pane), supervisorHooks)
 		l.rememberSession(f, PaneHook(TokenOf(pane), hooks))
 		l.rememberBranches(f)
-		stage := RunningStage(f, runs[f.Key()], panes, hooks)
+		stage := RunningStage(f, runs[f.Key()], panes, hooks, stalledAfter[f.Repo])
 		discovery := DiscoveryStage(f, runs[f.Key()], panes, hooks, stalledAfter[f.Repo])
 		revising := RevisingGates(f, runs[f.Key()], panes, hooks)
 		live := factory.Live{Pane: LivePane(panes, f), Hook: hook, Stage: promptingFirst(stage.HookValue(), discovery.HookValue()), Revising: revising}
@@ -138,7 +138,7 @@ func WithoutTokens(hooks []*state.HookFile, tokens map[string]bool) []*state.Hoo
 	return kept
 }
 
-func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile) *StageView {
+func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, hooks []*state.HookFile, patience time.Duration) *StageView {
 	if runs == nil {
 		return nil
 	}
@@ -146,7 +146,7 @@ func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, h
 	if !ok {
 		return nil
 	}
-	view := &StageView{Run: run, Hook: PaneHook(run.Token, hooks)}
+	view := &StageView{Run: run, Hook: PaneHook(run.Token, hooks), patience: patience, heartbeat: f.Heartbeat}
 	if p, found := stagePaneOf(panes, f, run.Role, run.Token); found {
 		view.Pane = &p
 	}
@@ -189,10 +189,13 @@ func (v *StageView) Lost(now time.Time) bool {
 }
 
 func (v *StageView) lastActivity() time.Time {
-	if v.Hook.Last.At.After(v.Hook.Main.At) {
-		return v.Hook.Last.At
+	latest := v.Hook.Main.At
+	for _, at := range []time.Time{v.Hook.Last.At, v.heartbeat} {
+		if at.After(latest) {
+			latest = at
+		}
 	}
-	return v.Hook.Main.At
+	return latest
 }
 
 func (v *StageView) paneValue() (tmux.Pane, bool) {
