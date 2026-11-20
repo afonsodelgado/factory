@@ -1,0 +1,22 @@
+ [1;38;2;192;202;245mMove csv[m                                                                    [38;2;86;95;137mon macbook[m 
+                                                                                        
+   [38;2;86;95;137mnode[m                   [38;2;86;95;137mstate[m                                                         
+   [38;2;192;202;245mbuild-box[m              [38;2;247;118;142m↮ unreachable[m                                                 
+   [38;2;192;202;245mhomelab[m                [38;2;158;206;106m● ready[m                                                       
+   [38;2;192;202;245mstudio[m                 [38;2;224;175;104m! 1 problem to fix[m                                            
+[48;2;41;46;66m [m[1;38;2;122;162;247;48;2;41;46;66m❯[m[48;2;41;46;66m [m[38;2;192;202;245;48;2;41;46;66mmini[m[48;2;41;46;66m                   [m[38;2;115;122;162;48;2;41;46;66m– cowork isn't added here[m[48;2;41;46;66m                                     [m
+                                                                                        
+ [38;2;169;177;214mcsv stops at its next checkpoint on macbook, when it waits for you or between stages.[m  
+ [38;2;169;177;214mIts branches are pushed and the node you pick resumes it with /factory resume and no[m   
+ [38;2;169;177;214mold conversation. Nodes that are unreachable, not ready or without cowork can't be[m     
+ [38;2;169;177;214mpicked.[m                                                                                
+                                                                                        
+ [38;2;247;118;142m✗ cowork isn't added on mini: clone it there, then run factory init in it or add it[m    
+ [38;2;247;118;142mfrom that node's hub (n → + add a repo…). Nothing moved.[m                               
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;169;177;214m⏎ move there   j/k pick   esc close[m                                                    

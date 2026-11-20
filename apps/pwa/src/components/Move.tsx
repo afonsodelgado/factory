@@ -203,16 +203,35 @@ export function Moving() {
     });
 }
 
-function useReadiness(targets: NodeView[]) {
-  const [reports, setReports] = useState<Record<string, Readiness>>({});
-  const asked = JSON.stringify(
-    targets.filter((n) => n.live).map((n) => [n.id, n.origin]),
+const listed = (names: string[]) =>
+  names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+    : names.join("");
+
+const gitURLs = (factories: LocalFactory[]) => [
+  ...new Set(factories.flatMap((f) => (f.git_url ? [f.git_url] : []))),
+];
+
+const repoChecks = (report: Readiness | undefined) =>
+  (report?.checks ?? []).filter((c) => c.name === "repo");
+
+const missingRepo = (report: Readiness | undefined, urls: string[], url = "") =>
+  repoChecks(report).find(
+    (c, i) => c.mark === "fail" && (url === "" || urls[i] === url),
   );
+
+function useReadiness(targets: NodeView[], repos: string[]) {
+  const [reports, setReports] = useState<Record<string, Readiness>>({});
+  const asked = JSON.stringify([
+    repos,
+    targets.filter((n) => n.live).map((n) => [n.id, n.origin]),
+  ]);
   useEffect(() => {
     let current = true;
-    for (const [id, origin] of JSON.parse(asked) as [string, string][])
+    const [wanted, live] = JSON.parse(asked) as [string[], [string, string][]];
+    for (const [id, origin] of live)
       nodeApi(origin)
-        .readiness([])
+        .readiness(wanted)
         .then(
           (report) =>
             current && setReports((all) => ({ ...all, [id]: report })),
@@ -225,10 +244,20 @@ function useReadiness(targets: NodeView[]) {
   return reports;
 }
 
-function unavailable(node: NodeView, report: Readiness | undefined) {
+function unavailable(
+  node: NodeView,
+  report: Readiness | undefined,
+  factory: LocalFactory,
+  holder: NodeView,
+) {
+  if (factory.remote_problem) return factory.remote_problem;
+  if (factory.no_remote)
+    return `${factory.repo_name} has no network git remote, so it runs only on ${holder.short}`;
   if (node.lost) return `${node.short} can't be reached`;
   if (!node.live) return `waiting for ${node.short} to answer`;
   if (!report) return `asking ${node.short}…`;
+  const missing = factory.git_url && missingRepo(report, [factory.git_url]);
+  if (missing) return `${missing.detail}: ${missing.fix}`;
   const failing = report.checks?.find((c) => c.mark === "fail");
   if (report.problems > 0 || failing)
     return `can't run factories yet: ${failing ? `${failing.name}: ${failing.detail}` : `${report.problems} to fix`}`;
@@ -244,7 +273,7 @@ function PickSheet(props: {
 }) {
   const { factory, holder, targets } = props;
   const { dialog, cancel } = useSheet();
-  const reports = useReadiness(targets);
+  const reports = useReadiness(targets, gitURLs([factory]));
   const [chosen, setChosen] = useState<NodeView>();
   const takeover = holder.lost;
   return (
@@ -262,12 +291,12 @@ function PickSheet(props: {
       </h2>
       <p className="sm">
         {takeover
-          ? `${holder.short} can't be reached. A node that kept the last checkpoint of ${factory.id} can take it over from there.`
+          ? `${holder.short} can't be reached. A node that kept the last checkpoint of ${factory.id}, and has ${factory.repo_name} added, can take it over from there.`
           : `${holder.short} stops ${factory.id} at a checkpoint, and the node you pick resumes it with /factory resume.`}
       </p>
       <div className="opts flush">
         {targets.map((node) => {
-          const why = unavailable(node, reports[node.id]);
+          const why = unavailable(node, reports[node.id], factory, holder);
           return (
             <button
               key={node.id}
@@ -452,7 +481,16 @@ export function MoveAll({ node }: { node: NodeView }) {
   const [asking, setAsking] = useState(false);
   const [batch, setBatch] = useState<BatchProgress>();
   const [problem, setProblem] = useState<string>();
-  const count = home.snapshot?.factories.length ?? 0;
+  const factories = home.snapshot?.factories ?? [];
+  const count = factories.length;
+  const urls = gitURLs(factories);
+  const report = useReadiness([node], urls)[node.id];
+  const stranded = factories.filter(
+    (f) => f.git_url && missingRepo(report, urls, f.git_url),
+  );
+  const strandedRepos = [...new Set(stranded.map((f) => f.repo_name))];
+  const unmovable = factories.filter((f) => f.no_remote || f.remote_problem);
+  const fix = missingRepo(report, urls)?.fix;
   useEffect(() => {
     if (!batch?.running) return;
     const timer = setTimeout(
@@ -496,6 +534,12 @@ export function MoveAll({ node }: { node: NodeView }) {
           ))}
         </ul>
       ) : null}
+      {batch && !batch.running && strandedRepos.length ? (
+        <Problem>
+          To move the others, add {listed(strandedRepos)} on {batch.target_name}
+          : {fix}.
+        </Problem>
+      ) : null}
       {batch?.running ? (
         <button type="button" className="btn warn" onClick={cancel}>
           Cancel the moves not released yet
@@ -525,6 +569,31 @@ export function MoveAll({ node }: { node: NodeView }) {
           Each of the {factoryCount(count)} on {home.short} stops at a
           checkpoint and resumes on {node.short}, one at a time. Those that
           can't move stay on {home.short} and say why.
+          {unmovable.length ? (
+            <span className="yel">
+              {" "}
+              {listed(unmovable.map((f) => f.id))} can't move:{" "}
+              {unmovable
+                .map(
+                  (f) =>
+                    f.remote_problem ??
+                    `${f.repo_name} has no network git remote`,
+                )
+                .join("; ")}
+              .
+            </span>
+          ) : null}
+          {stranded.length ? (
+            <span className="yel">
+              {" "}
+              {stranded.length} can't move now:{" "}
+              {listed(stranded.map((f) => f.id))}{" "}
+              {stranded.length === 1 ? "belongs" : "belong"} to{" "}
+              {listed(strandedRepos)}, which{" "}
+              {strandedRepos.length === 1 ? "isn't" : "aren't"} added on{" "}
+              {node.short}.
+            </span>
+          ) : null}
         </ConfirmSheet>
       ) : null}
     </>

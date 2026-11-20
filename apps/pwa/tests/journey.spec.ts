@@ -498,12 +498,23 @@ test("a factory moves to another node through its checkpoint and release, can't 
   page,
 }) => {
   const server = fake(page.request);
-  await server.set({ roster: roster("homelab") });
-  await server.factories([factory("csv-export", [])]);
+  const shop = "git@github.com:acme/shop.git";
+  await server.set({ roster: roster("homelab", "build-box") });
+  await server.factories([factory("csv-export", [], { git_url: shop })]);
   await server.node(peer("homelab"), { factories: [] });
+  await server.node(peer("build-box"), {
+    factories: [],
+    lacks: [shop],
+    short: "build-box",
+  });
   await page.goto("/f/shop-1a2b-csv-export");
   await page.getByRole("button", { name: "Move to…" }).click();
   const sheet = page.getByRole("dialog", { name: "Move csv-export" });
+  const lacking = sheet.getByRole("button", { name: /build-box/ });
+  await expect(lacking).toContainText(
+    "shop isn't added on build-box: clone it there, then run factory init in it or add it from that node's hub (n → + add a repo…)",
+  );
+  await expect(lacking).toBeDisabled();
   await sheet.getByRole("button", { name: /homelab\s*ready/ }).click();
   await sheet.getByRole("button", { name: "Move to homelab" }).click();
 
@@ -591,21 +602,30 @@ test("move all reports which factories moved and which stayed, and why", async (
 }) => {
   const server = fake(page.request);
   await server.set({ roster: roster("homelab") });
+  const billing = "git@github.com:acme/billing.git";
   await server.factories([
     factory("csv-export", []),
     factory("invoice-pdf", [], {
       unmovable: "the answer to gate-plan is unknown and must settle first",
     }),
+    factory("ledger-fix", [], { git_url: billing, repo_name: "billing" }),
   ]);
-  await server.node(peer("homelab"), { factories: [] });
+  await server.node(peer("homelab"), {
+    factories: [],
+    lacks: [billing],
+    short: "homelab",
+  });
   await page.goto("/phone/nodes/node-2");
   await page
     .getByRole("button", { name: "Move all from 127 to homelab…" })
     .click();
-  await page
-    .getByRole("dialog", { name: "Move all to homelab?" })
-    .getByRole("button", { name: "Move all" })
-    .click();
+  const confirm = page.getByRole("dialog", { name: "Move all to homelab?" });
+  await expect(
+    confirm.getByText(
+      "1 can't move now: ledger-fix belongs to billing, which isn't added on homelab.",
+    ),
+  ).toBeVisible();
+  await confirm.getByRole("button", { name: "Move all" }).click();
   const outcomes = page.getByRole("list", { name: "Moving to homelab" });
   await expect(
     outcomes

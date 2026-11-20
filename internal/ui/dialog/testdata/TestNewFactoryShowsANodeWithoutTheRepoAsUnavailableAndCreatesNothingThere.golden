@@ -1,0 +1,22 @@
+ [1;38;2;192;202;245mRepo[m                                                                            [38;2;86;95;137m1 of 3[m 
+ [1;38;2;122;162;247m❯[m [38;2;192;202;245m● cowork[m   [38;2;86;95;137m~/dev/cowork[m                  [38;2;115;122;162mterminal QA[m                                 
+     [38;2;115;122;162m+ add a repo…[m                                                                      
+                                                                                        
+ [1;38;2;192;202;245mRuns on[m                                                                                
+   [38;2;169;177;214m○ this machine[m   [38;2;169;177;214m○ homelab[m   [38;2;192;202;245m● build-box[m  [38;2;86;95;137mdefault[m  [38;2;86;95;137mno cowork[m                         
+   [38;2;247;118;142m✗ cowork isn't added on build-box: clone it there, then run factory init in it or[m    
+   [38;2;247;118;142madd it from that node's hub (n → + add a repo…).[m                                     
+   [38;2;86;95;137mbuild-box is the default node, but not for cowork: pick another with ←→.[m             
+                                                                                        
+ [1;38;2;192;202;245mFactory id[m                                                                             
+ [38;2;122;162;247m╭────────────────────────────────────────────────────────────────────────────────────╮[m 
+ [38;2;122;162;247m│ [m[38;2;192;202;245mcsv-export█[m                                                                        [38;2;122;162;247m│[m 
+ [38;2;122;162;247m╰────────────────────────────────────────────────────────────────────────────────────╯[m 
+ [38;2;86;95;137mcsv-export is a new factory on build-box. You'll write its prompt next.[m                
+ [38;2;247;118;142m✗ csv-export can't start on build-box until cowork is added there. Pick another node[m   
+ [38;2;247;118;142mwith ←→. Nothing was created.[m                                                          
+                                                                                        
+                                                                                        
+                                                                                        
+                                                                                        
+ [38;2;169;177;214m←→ runs on   ↑↓ repo   ctrl+e settings   esc cancel[m                                    

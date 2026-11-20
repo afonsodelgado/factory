@@ -106,6 +106,9 @@ export type LocalFactory = {
   title?: string;
   repo: string;
   repo_name: string;
+  git_url?: string;
+  no_remote?: boolean;
+  remote_problem?: string;
   stage?: string;
   loop?: string;
   round?: number;

@@ -212,9 +212,13 @@ func (m *Model) newContext() dialog.NewContext {
 				option.Agents = append(option.Agents, dialog.AgentOption{Role: role, AgentSetting: agents[role]})
 			}
 		}
-		if url, err := gitclone.RemoteURL(repo); err != nil {
+		url, err := gitclone.RemoteURL(repo)
+		switch {
+		case errors.Is(err, gitclone.ErrNoNetworkRemote):
 			option.NoGitRemote = err.Error()
-		} else {
+		case err != nil:
+			option.RemoteProblem = err.Error()
+		default:
 			option.GitURL = url
 		}
 		for _, it := range localOnly(m.snap).Items {

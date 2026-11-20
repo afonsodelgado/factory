@@ -28,10 +28,13 @@ type MoveContext struct {
 	HolderShort string       `json:"holder_short"`
 	Lost        bool         `json:"lost,omitempty"`
 	Targets     []NodeChoice `json:"targets"`
+	Repo        string       `json:"repo"`
+	GitURL      string       `json:"git_url,omitempty"`
+	NoRemote    bool         `json:"no_remote,omitempty"`
 }
 
 type MoveActions interface {
-	Ready(ctx context.Context, on string) (node.Report, error)
+	Ready(ctx context.Context, on, gitURL string) (node.Report, error)
 	Start(ctx context.Context, on string, r node.MoveRequest) (node.Progress, error)
 	Progress(ctx context.Context, on, operation string) (node.Progress, error)
 	Cancel(ctx context.Context, on, operation string) (node.Progress, error)
@@ -97,7 +100,7 @@ func (m *Move) Init() tea.Cmd {
 		cmds = append(cmds, m.resume())
 	}
 	for _, t := range m.Context.Targets {
-		if !t.Unreachable {
+		if !t.Unreachable && !m.Context.NoRemote {
 			cmds = append(cmds, m.check(t))
 		}
 	}
@@ -105,11 +108,11 @@ func (m *Move) Init() tea.Cmd {
 }
 
 func (m *Move) check(t NodeChoice) tea.Cmd {
-	actions, on := m.actions, nodeAddress(t)
+	actions, on, gitURL := m.actions, nodeAddress(t), m.Context.GitURL
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), checkWait)
 		defer cancel()
-		report, err := actions.Ready(ctx, on)
+		report, err := actions.Ready(ctx, on, gitURL)
 		return moveReady{name: t.Name, report: report, err: err}
 	}
 }
@@ -187,12 +190,31 @@ func (m *Move) picked() (NodeChoice, bool) {
 	return m.Context.Targets[m.cursor], true
 }
 
+func (m *Move) missingRepo(t NodeChoice) (node.Check, bool) {
+	r := m.ready[t.Name]
+	i := slices.IndexFunc(r.report.Checks, func(c node.Check) bool { return c.Name == "repo" && c.Mark == node.MarkFail })
+	if i < 0 {
+		return node.Check{}, false
+	}
+	return r.report.Checks[i], true
+}
+
+func (m *Move) noRemote() string {
+	ctx := m.Context
+	return ctx.Repo + " has no network git remote, so no other node can have it and its factories can't move. Push it to a remote, clone it on another node and run factory init there; then factories of " + ctx.Repo + " can move to that node."
+}
+
 func (m *Move) refusal(t NodeChoice) string {
 	r := m.ready[t.Name]
 	short := shortName(t.Name)
+	missing, lacks := m.missingRepo(t)
 	switch {
+	case m.Context.NoRemote:
+		return m.noRemote()
 	case t.Unreachable:
 		return short + " is unreachable, so nothing moves there. Pick another node."
+	case lacks:
+		return missing.Sentence() + ". Nothing moved."
 	case !r.done:
 		return short + " has not answered its readiness check yet."
 	case r.err != nil:
@@ -351,17 +373,25 @@ func (m *Move) drawPick(c *theme.Canvas) {
 
 func (m *Move) explanation() string {
 	ctx := m.Context
-	if ctx.Lost {
-		return ctx.HolderShort + " is unreachable, so " + ctx.Label + " can't stop at a checkpoint there. A node that kept a checkpoint of " + ctx.Label + " from an earlier move can take it over from that checkpoint; it warns you first."
+	switch {
+	case ctx.NoRemote:
+		return m.noRemote()
+	case ctx.Lost:
+		return ctx.HolderShort + " is unreachable, so " + ctx.Label + " can't stop at a checkpoint there. A node that kept a checkpoint of " + ctx.Label + " from an earlier move, and has " + ctx.Repo + " added, can take it over from that checkpoint; it warns you first."
 	}
-	return ctx.Label + " stops at its next checkpoint on " + ctx.HolderShort + ", when it waits for you or between stages. Its branches are pushed and the node you pick resumes it with /factory resume and no old conversation. Nodes that are unreachable or not ready can't be picked."
+	return ctx.Label + " stops at its next checkpoint on " + ctx.HolderShort + ", when it waits for you or between stages. Its branches are pushed and the node you pick resumes it with /factory resume and no old conversation. Nodes that are unreachable, not ready or without " + ctx.Repo + " can't be picked."
 }
 
 func (m *Move) targetState(t NodeChoice) (string, theme.Ink) {
 	r := m.ready[t.Name]
+	_, lacks := m.missingRepo(t)
 	switch {
+	case m.Context.NoRemote:
+		return "– " + m.Context.Repo + " is on " + m.Context.HolderShort + " only", theme.Quiet
 	case t.Unreachable:
 		return "↮ unreachable", theme.FgInk(theme.Red)
+	case lacks:
+		return "– " + m.Context.Repo + " isn't added here", theme.Quiet
 	case !r.done:
 		return "◌ asking…", theme.FgInk(theme.Cyan)
 	case r.err != nil:
@@ -412,6 +442,9 @@ func (m *Move) drawProgress(c *theme.Canvas) {
 			y = paragraph(c, y, "· "+step, theme.Text)
 		}
 		y++
+	}
+	if p.State == node.StateActive && p.DiscoversQA {
+		y = paragraph(c, y, target+" kept its own repo config for "+m.Context.Repo+". Its QA commands are still blank, so "+label+" discovers them there before QA.", theme.Text) + 1
 	}
 	if after := m.afterword(label, source, target); after != "" {
 		y = paragraph(c, y, after, theme.Muted) + 1

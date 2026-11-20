@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -70,7 +69,7 @@ func phoneStatus(cfg *state.Config) (dialog.PhoneContext, error) {
 
 func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.NodesContext) dialog.NodesContext {
 	_, tailnet, _ := strings.Cut(cfg.NodeHostname(), ".")
-	c := dialog.NodesContext{Machine: cfg.NodeName(), Tailnet: tailnet, Phone: phone, Owner: cfg.Node.Owner, Target: cfg.Node.Target, Repos: repoURLs(cfg.Repos)}
+	c := dialog.NodesContext{Machine: cfg.NodeName(), Tailnet: tailnet, Phone: phone, Owner: cfg.Node.Owner, Target: cfg.Node.Target}
 	ctx, cancel := context.WithTimeout(context.Background(), nodeAsk)
 	defer cancel()
 	local := node.Unix(cfg.NodeSocket())
@@ -80,6 +79,7 @@ func nodesContext(cfg *state.Config, phone dialog.PhoneContext, known dialog.Nod
 	}
 	c.Self, c.Version, c.Factories = snap.Node, snap.Version, len(snap.Factories)
 	for _, f := range snap.Factories {
+		c.Movable = append(c.Movable, dialog.MovableFactory{ID: f.ID, Repo: f.RepoName, GitURL: f.GitURL})
 		if !f.NeedsSince.IsZero() {
 			c.NeedsYou++
 		}
@@ -139,24 +139,6 @@ func rosterRows(roster node.Roster, known []dialog.NodeRow) []dialog.NodeRow {
 		rows = append(rows, row)
 	}
 	return rows
-}
-
-func shareableOrigin(repo string) string {
-	url := gitclone.Origin(repo)
-	if url == "" || gitclone.CheckURL(url) != nil {
-		return ""
-	}
-	return url
-}
-
-func repoURLs(repos []string) []dialog.RepoURL {
-	var urls []dialog.RepoURL
-	for _, repo := range repos {
-		if url := shareableOrigin(repo); url != "" {
-			urls = append(urls, dialog.RepoURL{Name: strings.TrimSuffix(path.Base(url), ".git"), URL: url})
-		}
-	}
-	return urls
 }
 
 func printPhoneStatus(w io.Writer, cfg *state.Config) error {
@@ -265,7 +247,9 @@ func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dial
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, node.ReadyWait+node.ProbeWait)
 	defer cancel()
-	if err := peer.Do(readyCtx, http.MethodGet, "/api/readiness?"+url.Values{"repo": repos}.Encode(), nil, &answer.Report); err != nil {
+	err = peer.Do(readyCtx, http.MethodGet, readinessPath(repos...), nil, &answer.Report)
+	answer.Report, answer.Repos = answer.Report.WithoutRepos()
+	if err != nil {
 		return answer, err
 	}
 	if answer.Snapshot.Supports(node.CanNeeds) {
@@ -277,7 +261,7 @@ func (a nodeActions) Ask(ctx context.Context, name string, repos []string) (dial
 func repoNeeds(repos []string) []node.RepoNeeds {
 	var asked []node.RepoNeeds
 	for _, repo := range repos {
-		if url := shareableOrigin(repo); url != "" {
+		if url, err := gitclone.RemoteURL(repo); err == nil {
 			asked = append(asked, node.RepoNeeds{URL: url, Needs: install.RepoNeeds(repo)})
 		}
 	}
@@ -361,13 +345,20 @@ func probeNode(name string, repo dialog.RepoOption) (dialog.NodeReadiness, error
 		return unanswered(err)
 	}
 	var report node.Report
-	if err := peer.Do(ctx, http.MethodGet, "/api/readiness", nil, &report); err != nil {
+	if err := peer.Do(ctx, http.MethodGet, readinessPath(repo.GitURL), nil, &report); err != nil {
 		return unanswered(err)
 	}
+	var failing error
 	for _, c := range report.Checks {
-		if c.Mark == node.MarkFail {
-			return dialog.NodeReadiness{}, fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
+		switch {
+		case c.Name == "repo" && c.Mark == node.MarkFail:
+			return dialog.NodeReadiness{RepoMissing: c.Sentence()}, nil
+		case c.Mark == node.MarkFail && failing == nil:
+			failing = fmt.Errorf("%s can't start factories yet: %s: %s", short, c.Name, c.Detail)
 		}
+	}
+	if failing != nil {
+		return dialog.NodeReadiness{}, failing
 	}
 	if !snap.Supports(node.CanNeeds) {
 		return dialog.NodeReadiness{Unchecked: true, PeerVersion: snap.Version, HubVersion: version}, nil
@@ -381,6 +372,19 @@ func probeNode(name string, repo dialog.RepoOption) (dialog.NodeReadiness, error
 		readiness.Needs = needs.Repos[0]
 	}
 	return readiness, nil
+}
+
+func readinessPath(gitURLs ...string) string {
+	query := url.Values{}
+	for _, gitURL := range gitURLs {
+		if gitURL != "" {
+			query.Add("repo", gitURL)
+		}
+	}
+	if len(query) == 0 {
+		return "/api/readiness"
+	}
+	return "/api/readiness?" + query.Encode()
 }
 
 func (a nodeActions) on(name string) *node.Client {
@@ -403,9 +407,9 @@ func (a nodeActions) transfer(ctx context.Context, on, method, path string, body
 	return p, plainRefusal(a.on(on).Do(ctx, method, path, body, &p))
 }
 
-func (a nodeActions) Ready(ctx context.Context, on string) (node.Report, error) {
+func (a nodeActions) Ready(ctx context.Context, on, gitURL string) (node.Report, error) {
 	var report node.Report
-	return report, plainRefusal(a.on(on).Do(ctx, http.MethodGet, "/api/readiness", nil, &report))
+	return report, plainRefusal(a.on(on).Do(ctx, http.MethodGet, readinessPath(gitURL), nil, &report))
 }
 
 func (a nodeActions) Start(ctx context.Context, on string, r node.MoveRequest) (node.Progress, error) {

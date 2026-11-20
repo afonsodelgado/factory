@@ -557,13 +557,30 @@ async function api(req, res, url, n) {
       `event: snapshot\ndata: ${JSON.stringify(snapshotOf(n))}\n\n`,
     );
   }
-  if (route === "/api/readiness")
+  if (route === "/api/readiness") {
+    const repos = url.searchParams.getAll("repo").map((wanted) => {
+      const name = wanted
+        .split("/")
+        .pop()
+        .replace(/\.git$/, "");
+      return (n.lacks ?? []).includes(wanted)
+        ? {
+            name: "repo",
+            mark: "fail",
+            detail: `${name} isn't added on ${n.short}`,
+            fix: "clone it there, then run factory init in it or add it from that node's hub (n → + add a repo…)",
+            on: n.short,
+          }
+        : { name: "repo", mark: "ok", detail: `${name} at /srv/${name}` };
+    });
+    const checks = [...n.readiness, ...repos];
     return send(res, 200, {
       node: n.id,
       at: now(),
-      checks: n.readiness,
-      problems: 0,
+      checks,
+      problems: checks.filter((c) => c.mark === "fail").length,
     });
+  }
   if (home && route === "/api/nodes" && req.method === "GET")
     return send(res, 200, state.roster);
   if (home && route === "/api/nodes/candidates")

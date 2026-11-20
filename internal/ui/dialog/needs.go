@@ -14,6 +14,7 @@ type NodeReadiness struct {
 	Unchecked   bool
 	PeerVersion string
 	HubVersion  string
+	RepoMissing string
 	Needs       node.RepoReport
 }
 
@@ -29,30 +30,17 @@ type probedMsg struct {
 	err    error
 }
 
+func (m *NewFactoryModel) keyFor(name string) string {
+	return name + " " + m.selectedRepo().Path
+}
+
 func (m *NewFactoryModel) probeKey() string {
-	return m.node() + " " + m.selectedRepo().Path
+	return m.keyFor(m.node())
 }
 
 func (m *NewFactoryModel) currentProbe() (probe, bool) {
 	p, started := m.probes[m.probeKey()]
 	return p, started
-}
-
-func (m *NewFactoryModel) probe() tea.Cmd {
-	choice, ok := m.nodeChoice()
-	repo := m.selectedRepo()
-	if !ok || choice.Unreachable || repo.GitURL == "" || m.ProbeNode == nil {
-		return nil
-	}
-	key, check := m.probeKey(), m.ProbeNode
-	if _, started := m.probes[key]; started {
-		return nil
-	}
-	m.probes[key] = probe{}
-	return func() tea.Msg {
-		report, err := check(choice.Name, repo)
-		return probedMsg{key: key, report: report, err: err}
-	}
 }
 
 func (m *NewFactoryModel) probed(msg probedMsg) tea.Cmd {
@@ -83,13 +71,13 @@ func (m *NewFactoryModel) heldBack() bool {
 
 func (m *NewFactoryModel) placeChanged() tea.Cmd {
 	m.startAnyway, m.refused, m.waiting = false, false, false
-	return m.probe()
+	return m.probeAll()
 }
 
 func (m *NewFactoryModel) recheck() tea.Cmd {
 	delete(m.probes, m.probeKey())
 	m.refused = false
-	return m.probe()
+	return m.probeAll()
 }
 
 func (m *NewFactoryModel) startAnywayKey() tea.Cmd {
@@ -178,11 +166,7 @@ func wrapped(c *theme.Canvas, x, y, w int, text string, ink theme.Ink) int {
 func (n *Nodes) drawNeeds(c *theme.Canvas, y int, row NodeRow, answer NodeAnswer) int {
 	short := row.Short()
 	if !answer.Snapshot.Supports(node.CanNeeds) {
-		var rows []CheckRow
-		for _, repo := range n.Context.Repos {
-			rows = append(rows, CheckRow{Name: repo.Name, Mark: node.MarkSkip, Detail: short + " runs factory " + answer.Snapshot.Version + ", which cannot report what repos need"})
-		}
-		return drawChecks(c, y, rows)
+		return drawChecks(c, y, []CheckRow{{Name: "repo needs", Mark: node.MarkSkip, Detail: short + " runs factory " + answer.Snapshot.Version + ", which cannot report what repos need"}})
 	}
 	var problems []string
 	noted := false

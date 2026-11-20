@@ -331,7 +331,7 @@ func (f *fakeMoveActions) Moves(context.Context, string) ([]node.Progress, error
 	return f.moves, nil
 }
 
-func (f *fakeMoveActions) Ready(_ context.Context, on string) (node.Report, error) {
+func (f *fakeMoveActions) Ready(_ context.Context, on, _ string) (node.Report, error) {
 	report, ok := f.reports[on]
 	if !ok {
 		return report, errors.New("dial " + on + ": no route to host")
@@ -391,14 +391,17 @@ func pressMove(m *Move, keys ...string) {
 }
 
 func TestMovingAFactoryNeverFallsBackCancelsOnlyBeforeReleaseAndReopensOnTheRunningMove(t *testing.T) {
+	missing := node.MissingRepo("git@github.com:acme/cowork.git", "mini")
 	actions := &fakeMoveActions{reports: map[string]node.Report{
 		"homelab.tail5e2c.ts.net": {At: nodesNow},
 		"studio.tail5e2c.ts.net":  {At: nodesNow, Problems: 1, Checks: []node.Check{{Name: "claude", Mark: node.MarkFail, Detail: "not logged in"}}},
+		"mini.tail5e2c.ts.net":    {At: nodesNow, Problems: 1, Checks: []node.Check{missing}},
 	}}
-	csv := MoveContext{Key: "/src/cowork:csv", Label: "csv", Factory: "/src/cowork:csv", HolderShort: "macbook", Targets: []NodeChoice{
+	csv := MoveContext{Key: "/src/cowork:csv", Label: "csv", Factory: "/src/cowork:csv", HolderShort: "macbook", Repo: "cowork", GitURL: "git@github.com:acme/cowork.git", Targets: []NodeChoice{
 		{Name: "build-box.tail5e2c.ts.net", Unreachable: true},
 		{Name: "homelab.tail5e2c.ts.net"},
 		{Name: "studio.tail5e2c.ts.net"},
+		{Name: "mini.tail5e2c.ts.net"},
 	}}
 	m := NewMove(csv, actions)
 	m.Update(tea.WindowSizeMsg{Width: 88, Height: 22})
@@ -407,6 +410,14 @@ func TestMovingAFactoryNeverFallsBackCancelsOnlyBeforeReleaseAndReopensOnTheRunn
 	if len(actions.started) > 0 || !strings.Contains(m.View().Content, "studio can't run factories yet: claude: not logged in") {
 		t.Fatalf("⏎ on an unreachable and an unready node started %v and shows:\n%s\nwant nothing started and the reason named", actions.started, m.View().Content)
 	}
+	pressMove(m, "j", "enter")
+	t.Run("a target without the repo", func(t *testing.T) {
+		if len(actions.started) > 0 {
+			t.Fatalf("⏎ on mini, which lacks cowork, started %+v", actions.started)
+		}
+		golden.RequireEqual(t, m.View().Content)
+	})
+	pressMove(m, "k")
 
 	actions.progress = node.Progress{Transfer: node.Transfer{Operation: "op-csv", Role: node.RoleSource, Factory: "csv", Key: "/src/cowork:csv", SourceName: "macbook", TargetName: "homelab", Phase: node.PhaseCheckpoint, Waiting: "csv is implementing; it stops for the move when it next waits for you or between stages."}, State: node.StateCheckpointWaiting, Running: true}
 	pressMove(m, "k", "enter")
@@ -698,6 +709,69 @@ func TestNewFactoryOnANodeMissingWhatTheRepoNeedsStartsOnlyWithStartAnyway(t *te
 	if r, ok := m.Result(); !ok || !r.(NewResult).StartAnyway {
 		t.Errorf("ctrl+y on the refusal gave %+v; want a start with StartAnyway", r)
 	}
+}
+
+func TestNewFactoryShowsANodeWithoutTheRepoAsUnavailableAndCreatesNothingThere(t *testing.T) {
+	cowork := "git@github.com:acme/cowork.git"
+	context := NewContext{
+		Repos:  []RepoOption{{Name: "cowork", Path: "/r/cowork", Display: "~/dev/cowork", GitURL: cowork}},
+		Nodes:  []NodeChoice{{Name: "homelab.tail5e2c.ts.net"}, {Name: "build-box.tail5e2c.ts.net"}},
+		Target: "build-box.tail5e2c.ts.net",
+	}
+	opened := func() (*NewFactoryModel, []tea.Msg) {
+		m := NewFactory(context)
+		m.ProbeNode = func(name string, repo RepoOption) (NodeReadiness, error) {
+			if strings.HasPrefix(name, "build-box") {
+				return NodeReadiness{RepoMissing: node.MissingRepo(repo.GitURL, "build-box").Sentence()}, nil
+			}
+			return NodeReadiness{}, nil
+		}
+		m.Update(tea.WindowSizeMsg{Width: 88, Height: 22})
+		answers := runAll(m.Init())
+		for _, r := range "csv-export" {
+			m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		}
+		return m, answers
+	}
+
+	m, answers := opened()
+	for _, msg := range answers {
+		m.Update(msg)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	if m.step != 1 {
+		t.Fatalf("⏎ and ctrl+y on build-box, which lacks cowork, went to step %d; want nothing created there, start anyway included", m.step)
+	}
+	golden.RequireEqual(t, m.View().Content)
+
+	m, answers = opened()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m.prompt.text = "Export contacts."
+	m.start()
+	for _, msg := range answers {
+		if _, cmd := m.Update(msg); cmd != nil {
+			m.Update(cmd())
+		}
+	}
+	if r, ok := m.Result(); ok || !strings.Contains(m.problem, "until cowork is added there") {
+		t.Errorf("starting before build-box answered gave %+v and %q; want it to wait, then refuse because build-box lacks cowork", r, m.problem)
+	}
+}
+
+func runAll(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batch {
+			msgs = append(msgs, runAll(c)...)
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
 }
 
 func TestRepoSetupFailureStaysInTheDialogUntilRetrySucceeds(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
@@ -343,32 +345,35 @@ type Local struct {
 }
 
 type LocalFactory struct {
-	Key         string       `json:"key"`
-	Route       string       `json:"route"`
-	Incarnation string       `json:"incarnation"`
-	ID          string       `json:"id"`
-	Title       string       `json:"title,omitempty"`
-	Repo        string       `json:"repo"`
-	RepoName    string       `json:"repo_name"`
-	Stage       string       `json:"stage,omitempty"`
-	Loop        string       `json:"loop,omitempty"`
-	Round       int          `json:"round,omitempty"`
-	Status      string       `json:"status"`
-	Paused      bool         `json:"paused"`
-	NeedsSince  time.Time    `json:"needs_since,omitzero"`
-	Items       []LocalItem  `json:"items"`
-	Resolved    []Resolution `json:"resolved,omitempty"`
-	Pages       []LocalPage  `json:"pages"`
-	ReviewStack *StackStatus `json:"review_stack,omitempty"`
-	Message     Eligibility  `json:"message"`
-	CanPause    bool         `json:"can_pause"`
-	CanWake     bool         `json:"can_wake"`
-	Pane        string       `json:"pane,omitempty"`
-	StageRole   string       `json:"stage_role,omitempty"`
-	StageLabel  string       `json:"stage_label,omitempty"`
-	StagePane   string       `json:"stage_pane,omitempty"`
-	Generation  int64        `json:"generation,omitempty"`
-	Unverified  string       `json:"unverified,omitempty"`
+	Key           string       `json:"key"`
+	Route         string       `json:"route"`
+	Incarnation   string       `json:"incarnation"`
+	ID            string       `json:"id"`
+	Title         string       `json:"title,omitempty"`
+	Repo          string       `json:"repo"`
+	RepoName      string       `json:"repo_name"`
+	GitURL        string       `json:"git_url,omitempty"`
+	NoRemote      bool         `json:"no_remote,omitempty"`
+	RemoteProblem string       `json:"remote_problem,omitempty"`
+	Stage         string       `json:"stage,omitempty"`
+	Loop          string       `json:"loop,omitempty"`
+	Round         int          `json:"round,omitempty"`
+	Status        string       `json:"status"`
+	Paused        bool         `json:"paused"`
+	NeedsSince    time.Time    `json:"needs_since,omitzero"`
+	Items         []LocalItem  `json:"items"`
+	Resolved      []Resolution `json:"resolved,omitempty"`
+	Pages         []LocalPage  `json:"pages"`
+	ReviewStack   *StackStatus `json:"review_stack,omitempty"`
+	Message       Eligibility  `json:"message"`
+	CanPause      bool         `json:"can_pause"`
+	CanWake       bool         `json:"can_wake"`
+	Pane          string       `json:"pane,omitempty"`
+	StageRole     string       `json:"stage_role,omitempty"`
+	StageLabel    string       `json:"stage_label,omitempty"`
+	StagePane     string       `json:"stage_pane,omitempty"`
+	Generation    int64        `json:"generation,omitempty"`
+	Unverified    string       `json:"unverified,omitempty"`
 }
 
 type LocalPage struct {
@@ -450,7 +455,7 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 	f := it.Factory
 	target := supervisorTarget(it)
 	lf := LocalFactory{
-		Key: f.Key(), Route: ReviewKey(f), Incarnation: Incarnation(f), ID: f.Label(), Title: f.Title(), Repo: f.Repo, RepoName: m.repoName(f.Repo),
+		Key: f.Key(), Route: ReviewKey(f), Incarnation: Incarnation(f), ID: f.Label(), Title: f.Title(), Repo: f.Repo, RepoName: m.remote(f.Repo).name, GitURL: m.remote(f.Repo).gitURL, NoRemote: m.remote(f.Repo).localOnly, RemoteProblem: m.remote(f.Repo).problem,
 		Status: it.Status.String(), Paused: Paused(f), Items: []LocalItem{}, Pages: []LocalPage{}, Message: Eligible(target, "the message"),
 		CanPause: it.Pane != nil && !it.Pane.Dead, CanWake: it.Status.Asleep() && it.Status != factory.Done,
 		Generation: m.holdings[f.Key()].Generation, Unverified: m.holdings[f.Key()].Unverified,
@@ -494,12 +499,27 @@ func (m *Runtime) threadCounter() ThreadCounter {
 	return m.Pages.OpenCount
 }
 
-func (m *Runtime) repoName(repo string) string {
-	if name, ok := m.repoNames[repo]; ok {
-		return name
+const remoteRecheck = time.Minute
+
+type repoRemote struct {
+	name      string
+	gitURL    string
+	localOnly bool
+	problem   string
+	at        time.Time
+}
+
+func (m *Runtime) remote(repo string) repoRemote {
+	if known, ok := m.remotes[repo]; ok && m.Now().Sub(known.at) < remoteRecheck {
+		return known
 	}
-	m.repoNames[repo] = repoName(repo)
-	return m.repoNames[repo]
+	gitURL, err := gitclone.RemoteURL(repo)
+	known := repoRemote{name: repoName(repo), gitURL: gitURL, localOnly: errors.Is(err, gitclone.ErrNoNetworkRemote), at: m.Now()}
+	if err != nil && !known.localOnly {
+		known.problem = err.Error()
+	}
+	m.remotes[repo] = known
+	return m.remotes[repo]
 }
 
 func (m *Runtime) localItem(it Item, item AttentionItem, target Target) LocalItem {

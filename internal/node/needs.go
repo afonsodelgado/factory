@@ -71,7 +71,7 @@ func (n *Nodes) CheckNeeds(ctx context.Context, body NeedsRequest) NeedsReport {
 	}
 	on, checkouts := cmp.Or(n.Self.short(), "this node"), n.repos()
 	for _, repo := range body.Repos {
-		checkout, added := checkouts[repo.URL]
+		checkout, added := gitclone.Find(checkouts, repo.URL)
 		if !added || gitclone.CheckURL(repo.URL) != nil {
 			continue
 		}

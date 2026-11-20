@@ -267,11 +267,10 @@ func (ts *Transfers) named(err error) error {
 }
 
 func (ts *Transfers) repoFor(gitURL string) (string, error) {
-	if repo, ok := ts.Nodes.repos()[gitURL]; ok {
+	if repo, ok := gitclone.Find(ts.Nodes.repos(), gitURL); ok {
 		return repo, nil
 	}
-	missing := MissingRepo(gitURL, ts.Nodes.Self.short())
-	return "", declinedf("%s: %s", missing.Detail, missing.Fix)
+	return "", declinedf("%s", MissingRepo(gitURL, ts.Nodes.Self.short()).Sentence())
 }
 
 func (ts *Transfers) claim(ctx context.Context, t Transfer, m Manifest) (int64, error) {

@@ -87,7 +87,7 @@ func (m *NewFactoryModel) stageAgents() map[string]state.AgentSetting {
 	return agents
 }
 
-func (m *NewFactoryModel) Init() tea.Cmd { return m.probe() }
+func (m *NewFactoryModel) Init() tea.Cmd { return m.probeAll() }
 
 func (m *NewFactoryModel) nodeChoice() (NodeChoice, bool) {
 	if m.place == 0 || m.place > len(m.Context.Nodes) {
@@ -108,6 +108,36 @@ func (m *NewFactoryModel) placeName() string {
 	return ""
 }
 
+func (m *NewFactoryModel) probeAll() tea.Cmd {
+	repo := m.selectedRepo()
+	if m.ProbeNode == nil || repo.GitURL == "" {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, choice := range m.Context.Nodes {
+		key := m.keyFor(choice.Name)
+		if _, started := m.probes[key]; started || choice.Unreachable {
+			continue
+		}
+		m.probes[key] = probe{}
+		name, check := choice.Name, m.ProbeNode
+		cmds = append(cmds, func() tea.Msg {
+			report, err := check(name, repo)
+			return probedMsg{key: key, report: report, err: err}
+		})
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m *NewFactoryModel) probeOf(choice NodeChoice) probe {
+	return m.probes[m.keyFor(choice.Name)]
+}
+
+func (m *NewFactoryModel) lacksRepo(choice NodeChoice) bool {
+	repo := m.selectedRepo()
+	return repo.NoGitRemote != "" || repo.RemoteProblem != "" || m.probeOf(choice).report.RepoMissing != ""
+}
+
 func (m *NewFactoryModel) moveOn(delta int) tea.Cmd {
 	places := len(m.Context.Nodes) + 1
 	m.place = (m.place + delta + places) % places
@@ -124,9 +154,9 @@ func (m *NewFactoryModel) choosesPlace() bool {
 
 func (m *NewFactoryModel) nodeProblem(choice NodeChoice) string {
 	short, repo := shortName(choice.Name), m.selectedRepo()
-	switch p, _ := m.currentProbe(); {
-	case repo.NoGitRemote != "":
-		return repo.Name + " has no git remote, so " + short + " has nothing to clone. Push it to one first (git remote add origin <url>, then git push), or pick this machine with ←."
+	switch p := m.probeOf(choice); {
+	case m.lacksRepo(choice):
+		return m.id() + " can't start on " + short + " until " + repo.Name + " is added there. Pick another node with ←→. Nothing was created."
 	case choice.Unreachable:
 		return m.id() + " can't start on " + short + " while it is unreachable. Pick another node with ←→; N shows what is known about " + short + "."
 	case p.done && p.err != nil:
@@ -681,6 +711,10 @@ func (m *NewFactoryModel) start() tea.Cmd {
 	if m.holdStart() {
 		return nil
 	}
+	if problem := m.placeProblem(); problem != "" {
+		m.problem = problem
+		return nil
+	}
 	name, stages := m.chosenPipeline()
 	m.result = &NewResult{Repo: m.selectedRepo().Path, Slug: m.slug(), Prompt: m.prompt.text, Pipeline: name, Stages: stages, Agents: m.stageAgents(), Supervisor: m.overrides[supervisorRole], Node: m.node(), WatchComments: m.watchComments}
 	m.result.StartAnyway = m.startAnyway && len(m.missing()) > 0
@@ -846,19 +880,25 @@ func (m *NewFactoryModel) drawPlaces(c *theme.Canvas, y, w int) int {
 	defaultAt := defaultPlace(m.Context)
 	for i, name := range m.placeNames() {
 		mark, ink := "○ ", theme.Text
-		unreachable := i > 0 && i <= len(m.Context.Nodes) && m.Context.Nodes[i-1].Unreachable
+		unreachable := i > 0 && m.Context.Nodes[i-1].Unreachable
+		lacks := i > 0 && !unreachable && m.lacksRepo(m.Context.Nodes[i-1])
 		switch {
 		case i == m.place:
 			mark, ink = "● ", theme.Bright
 		case unreachable:
 			mark, ink = "↮ ", theme.Quiet
+		case lacks:
+			mark, ink = "– ", theme.Quiet
 		}
 		x = c.Put(x, y, mark+name, ink)
 		if i == defaultAt {
 			x = c.Put(x+2, y, "default", theme.Muted)
 		}
-		if unreachable {
+		switch {
+		case unreachable:
 			x = c.Put(x+2, y, "unreachable", theme.Muted)
+		case lacks:
+			x = c.Put(x+2, y, "no "+m.selectedRepo().Name, theme.Muted)
 		}
 		x += 3
 	}
@@ -879,19 +919,36 @@ func (m *NewFactoryModel) placeNames() []string {
 }
 
 func (m *NewFactoryModel) drawNodeState(c *theme.Canvas, y, w int, choice NodeChoice) int {
-	short, repo := shortName(choice.Name), m.selectedRepo().Name
-	p, _ := m.currentProbe()
-	switch {
-	case m.selectedRepo().GitURL == "":
+	short, repo := shortName(choice.Name), m.selectedRepo()
+	p := m.probeOf(choice)
+	refused := func(text string) int {
+		for _, l := range theme.Wrap("✗ "+text, w-3) {
+			c.Put(3, y, l, theme.FgInk(theme.Red))
+			y++
+		}
+		if m.place == defaultPlace(m.Context) {
+			c.PutMax(3, y, short+" is the default node, but not for "+repo.Name+": pick another with ←→.", theme.Muted, w-3)
+			y++
+		}
 		return y
+	}
+	switch {
 	case choice.Unreachable:
 		c.PutMax(3, y, "✗ "+short+" is unreachable, so nothing starts there now.", theme.FgInk(theme.Red), w-3)
+	case repo.RemoteProblem != "":
+		return refused(repo.RemoteProblem + ".")
+	case repo.NoGitRemote != "":
+		return refused(repo.Name + " has no network git remote, so it runs only on this machine. Push it to a remote, clone it on " + short + " and run factory init there to run it on " + short + " too.")
+	case repo.GitURL == "":
+		return y
 	case !p.done:
-		c.PutMax(3, y, "◌ checking what "+repo+" needs on "+short+"…", theme.FgInk(theme.Cyan), w-3)
+		c.PutMax(3, y, "◌ asking "+short+" whether it has "+repo.Name+" and what it needs there…", theme.FgInk(theme.Cyan), w-3)
+	case p.report.RepoMissing != "":
+		return refused(p.report.RepoMissing + ".")
 	case p.err != nil:
 		c.PutMax(3, y, "✗ "+p.err.Error(), theme.FgInk(theme.Red), w-3)
 	default:
-		return drawReadiness(c, y, w, short, repo, p.report)
+		return drawReadiness(c, y, w, short, repo.Name, p.report)
 	}
 	return y + 1
 }
