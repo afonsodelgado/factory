@@ -738,10 +738,28 @@ function CapForm(props: FormProps) {
             type="button"
             className="btn"
             disabled={props.disabled}
-            onClick={() => props.submit({ action: cap ? "continue" : "retry" })}
+            onClick={() =>
+              props.submit(
+                cap
+                  ? { action: "continue", option: "1", text }
+                  : { action: "retry" },
+              )
+            }
           >
-            {cap ? "Continue one more round" : "Retry"}
+            {cap ? "+1 round" : "Retry"}
           </button>
+          {cap && (
+            <button
+              type="button"
+              className="btn"
+              disabled={props.disabled}
+              onClick={() =>
+                props.submit({ action: "continue", option: "2", text })
+              }
+            >
+              +2 rounds
+            </button>
+          )}
         </div>
         <button
           type="button"

@@ -425,7 +425,12 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"approval carries the notes on one line", act(ActApprove, "gate-csv-plan", nil, "ship it,\nkeep retries"), "%1: /factory approve plan gate-csv-plan ship it, keep retries"},
 		{"changes", act(ActChanges, "gate-csv-plan", nil, "darker header"), "%1: gate-csv-plan changes: darker header"},
 		{"comment reply", act(ActReply, "c1", nil, "done"), "%1: c1 reply: done"},
-		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_fix_rounds by one for this factory"},
+		{"continue a cap", act(ActContinue, "cap-csv-qa", nil, ""), "%1: cap-csv-qa continue: raise qa_fix_rounds by 1 for this factory"},
+		{"allow two more rounds with an instruction", func() ActionRequest {
+			r := act(ActContinue, "cap-csv-qa", nil, "also fix\nthe header")
+			r.Option = "2"
+			return r
+		}(), "%1: cap-csv-qa continue: raise qa_fix_rounds by 2 for this factory. also fix the header"},
 		{"retry a failure", act(ActRetry, "fail-csv-qa", nil, ""), "%1: /factory resume"},
 		{"skip a failure", act("skip", "fail-csv-qa", nil, ""), ""},
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},

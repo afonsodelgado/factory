@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -25,8 +26,22 @@ func CommentReply(id, text string) string {
 	return id + " reply: " + strings.TrimSpace(text)
 }
 
-func CapContinue(id, limit string) string {
-	return fmt.Sprintf("%s continue: raise %s by one for this factory", id, limit)
+const MaxCapRounds = 2
+
+func CapRounds(option string) (int, bool) {
+	if option == "" {
+		return 1, true
+	}
+	n, err := strconv.Atoi(option)
+	return n, err == nil && n >= 1 && n <= MaxCapRounds
+}
+
+func CapContinue(id, limit string, rounds int, text string) string {
+	message := fmt.Sprintf("%s continue: raise %s by %d for this factory", id, limit, rounds)
+	if instruction := oneLine(text); instruction != "" {
+		message += ". " + instruction
+	}
+	return message
 }
 
 func Retry() string {
@@ -71,7 +86,7 @@ const (
 
 const MaxMessageRunes = 4000
 
-func ActionText(item AttentionItem, action string, answers []string, text string) string {
+func ActionText(item AttentionItem, action, option string, answers []string, text string) string {
 	switch {
 	case action == ActHandled && item.Kind == "handoff":
 		return MarkDone(item.ID)
@@ -88,7 +103,8 @@ func ActionText(item AttentionItem, action string, answers []string, text string
 	case action == ActReply:
 		return CommentReply(item.ID, text)
 	case action == ActContinue:
-		return CapContinue(item.ID, item.LimitKey)
+		rounds, _ := CapRounds(option)
+		return CapContinue(item.ID, item.LimitKey, rounds, text)
 	case action == ActRetry:
 		return Retry()
 	}
