@@ -405,3 +405,25 @@ func subjectOf(authorization string) string {
 	json.Unmarshal(claims, &body)
 	return body.Sub
 }
+
+func TestAStalledFactoryReachesAPhoneThatSubscribesAfterItStopped(t *testing.T) {
+	store := Open(t.TempDir())
+	now := time.Date(2026, 11, 20, 18, 0, 0, 0, time.UTC)
+	offline := func(string) bool { return false }
+	stalled := factoryWith(false)
+	stalled[0].Items = []host.LocalItem{{Key: "asleep-1", AttentionItem: host.AttentionItem{Kind: "asleep", Title: "stalled · no activity"}}}
+
+	store.Reconcile(testNode, factoryWith(false), offline, now)
+	if queued, _ := store.Reconcile(testNode, stalled, offline, now); queued {
+		t.Fatal("pushed with no phone subscribed")
+	}
+	if _, err := store.Subscribe(subscriptionFor(t, "a", "https://push.example/a"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if queued, _ := store.Reconcile(testNode, stalled, offline, now); !queued {
+		t.Fatal("a factory that stopped before the phone subscribed was never pushed")
+	}
+	if queued, _ := store.Reconcile(testNode, stalled, offline, now); queued {
+		t.Fatal("the stalled factory was pushed twice")
+	}
+}

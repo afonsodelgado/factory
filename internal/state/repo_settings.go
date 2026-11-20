@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -106,20 +107,26 @@ func ReadRepoSettings(repo string) (*RepoSettings, error) {
 
 type Verify func(effective map[string]string, written []string) error
 
-func RecordDiscovered(repo, factory string, day time.Time, values map[string]string, replace []string, verify Verify) (Recorded, error) {
+func RecordDiscovered(repo, factory string, day time.Time, values map[string]string, replace, supersede []string, verify Verify) (Recorded, error) {
 	provenance := "found by " + factory + ", " + day.Format(time.DateOnly)
-	return record(repo, values, verify, func(s *RepoSettings, key string) (bool, string) {
-		return s.Values[key] == "" || (s.Discovered(key) && slices.Contains(replace, key)), provenance
+	return record(repo, values, verify, func(s *RepoSettings, key string) (bool, string, string) {
+		replaceable := s.Values[key] == "" || (s.Discovered(key) && slices.Contains(replace, key))
+		if !replaceable && slices.Contains(supersede, key) {
+			return true, provenance, fmt.Sprintf("replaced %q, which failed on the base too", s.Values[key])
+		}
+		return replaceable, provenance, ""
 	})
 }
 
 func RecordYours(repo string, values map[string]string) (Recorded, error) {
-	return record(repo, values, nil, func(*RepoSettings, string) (bool, string) { return true, "" })
+	return record(repo, values, nil, func(*RepoSettings, string) (bool, string, string) { return true, "", "" })
 }
+
+type writable func(s *RepoSettings, key string) (ok bool, provenance, note string)
 
 const verifyAttempts = 3
 
-func record(repo string, values map[string]string, verify Verify, writable func(*RepoSettings, string) (bool, string)) (Recorded, error) {
+func record(repo string, values map[string]string, verify Verify, writable writable) (Recorded, error) {
 	none := Recorded{Recorded: []string{}, Kept: []string{}}
 	for key := range values {
 		if !slices.Contains(SettingsKeys("browser"), key) {
@@ -163,25 +170,26 @@ type recordPlan struct {
 	settings   *RepoSettings
 	effective  map[string]string
 	provenance map[string]string
+	notes      map[string]string
 }
 
-func planRecord(repo string, values map[string]string, writable func(*RepoSettings, string) (bool, string)) (recordPlan, error) {
+func planRecord(repo string, values map[string]string, writable writable) (recordPlan, error) {
 	s, err := ReadRepoSettings(repo)
 	if err != nil {
 		return recordPlan{}, err
 	}
-	p := recordPlan{outcome: Recorded{Recorded: []string{}, Kept: []string{}}, settings: s, effective: maps.Clone(s.Values), provenance: map[string]string{}}
+	p := recordPlan{outcome: Recorded{Recorded: []string{}, Kept: []string{}}, settings: s, effective: maps.Clone(s.Values), provenance: map[string]string{}, notes: map[string]string{}}
 	for _, key := range SettingsKeys("browser") {
 		value, asked := values[key]
 		if !asked {
 			continue
 		}
-		ok, found := writable(s, key)
+		ok, found, note := writable(s, key)
 		if !ok {
 			p.outcome.Kept = append(p.outcome.Kept, key)
 			continue
 		}
-		p.effective[key], p.provenance[key] = value, found
+		p.effective[key], p.provenance[key], p.notes[key] = value, found, note
 		p.outcome.Recorded = append(p.outcome.Recorded, key)
 	}
 	return p, nil
@@ -193,7 +201,8 @@ func (p recordPlan) write() error {
 		return err
 	}
 	for _, key := range p.outcome.Recorded {
-		comment := lineComment(ownComment(settingsNode(file, key)), p.provenance[key])
+		own := cmp.Or(p.notes[key], ownComment(settingsNode(file, key)))
+		comment := lineComment(own, p.provenance[key])
 		if err := setSetting(file, key, p.effective[key], comment); err != nil {
 			return err
 		}

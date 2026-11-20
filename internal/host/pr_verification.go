@@ -22,6 +22,8 @@ const CheckDeadline = 2 * time.Hour
 
 const ReadyDiscovery = 2 * time.Minute
 
+const ErrorGrace = 10 * time.Minute
+
 type CheckWindow struct {
 	Head      string    `json:"head"`
 	Base      string    `json:"base"`
@@ -136,9 +138,6 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		o.Window.Discovery = o.Window.Started
 	}
 	var branch struct {
-		Commit struct {
-			SHA string `json:"sha"`
-		} `json:"commit"`
 		Protection struct {
 			Status struct {
 				Contexts []string        `json:"contexts"`
@@ -148,9 +147,6 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 	}
 	if err := g.api(dir, prefix+"/branches/"+url.PathEscape(pr.Base.Ref), &branch, false); err != nil {
 		return err
-	}
-	if branch.Commit.SHA != o.Base {
-		return errors.New("base moved during verification")
 	}
 	var rules [][]struct {
 		Type       string `json:"type"`
@@ -415,6 +411,7 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 	if err := os.MkdirAll(records, 0700); err != nil {
 		return nil, err
 	}
+	failingSince := map[int]time.Time{}
 	for {
 		at := now()
 		if err := os.WriteFile(filepath.Join(dir, ".heartbeat"), []byte(at.UTC().Format(time.RFC3339)), 0600); err != nil {
@@ -438,6 +435,16 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 				return nil, err
 			}
 			observations = append(observations, observation)
+			if observation.Reason != "verification_error" {
+				delete(failingSince, number)
+			} else if _, seen := failingSince[number]; !seen {
+				failingSince[number] = at
+			}
+			retrying := observation.Reason == "verification_error" && at.Sub(failingSince[number]) < ErrorGrace
+			if retrying {
+				waiting = true
+				continue
+			}
 			waiting = waiting || observation.CI == "pending" || observation.Policy == "pending"
 			if observation.CI == "unknown" || observation.CI == "fail" || observation.CI == "timeout" {
 				waiting = false

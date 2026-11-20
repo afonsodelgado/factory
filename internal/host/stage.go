@@ -276,6 +276,9 @@ func (m *Runtime) ItemForStage(token, cwd string) (Item, bool) {
 func (m *Runtime) StartStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
 	setting := catalog.Local(m.Config.StateDir).WithDefault(it.Factory.Agent(r.Role))
 	trust.Managed(it.Factory.Repo, it.Factory.Worktree)
+	if _, err := factory.CopyEnvFiles(it.Factory.Repo, it.Factory.Worktree); err != nil {
+		m.notice = "could not copy env files into the worktree: " + err.Error()
+	}
 	if err := Runnable(it.Factory.Repo, r.Role, setting); err != nil {
 		return StageReply{}, err
 	}

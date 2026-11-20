@@ -114,7 +114,12 @@ func (m *Runtime) QueueInbox() {
 			continue
 		}
 		record := DeliveredPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug)
-		for _, msg := range InboxMessages(m.Config.StateDir, it, ReadDelivered(record), m.Now()) {
+		checked := it
+		browserStarting := it.Stage != nil && m.preparing[it.Factory.Key()] == it.Stage.Run.Token
+		if browserStarting {
+			checked.Stage = nil
+		}
+		for _, msg := range InboxMessages(m.Config.StateDir, checked, ReadDelivered(record), m.Now()) {
 			if m.inboxQueued[msg.Key] {
 				continue
 			}
@@ -140,6 +145,9 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 	if lost := it.Discovery; lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
 		messages = append(messages, InboxMessage{Key: lost.Run.Result + lostSuffix, Text: "stage discoverer lost: it stopped or its pane closed without writing " + lost.Run.Result + "; run factory stage discover again"})
 	}
+	if lost := it.Stage; awaited(it, lost) && lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
+		messages = append(messages, InboxMessage{Key: lost.Run.Result + lostSuffix, Text: "stage " + lost.Run.Role + " lost: it stopped or its pane closed without writing " + lost.Run.Result + "; reconcile it as a lost run"})
+	}
 	files, _ := filepath.Glob(filepath.Join(it.Factory.Dir, "inbox", "*.json"))
 	sort.Strings(files)
 	for _, file := range files {
@@ -153,6 +161,10 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 		messages = append(messages, InboxMessage{Key: file, Text: note.Text})
 	}
 	return messages
+}
+
+func awaited(it Item, stage *StageView) bool {
+	return stage != nil && it.Factory.State != nil && it.Factory.State.Workflow.ActiveRun == stage.Run.ID
 }
 
 func DeliveredPath(stateDir, repo, slug string) string {

@@ -58,6 +58,8 @@ func TestStatusOf(t *testing.T) {
 		{"long CI wait with a fresh heartbeat", Factory{State: v2("ci"), StateMod: ago(2 * time.Hour), Heartbeat: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(2*time.Hour))}, WaitingCI},
 		{"a stage pane in another tool asks permission", Factory{State: v2("agent"), StateMod: ago(time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(time.Minute)), Stage: prompting}, NeedsYou},
 		{"a stage pane in another tool works while the supervisor waits", Factory{State: v2("agent"), StateMod: ago(2 * time.Hour)}, Live{Pane: alive, Hook: hook("Stop", ago(2*time.Hour)), Stage: hook("PreToolUse", ago(time.Minute))}, WaitingAgent},
+		{"a stage silent mid-tool for over three stall periods has hung", Factory{State: v2("agent"), StateMod: ago(2 * time.Hour)}, Live{Pane: alive, Hook: hook("Stop", ago(2*time.Hour)), Stage: hook("PreToolUse", ago(61*time.Minute))}, Stalled},
+		{"a supervisor idle with nothing open waits on nobody", Factory{State: v2("user", resolved), StateMod: ago(30 * time.Minute)}, Live{Pane: alive, Hook: hook("Stop", ago(30*time.Minute))}, Stalled},
 		{"subagent tool call after the supervisor stopped", Factory{State: v2("agent"), StateMod: ago(2 * time.Hour)}, Live{Pane: alive, Hook: subagentBusy}, WaitingAgent},
 		{"exited beats needs you", Factory{State: v2("user", openQuestion)}, Live{Pane: Pane{Found: true, Shell: true}, Hook: hook("Stop", ago(time.Minute))}, Exited},
 		{"no pane", Factory{State: v2("agent")}, Live{Pane: Pane{}, Hook: nil}, Gone},
