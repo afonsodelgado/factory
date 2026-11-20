@@ -562,7 +562,7 @@ func (m *Runtime) FlushTypeQueue() {
 			waiting = append(waiting, q)
 			continue
 		}
-		m.typedAt[q.Pane] = m.Now()
+		m.typedAt[q.Pane] = typing.TypingAt
 		if q.Answers != nil {
 			m.RecordSent(*q.Answers, typing.TypingAt)
 		}
