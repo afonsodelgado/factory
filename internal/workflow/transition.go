@@ -356,7 +356,7 @@ func result(s *state.State, e Event, dir string) error {
 		return nil
 	}
 	if r.Status != "done" {
-		attention(s, e, "failure", "Stage needs attention", stage+": "+r.Status)
+		attention(s, e, "failure", "Stage needs attention", failureBody(stage, r))
 		return nil
 	}
 	switch stage {
@@ -532,6 +532,22 @@ func withFindings(body string, findings []state.Finding, include func(state.Find
 		}
 	}
 	return body
+}
+
+func failureBody(stage string, r *Result) string {
+	lines := []string{stage + ": " + r.Status}
+	for _, said := range []string{r.Summary, r.Evidence.Reason} {
+		if said = strings.TrimSpace(said); said != "" {
+			lines = append(lines, said)
+		}
+	}
+	for _, note := range r.Evidence.Notes {
+		lines = append(lines, "- "+note)
+	}
+	if len(r.Outputs) > 0 {
+		lines = append(lines, "Outputs: "+strings.Join(r.Outputs, ", "))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func attention(s *state.State, e Event, kind, title, body string) {

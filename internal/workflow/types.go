@@ -59,6 +59,7 @@ type Result struct {
 	Findings      []state.Finding     `json:"findings"`
 	Evidence      state.Verification  `json:"evidence"`
 	Outputs       []string            `json:"outputs"`
+	Summary       string              `json:"summary,omitempty"`
 }
 
 type Question struct {

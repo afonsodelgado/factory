@@ -297,6 +297,30 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 }
 
+func TestAFailedStageTellsTheDeveloperWhyOnItsItem(t *testing.T) {
+	s := workflowState()
+	s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
+	if err := dispatch(&s, eventFor(s, "result"), "qa"); err != nil {
+		t.Fatal(err)
+	}
+	failed := eventFor(s, "result")
+	failed.Stack = s.Stack
+	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack,
+		Summary:  "Drafting stays blocked because OpenAI rejects this machine's IP.",
+		Evidence: state.Verification{Status: "fail", Notes: []string{"ANTHROPIC_API_KEY is invalid, so live missions cannot run."}},
+		Outputs:  []string{".claude/factory/f/qa-report.md"}}
+	waiting := step(t, s, failed)
+	open := waiting.OpenAttention()
+	if len(open) != 1 || open[0].Kind != "failure" {
+		t.Fatalf("a failed QA result opened %+v; want one failure item", open)
+	}
+	for _, why := range []string{failed.Result.Summary, failed.Result.Evidence.Notes[0], failed.Result.Outputs[0]} {
+		if !strings.Contains(open[0].Body, why) {
+			t.Fatalf("the failure item reads %q; it must show %q so the developer can decide from the panel or phone", open[0].Body, why)
+		}
+	}
+}
+
 func TestStaleHandoffAndPartialChecksCannotFinish(t *testing.T) {
 	s := offeredHandoff(t)
 	red := eventFor(s, "observe")

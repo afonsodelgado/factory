@@ -895,6 +895,7 @@ code {
 
 .ihead .sm {
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .detail {
