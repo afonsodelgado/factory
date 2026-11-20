@@ -369,11 +369,19 @@ func result(s *state.State, e Event, dir string) error {
 	case "design":
 		return gate(s, e, "design")
 	case "plan":
-		if slices.ContainsFunc(s.Findings, gatingDesign) {
+		if !slices.ContainsFunc(s.Findings, gatingDesign) {
+			return gate(s, e, "plan")
+		}
+		if slices.Contains(s.PipelineStages, "design") {
 			attention(s, e, "design_return", "Revise the design or keep the plan?", withFindings("The plan found gaps in the approved design. Revise the design: the designer reworks it for these findings, you approve it again, then the architect plans again. Keep the plan: the findings are recorded as accepted risks and the plan comes to you for approval.", s.Findings, gatingDesign))
 			return nil
 		}
-		return gate(s, e, "plan")
+		if err := gate(s, e, "plan"); err != nil {
+			return err
+		}
+		item := &s.Attention[len(s.Attention)-1]
+		item.Body = withFindings(item.Body+" The plan found gaps in the design it was given; comment on them like the rest of the plan, and approving it records them as accepted risks.", s.Findings, gatingDesign)
+		return nil
 	case "implement":
 		if !LocalChecks(*s, r.Evidence) {
 			return errors.New("implementation needs current successful build, lint and test evidence")
@@ -509,6 +517,14 @@ func gatingDesign(f state.Finding) bool {
 	return f.Severity == "design" && Gating(f)
 }
 
+func acceptDesignGaps(s *state.State) {
+	for i := range s.Findings {
+		if gatingDesign(s.Findings[i]) {
+			s.Findings[i].Disposition = "accepted_risk"
+		}
+	}
+}
+
 func withFindings(body string, findings []state.Finding, include func(state.Finding) bool) string {
 	for _, f := range findings {
 		if include(f) {
@@ -633,11 +649,7 @@ func answer(s *state.State, e Event) error {
 		if e.Approved {
 			return correct(s, e, state.Correction{Loop: DesignLoop, Stage: "design", ReturnTo: "plan"})
 		}
-		for i := range s.Findings {
-			if gatingDesign(s.Findings[i]) {
-				s.Findings[i].Disposition = "accepted_risk"
-			}
-		}
+		acceptDesignGaps(s)
 		return gate(s, e, "plan")
 	}
 	if e.Kind == "handoff" || e.Kind == "continue" {
@@ -688,6 +700,7 @@ func answer(s *state.State, e Event) error {
 		return dispatch(s, e, "plan")
 	case "plan":
 		s.Loops.Active = ""
+		acceptDesignGaps(s)
 		return dispatch(s, e, "implement")
 	}
 	return errors.New("unknown approval gate")

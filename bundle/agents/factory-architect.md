@@ -65,6 +65,6 @@ End every turn with:
 
 List every page the developer must review in `artifacts`: `plan.html`, and `schematic.html` when you wrote one. The engine rejects a `done` result without them.
 
-Return design-affecting findings explicitly, with severity `design`. Never silently change approved design. The supervisor asks whether to return to design; refusal must record the exact finding as an accepted risk in plan.md.
+Return design-affecting findings explicitly, with severity `design`. Never silently change approved design. When the pipeline has a design stage, the supervisor asks whether to return to design; without one, the findings wait on the plan gate with the rest of the plan. Either way, keeping the plan must record the exact finding as an accepted risk in plan.md.
 
 Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.
