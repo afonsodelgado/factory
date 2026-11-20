@@ -136,10 +136,15 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		o.Window.Discovery = o.Window.Started
 	}
 	var branch struct {
-		Protected bool `json:"protected"`
-		Commit    struct {
+		Commit struct {
 			SHA string `json:"sha"`
 		} `json:"commit"`
+		Protection struct {
+			Status struct {
+				Contexts []string        `json:"contexts"`
+				Checks   []requiredCheck `json:"checks"`
+			} `json:"required_status_checks"`
+		} `json:"protection"`
 	}
 	if err := g.api(dir, prefix+"/branches/"+url.PathEscape(pr.Base.Ref), &branch, false); err != nil {
 		return err
@@ -173,36 +178,11 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 			}
 		}
 	}
-	if branch.Protected {
-		var protection struct {
-			Status struct {
-				Contexts []string        `json:"contexts"`
-				Checks   []requiredCheck `json:"checks"`
-			} `json:"required_status_checks"`
-			Reviews *struct {
-				Count  int  `json:"required_approving_review_count"`
-				Owners bool `json:"require_code_owner_reviews"`
-				Last   bool `json:"require_last_push_approval"`
-			} `json:"required_pull_request_reviews"`
-			Threads struct {
-				Enabled bool `json:"enabled"`
-			} `json:"required_conversation_resolution"`
-			Lock struct {
-				Enabled bool `json:"enabled"`
-			} `json:"lock_branch"`
+	required = append(required, branch.Protection.Status.Checks...)
+	for _, name := range branch.Protection.Status.Contexts {
+		if !slices.ContainsFunc(required, func(c requiredCheck) bool { return c.Context == name }) {
+			required = append(required, requiredCheck{Context: name})
 		}
-		if err := g.api(dir, prefix+"/branches/"+url.PathEscape(pr.Base.Ref)+"/protection", &protection, false); err != nil {
-			return err
-		}
-		required = append(required, protection.Status.Checks...)
-		for _, name := range protection.Status.Contexts {
-			if !slices.ContainsFunc(required, func(c requiredCheck) bool { return c.Context == name }) {
-				required = append(required, requiredCheck{Context: name})
-			}
-		}
-		approvals = approvals || protection.Reviews != nil && (protection.Reviews.Count > 0 || protection.Reviews.Owners || protection.Reviews.Last)
-		threads = threads || protection.Threads.Enabled
-		otherPolicy = otherPolicy || protection.Lock.Enabled
 	}
 	checks, err := g.checksAt(dir, prefix, o.Head)
 	if err != nil {
@@ -236,7 +216,7 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 	if review.Head != o.Head || review.Base != o.Base {
 		return errors.New("heads changed during verification")
 	}
-	o.ApprovalNeeded = approvals && review.ReviewDecision != "APPROVED"
+	o.ApprovalNeeded = review.ReviewDecision == "REVIEW_REQUIRED" || approvals && review.ReviewDecision != "APPROVED"
 	approvalOnly := pr.MergeState == "blocked" && o.ApprovalNeeded && !otherPolicy && o.CI == "pass"
 	if approvalOnly && threads {
 		unresolved, err := g.unresolvedThreads(dir, repo.Name, o.Number)
