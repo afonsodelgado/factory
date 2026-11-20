@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,9 +47,11 @@ type cachedPR struct {
 func RunGH(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("gh", args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()+"\n"+string(out)))
 	}
 	return out, nil
 }
