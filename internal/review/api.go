@@ -143,10 +143,6 @@ func (s *Server) saveShot(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	rel := "shots/" + id + ".png"
-	if err := st.SetShot(id, rel); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 	path := filepath.Join(f.Dir, "review", filepath.FromSlash(rel))
 	err := os.MkdirAll(filepath.Dir(path), 0o755)
 	if err == nil {
@@ -154,6 +150,11 @@ func (s *Server) saveShot(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := st.SetShot(id, rel); err != nil {
+		os.Remove(path)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	s.ThreadsChanged(f)
