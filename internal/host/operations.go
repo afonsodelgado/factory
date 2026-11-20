@@ -71,7 +71,7 @@ func journal(stateDir, id, action string, data json.RawMessage, effect func() Me
 func (m *Runtime) uncertain(factoryKey string) []string {
 	var blockers []string
 	for _, a := range m.receipts.Claims {
-		if a.Factory == factoryKey {
+		if a.Factory == factoryKey && a.Action != ActDismiss {
 			blockers = append(blockers, "the answer to "+a.ItemID+" is "+a.Status()+" and must settle first")
 		}
 	}

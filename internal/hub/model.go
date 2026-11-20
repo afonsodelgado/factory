@@ -1203,10 +1203,10 @@ func (m *Model) panelHints() []footer.Hint {
 		back = "stop typing"
 	}
 	if panel.TextAnswered(item) && len(item.Artifacts) > 0 {
-		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "↑↓", "pick", "ctrl+o", "open", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
+		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "↑↓", "pick", "ctrl+o", "open", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+d", "discard", "esc", back)
 	}
 	if panel.TextAnswered(item) {
-		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "esc", back)
+		return hints("type", panel.TextPrompt(item.Kind), "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+d", "discard", "esc", back)
 	}
 	d := &panel.Draft{}
 	if item.Answerable() {
@@ -1221,21 +1221,21 @@ func (m *Model) panelHints() []footer.Hint {
 	case item.Kind == "question" && editing:
 		return hints("⏎", "confirm", "ctrl+s", "send", "esc", back)
 	case onSendRow(item, d):
-		return hints("⏎", "send", "↑", "back to the questions", "ctrl+k", "already handled", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+		return hints("⏎", "send", "↑", "back to the questions", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "question":
-		return hints("↑↓", "move", "⏎", "pick", "←→", "question", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
+		return hints("↑↓", "move", "⏎", "pick", "←→", "question", "type", "your answer", "ctrl+r", "recommended", "ctrl+s", "send", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+d", "discard", "ctrl+n/p", "item", "esc", back)
 	case approving:
-		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("⏎", "approve", "ctrl+a", "approve", "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "gate":
-		return hints("ctrl+a", approve, "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+a", approve, "type", "notes", "ctrl+s", "send as changes", "↑↓", "pick", "ctrl+o", "open", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "comment":
-		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("type", "a reply", "ctrl+s", "send", "ctrl+o", "open thread", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "cap":
-		return hints("ctrl+r", "one more round", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "one more round", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "failure":
-		return hints("ctrl+r", "retry", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+r", "retry", "type", "an instruction", "ctrl+s", "send it", "ctrl+k", "already handled", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "handoff":
-		return hints("ctrl+k", "mark done", "type", "what to do next", "ctrl+s", "continue working", "ctrl+n/p", "item", "esc", back)
+		return hints("ctrl+k", "mark done", "type", "what to do next", "ctrl+s", "continue working", "ctrl+x", "dismiss", "ctrl+n/p", "item", "esc", back)
 	case item.Kind == "permission" || item.Kind == "prompt":
 		return hints("⏎", "answer in the session", "[ ]", "item", "esc", "back")
 	case item.Kind == "silent":

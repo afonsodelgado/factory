@@ -148,7 +148,9 @@ export function useDraft(factory: LocalFactory, itemKey: string) {
 }
 
 export const settled = (receipt: Receipt | undefined) =>
-  receipt?.status === "delivered" || receipt?.status === "queued";
+  receipt?.status === "delivered" ||
+  receipt?.status === "queued" ||
+  receipt?.status === "dismissed";
 
 export function useSend(factory: LocalFactory) {
   const { act } = useApp();

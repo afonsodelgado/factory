@@ -152,7 +152,21 @@ type FormProps = {
   disabled: boolean;
   why?: string;
   outcome: ReactNode;
+  dismiss?: Dismiss;
 };
+
+type Dismiss = { disabled: boolean; run: () => void };
+
+const fromStateJson = [
+  "question",
+  "commands",
+  "design_return",
+  "gate",
+  "comment",
+  "cap",
+  "failure",
+  "handoff",
+];
 
 const forms: Record<string, (props: FormProps) => ReactNode> = {
   question: QuestionForm,
@@ -206,6 +220,12 @@ function OpenItem(props: {
       )}
     </>
   ) : null;
+  const dismiss = fromStateJson.includes(item.kind)
+    ? {
+        disabled: !!why || locked || sender.sending,
+        run: () => void submit({ action: "dismiss" }),
+      }
+    : undefined;
   const Form = forms[item.kind] ?? Unanswerable;
   return (
     <div className="pad stack">
@@ -222,6 +242,7 @@ function OpenItem(props: {
         disabled={!!why || locked || sender.sending || !item.send.ready}
         why={why}
         outcome={outcome}
+        dismiss={dismiss}
       />
     </div>
   );
@@ -267,25 +288,44 @@ function ItemHead({ item }: { item: LocalItem }) {
 function Answered({ answer }: { answer: Receipt }) {
   const where = answer.source ? `from the ${answer.source}` : "elsewhere";
   const when = answer.at ? ` at ${clock(answer.at)}` : "";
+  const dismissed = answer.status === "dismissed";
   return (
-    <p className="stat ok" role="status">
+    <p className={dismissed ? "stat idle" : "stat ok"} role="status">
       <span className="gl" aria-hidden="true">
         ✓
       </span>
       <span>
-        Answered {where}
+        {dismissed ? "Dismissed" : "Answered"} {where}
         {when}
       </span>
-      <span className="x">Nothing more can be sent for this item.</span>
+      <span className="x">
+        {dismissed
+          ? "Nothing was sent. It closes once the supervisor resolves it."
+          : "Nothing more can be sent for this item."}
+      </span>
     </p>
   );
 }
 
-function Actions(props: { why?: string; children: ReactNode }) {
+function Actions(props: {
+  why?: string;
+  dismiss?: Dismiss;
+  children: ReactNode;
+}) {
   return (
     <footer className="ab col">
       {props.why ? <p className="note yel">{props.why}</p> : null}
       {props.children}
+      {props.dismiss ? (
+        <button
+          type="button"
+          className="btn quiet"
+          disabled={props.dismiss.disabled}
+          onClick={props.dismiss.run}
+        >
+          Dismiss, send nothing
+        </button>
+      ) : null}
     </footer>
   );
 }
@@ -449,7 +489,7 @@ function QuestionForm(props: FormProps) {
       )}
       <Preview factory={props.factory} body={body} />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <button
           type="button"
           className="btn pri"
@@ -495,7 +535,7 @@ function TextAnswer(props: FormProps & { label?: string }) {
         }
       />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <button
           type="button"
           className="btn pri"
@@ -544,7 +584,7 @@ function GateForm(props: FormProps) {
         body={bodyFor(props.item, { action: "approve", text: notes })}
       />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         {armed && threads > 0 ? (
           <p className="note yel">
             ! Open threads:{" "}
@@ -606,7 +646,7 @@ function CommentForm(props: FormProps) {
         }
       />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <div className="row2">
           <button
             type="button"
@@ -654,7 +694,7 @@ function HandoffForm(props: FormProps) {
         }
       />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <div className="row2">
           <button
             type="button"
@@ -692,7 +732,7 @@ function CapForm(props: FormProps) {
       />
       <SendLine send={props.item.send} />
       {props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <div className="row2">
           <button
             type="button"
@@ -799,7 +839,7 @@ function PermissionForm(props: FormProps) {
       ) : null}
       <SendLine send={props.item.send} />
       {props.receipt?.status === "stale" ? null : props.outcome}
-      <Actions why={props.why}>
+      <Actions why={props.why} dismiss={props.dismiss}>
         <button
           type="button"
           className="btn pri"

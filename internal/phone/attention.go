@@ -84,6 +84,9 @@ func alertsOf(factories []host.LocalFactory) (open map[string]alert, active, wor
 				working[item.Key] = true
 				continue
 			}
+			if item.Answer != nil && item.Answer.Status == host.StatusDismissed {
+				continue
+			}
 			if slices.Contains(notifiable, item.Kind) {
 				link := Link{Route: f.Route, Item: item.ID, Incarnation: f.Incarnation, Open: true}
 				open[item.Key] = alert{tracked: tracked{Link: link, Title: f.ID + " · " + kindWord(item.Kind), Body: alertBody(item.Kind), Revision: 1}, active: !f.Paused, reopens: item.Kind == "gate"}

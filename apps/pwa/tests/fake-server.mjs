@@ -628,7 +628,10 @@ async function api(req, res, url, n) {
       factory: key,
       item: request.item,
       action: request.action,
-      status: n.nextStatus ?? "delivered",
+      status:
+        request.action === "dismiss"
+          ? "dismissed"
+          : (n.nextStatus ?? "delivered"),
       reason: n.nextReason,
       source: "phone",
       at: now(),

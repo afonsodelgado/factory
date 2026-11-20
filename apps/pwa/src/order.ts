@@ -20,7 +20,7 @@ const waitingSince = (f: LocalFactory) => {
 };
 
 const handedOff = (f: LocalFactory) =>
-  f.items.some((i) => i.kind === "handoff");
+  f.items.some((i) => i.kind === "handoff" && i.answer?.status !== "dismissed");
 
 export function needsYou(f: LocalFactory): boolean {
   return f.items.length > 0 && (f.status === "needs you" || handedOff(f));

@@ -44,6 +44,13 @@ const receiptLooks: Record<
     label: "Not sent.",
     fallback: "The item changed before the answer reached it.",
   },
+  dismissed: {
+    glyph: "✓",
+    tone: "idle",
+    label: "Dismissed.",
+    fallback:
+      "Nothing was sent. The supervisor still has it open until you settle it there.",
+  },
   unknown: {
     glyph: "?",
     tone: "warn",
@@ -69,7 +76,9 @@ export function NextLink({ factory }: { factory: LocalFactory }) {
   const { snapshot } = useApp();
   const waiting = snapshot ? next(snapshot, factory.route) : undefined;
   if (!waiting) return null;
-  const first = waiting.items[0];
+  const first =
+    waiting.items.find((i) => i.answer?.status !== "dismissed") ??
+    waiting.items[0];
   return (
     <Link
       className="btn wide"

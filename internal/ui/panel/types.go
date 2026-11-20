@@ -124,6 +124,7 @@ const (
 	Queued Progress = iota
 	Sending
 	Answered
+	Dismissed
 )
 
 type Settled struct {

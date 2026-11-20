@@ -472,9 +472,6 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 			lf.Pages = append(lf.Pages, localPage(ReviewFactory(it), NewArtifactRow(a, m.threadCounter())))
 		}
 	}
-	if it.Status == factory.NeedsYou {
-		lf.NeedsSince = NeedsSince(it)
-	}
 	if lf.CanPause {
 		lf.Pane = it.Pane.Token
 	}
@@ -491,7 +488,18 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 		}
 	}
 	lf.Resolved = m.resolutions(f)
+	switch {
+	case it.Status == factory.NeedsYou && everyItemDismissed(lf.Items):
+		lf.Status = it.Unblocked.String()
+	case it.Status == factory.NeedsYou:
+		lf.NeedsSince = NeedsSince(it)
+	}
 	return lf
+}
+
+func everyItemDismissed(items []LocalItem) bool {
+	dismissed := func(li LocalItem) bool { return li.Answer != nil && li.Answer.Status == StatusDismissed }
+	return len(items) > 0 && !slices.ContainsFunc(items, func(li LocalItem) bool { return !dismissed(li) })
 }
 
 func (m *Runtime) threadCounter() ThreadCounter {

@@ -269,6 +269,8 @@ func settledLine(s Settled) line {
 		return line{{Text: "◷ Queued " + s.ID, Ink: theme.FgInk(theme.Cyan)}, {Text: "  sends when the supervisor is idle", Ink: theme.Muted}}
 	case Sending:
 		return line{{Text: "… Sending " + s.ID, Ink: theme.Muted}}
+	case Dismissed:
+		return line{{Text: "✓ Dismissed " + s.ID, Ink: theme.Muted}, {Text: "  nothing sent; it stays open for the supervisor", Ink: theme.Muted}}
 	}
 	return line{{Text: "✓ Answered " + s.ID, Ink: theme.FgInk(theme.Green)}, {Text: "  the supervisor is on it", Ink: theme.Muted}}
 }

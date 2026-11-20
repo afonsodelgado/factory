@@ -74,6 +74,11 @@ func (m *Runtime) QueueAnswerFor(q QueuedAnswer) (Answer, error) {
 	if !open {
 		return Answer{}, errors.New("This item was answered or replaced since it was loaded. Nothing was sent.")
 	}
+	if q.Answer.Action == ActDismiss {
+		m.dismiss(it, q.Answer)
+		claimed, _ := m.Claim(q.Answer.Key())
+		return claimed, nil
+	}
 	if reason := m.answer(it, item, q.Answer, q.Text); reason != "" {
 		return Answer{}, errors.New("Not sent. " + reason)
 	}
