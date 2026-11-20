@@ -245,6 +245,35 @@ func TestHostContinuesAfterClientDisconnect(t *testing.T) {
 	}
 }
 
+type promptSubmittingTypist struct {
+	t     *testing.T
+	f     fixture
+	typed []string
+}
+
+func (p *promptSubmittingTypist) Type(pane, text string) error {
+	p.typed = append(p.typed, text)
+	p.f.hook(p.t, "UserPromptSubmit")
+	p.f.hook(p.t, "Stop")
+	return nil
+}
+
+func TestASupervisorThatSubmitsBeforeTypingReturnsStillGetsItsNextMessage(t *testing.T) {
+	f := newFixture(t)
+	typist := &promptSubmittingTypist{t: t, f: f}
+	r := f.runtime(t, typist)
+	for _, name := range []string{"ci", "review"} {
+		if err := WriteFile(filepath.Join(f.dir, "inbox", name+".json"), `{"text":"`+name+` passed"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Tick()
+	r.Tick()
+	if !slices.Equal(typist.typed, []string{"ci passed", "review passed"}) {
+		t.Fatalf("typed %q; a prompt submitted while typing was still returning held the next message back for a minute", typist.typed)
+	}
+}
+
 func TestOperationRetryDoesNotRepeatEffects(t *testing.T) {
 	t.Run("a retried request returns its receipt instead of starting a second stage", func(t *testing.T) {
 		f := newFixture(t)
