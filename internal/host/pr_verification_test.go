@@ -180,3 +180,20 @@ func TestWatcherPersistsDiscoveryAcrossRestartAndFailsClosedOnAPIError(t *testin
 		t.Fatal("no GitHub observations")
 	}
 }
+
+func TestRunGHKeepsStderrHintsOutOfTheJSON(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho '{\"number\":7}'\necho 'A new release of gh is available' >&2\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := RunGH(t.TempDir(), "pr", "view", "7", "--json", "number")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pr struct{ Number int }
+	if err := json.Unmarshal(out, &pr); err != nil || pr.Number != 7 {
+		t.Fatalf("output %q is not the PR JSON: %v", out, err)
+	}
+}
