@@ -191,11 +191,6 @@ func Capture(m host.Movable, manifest Manifest, limits Limits) (Checkpoint, erro
 	if err := c.walk(RootEvidence, m.Evidence); err != nil {
 		return Checkpoint{}, err
 	}
-	if config := state.ProfilePath(m.Repo); fileExists(config) {
-		if err := c.add(RepoConfigFile, config); err != nil {
-			return Checkpoint{}, err
-		}
-	}
 	manifest.Schema, manifest.Files = CheckpointSchema, c.files
 	return Checkpoint{Manifest: manifest, Files: c.data}, nil
 }

@@ -124,11 +124,6 @@ export const nodeApi = (origin: string) => ({
       "GET",
       `${origin}/api/readiness?${new URLSearchParams(repos.map((r) => ["repo", r]))}`,
     ),
-  clone: (url: string) =>
-    call<{ repo: string }>("POST", origin + "/api/clone", {
-      operation: crypto.randomUUID(),
-      url,
-    }),
   push: (installation: string) =>
     call<PushState>(
       "GET",

@@ -219,16 +219,16 @@ func (n *needs) variables(signIn string) {
 	}
 }
 
-func CheckNeeds(ctx context.Context, on, repo, clone string, needs []Need) []node.Check {
+func CheckNeeds(ctx context.Context, on, repo, checkout string, needs []Need) []node.Check {
 	checks := make([]node.Check, 0, len(needs))
 	for _, need := range needs {
 		check := node.Check{Name: need.Name, Mark: node.MarkOK, On: on}
 		switch need.Kind {
 		case node.NeedTool:
-			check = checkTool(ctx, clone, need, check)
+			check = checkTool(ctx, checkout, need, check)
 		case node.NeedFile:
-			if !inClone(clone, need.Name) {
-				check.Mark, check.Detail, check.Fix = node.MarkFail, "not in "+on+"'s clone; "+need.Why, "put it in "+repo+"'s clone; it is never copied"
+			if !inCheckout(checkout, need.Name) {
+				check.Mark, check.Detail, check.Fix = node.MarkFail, "not in "+on+"'s checkout; "+need.Why, "put it in "+repo+"'s checkout on "+on+"; it is never copied"
 			}
 		case node.NeedVariable:
 			if os.Getenv(need.Name) == "" {
@@ -240,11 +240,11 @@ func CheckNeeds(ctx context.Context, on, repo, clone string, needs []Need) []nod
 	return checks
 }
 
-func inClone(clone, name string) bool {
-	return clone != "" && filepath.IsLocal(name) && exists(filepath.Join(clone, name))
+func inCheckout(checkout, name string) bool {
+	return checkout != "" && filepath.IsLocal(name) && exists(filepath.Join(checkout, name))
 }
 
-func checkTool(ctx context.Context, clone string, need Need, check node.Check) node.Check {
+func checkTool(ctx context.Context, checkout string, need Need, check node.Check) node.Check {
 	if !hasCommand(need.Name) {
 		check.Mark, check.Detail, check.Fix = node.MarkFail, "not installed; "+need.Why, toolFix(need)
 		return check
@@ -252,7 +252,7 @@ func checkTool(ctx context.Context, clone string, need Need, check node.Check) n
 	if need.Version == "" {
 		return check
 	}
-	have := installedVersion(ctx, clone, need.Name)
+	have := installedVersion(ctx, checkout, need.Name)
 	check.Detail = have
 	if have != "" && !compatible(have, need.Version) {
 		check.Mark, check.Detail, check.Fix = node.MarkFail, have+" here; "+need.Why, toolFix(need)
@@ -266,7 +266,7 @@ func compatible(have, want string) bool {
 	return haveMajor == wantMajor && atLeast(have, want)
 }
 
-func installedVersion(ctx context.Context, clone, tool string) string {
+func installedVersion(ctx context.Context, checkout, tool string) string {
 	if strings.ContainsAny(tool, `/\`) || strings.HasPrefix(tool, "-") {
 		return ""
 	}
@@ -277,8 +277,8 @@ func installedVersion(ctx context.Context, clone, tool string) string {
 		flag = "version"
 	}
 	cmd := exec.CommandContext(ctx, tool, flag)
-	if dirExists(clone) {
-		cmd.Dir = clone
+	if dirExists(checkout) {
+		cmd.Dir = checkout
 	}
 	out, _ := cmd.Output()
 	return version(string(out))

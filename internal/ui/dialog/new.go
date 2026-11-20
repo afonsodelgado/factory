@@ -3,7 +3,6 @@ package dialog
 import (
 	"cmp"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -926,7 +925,7 @@ func (m *NewFactoryModel) drawPreview(c *theme.Canvas, x, y, w int) {
 
 func (m *NewFactoryModel) drawNodePreview(c *theme.Canvas, x, y, w int, name string) {
 	repo := m.selectedRepo()
-	c.Put(x, y, "Will run on "+name+", from its clone of "+strings.TrimSuffix(filepath.Base(repo.GitURL), ".git"), theme.Quiet)
+	c.Put(x, y, "Will run on "+name+", in a new worktree of its "+repo.Name, theme.Quiet)
 	y++
 	launch := m.launch()
 	command := strings.SplitN(launch.CreateCommand(), "; cd ", 2)[0]
@@ -937,7 +936,7 @@ func (m *NewFactoryModel) drawNodePreview(c *theme.Canvas, x, y, w int, name str
 		c.Put(x+2, y, l, theme.Text)
 		y++
 	}
-	for _, l := range theme.Wrap(name+" clones "+repo.GitURL+" there the first time, then fetches.", w) {
+	for _, l := range theme.Wrap(name+" runs it with its own repo config. Any command still blank there is discovered by this factory on "+name+".", w) {
 		c.Put(x, y, l, theme.Muted)
 		y++
 	}

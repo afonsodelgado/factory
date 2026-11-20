@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,14 @@ type Readiness struct {
 	Probes func(Scope) []Probe
 	Wait   time.Duration
 	Now    func() time.Time
+}
+
+func RepoName(gitURL string) string {
+	return strings.TrimSuffix(path.Base(strings.TrimRight(gitURL, "/")), ".git")
+}
+
+func MissingRepo(gitURL, on string) Check {
+	return Check{Name: "repo", Mark: MarkFail, Detail: RepoName(gitURL) + " isn't added on " + on, Fix: "clone it there, then run factory init in it or add it from that node's hub (n → + add a repo…)"}
 }
 
 func (r Readiness) now() time.Time {

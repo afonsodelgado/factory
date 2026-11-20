@@ -74,7 +74,7 @@ It installs `factory` in `~/.local/bin` and starts `factory setup`.
 
 **2. Answer setup.** Setup lists what it will install and asks once. Then it walks you through the logins:
 
-- **GitHub:** open the link it prints and enter the code. Setup adds this machine's SSH key, `~/.ssh/id_ed25519`, to GitHub. If that key has a passphrase, setup says so and offers to remove it, because the node clones and pushes with nobody at the keyboard.
+- **GitHub:** open the link it prints and enter the code. Setup adds this machine's SSH key, `~/.ssh/id_ed25519`, to GitHub. If that key has a passphrase, setup says so and offers to remove it, because the node fetches and pushes with nobody at the keyboard.
 - **Git:** confirm your name and email for commits.
 - **Claude Code:** it opens Claude. Type `/login`, finish in the browser, then type `/exit`.
 
@@ -135,14 +135,15 @@ Log in to Tailscale as in step 1, and to GitHub and Claude Code as in part 1. Us
 **4. It joins your other nodes by itself.** Setup finds the node on your laptop and joins its list, so keep your laptop on with its node running. The server then copies your shared settings from it:
 
 - your coding rules;
-- your agent, model and pipeline settings;
-- your repos, which it clones with its own GitHub key, together with each repo's factory config.
+- your agent, model and pipeline settings.
 
-Nothing else is copied: no credentials, `.env` files or logins. From then on, a change to these settings on any node reaches the others within seconds.
+Nothing else is copied: no repos, repo configs, credentials, `.env` files or logins. From then on, a change to these settings on any node reaches the others within seconds.
+
+Repos stay on the machine they are added on. To work on a repo on the server, clone it there, add its secrets, and run `factory init` in it or add it from the server's hub (`n` → `+ add a repo…`). Its first factory there works out the commands for that machine.
 
 Because the server runs Linux, setup then asks whether it stays on all the time, to make it the phone app's home. Answer `y` for a server that does; see [the home node](#the-home-node). The default is no.
 
-**5. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`. When you pick the server in New factory (`n`), it first checks what the repo needs there, such as a tool, a `.env` file or a variable `qa.sign_in` reads, and lists anything missing with the command that fixes it on the server. Nothing is copied or installed for you; `ctrl+y` starts anyway. `⏎` on one of the server's factories opens its live session in the hub, streamed over the same connection the hub already uses for the node. You need no ssh, Remote Login or keys for it.
+**5. Use it from your laptop.** In the hub, press `N` to see your nodes. To start new factories on the server by default, select it and press `d`. To move a running factory there, select the factory and press `m`; the server needs the factory's repo added first. When you pick the server in New factory (`n`), a repo it hasn't added is refused there, with the fix. For a repo it has, New factory first checks what the repo needs there, such as a tool, a `.env` file or a variable `qa.sign_in` reads, and lists anything missing with the command that fixes it on the server. Nothing is copied or installed for you; `ctrl+y` starts anyway. `⏎` on one of the server's factories opens its live session in the hub, streamed over the same connection the hub already uses for the node. You need no ssh, Remote Login or keys for it.
 
 ## 3. Set up your phone
 

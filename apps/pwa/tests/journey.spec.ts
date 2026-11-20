@@ -171,9 +171,8 @@ test("the shell has no sideways scroll at phone and desktop widths", async ({
       },
       {
         name: "repos",
-        mark: "warn",
-        detail:
-          "cowork not cloned yet; c clones it with this machine's login, or it clones when a factory first starts or moves here",
+        mark: "ok",
+        detail: "cowork at ~/src/cowork",
       },
     ],
   });
@@ -185,7 +184,7 @@ test("the shell has no sideways scroll at phone and desktop widths", async ({
     ["/", /can't be reached/],
     ["/phone", /app home/],
     ["/phone/nodes/node-3", /Unreachable/],
-    ["/phone/nodes/node-2", /Clone cowork now, with homelab/],
+    ["/phone/nodes/node-2", /cowork at ~\/src\/cowork/],
     [`/phone/add/${homelab}`, /nothing was changed on homelab/],
   ];
   for (const colorScheme of ["light", "dark"] as const) {
@@ -201,6 +200,9 @@ test("the shell has no sideways scroll at phone and desktop widths", async ({
       }
     }
   }
+  await page.goto("/phone/nodes/node-2");
+  await expect(page.getByText(/cowork at ~\/src\/cowork/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /clone/i })).toHaveCount(0);
 });
 
 test("with Funnel on, the installed app names each fix, shows no factory data and recovers once it is off", async ({

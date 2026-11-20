@@ -204,8 +204,7 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 	nodes.Factories = func() int { _, factories, _ := api.Factories(); return len(factories) }
 	go api.Awake.Run(ctx, func() int { _, factories, _ := api.Factories(); return node.ActiveFactories(factories) })
 	nodes.Settings = &node.Settings{Path: node.SettingsPath(cfg.StateDir), Self: id}
-	nodes.Settings.Sources = settingSources(cfg, queue, nodes)
-	nodes.Clone = cloneFor(cfg, queue, nodes.Settings)
+	nodes.Settings.Sources = settingSources(cfg, queue)
 	nodes.Update = selfUpdate(cfg)
 	transfers := &node.Transfers{Commands: node.Commands{Runtime: queue}, Nodes: nodes, StateDir: cfg.StateDir, Holds: api.HoldsIncarnation, Holders: &node.Holders{Dir: filepath.Join(cfg.StateDir, "holders.git")}, Ctx: ctx}
 	api.Transfers = transfers
@@ -274,33 +273,11 @@ func repoOrigins() map[string]string {
 func originsOf(repos []string) map[string]string {
 	origins := map[string]string{}
 	for _, repo := range repos {
-		if url := shareableOrigin(repo); url != "" {
+		if url, err := gitclone.RemoteURL(repo); err == nil {
 			origins[url] = repo
 		}
 	}
 	return origins
-}
-
-func cloneFor(cfg *state.Config, queue node.Caller, settings *node.Settings) func(context.Context, string) (string, error) {
-	return func(ctx context.Context, url string) (string, error) {
-		ctx, cancel := context.WithTimeout(ctx, gitclone.Timeout)
-		defer cancel()
-		clone, err := gitclone.Ensure(ctx, cfg.StateDir, url)
-		if err != nil {
-			return "", withGitHint(err)
-		}
-		if _, err := install.Init(clone, cfg.StateDir); err != nil {
-			return "", err
-		}
-		if content, ok := settings.Recorded(repoSetting + url); ok && replaceFile(state.ProfilePath(clone), content) == nil {
-			settings.Applied(repoSetting+url, content)
-		}
-		answer, err := queue.Call(ctx, host.Message{T: "repo", Data: mustJSON(host.RepoRequest{Repo: clone})})
-		if err == nil && answer.T != "done" {
-			err = errors.New(answer.Error)
-		}
-		return clone, err
-	}
 }
 
 func nodeOS() string {

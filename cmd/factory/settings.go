@@ -4,19 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/install"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/state"
 )
-
-const repoSetting = "repo:"
 
 func readSettings(cfg *state.Config) map[string]string {
 	local := map[string]string{}
@@ -26,15 +21,10 @@ func readSettings(cfg *state.Config) map[string]string {
 	if rules, err := os.ReadFile(cfg.RulesPath()); err == nil && strings.TrimSpace(string(rules)) != "" {
 		local["rules"] = string(rules)
 	}
-	for origin, repo := range repoOrigins() {
-		if profile, err := os.ReadFile(state.ProfilePath(repo)); err == nil && strings.TrimSpace(string(profile)) != "" {
-			local[repoSetting+origin] = string(profile)
-		}
-	}
 	return local
 }
 
-func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) node.Sources {
+func settingSources(cfg *state.Config, queue node.Caller) node.Sources {
 	write := func(ctx context.Context, key, content string) (string, error) {
 		switch {
 		case key == "config":
@@ -50,17 +40,6 @@ func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) nod
 			return written, err
 		case key == "rules":
 			return content, replaceFile(cfg.RulesPath(), content)
-		case strings.HasPrefix(key, repoSetting):
-			origin := strings.TrimPrefix(key, repoSetting)
-			repo, ok := repoOrigins()[origin]
-			if !ok {
-				cloned, err := nodes.Clone(ctx, origin)
-				if err != nil {
-					return "", err
-				}
-				repo = cloned
-			}
-			return content, replaceFile(state.ProfilePath(repo), content)
 		}
 		return "", errors.New("unknown setting " + key)
 	}
@@ -69,22 +48,7 @@ func settingSources(cfg *state.Config, queue node.Caller, nodes *node.Nodes) nod
 			queue.Call(context.Background(), host.Message{T: "settings"})
 		}
 	}
-	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write, Cloned: clonedHere(cfg), Authored: reload}
-}
-
-func withGitHint(err error) error {
-	if hint := install.GitHint(err.Error()); hint != "" {
-		return fmt.Errorf("%w\nfix  %s", err, hint)
-	}
-	return err
-}
-
-func clonedHere(cfg *state.Config) func(string) bool {
-	clones := filepath.Join(cfg.StateDir, "repos") + string(filepath.Separator)
-	return func(key string) bool {
-		origin, repo := strings.CutPrefix(key, repoSetting)
-		return repo && strings.HasPrefix(repoOrigins()[origin], clones)
-	}
+	return node.Sources{Read: func() map[string]string { return readSettings(cfg) }, Write: write, Authored: reload}
 }
 
 func replaceFile(path, content string) error {

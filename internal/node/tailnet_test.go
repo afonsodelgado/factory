@@ -38,7 +38,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
-	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/node"
 	"github.com/afonsodelgado/factory/internal/node/nodetest"
@@ -434,7 +433,7 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
-func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOnTheTarget(t *testing.T) {
+func TestChecksWriteNothingStopWhenCancelledAndNoNodeClonesOnRequest(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
@@ -443,9 +442,6 @@ func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOn
 	before := rosterFiles(t, macbook, homelab)
 	if _, err := macbook.Nodes.Check(context.Background(), "homelab"); err != nil {
 		t.Fatal(err)
-	}
-	if clones := homelab.Clones(); len(clones) > 0 {
-		t.Errorf("checking homelab cloned %v", clones)
 	}
 	stopped := make(chan struct{})
 	homelab.SetProbes(node.Probe{Name: "git access", Run: func(ctx context.Context) node.Check {
@@ -472,19 +468,13 @@ func TestChecksWriteAndCloneNothingStopWhenCancelledAndOnlyAnExplicitCloneRunsOn
 	}
 
 	laptop := tn.Machine("laptop")
-	clone := node.CloneRequest{Operation: uuid.NewString(), URL: cowork}
-	if status, _, _ := tn.Request(laptop, homelab.Machine, "POST", "/api/clone", "https://evil.example", clone); status != http.StatusForbidden {
-		t.Errorf("another origin's clone answered %d", status)
-	}
-	if status, _, body := tn.Request(laptop, homelab.Machine, "POST", "/api/clone", "", clone); status != http.StatusOK {
-		t.Fatalf("the hub's clone answered %d %s", status, body)
-	}
-	if got := homelab.Clones(); !slices.Equal(got, []string{cowork}) || len(macbook.Clones()) > 0 {
-		t.Errorf("homelab cloned %v and macbook %v; want only the explicit clone, on homelab with its own git login", got, macbook.Clones())
+	clone := map[string]string{"operation": uuid.NewString(), "url": cowork}
+	if status, _, body := tn.Request(laptop, homelab.Machine, "POST", "/api/clone", "", clone); status != http.StatusNotFound {
+		t.Errorf("POST /api/clone answered %d %s; want 404, because no node clones a repo on request", status, body)
 	}
 }
 
-func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFix(t *testing.T) {
+func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFixOnlyForItsOwnRepos(t *testing.T) {
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
@@ -496,13 +486,14 @@ func TestAPeerReportsAMissingToolFileAndVariableByNameWithAFix(t *testing.T) {
 		{Name: ".env.local", Kind: node.NeedFile, Why: "compose.yml reads it"},
 		{Name: "QA_NEEDS_TEST_PASSWORD", Kind: node.NeedVariable, Why: "qa.sign_in reads it"},
 	}
-	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: cowork, Needs: needs}}})
+	billing := "git@github.com:alice/billing.git"
+	status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", node.NeedsRoute, "", node.NeedsRequest{Repos: []node.RepoNeeds{{URL: cowork, Needs: needs}, {URL: billing, Needs: needs}}})
 	if status != http.StatusOK {
 		t.Fatalf("homelab answered %d %s", status, body)
 	}
 	var report node.NeedsReport
-	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 {
-		t.Fatalf("homelab reported %s; want one report for cowork", body)
+	if err := json.Unmarshal([]byte(body), &report); err != nil || len(report.Repos) != 1 || report.Repos[0].URL != cowork {
+		t.Fatalf("homelab reported %s; want one report for cowork and none for billing, which it has not added", body)
 	}
 	missing := report.Repos[0].Missing()
 	if len(missing) != len(needs) {
@@ -654,14 +645,13 @@ func TestFactoryUpdateAsksEveryListedNodeAndNoOtherMachineCanTriggerOne(t *testi
 	}
 }
 
-func TestSharedSettingsReachEveryNodeAndAJoinerTakesTheListsOverItsOwn(t *testing.T) {
+func TestSharedSettingsReachEveryNodeAJoinerTakesTheListsOverItsOwnAndRepoRecordsAreDropped(t *testing.T) {
 	const repo = "repo:git@github.com:acme/app.git"
 	tn := nodetest.New(t)
 	macbook := tn.Machine("macbook").Start()
 	homelab := tn.Machine("homelab").Start()
 	macbook.SetSetting("rules", "be terse")
 	macbook.SetSetting(repo, "qa: {mode: browser}")
-	homelab.SetCloneTime(3 * tn.ProbeWait)
 	for _, draft := range []string{"homelab's first draft", "homelab's own draft"} {
 		homelab.SetSetting("rules", draft)
 		tn.Settle(homelab)
@@ -674,8 +664,15 @@ func TestSharedSettingsReachEveryNodeAndAJoinerTakesTheListsOverItsOwn(t *testin
 	if got := homelab.Setting("rules"); got != "be terse" {
 		t.Errorf("homelab joined with rules %q; want the list's rules, or a joiner's own file overwrites every node", got)
 	}
-	if got := homelab.Setting(repo); got != "qa: {mode: browser}" || !slices.Equal(homelab.Clones(), []string{"git@github.com:acme/app.git"}) {
-		t.Errorf("homelab has repo config %q and cloned %v; want the repo cloned with its config", got, homelab.Clones())
+	homelab.Nodes.Settings.Merge([]node.Setting{{Key: repo, Content: "qa: {mode: browser}", Revision: 9, Author: macbook.ID}})
+	tn.Settle(macbook, homelab)
+	if got, status := homelab.Setting(repo), homelab.Nodes.Settings.Status(); got != "" || len(status.Pending) > 0 || status.Records != 1 {
+		t.Errorf("homelab took repo config %q from a peer and has %+v; want repo records dropped, so repos stay per node and setup never waits on one", got, status)
+	}
+	stale := &node.Settings{Path: filepath.Join(t.TempDir(), "settings.json")}
+	os.WriteFile(stale.Path, []byte(`{"records":{"`+repo+`":{"key":"`+repo+`","content":"x","revision":1}},"seen":{}}`), 0o600)
+	if status := stale.Status(); status.Records != 0 || len(status.Pending) > 0 {
+		t.Errorf("a repo record left by an older release reads as %+v; want it dropped", status)
 	}
 
 	homelab.SetSetting("rules", "be terser")
@@ -1884,8 +1881,13 @@ func (r *movableRuntime) Call(_ context.Context, m host.Message) (host.Message, 
 	return host.Message{T: "done", Data: data}, nil
 }
 
-func cloneWithOwnCredentials(stateDir string) func(context.Context, string) (string, error) {
-	return func(ctx context.Context, url string) (string, error) { return gitclone.Ensure(ctx, stateDir, url) }
+func appClone(dir string) string { return filepath.Join(dir, "repos", "app") }
+
+func (g gitFixture) addApp(n *nodetest.Node) string {
+	clone := appClone(n.Dir)
+	g.run(n.Dir, "clone", "-q", appRemote, clone)
+	n.SetRepos(map[string]string{appRemote: clone})
+	return clone
 }
 
 func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConversation(t *testing.T) {
@@ -1916,7 +1918,8 @@ func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConve
 	if _, err := macbook.Add("homelab"); err != nil {
 		t.Fatal(err)
 	}
-	homelab.Nodes.Clone = cloneWithOwnCredentials(homelab.Dir)
+	clone := g.addApp(homelab)
+	writeFiles(t, clone, map[string]string{".factory/config.yml": "qa:\n  mode: terminal\n  notes: homelab's own\n"})
 	incarnation := uuid.NewString()
 	runtime := &movableRuntime{movable: host.Movable{
 		Key: g.repo + ":csv", Incarnation: incarnation, ID: "csv", Slug: "csv", Repo: g.repo, Worktree: g.worktree, Dir: g.dir,
@@ -1951,14 +1954,16 @@ func TestACheckpointWithAStackEvidenceAndThreadsStagesOnAnotherNodeWithoutAConve
 		}
 	}
 	slices.Sort(got)
-	want := []string{"config/config.yml", "evidence/qa-1/console.txt", "evidence/qa-1/export.png", "factory/brief.md", "factory/design/variant-a.html", "factory/review/shots/t1.png", "factory/review/threads.json", "factory/state.json"}
+	want := []string{"evidence/qa-1/console.txt", "evidence/qa-1/export.png", "factory/brief.md", "factory/design/variant-a.html", "factory/review/shots/t1.png", "factory/review/threads.json", "factory/state.json"}
 	if !slices.Equal(got, want) {
-		t.Errorf("homelab staged %v; want only the factory's files, its QA evidence and the repo config, without generated cookies or a conversation", got)
+		t.Errorf("homelab staged %v; want only the factory's files and its QA evidence, without the repo config, generated cookies or a conversation", got)
 	}
 	if threads, _ := os.ReadFile(filepath.Join(staged, "files", "factory", "review", "threads.json")); string(threads) != factoryFiles["review/threads.json"] {
 		t.Errorf("the review threads arrived as %q", threads)
 	}
-	clone := gitclone.Dir(homelab.Dir, appRemote)
+	if config, _ := os.ReadFile(filepath.Join(clone, ".factory", "config.yml")); string(config) != "qa:\n  mode: terminal\n  notes: homelab's own\n" {
+		t.Errorf("homelab's repo config became %q; want its own file unchanged, because each node keeps its own commands", config)
+	}
 	g.run(clone, "fetch", "-q", "origin")
 	wantStack := []node.StackBranch{
 		{Branch: "csv-1", PR: 11, SHA: g.run(g.worktree, "rev-parse", "csv-1")},
@@ -2109,10 +2114,10 @@ func TestANodeStagesNoMaliciousOrOversizedCheckpoint(t *testing.T) {
 }
 
 func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
-	newGitFixture(t)
+	g := newGitFixture(t)
 	tn := nodetest.New(t)
 	homelab := tn.Machine("homelab").Start()
-	homelab.Nodes.Clone = cloneWithOwnCredentials(homelab.Dir)
+	clone := g.addApp(homelab)
 	browserConfig := "qa:\n  mode: browser\n  url: http://localhost:${FACTORY_WEB_PORT}/\n  health: http://localhost:${FACTORY_WEB_PORT}/health\n  start: exit 3\n  seed: none\n  sign_in: none\n"
 	failing := func(name, detail string) node.Probe {
 		return node.Probe{Name: name, Run: func(context.Context) node.Check { return node.Check{Name: name, Mark: node.MarkFail, Detail: detail} }}
@@ -2126,15 +2131,37 @@ func TestPreflightRefusesANodeThatCannotRunTheFactoryAndNamesWhy(t *testing.T) {
 	}{
 		{"missing tool", failing("tools", "gh-stack is not installed"), appRemote, "", "gh-stack is not installed"},
 		{"missing agent login", failing("claude", "claude is not logged in"), appRemote, "", "claude is not logged in"},
-		{"unclonable repo", nodetest.Passing("tools", "ok"), goneRemote, "", "cannot clone " + goneRemote},
+		{"target lacks the repo", nodetest.Passing("tools", "ok"), goneRemote, "", "gone isn't added on homelab"},
 		{"failing stack recipe", nodetest.Passing("tools", "ok"), appRemote, browserConfig, "stack_start"},
 	}
 	for _, c := range cases {
 		homelab.SetProbes(c.probe)
-		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: c.remote, Branch: "worktree-csv", Config: c.config, Protocol: node.Protocol}
+		writeFiles(t, clone, map[string]string{".factory/config.yml": c.config})
+		request := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: c.remote, Branch: "worktree-csv", Protocol: node.Protocol}
 		if report := homelab.Transfers.Preflight(context.Background(), request); !strings.Contains(report.Refusal, c.reason) {
 			t.Errorf("preflight with a %s answered %q; want a refusal naming %q", c.name, report.Refusal, c.reason)
 		}
+	}
+	writeFiles(t, clone, map[string]string{
+		".factory/config.yml": "qa:\n  mode: browser\n  url: http://localhost:${FACTORY_WEB_PORT}/\n  health: http://localhost:${FACTORY_WEB_PORT}/health\n",
+		"Makefile":            "dev:\n\texit 3\n",
+	})
+	detected := node.PreflightRequest{Operation: uuid.NewString(), Incarnation: uuid.NewString(), Factory: "csv", Slug: "csv", GitURL: appRemote, Branch: "worktree-csv", Protocol: node.Protocol}
+	if report := homelab.Transfers.Preflight(context.Background(), detected); !strings.Contains(report.Refusal, "stack recipe failed") {
+		t.Errorf("preflight with qa.start detected from the Makefile answered %q; want the stack tried and refused, never skipped as still to be discovered", report.Refusal)
+	}
+	os.Remove(filepath.Join(clone, "Makefile"))
+	if entries, _ := os.ReadDir(filepath.Join(homelab.Dir, "repos")); len(entries) != 1 || entries[0].Name() != "app" {
+		t.Errorf("after preflight homelab's repos are %v; want only its own app checkout, nothing cloned", entries)
+	}
+
+	macbook := tn.Machine("macbook").Start()
+	if _, err := macbook.Add("homelab"); err != nil {
+		t.Fatal(err)
+	}
+	older := map[string]any{"operation": uuid.NewString(), "source": macbook.ID, "incarnation": uuid.NewString(), "factory": "csv", "slug": "csv", "git_url": appRemote, "branch": "worktree-csv", "config": "qa: {mode: browser}\n", "protocol": node.Protocol}
+	if status, _, body := tn.Request(macbook.Machine, homelab.Machine, "POST", "/api/node/transfer/preflight", "", older); status != http.StatusOK {
+		t.Errorf("a preflight from an older release that still sends its repo config answered %d %s; want it accepted and the config ignored", status, body)
 	}
 }
 
@@ -2312,7 +2339,7 @@ func newMoveFixture(t *testing.T) moveFixture {
 	if _, err := f.macbook.Add("homelab"); err != nil {
 		t.Fatal(err)
 	}
-	f.homelab.Nodes.Clone = cloneWithOwnCredentials(f.homelab.Dir)
+	g.addApp(f.homelab)
 	f.macbook.SetRepos(map[string]string{appRemote: g.repo})
 	f.csv = host.Movable{Key: state.Key(g.repo, "csv"), Incarnation: uuid.NewString(), ID: "csv", Slug: "csv", Repo: g.repo, Worktree: g.worktree, Dir: g.dir, Evidence: filepath.Join(g.worktree, ".claude", "qa", "csv"), Branch: "worktree-csv"}
 	f.mac, f.lab = newMoveHost("macbook", f.log, f.csv), newMoveHost("homelab", f.log)
@@ -2400,7 +2427,7 @@ func TestAMoveInterruptedAtEachStepResumesAndNeverRunsTheFactoryInTwoPlaces(t *t
 	if h := holderOf(t, f.csv.Incarnation); h.Node != f.homelab.ID || h.Generation != 1 || h.Operation != op {
 		t.Errorf("the holder record is %+v; want homelab at generation 1 by this move", h)
 	}
-	moved := filepath.Join(factory.WorktreesDir(gitclone.Dir(f.homelab.Dir, appRemote)), "csv", ".claude", "factory", "csv", "brief.md")
+	moved := filepath.Join(factory.WorktreesDir(appClone(f.homelab.Dir)), "csv", ".claude", "factory", "csv", "brief.md")
 	if brief, err := os.ReadFile(moved); err != nil || string(brief) != "Export contacts as CSV." {
 		t.Errorf("homelab's worktree holds %q, %v; want the checkpointed factory folder", brief, err)
 	}
@@ -2481,7 +2508,7 @@ func TestAFactoryMovesBackWithItsNewCommitsAndTakingBackAStrandedMoveEndsIt(t *t
 	f := newMoveFixture(t)
 	f.moveToHomelab(t)
 	background := context.Background()
-	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	clone := appClone(f.homelab.Dir)
 	away := filepath.Join(factory.WorktreesDir(clone), "csv")
 	if err := os.Remove(filepath.Join(away, ".claude", "factory", "csv", "brief.md")); err != nil {
 		t.Fatal(err)
@@ -2581,7 +2608,7 @@ func TestAForcedTakeoverWarnsNeedsACheckpointAndTheReturningHolderLearnsItLost(t
 	returning := restarted(f.homelab)
 	returning.HoldUnverified(background)
 	returning.Reconcile(background)
-	homelabKey := state.Key(gitclone.Dir(f.homelab.Dir, appRemote), "csv")
+	homelabKey := state.Key(appClone(f.homelab.Dir), "csv")
 	if f.lab.holding(homelabKey).Unverified == "" || f.log.count("homelab release csv") > 0 {
 		t.Errorf("homelab restarted without reaching the holder record and holds csv as %+v; want it kept from resuming", f.lab.holding(homelabKey))
 	}
@@ -2610,7 +2637,7 @@ func TestTwoNodesTakingOverAtOnceLeaveExactlyOneHolder(t *testing.T) {
 		if _, err := macbook.Add(n.Short()); err != nil {
 			t.Fatal(err)
 		}
-		n.Nodes.Clone = cloneWithOwnCredentials(n.Dir)
+		g.addApp(n)
 		h := newMoveHost(n.Short(), log)
 		var leaseRead sync.Once
 		h.onAdopt = func() { leaseRead.Do(func() { arrived.Done(); arrived.Wait() }) }
@@ -2706,11 +2733,7 @@ func assertOccupiedMovePreserved(t *testing.T, existing, incoming string, alias 
 	t.Helper()
 	f := newMoveFixture(t)
 	ctx := context.Background()
-	clone, err := gitclone.Ensure(ctx, t.TempDir(), appRemote)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.homelab.SetRepos(map[string]string{appRemote: clone})
+	clone := appClone(f.homelab.Dir)
 	worktree := filepath.Join(factory.WorktreesDir(clone), existing)
 	f.g.run(clone, "worktree", "add", "-q", "-b", "occupied", worktree)
 	files := map[string]string{
@@ -2798,7 +2821,7 @@ func TestAReturnedFactoryUsesItsLatestStateWhenTheFolderDiffersFromItsID(t *test
 	f.mac = newMoveHost("macbook", f.log, f.csv)
 	f.macbook.Runtime.Behind(f.mac)
 	f.moveToHomelab(t)
-	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	clone := appClone(f.homelab.Dir)
 	writeFiles(t, filepath.Join(clone, ".git", "info"), map[string]string{"exclude": strings.Join(state.FactoryPaths, "\n") + "\n"})
 	found := factory.Discover([]string{clone}, &state.Registry{})
 	if len(found) != 1 || found[0].State == nil {
@@ -2829,7 +2852,7 @@ func TestAMovedLegacyFactoryUsesTheTargetsWorktree(t *testing.T) {
 	f := newMoveFixture(t)
 	writeFiles(t, f.csv.Dir, map[string]string{"state.json": fmt.Sprintf(`{"schema_version":2,"id":"csv","branch":"worktree-csv","worktree":%q,"unknown_future_field":{"keep":true}}`, f.csv.Worktree)})
 	f.moveToHomelab(t)
-	clone := gitclone.Dir(f.homelab.Dir, appRemote)
+	clone := appClone(f.homelab.Dir)
 	found := factory.Discover([]string{clone}, &state.Registry{})
 	want := filepath.Join(factory.WorktreesDir(clone), "csv")
 	if len(found) != 1 || found[0].Worktree != want || found[0].State.Worktree != want {

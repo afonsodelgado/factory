@@ -18,7 +18,6 @@ import (
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
-	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/trust"
 )
 
@@ -162,7 +161,7 @@ func readManifest(staged string) (Manifest, error) {
 }
 
 func (ts *Transfers) takeOver(ctx context.Context, t Transfer, m Manifest) (Transfer, error) {
-	repo, err := ts.repoFor(ctx, m.GitURL)
+	repo, err := ts.repoFor(m.GitURL)
 	if err != nil {
 		return ts.failed(t, err)
 	}
@@ -267,14 +266,12 @@ func (ts *Transfers) named(err error) error {
 	return declinedf("%s claimed this factory first, at generation %d", ts.nodeName(changed.Now.Node), changed.Now.Generation)
 }
 
-func (ts *Transfers) repoFor(ctx context.Context, gitURL string) (string, error) {
+func (ts *Transfers) repoFor(gitURL string) (string, error) {
 	if repo, ok := ts.Nodes.repos()[gitURL]; ok {
 		return repo, nil
 	}
-	if ts.Nodes.Clone == nil {
-		return "", errors.New("this node cannot clone repos")
-	}
-	return ts.Nodes.Clone(ctx, gitURL)
+	missing := MissingRepo(gitURL, ts.Nodes.Self.short())
+	return "", declinedf("%s: %s", missing.Detail, missing.Fix)
 }
 
 func (ts *Transfers) claim(ctx context.Context, t Transfer, m Manifest) (int64, error) {
@@ -353,10 +350,10 @@ func unpack(staged, worktree, repo string, m Manifest) error {
 		}
 		rel, _ := filepath.Rel(files, full)
 		root, rest, _ := strings.Cut(filepath.ToSlash(rel), "/")
-		dest := filepath.Join(places[root], filepath.FromSlash(rest))
 		if filepath.ToSlash(rel) == RepoConfigFile {
-			dest = state.ProfilePath(repo)
+			return nil
 		}
+		dest := filepath.Join(places[root], filepath.FromSlash(rest))
 		data, err := os.ReadFile(full)
 		if err != nil {
 			return err

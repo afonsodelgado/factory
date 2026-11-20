@@ -9,10 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/goccy/go-yaml"
-
 	"github.com/afonsodelgado/factory/internal/gitclone"
 	"github.com/afonsodelgado/factory/internal/host"
+	"github.com/afonsodelgado/factory/internal/recipe"
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
@@ -26,8 +25,9 @@ type PreflightRequest struct {
 	Slug        string `json:"slug"`
 	GitURL      string `json:"git_url"`
 	Branch      string `json:"branch"`
-	Config      string `json:"config"`
 	Protocol    int    `json:"protocol"`
+
+	IgnoredConfig string `json:"config,omitempty"`
 }
 
 type Preflight struct {
@@ -57,21 +57,21 @@ func (ts *Transfers) Preflight(ctx context.Context, r PreflightRequest) Prefligh
 			return p
 		}
 	}
-	clone, ok := ts.checkClone(ctx, r, &p)
+	repo, ok := ts.checkRepo(r, &p)
 	if !ok {
 		return p
 	}
-	if err := ts.host(ctx, "can-adopt", host.AdoptRequest{Repo: clone, Slug: r.Slug, Incarnation: r.Incarnation}, nil); err != nil {
+	if err := ts.host(ctx, "can-adopt", host.AdoptRequest{Repo: repo, Slug: r.Slug, Incarnation: r.Incarnation}, nil); err != nil {
 		p.refuse(n, "factory", err.Error(), "")
 		return p
 	}
-	report := n.Ready.Run(ctx, n.Self.Name, Scope{Repo: clone})
+	report := n.Ready.Run(ctx, n.Self.Name, Scope{Repo: repo})
 	p.Checks = append(p.Checks, report.Checks...)
 	if err := report.Runnable(cmp.Or(n.Self.short(), "this node")); err != nil {
 		p.Refusal = err.Error()
 		return p
 	}
-	ts.checkRecipe(ctx, clone, r, &p)
+	ts.checkRecipe(ctx, repo, r, &p)
 	return p
 }
 
@@ -126,43 +126,46 @@ func freeBytes(dir string) (uint64, error) {
 	return uint64(fs.Bavail) * uint64(fs.Bsize), nil
 }
 
-func (ts *Transfers) checkClone(ctx context.Context, r PreflightRequest, p *Preflight) (string, bool) {
-	n := ts.Nodes
-	if err := gitclone.CheckURL(r.GitURL); err != nil {
-		p.refuse(n, "clone", fmt.Sprintf("this node clones only network git remotes: %v", err), "")
-		return "", false
-	}
-	ctx, cancel := context.WithTimeout(ctx, gitclone.Timeout)
-	defer cancel()
-	clone, err := ts.repoFor(ctx, r.GitURL)
+func (ts *Transfers) checkRepo(r PreflightRequest, p *Preflight) (string, bool) {
+	repo, err := ts.repoFor(r.GitURL)
 	if err != nil {
-		p.refuse(n, "clone", fmt.Sprintf("this node cannot clone %s with its own git credentials: %v", r.GitURL, err), "git clone "+r.GitURL)
+		missing := MissingRepo(r.GitURL, ts.Nodes.Self.short())
+		p.refuse(ts.Nodes, missing.Name, missing.Detail, missing.Fix)
 		return "", false
 	}
-	p.pass(n, "clone", r.GitURL+" in "+clone)
-	return clone, true
+	p.pass(ts.Nodes, "repo", RepoName(r.GitURL)+" at "+repo)
+	return repo, true
 }
 
-func (ts *Transfers) checkRecipe(ctx context.Context, clone string, r PreflightRequest, p *Preflight) {
-	var profile state.Profile
-	if err := yaml.Unmarshal([]byte(r.Config), &profile); err != nil {
-		p.refuse(ts.Nodes, "stack", "the factory's repo config does not parse: "+err.Error(), "")
+func (ts *Transfers) checkRecipe(ctx context.Context, repo string, r PreflightRequest, p *Preflight) {
+	resolved, err := recipe.Resolve(repo)
+	profile := resolved.Profile
+	switch {
+	case err != nil:
+		p.refuse(ts.Nodes, "stack", "this node's repo config does not parse: "+err.Error(), "")
 		return
-	}
-	if !profile.BrowserQA() {
+	case !profile.BrowserQA():
 		p.pass(ts.Nodes, "stack", "terminal QA needs no stack")
+		return
+	case undiscovered(profile):
+		p.pass(ts.Nodes, "stack", "QA commands are blank on this node; discovered before QA")
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, recipeWait)
 	defer cancel()
-	if err := tryRecipe(ctx, clone, r.Branch, profile); err != nil {
-		p.refuse(ts.Nodes, "stack", fmt.Sprintf("the repo's stack recipe failed here at %s: %v", failureOf(err), err), "")
+	if err := tryRecipe(ctx, repo, r.Branch, profile); err != nil {
+		p.refuse(ts.Nodes, "stack", fmt.Sprintf("this node's stack recipe failed at %s: %v", failureOf(err), err), "")
 		return
 	}
-	p.pass(ts.Nodes, "stack", "qa.start, qa.health, qa.seed and qa.sign_in ran in a scratch checkout")
+	p.pass(ts.Nodes, "stack", "this node's qa.start, qa.health, qa.seed and qa.sign_in ran in a scratch checkout")
 }
 
-func tryRecipe(ctx context.Context, clone, branch string, profile state.Profile) error {
+func undiscovered(p state.Profile) bool {
+	qa := p.QA
+	return qa.Start == "" || qa.Health == "" || (qa.URL == "" && qa.WebPort == 0)
+}
+
+func tryRecipe(ctx context.Context, repo, branch string, profile state.Profile) error {
 	scratch, err := os.MkdirTemp("", "factory-preflight-")
 	if err != nil {
 		return err
@@ -170,13 +173,13 @@ func tryRecipe(ctx context.Context, clone, branch string, profile state.Profile)
 	defer os.RemoveAll(scratch)
 	checkout := filepath.Join(scratch, "checkout")
 	revision := "origin/" + branch
-	if _, err := gitclone.Git(ctx, clone, "rev-parse", "--verify", revision); err != nil {
+	if _, err := gitclone.Git(ctx, repo, "rev-parse", "--verify", revision); err != nil {
 		revision = "HEAD"
 	}
-	if _, err := gitclone.Git(ctx, clone, "worktree", "add", "--detach", checkout, revision); err != nil {
+	if _, err := gitclone.Git(ctx, repo, "worktree", "add", "--detach", checkout, revision); err != nil {
 		return failed(host.FailStack, err)
 	}
-	defer gitclone.Git(context.Background(), clone, "worktree", "remove", "--force", checkout)
+	defer gitclone.Git(context.Background(), repo, "worktree", "remove", "--force", checkout)
 	recipe, err := RecipeOf(profile, checkout)
 	if err != nil {
 		return failed(host.FailRecipe, err)

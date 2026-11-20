@@ -44,7 +44,6 @@ type SettingsPush struct {
 type Sources struct {
 	Read     func() map[string]string
 	Write    func(ctx context.Context, key, content string) (string, error)
-	Cloned   func(key string) bool
 	Authored func(key string)
 }
 
@@ -74,6 +73,8 @@ type settingsBook struct {
 
 func SettingsPath(stateDir string) string { return filepath.Join(stateDir, "settings.json") }
 
+func shared(key string) bool { return key == "config" || key == "rules" }
+
 func digest(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
@@ -91,7 +92,27 @@ func (s *Settings) opened() {
 		if s.book.Seen == nil {
 			s.book.Seen = map[string]string{}
 		}
+		if s.dropUnshared() {
+			s.save()
+		}
 	})
+}
+
+func (s *Settings) dropUnshared() bool {
+	dropped := false
+	for key := range s.book.Records {
+		if !shared(key) {
+			delete(s.book.Records, key)
+			dropped = true
+		}
+	}
+	for key := range s.book.Seen {
+		if !shared(key) {
+			delete(s.book.Seen, key)
+			dropped = true
+		}
+	}
+	return dropped
 }
 
 func (s *Settings) save() error {
@@ -121,6 +142,9 @@ func (s *Settings) Merge(records []Setting) {
 	s.opened()
 	changed := false
 	for _, r := range records {
+		if !shared(r.Key) {
+			continue
+		}
 		if current, ok := s.book.Records[r.Key]; !ok || r.newer(current) {
 			s.book.Records[r.Key] = r
 			changed = true
@@ -162,14 +186,6 @@ func (s *Settings) Run(ctx context.Context) {
 		}
 		s.Apply(ctx)
 	}
-}
-
-func (s *Settings) Recorded(key string) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.opened()
-	record, ok := s.book.Records[key]
-	return record.Content, ok
 }
 
 func (s *Settings) Applied(key, written string) {
@@ -240,10 +256,6 @@ func (s *Settings) Apply(ctx context.Context) {
 	}
 }
 
-func (s *Settings) cloned(key string) bool {
-	return s.Sources.Cloned != nil && s.Sources.Cloned(key)
-}
-
 func (s *Settings) plan(local map[string]string, author bool) ([]string, []apply) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -256,15 +268,14 @@ func (s *Settings) plan(local map[string]string, author bool) ([]string, []apply
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range keys {
+	for _, key := range slices.DeleteFunc(keys, func(key string) bool { return !shared(key) }) {
 		content, present := local[key]
 		record, known := s.book.Records[key]
 		seen := s.book.Seen[key]
 		h := digest(content)
 		editedHere := present && h != seen && (seen != "" || !known)
-		firstFromAClone := editedHere && seen == "" && s.cloned(key)
 		switch {
-		case editedHere && known && digest(record.Content) == h, firstFromAClone:
+		case editedHere && known && digest(record.Content) == h:
 			s.book.Seen[key] = h
 		case editedHere && author:
 			s.book.Records[key] = Setting{Key: key, Content: content, Revision: record.Revision + 1, Author: s.Self, At: s.now()}

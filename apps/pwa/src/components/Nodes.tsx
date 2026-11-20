@@ -27,19 +27,6 @@ export const factoryCount = (n: number) =>
 const reason = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-const repoName = (url: string) =>
-  (url.split("/").pop() ?? url).replace(/\.git$/, "");
-
-const uncloned = (check: Result, repos: string[]) =>
-  check.name === "repos"
-    ? repos.filter((url) =>
-        check.detail.includes(`${repoName(url)} not cloned`),
-      )
-    : [];
-
-const phoneWording = (detail: string) =>
-  detail.replace(/ not cloned yet;[^·]*?(?= · |$)/g, " isn't cloned yet");
-
 export function Problem({ children }: { children: ReactNode }) {
   return (
     <p className="stat warn" role="status">
@@ -64,7 +51,7 @@ export function ResultRow(props: {
       label={check.name}
       detail={
         <>
-          {phoneWording(check.detail)}
+          {check.detail}
           {check.fix ? (
             <>
               {" "}
@@ -195,16 +182,12 @@ function Unreachable({ node }: { node: NodeView }) {
 }
 
 function NodeReadiness({ node }: { node: NodeView }) {
-  const [repos, setRepos] = useState<string[]>([]);
   const [report, setReport] = useState<Readiness>();
   const [problem, setProblem] = useState<string>();
-  const [cloning, setCloning] = useState<string>();
   const run = useCallback(async () => {
     setProblem(undefined);
     try {
-      const wanted = Object.keys((await api.repos()) ?? {});
-      setRepos(wanted);
-      setReport(await nodeApi(node.origin).readiness(wanted));
+      setReport(await nodeApi(node.origin).readiness([]));
     } catch (error) {
       setProblem(reason(error));
     }
@@ -212,18 +195,6 @@ function NodeReadiness({ node }: { node: NodeView }) {
   useEffect(() => {
     run();
   }, [run]);
-  const clone = async (url: string) => {
-    setCloning(url);
-    setProblem(undefined);
-    try {
-      await nodeApi(node.origin).clone(url);
-      await run();
-    } catch (error) {
-      setProblem(`${repoName(url)} was not cloned: ${reason(error)}`);
-    } finally {
-      setCloning(undefined);
-    }
-  };
   const version = node.snapshot?.version;
   return (
     <>
@@ -243,21 +214,7 @@ function NodeReadiness({ node }: { node: NodeView }) {
         />
         {report ? (
           (report.checks ?? []).map((check, i) => (
-            <ResultRow key={i} check={check} on={node.short}>
-              {uncloned(check, repos).map((url) => (
-                <button
-                  key={url}
-                  type="button"
-                  className="btn fit"
-                  disabled={!!cloning}
-                  onClick={() => clone(url)}
-                >
-                  {cloning === url
-                    ? `Cloning ${repoName(url)}…`
-                    : `Clone ${repoName(url)} now, with ${node.short}'s git login`}
-                </button>
-              ))}
-            </ResultRow>
+            <ResultRow key={i} check={check} on={node.short} />
           ))
         ) : (
           <Check

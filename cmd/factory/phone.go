@@ -383,10 +383,6 @@ func probeNode(name string, repo dialog.RepoOption) (dialog.NodeReadiness, error
 	return readiness, nil
 }
 
-func (a nodeActions) Clone(ctx context.Context, name, op, repo string) error {
-	return node.Remote(name, a.peers).Do(ctx, http.MethodPost, "/api/clone", node.CloneRequest{Operation: op, URL: repo}, nil)
-}
-
 func (a nodeActions) on(name string) *node.Client {
 	if name == "" {
 		return a.local

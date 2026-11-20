@@ -8,9 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -39,7 +37,6 @@ type Nodes struct {
 	Ready       Readiness
 	Factories   func() int
 	Repos       func() map[string]string
-	Clone       func(ctx context.Context, url string) (string, error)
 	Needs       NeedsCheck
 	Update      func(version string) error
 	Settings    *Settings
@@ -108,15 +105,6 @@ func (n *Nodes) repos() map[string]string {
 		return nil
 	}
 	return n.Repos()
-}
-
-func (n *Nodes) repoQuery() string {
-	origins := slices.Sorted(maps.Keys(n.repos()))
-	if len(origins) == 0 {
-		return ""
-	}
-	query := url.Values{"repo": origins}
-	return "?" + query.Encode()
 }
 
 type CheckReport struct {
@@ -266,7 +254,7 @@ func (n *Nodes) withReadiness(ctx context.Context, c checked) (checked, error) {
 	ctx, cancel := context.WithTimeout(ctx, wait+n.probeWait())
 	defer cancel()
 	var report Report
-	err := Remote(c.peer.Name, n.HTTP).Do(ctx, http.MethodGet, "/api/node/readiness"+n.repoQuery(), nil, &report)
+	err := Remote(c.peer.Name, n.HTTP).Do(ctx, http.MethodGet, "/api/node/readiness", nil, &report)
 	switch {
 	case errors.Is(err, context.Canceled):
 		return c, err
@@ -685,7 +673,6 @@ func (n *Nodes) routes(route func(string, func(http.ResponseWriter, *http.Reques
 	route("POST /api/nodes/update", socketOnly("updating every node runs only from factory update on this machine", n.updateAllRoute))
 	route("GET /api/readiness", n.readinessWithPush)
 	route("GET /api/repos", func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.repos()) })
-	route("POST /api/clone", n.homeOrNative(n.cloneRoute))
 	route("GET /api/node/hello", nativeOnly(func(w http.ResponseWriter, r *http.Request, _ string) { reply(w, http.StatusOK, n.hello()) }))
 	route("GET /api/node/readiness", nativeOnly(n.readinessRoute))
 	route("POST "+NeedsRoute, nativeOnly(n.needsRoute))
@@ -803,29 +790,6 @@ func (n *Nodes) readiness(r *http.Request) Report {
 
 func (n *Nodes) readinessRoute(w http.ResponseWriter, r *http.Request, _ string) {
 	reply(w, http.StatusOK, n.readiness(r))
-}
-
-type CloneRequest struct {
-	Operation string `json:"operation"`
-	URL       string `json:"url"`
-}
-
-type Cloned struct {
-	Repo string `json:"repo"`
-}
-
-func (n *Nodes) cloneRoute(w http.ResponseWriter, r *http.Request, _ string) {
-	var body CloneRequest
-	if err := decode(r, &body); err != nil || uuid.Validate(body.Operation) != nil {
-		fail(w, http.StatusBadRequest, "send {operation: a UUID, url}")
-		return
-	}
-	if err := gitclone.CheckURL(body.URL); err != nil || n.Clone == nil {
-		fail(w, http.StatusBadRequest, fmt.Sprintf("this node clones only network git remotes: %v", err))
-		return
-	}
-	repo, err := n.Clone(r.Context(), body.URL)
-	n.answer(w, Cloned{Repo: repo}, err)
 }
 
 func (n *Nodes) pullRoute(w http.ResponseWriter, r *http.Request, _ string) {

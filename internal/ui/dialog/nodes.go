@@ -85,7 +85,6 @@ type NodeActions interface {
 	Remove(op, id string) (node.Roster, error)
 	MoveHome(op, id string) (node.Roster, error)
 	SetTarget(name string) error
-	Clone(ctx context.Context, name, op, url string) error
 	MoveAll(ctx context.Context, op, target string) (node.BatchProgress, error)
 	Batch(ctx context.Context, op string) (node.BatchProgress, error)
 	CancelAll(ctx context.Context, op string) (node.BatchProgress, error)
@@ -110,8 +109,6 @@ type peerState struct {
 	err      error
 	seen     *node.Peer
 	seenErr  error
-	cloning  bool
-	cloneErr error
 }
 
 type nodeAsked struct {
@@ -149,11 +146,6 @@ type nodeAdded struct {
 	result      node.AddResult
 	err         error
 	makeDefault bool
-}
-
-type nodeCloned struct {
-	id  string
-	err error
 }
 
 type batchArrived struct {
@@ -280,12 +272,6 @@ func (n *Nodes) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nodeSeen:
 		p := n.peer(msg.id)
 		p.seen, p.seenErr = &msg.peer, msg.err
-	case nodeCloned:
-		p := n.peer(msg.id)
-		p.cloning, p.cloneErr = false, msg.err
-		if msg.err == nil {
-			return n, n.reask(msg.id)
-		}
 	case machinesListed:
 		if msg.run == n.run && msg.err == nil && !n.listed {
 			n.inventory = &msg.inv
@@ -318,15 +304,6 @@ func (n *Nodes) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return n, n.key(msg)
 	}
 	return n, nil
-}
-
-func (n *Nodes) reask(id string) tea.Cmd {
-	for _, row := range n.Context.Others {
-		if row.ID == id {
-			return n.ask(row)
-		}
-	}
-	return nil
 }
 
 func (n *Nodes) stop() {
@@ -508,8 +485,6 @@ func (n *Nodes) peerDetailsKey(key string) tea.Cmd {
 		n.screen = nodesListScreen
 	case "r":
 		return tea.Batch(n.ask(row), n.see(row))
-	case "c":
-		return n.clone(row)
 	case "d":
 		n.makeDefault(row.Name)
 	case "h":
@@ -520,40 +495,6 @@ func (n *Nodes) peerDetailsKey(key string) tea.Cmd {
 		n.scrollKey(key)
 	}
 	return nil
-}
-
-func (n *Nodes) uncloned(row NodeRow) []RepoURL {
-	p := n.peer(row.ID)
-	if !p.answered {
-		return nil
-	}
-	var missing []RepoURL
-	for _, c := range p.answer.Report.Checks {
-		for _, r := range n.Context.Repos {
-			if c.Name == "repos" && strings.Contains(c.Detail, r.Name+" not cloned") {
-				missing = append(missing, r)
-			}
-		}
-	}
-	return missing
-}
-
-func (n *Nodes) clone(row NodeRow) tea.Cmd {
-	missing := n.uncloned(row)
-	p := n.peer(row.ID)
-	if len(missing) == 0 || p.cloning {
-		return nil
-	}
-	p.cloning, p.cloneErr = true, nil
-	actions := n.actions
-	return func() tea.Msg {
-		for _, r := range missing {
-			if err := actions.Clone(context.Background(), row.Name, uuid.NewString(), r.URL); err != nil {
-				return nodeCloned{id: row.ID, err: err}
-			}
-		}
-		return nodeCloned{id: row.ID}
-	}
 }
 
 func (n *Nodes) openPick() tea.Cmd {
@@ -1303,10 +1244,7 @@ func (n *Nodes) drawPeerDetails(c *theme.Canvas, y int) int {
 		c.Put(3, y+1, "◌ asking "+row.Short()+"…", theme.FgInk(theme.Cyan))
 		return y + 2
 	}
-	y = drawChecks(c, y+1, n.cloneRows(row, p.answer.Report.Checks))
-	if p.cloneErr != nil {
-		y = paragraph(c, y+1, "✗ "+p.cloneErr.Error(), theme.FgInk(theme.Red))
-	}
+	y = drawChecks(c, y+1, checkRows(p.answer.Report.Checks))
 	y = paragraph(c, y+1, readySummary(row.Short(), p.answer.Report.Problems), theme.Text)
 	return n.drawNeeds(c, y+1, row, p.answer)
 }
@@ -1316,32 +1254,6 @@ func readySummary(short string, problems int) string {
 		return "Every check passes. Factories can start on " + short + " and move there."
 	}
 	return fmt.Sprintf("%s. Factories won't start or move to %s until %s.", plural(problems, "problem"), short, passes(problems))
-}
-
-func (n *Nodes) cloneRows(row NodeRow, checks []node.Check) []CheckRow {
-	rows := checkRows(checks)
-	missing := n.uncloned(row)
-	if len(missing) == 0 {
-		return rows
-	}
-	act := "clones " + repoNames(missing) + " now, with " + row.Short() + "'s git login"
-	if n.peer(row.ID).cloning {
-		act = "◌ cloning " + repoNames(missing) + " on " + row.Short() + "…"
-	}
-	for i := range rows {
-		if rows[i].Name == "repos" {
-			rows[i].Act, rows[i].ActKey = act, "c"
-		}
-	}
-	return rows
-}
-
-func repoNames(repos []RepoURL) string {
-	var names []string
-	for _, r := range repos {
-		names = append(names, r.Name)
-	}
-	return joinNames(names)
 }
 
 func (n *Nodes) drawLostDetails(c *theme.Canvas, y int, row NodeRow, p *peerState) int {
@@ -1377,9 +1289,6 @@ func (n *Nodes) peerHints() string {
 		return "r check now   x remove   esc back"
 	}
 	hints := "r check again   "
-	if missing := n.uncloned(row); len(missing) > 0 {
-		hints += "c clone " + repoNames(missing) + "   "
-	}
 	if n.takesFactories(row) {
 		hints += "m move all here   "
 	}
