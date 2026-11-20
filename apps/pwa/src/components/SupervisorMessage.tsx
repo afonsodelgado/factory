@@ -165,6 +165,7 @@ const resultLooks: Record<Receipt["status"], [string, string, string]> = {
   refused: ["!", "yel", "Refused"],
   stale: ["!", "yel", "Refused"],
   unknown: ["?", "yel", "Not confirmed"],
+  dismissed: ["✓", "mute", "Dismissed"],
 };
 
 function Result(props: {

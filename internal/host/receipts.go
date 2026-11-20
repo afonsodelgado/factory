@@ -25,6 +25,7 @@ const (
 	StatusRefused   = "refused"
 	StatusUnknown   = "unknown"
 	StatusStale     = "stale"
+	StatusDismissed = "dismissed"
 )
 
 const (
@@ -96,6 +97,8 @@ func (a Answer) Status() string {
 	switch {
 	case a.Outcome != "":
 		return a.Outcome
+	case a.Action == ActDismiss:
+		return StatusDismissed
 	case a.At.IsZero():
 		return StatusQueued
 	case a.Received.IsZero():
@@ -364,10 +367,10 @@ func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []It
 		os.Remove(mark.Draft)
 		return Settlement{Key: key}, true
 	case closed:
-		m.settle(key, StatusDelivered, "")
+		m.settle(key, closedOutcome(mark), "")
 		os.Remove(mark.Draft)
 		return Settlement{Key: key}, true
-	case mark.At.IsZero() || typedIntoScreen(mark):
+	case mark.Action == ActDismiss || mark.At.IsZero() || typedIntoScreen(mark):
 		return Settlement{}, false
 	case !mark.Received.IsZero():
 		if found && factory.IdleAtPrompt(it.Hook) && it.Hook.Main.At.After(mark.Received) {
@@ -403,6 +406,13 @@ func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []It
 		return Settlement{Key: key, Refused: NotReceived}, true
 	}
 	return Settlement{}, false
+}
+
+func closedOutcome(mark Answer) string {
+	if mark.Action == ActDismiss {
+		return StatusDismissed
+	}
+	return StatusDelivered
 }
 
 func typedIntoScreen(mark Answer) bool {
@@ -520,7 +530,11 @@ func (m *Runtime) alreadyClaimed(r ActionRequest) (Receipt, bool) {
 	if !ok {
 		return Receipt{}, false
 	}
-	return stale(r, fmt.Sprintf("Already answered from the %s at %s. Nothing was sent.", sourceName(claimed.Source), claimed.Receipt().At.Local().Format("15:04"))), true
+	verb := "answered"
+	if claimed.Action == ActDismiss {
+		verb = "dismissed"
+	}
+	return stale(r, fmt.Sprintf("Already %s from the %s at %s. Nothing was sent.", verb, sourceName(claimed.Source), claimed.Receipt().At.Local().Format("15:04"))), true
 }
 
 func sourceName(source string) string {
@@ -544,6 +558,11 @@ func (m *Runtime) answerItem(it Item, r ActionRequest) (Receipt, error) {
 	if receipt, claimed := m.alreadyClaimed(r); claimed {
 		return receipt, nil
 	}
+	if r.Action == ActDismiss {
+		mark := Answer{ItemSince: item.Since, Factory: r.Factory, ItemID: item.ID, Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: ActDismiss}
+		m.dismiss(it, mark)
+		return m.receiptOf(mark), nil
+	}
 	text := supervisorText(it, item, r)
 	mark := Answer{ItemSince: item.Since, Factory: r.Factory, ItemID: item.ID, Head: state.PromptHead(text), LeavesOpen: r.Action == ActChanges, Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: r.Action}
 	if reason := m.answer(it, item, mark, text); reason != "" {
@@ -551,6 +570,12 @@ func (m *Runtime) answerItem(it Item, r ActionRequest) (Receipt, error) {
 	}
 	m.note(it.Factory, "answered "+item.ID+" from a phone")
 	return m.receiptOf(mark), nil
+}
+
+func (m *Runtime) dismiss(it Item, mark Answer) {
+	mark.At = m.Now()
+	m.PutClaim(mark)
+	m.note(it.Factory, "dismissed "+mark.ItemID+" from the "+sourceName(mark.Source)+" without telling the supervisor")
 }
 
 func supervisorText(it Item, item AttentionItem, r ActionRequest) string {
@@ -572,6 +597,9 @@ func (m *Runtime) Preview(r ActionRequest) (Preview, error) {
 	item, ok := openItem(it, r.Item, r.Since)
 	if !ok || !Fits(item, r.Action) {
 		return Preview{}, errors.New("This item was answered or replaced since it was loaded.")
+	}
+	if r.Action == ActDismiss {
+		return Preview{}, nil
 	}
 	return Preview{Text: supervisorText(it, item, r)}, nil
 }

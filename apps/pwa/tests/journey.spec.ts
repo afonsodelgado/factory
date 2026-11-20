@@ -29,6 +29,12 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
       needs_since: new Date(Date.now() - 30 * 60_000).toISOString(),
     }),
     factory("search-typos", []),
+    factory("rate-limits", [
+      {
+        ...gate("k-busy-gate"),
+        send: { ready: false, reason: "rate-limits is not at its prompt." },
+      },
+    ]),
   ]);
 
   await page.goto("/");
@@ -62,6 +68,10 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await page.getByRole("button", { name: "Tap again to approve" }).click();
   await expect(page.getByText("Delivered.")).toBeVisible();
 
+  await page.goto("/f/shop-1a2b-rate-limits/i/k-busy-gate");
+  await page.getByRole("button", { name: "Dismiss, send nothing" }).click();
+  await expect(page.getByText("Dismissed.")).toBeVisible();
+
   await server.set({ nextStatus: "sending" });
   await page.goto("/f/shop-1a2b-search-typos/message");
   await page
@@ -87,6 +97,7 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   expect(actions.map((a) => [a.action, a.answers ?? a.text])).toEqual([
     ["answer", ["Comma", "No"]],
     ["approve", "ship it"],
+    ["dismiss", undefined],
     ["message", "/factory status"],
   ]);
 

@@ -23,7 +23,13 @@ export type PromptMenu = {
 };
 
 export type ReceiptStatus =
-  "queued" | "sending" | "delivered" | "refused" | "unknown" | "stale";
+  | "queued"
+  | "sending"
+  | "delivered"
+  | "refused"
+  | "unknown"
+  | "stale"
+  | "dismissed";
 
 export type Receipt = {
   operation?: string;
@@ -251,7 +257,8 @@ export type Action =
   | "pause"
   | "wake"
   | "permission"
-  | "prompt";
+  | "prompt"
+  | "dismiss";
 
 export type ActionBody = {
   action: Action;

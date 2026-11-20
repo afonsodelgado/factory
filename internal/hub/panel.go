@@ -81,6 +81,8 @@ func (m *Model) delivery(it Item, item panel.Item) (panel.Progress, bool) {
 
 func progress(s sentMark) panel.Progress {
 	switch {
+	case s.Action == host.ActDismiss:
+		return panel.Dismissed
 	case s.At.IsZero():
 		return panel.Queued
 	case s.Received.IsZero():
@@ -270,6 +272,8 @@ func hostAction(item panel.Item, action string) string {
 	switch {
 	case action == "handled":
 		return host.ActHandled
+	case action == "dismiss":
+		return host.ActDismiss
 	case asksQuestions(item):
 		return host.ActAnswer
 	case item.Kind == "gate" && action == "approve":
@@ -301,13 +305,15 @@ func (m *Model) gateNotes(item panel.Item, d *panel.Draft) string {
 
 func (m *Model) deliver(action string) {
 	it, item, ok := m.currentAttention()
-	handoffAction := action == "handled" || action == "continue"
+	dismissing := action == "dismiss"
+	handoffAction := action == "handled" || action == "continue" || dismissing
 	if !ok || !item.Answerable() || (item.Kind == "handoff" && !handoffAction) {
 		return
 	}
 	key := draftKey(it.Factory, item.ID)
 	d := m.draft(it.Factory, item)
-	if action != "handled" && unanswered(item, d) != "" {
+	needsNoAnswer := action == "handled" || dismissing
+	if !needsNoAnswer && unanswered(item, d) != "" {
 		return
 	}
 	if reason := m.unverified(it); reason != "" {
@@ -316,7 +322,7 @@ func (m *Model) deliver(action string) {
 	}
 	remote := it.Factory.Remote != nil
 	wakesItsSupervisor := item.Kind == "handoff"
-	if reason := unqueueable(m.target(it)); reason != "" && !remote && !wakesItsSupervisor {
+	if reason := unqueueable(m.target(it)); reason != "" && !remote && !wakesItsSupervisor && !dismissing {
 		m.panel.refused[key] = "Not sent. " + reason
 		m.saveDraft()
 		return
@@ -329,6 +335,9 @@ func (m *Model) deliver(action string) {
 		return
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), m.message(item, d, action))
+	if dismissing {
+		text = ""
+	}
 	mark := sentMark{ItemSince: item.Since, Factory: it.Factory.Key(), ItemID: item.ID, Head: state.PromptHead(text), Draft: m.draftPath(it.Factory, item.ID), Source: host.SourceHub, Action: hostAction(item, action)}
 	mark.LeavesOpen = item.Kind == "gate" && action == "changes"
 	m.queueAnswer(mark, text)
@@ -336,7 +345,7 @@ func (m *Model) deliver(action string) {
 
 func (m *Model) repeatedOntoNextItem(it Item, item panel.Item, key string) bool {
 	switch key {
-	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+k", "enter":
+	case "ctrl+s", "ctrl+a", "ctrl+r", "ctrl+k", "ctrl+x", "enter":
 	default:
 		return false
 	}
@@ -634,7 +643,7 @@ func confirmTyped(item panel.Item, d *panel.Draft) {
 }
 
 func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.Cmd, bool) {
-	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+k"
+	sends := key == "ctrl+s" || key == "ctrl+a" || key == "ctrl+r" || key == "ctrl+k" || key == "ctrl+x"
 	if sends {
 		d.Editing = false
 	}
@@ -649,6 +658,8 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 		m.recommendedOrRetry(item, d)
 	case "ctrl+k":
 		m.deliver("handled")
+	case "ctrl+x":
+		m.deliver("dismiss")
 	case "ctrl+o":
 		return m.openReview(itemURL(item, d), itemTitle(item, d)), true
 	case "ctrl+d":

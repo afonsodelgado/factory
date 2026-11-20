@@ -66,6 +66,7 @@ const (
 	ActWake       = "wake"
 	ActPermission = "permission"
 	ActPrompt     = "prompt"
+	ActDismiss    = "dismiss"
 )
 
 const MaxMessageRunes = 4000
@@ -96,7 +97,7 @@ func ActionText(item AttentionItem, action string, answers []string, text string
 
 func Fits(item AttentionItem, action string) bool {
 	switch action {
-	case ActHandled:
+	case ActHandled, ActDismiss:
 		return item.Answerable()
 	case ActAnswer:
 		return item.Kind == "question" || item.Kind == "commands" || item.Kind == "design_return" || item.Kind == "cap" || item.Kind == "failure"

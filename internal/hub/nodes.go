@@ -675,6 +675,8 @@ func receiptProgress(status string) panel.Progress {
 		return panel.Queued
 	case host.StatusDelivered:
 		return panel.Answered
+	case host.StatusDismissed:
+		return panel.Dismissed
 	}
 	return panel.Sending
 }

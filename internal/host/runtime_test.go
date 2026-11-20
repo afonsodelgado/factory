@@ -571,6 +571,49 @@ func TestAnAnswerQueuedForASupervisorThatNeverLooksIdleIsGivenBack(t *testing.T)
 	}
 }
 
+func TestADismissedItemTypesNothingAndStaysDismissedUntilTheSupervisorClosesIt(t *testing.T) {
+	gate, question := asked("gate-csv-plan", "gate"), asked("q-csv-1", "question", "Which region?")
+	typist := &paneTypist{}
+	busy := phoneSnapshot("PostToolUse", gate, question)
+	busy.Items[0].Unblocked = factory.Running
+	r := phoneRuntime(t.TempDir(), typist, busy)
+	dismiss := ActionRequest{Operation: uuid.NewString(), Device: "d1", Factory: "/r/app:csv", Incarnation: "/r/app:csv", Action: ActDismiss, Item: gate.ID, Since: gate.CreatedAt.Time}
+	if receipt, err := r.Act(dismiss); err != nil || receipt.Status != StatusDismissed {
+		t.Fatalf("dismissing while the supervisor is busy gave %+v, %v; want it dismissed at once", receipt, err)
+	}
+	fromHub, _ := json.Marshal(QueuedAnswer{Answer: Answer{Factory: "/r/app:csv", ItemID: question.ID, ItemSince: question.CreatedAt.Time, Source: SourceHub, Action: ActDismiss}})
+	if reply := r.Handle(Message{T: "queue-answer", Data: fromHub}); reply.T != "done" {
+		t.Fatalf("the hub's dismissal of a busy supervisor's question was refused: %+v", reply)
+	}
+
+	talkedThenIdle := phoneSnapshot("Stop", gate, question)
+	talkedThenIdle.Items[0].Unblocked = factory.Running
+	talkedThenIdle.At = phoneNow.Add(time.Minute)
+	talkedThenIdle.Items[0].Hook.Submit = &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "let us redo the plan", At: phoneNow.Add(time.Second)}
+	talkedThenIdle.Items[0].Hook.Main = &state.HookEvent{Event: "Stop", At: phoneNow.Add(30 * time.Second)}
+	r.SetSnapshot(talkedThenIdle)
+	for range 2 {
+		r.FlushTypeQueue()
+		r.SettleReceipts(talkedThenIdle.Items, func(string) time.Time { return talkedThenIdle.At })
+	}
+	if receipt, _ := r.LookupReceipt(ReceiptRequest{Operation: dismiss.Operation}); receipt.Status != StatusDismissed || len(typist.typed) != 0 {
+		t.Fatalf("after the developer talked to the supervisor directly the dismissal reads %+v and typed %q; want it still dismissed with nothing typed", receipt, typist.typed)
+	}
+	if hub, _ := r.Claim(ClaimKey("/r/app:csv", question.ID)); hub.Status() != StatusDismissed {
+		t.Fatalf("the hub's dismissal reads %q after the supervisor went idle; want it still dismissed", hub.Status())
+	}
+	if lf := r.Local().Factories[0]; lf.Status == factory.NeedsYou.String() {
+		t.Fatalf("a factory whose items are all dismissed still reads %q on the phone", lf.Status)
+	}
+
+	closed := phoneSnapshot("Stop")
+	r.SetSnapshot(closed)
+	r.SettleReceipts(closed.Items, func(string) time.Time { return closed.At })
+	if _, open := r.Claim(ClaimKey("/r/app:csv", gate.ID)); open {
+		t.Fatal("the dismissal outlived the item the supervisor closed")
+	}
+}
+
 func TestAPhoneMessageShowsOnlyTheSupervisorsReplyToItsOwnTurn(t *testing.T) {
 	r := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop"))
 	send := func(text string) string {
