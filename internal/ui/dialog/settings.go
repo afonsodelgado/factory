@@ -152,9 +152,9 @@ func (m *Settings) help() string {
 	case "qa.health":
 		return "The URL QA checks to know the local stack is ready."
 	case "qa.seed":
-		return "The command that seeds an isolated test environment before QA, or none. Browser QA refuses to start without it."
+		return "Optional. A command that loads repeatable test data before QA. Blank or none: QA creates the data it needs through the app, on the local stack only."
 	case "qa.sign_in":
-		return "The command that signs in and prints the session cookies as JSON, or none. Browser QA refuses to start without it."
+		return "Optional. A command that signs in and prints the session cookies as JSON. Blank or none: QA signs up or logs in through the app, on the local stack only."
 	default:
 		return "build, lint and test are the focused checks every layer of a factory's stack runs. A cleared field is saved as an empty string and keeps its place."
 	}
@@ -260,6 +260,11 @@ func (m *Settings) drawForm(c *theme.Canvas, w int) {
 
 var browserOnlyKeys = []string{"qa.start", "qa.health", "qa.seed", "qa.sign_in", "qa.url"}
 
+var optionalKeys = map[string]string{
+	"qa.seed":    "not used · QA creates the data it needs through the app",
+	"qa.sign_in": "not used · QA signs up or logs in through the app",
+}
+
 func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edited bool) {
 	title := strings.TrimPrefix(strings.TrimPrefix(key, "commands."), "qa.")
 	ink := theme.Quiet
@@ -290,7 +295,9 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 		return
 	}
 	value := strings.ReplaceAll(m.values[key], "\n", " ↵ ")
-	if value == "" && !focused {
+	unused, optional := optionalKeys[key]
+	blank := value == ""
+	if blank && !focused {
 		if detected, ok := m.detected[key]; ok {
 			value = detected.Command + " (detected: " + detected.Source + ")"
 		}
@@ -299,10 +306,19 @@ func (m *Settings) drawField(c *theme.Canvas, y, w int, key string, focused, edi
 		value += "█"
 	}
 	drawInput(c, 1, y, w, title, []string{value}, focused, ink)
-	if edited {
-		c.Right(c.W-4, y, " edited ", theme.Bright.B())
+	switch {
+	case blank && optional && focused:
+		c.Put(6, y+1, "blank: not used", theme.Muted)
+	case blank && optional:
+		c.PutMax(3, y+1, unused, theme.Muted, w-4)
 	}
-	if !m.settings.Present[key] && m.values[key] == "" && !focused {
+	switch {
+	case edited:
+		c.Right(c.W-4, y, " edited ", theme.Bright.B())
+	case optional:
+		c.Right(c.W-4, y, " optional ", theme.Muted)
+	}
+	if !m.settings.Present[key] && blank && !focused && !optional {
 		c.Put(3, y+1, "not in the file yet", theme.Muted)
 	}
 }

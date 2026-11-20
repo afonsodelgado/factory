@@ -73,12 +73,6 @@ func RecipeOf(profile state.Profile, worktree string) (Recipe, error) {
 	undeclared := func(key, what string) {
 		problems = append(problems, fmt.Errorf("qa.%s is not declared in the repo config; write %s", key, what))
 	}
-	if r.Seed == "" {
-		undeclared("seed", "the command that seeds an isolated test environment, or "+state.NotNeeded)
-	}
-	if r.SignIn == "" {
-		undeclared("sign_in", "the command that signs in and prints the session cookies as JSON, or "+state.NotNeeded)
-	}
 	if r.Health == "" {
 		undeclared("health", "the URL that answers once the stack is ready")
 	}
@@ -302,7 +296,7 @@ func (p *stackProcess) stop() {
 }
 
 func step(ctx context.Context, name, command string, r Recipe) ([]byte, error) {
-	if command == state.NotNeeded {
+	if state.Unused(command) {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, stepWait)

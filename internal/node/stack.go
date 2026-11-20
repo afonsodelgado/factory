@@ -233,6 +233,7 @@ func (s *Stacks) outcome(run *liveStack, err error) host.StackStatus {
 	status.Origin = s.origin(run.record)
 	status.URL = status.Origin + app.RequestURI()
 	status.Href = "/w/" + url.PathEscape(run.record.Route)
+	status.SignedIn = !state.Unused(run.recipe.SignIn)
 	return status
 }
 
@@ -393,7 +394,7 @@ func (s *Stacks) Open(w http.ResponseWriter, r *http.Request) {
 		phone.Notice(w, http.StatusConflict, "The review stack failed at "+status.Failure, status.Reason)
 	case status.State != host.StackReady:
 		phone.Notice(w, http.StatusConflict, "The review stack is still starting", "Open it again in a moment.")
-	case run.recipe.SignIn == state.NotNeeded && !s.loopback():
+	case state.Unused(run.recipe.SignIn) && !s.loopback():
 		http.Redirect(w, r, status.URL, http.StatusSeeOther)
 	default:
 		w.Header().Set("Referrer-Policy", "no-referrer")

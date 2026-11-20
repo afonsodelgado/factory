@@ -160,7 +160,7 @@ func (ts *Transfers) checkRecipe(ctx context.Context, repo string, r PreflightRe
 		p.refuse(ts.Nodes, "stack", fmt.Sprintf("this node's stack recipe failed at %s: %v", failureOf(err), err), "")
 		return
 	}
-	p.pass(ts.Nodes, "stack", "this node's qa.start, qa.health, qa.seed and qa.sign_in ran in a scratch checkout")
+	p.pass(ts.Nodes, "stack", "this node's stack recipe ran in a scratch checkout")
 }
 
 func (t Transfer) MissingRepo() (Check, bool) {

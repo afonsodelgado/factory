@@ -189,7 +189,7 @@ func Resolve(root string) (Resolution, error) {
 	r.Profile.QA.URL = r.Recipe.QA["url"].Command
 	r.Profile.QA.Health = r.Recipe.QA["health"].Command
 	if r.Profile.QA.Mode == "browser" {
-		for _, key := range []string{"start", "url", "health", "seed", "sign_in"} {
+		for _, key := range []string{"start", "url", "health"} {
 			if _, ok := r.Recipe.QA[key]; !ok {
 				r.Recipe.Unresolved = append(r.Recipe.Unresolved, "qa."+key+": declare the local startup prerequisite")
 			}

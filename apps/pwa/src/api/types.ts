@@ -85,6 +85,7 @@ export type ReviewStack = {
   origin?: string;
   url?: string;
   href?: string;
+  signed_in?: boolean;
   failure?: string;
   reason?: string;
 };

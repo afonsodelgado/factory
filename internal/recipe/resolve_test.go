@@ -89,7 +89,7 @@ func TestCIWorkingDirectoryAndIncompleteBrowserRecipeAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Recipe.Commands["test"].Directory != filepath.Join(root, "server") || r.Profile.Commands.Lint != "" || len(r.Recipe.Unresolved) != 6 {
+	if r.Recipe.Commands["test"].Directory != filepath.Join(root, "server") || r.Profile.Commands.Lint != "" || len(r.Recipe.Unresolved) != 4 {
 		t.Fatal(r)
 	}
 }

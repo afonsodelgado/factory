@@ -1611,6 +1611,14 @@ func TestThePhoneSignInLinkWorksOnceAndRefusesCookiesItCannotHold(t *testing.T) 
 	if failed, _ := w.launch(pdf); failed.Failure != host.FailPhoneSignIn || w.proxyOf(failed) != "" {
 		t.Errorf("a stack whose sign-in no phone can hold became %s at %q; want it refused by name before Serve publishes it", failed.State, failed.Failure)
 	}
+
+	signedOut := w.factory("docs", strings.Replace(stackApp, "  sign_in: cat cookies.json\n", "", 1))
+	plain, _ := w.start(signedOut)
+	rec := httptest.NewRecorder()
+	opener.ServeHTTP(rec, httptest.NewRequest("GET", plain.Href, nil))
+	if next := rec.Header().Get("Location"); rec.Code != http.StatusSeeOther || next != plain.URL || plain.SignedIn || !status.SignedIn {
+		t.Errorf("a stack with no sign-in command answered %d to %q, signed in %v; want a plain link to %s that opens signed out", rec.Code, next, plain.SignedIn, plain.URL)
+	}
 }
 
 func TestACommentFromAnotherFactorysWalkthroughIsRefused(t *testing.T) {

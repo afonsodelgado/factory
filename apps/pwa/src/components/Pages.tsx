@@ -4,7 +4,10 @@ export function Pages({ factory }: { factory: LocalFactory }) {
   const reviewStack = factory.review_stack ? (
     <ul className="items">
       <li>
-        <ReviewStackRow reviewStack={factory.review_stack} />
+        <ReviewStackRow
+          reviewStack={factory.review_stack}
+          repo={factory.repo_name}
+        />
       </li>
     </ul>
   ) : null;
@@ -32,7 +35,13 @@ export function Pages({ factory }: { factory: LocalFactory }) {
   );
 }
 
-function ReviewStackRow({ reviewStack }: { reviewStack: ReviewStack }) {
+function ReviewStackRow({
+  reviewStack,
+  repo,
+}: {
+  reviewStack: ReviewStack;
+  repo: string;
+}) {
   if (reviewStack.state === "ready" && reviewStack.href)
     return (
       <a className="it" href={reviewStack.href}>
@@ -42,8 +51,15 @@ function ReviewStackRow({ reviewStack }: { reviewStack: ReviewStack }) {
         <span className="ink b">Review stack</span>
         <span className="sm grn">running</span>
         <span className="s">
-          {reviewStack.origin?.replace("https://", "")} · open signed in ›
+          {reviewStack.origin?.replace("https://", "")} ·{" "}
+          {reviewStack.signed_in ? "open signed in" : "opens signed out"} ›
         </span>
+        {reviewStack.signed_in ? null : (
+          <span className="s">
+            {repo} has no sign-in command, so sign in or sign up yourself, as QA
+            did.
+          </span>
+        )}
       </a>
     );
   const failed = reviewStack.state === "failed";
