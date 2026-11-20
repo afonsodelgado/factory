@@ -354,7 +354,7 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 		snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa", Kind: "cap", StageKey: "qa", Loop: "qa_fix", LimitKey: "qa_fix_rounds", Title: "QA rounds 3 of 3", CreatedAt: state.Time{Time: created}}}
 		return snap
 	}
-	firstReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "cap-7452-qa continue: raise qa_fix_rounds by one for this factory", At: now.Add(time.Second / 2)}
+	firstReceived := &state.HookEvent{Event: "UserPromptSubmit", PromptHead: "cap-7452-qa continue: raise qa_fix_rounds by 1 for this factory", At: now.Add(time.Second / 2)}
 	resolved := questionFactory("Stop", now.Add(time.Second))
 	resolved.Items[0].Factory.State.Attention = []state.Attention{}
 	resolved.Items[0].Hook.Submit = firstReceived
@@ -370,6 +370,24 @@ func TestAReRaisedItemStartsUnsent(t *testing.T) {
 	panelKeys(tm, "ctrl+r")
 	if len(typist.typed) != 2 {
 		t.Errorf("typed %q; the cap tripped again under the same id, so continue must send a second time", typist.typed)
+	}
+}
+
+func TestPickingTwoMoreRoundsOnACapSendsThatIncrement(t *testing.T) {
+	now := time.Date(2026, 10, 22, 14, 42, 0, 0, time.UTC)
+	snap := questionFactory("Stop", now)
+	snap.Items[0].Factory.State.Attention = []state.Attention{{ID: "cap-7452-qa", Kind: "cap", StageKey: "qa", Loop: "qa_fix", LimitKey: "qa_fix_rounds", Title: "Allow more correction cycles?", CreatedAt: state.Time{Time: now.Add(-time.Minute)}}}
+	typist := &fakeTypist{}
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Icons: theme.Nerd}, host.Runtime{Typist: typist})
+	node.show(model, snap)
+	tm := drive(model, 34, 44)
+	view := escapes.ReplaceAllString(model.PanelView(109, 20), "")
+	if !strings.Contains(view, "+1 round") || !strings.Contains(view, "+2 rounds") {
+		t.Fatalf("cap panel:\n%s\nwant a row for each increment the developer can allow", view)
+	}
+	panelKeys(tm, "down", "enter")
+	if len(typist.typed) != 1 || !strings.Contains(typist.typed[0], "cap-7452-qa continue: raise qa_fix_rounds by 2 for this factory") {
+		t.Errorf("typed %q; picking +2 rounds must send that increment", typist.typed)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -219,6 +220,9 @@ func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
 	if item.Kind == "design_return" {
 		d.Artifact = max(0, min(d.Artifact, len(item.Artifacts)-1))
 	}
+	if item.Kind == "cap" {
+		d.Artifact = max(0, min(d.Artifact, host.MaxCapRounds-1))
+	}
 	return d
 }
 
@@ -253,13 +257,16 @@ func (m *Model) target(it Item) Target {
 
 func (m *Model) message(item panel.Item, d *panel.Draft, action string) string {
 	r := m.answerBody(item, d, action)
-	return host.ActionText(item, r.Action, r.Answers, r.Text)
+	return host.ActionText(item, r.Action, r.Option, r.Answers, r.Text)
 }
 
 func (m *Model) answerBody(item panel.Item, d *panel.Draft, action string) node.ActionBody {
 	r := node.ActionBody{Action: hostAction(item, action), Item: item.ID, Since: item.Since, Text: d.Text}
 	if r.Action == host.ActApprove {
 		r.Text = m.gateNotes(item, d)
+	}
+	if r.Action == host.ActContinue && item.Kind == "cap" {
+		r.Option = strconv.Itoa(d.Artifact + 1)
 	}
 	r.Answers = make([]string, len(item.Questions))
 	for i, q := range item.Questions {
@@ -582,6 +589,8 @@ func (m *Model) answerKey(it Item, item panel.Item, key, text string) (tea.Cmd, 
 		typeInto(item, d, "\n")
 	case key == "enter" && onApproveRow(item, d):
 		m.deliver("approve")
+	case key == "enter" && item.Kind == "cap":
+		m.deliver("continue")
 	case key == "enter":
 		startTyping(item, d)
 	case key == "backspace":
@@ -677,6 +686,7 @@ func (m *Model) answerAction(item panel.Item, d *panel.Draft, key string) (tea.C
 func (m *Model) recommendedOrRetry(item panel.Item, d *panel.Draft) {
 	switch {
 	case item.Kind == "cap":
+		d.Artifact = 0
 		m.deliver("continue")
 	case item.Kind == "failure":
 		m.deliver("retry")
@@ -717,7 +727,7 @@ func nothingTyped(kind string) string {
 	case "comment":
 		return "Type a reply first: ctrl+s sends it"
 	case "cap":
-		return "Type an instruction first, or ctrl+r for one more round"
+		return "Type an instruction first, or ⏎ on a row to allow more rounds"
 	case "failure":
 		return "Type an instruction first, or ctrl+r to retry"
 	case "handoff":
@@ -773,6 +783,8 @@ func moveIn(item panel.Item, d *panel.Draft, key string) {
 	case "gate":
 	case "design_return":
 		last--
+	case "cap":
+		last = host.MaxCapRounds - 1
 	default:
 		return
 	}

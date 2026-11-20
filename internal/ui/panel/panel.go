@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/ui/theme"
 )
 
@@ -340,7 +341,7 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		top = append(top, text("Your reply goes to thread "+it.ThreadID+".", theme.Muted))
 		return top, nil, withStatus(v, w, field("reply", v.Draft, w)), 0
 	case it.Kind == "cap":
-		return top, append(choices(v, "ctrl+r", "continue one more round", "raises "+it.LimitKey+" by one for this factory"), freeText(v, "instruction", w)...), withStatus(v, w), 0
+		return top, append(capRows(v, it), freeText(v, "instruction", w)...), withStatus(v, w), 1 + v.Draft.Artifact
 	case it.Kind == "failure":
 		return top, append(choices(v, "ctrl+r", "retry", "sends /factory resume"), freeText(v, "instruction", w)...), withStatus(v, w), 0
 	case it.Kind == "handoff":
@@ -629,6 +630,22 @@ func freeText(v View, title string, w int) []line {
 		return nil
 	}
 	return append([]line{blank()}, textBox(title, v.Draft, w)...)
+}
+
+func capRows(v View, it Item) []line {
+	lines := []line{blank()}
+	for rounds := 1; rounds <= host.MaxCapRounds; rounds++ {
+		label := fmt.Sprintf("+%d rounds", rounds)
+		if rounds == 1 {
+			label = "+1 round"
+		}
+		row := line{cursor(v, v.Draft.Artifact == rounds-1), {Text: fmt.Sprintf("%-11s", label), Ink: theme.Bright}, {Text: fmt.Sprintf("raises %s by %d for this factory", it.LimitKey, rounds), Ink: theme.Muted}}
+		if rounds == 1 {
+			row = append(row, theme.Span{Text: "  recommended", Ink: theme.Muted})
+		}
+		lines = append(lines, row)
+	}
+	return lines
 }
 
 func choices(v View, options ...string) []line {

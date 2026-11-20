@@ -579,7 +579,7 @@ func (m *Runtime) dismiss(it Item, mark Answer) {
 }
 
 func supervisorText(it Item, item AttentionItem, r ActionRequest) string {
-	return factory.ForSupervisor(it.Factory.Supervisor().ToolName(), ActionText(item, r.Action, r.Answers, r.Text))
+	return factory.ForSupervisor(it.Factory.Supervisor().ToolName(), ActionText(item, r.Action, r.Option, r.Answers, r.Text))
 }
 
 type Preview struct {
@@ -612,8 +612,15 @@ func missingInput(item AttentionItem, r ActionRequest) string {
 		return fmt.Sprintf("answer all %d questions", len(item.Questions))
 	case needsText && strings.TrimSpace(r.Text) == "":
 		return "type the text to send first"
+	case r.Action == ActContinue && item.Kind == "cap" && !validCapRounds(r.Option):
+		return fmt.Sprintf("allow between 1 and %d more rounds", MaxCapRounds)
 	}
 	return ""
+}
+
+func validCapRounds(option string) bool {
+	_, ok := CapRounds(option)
+	return ok
 }
 
 func everyAnswered(answers []string, questions int) bool {
