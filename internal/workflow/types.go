@@ -36,7 +36,16 @@ type Event struct {
 	Observations        []state.PRVerification `json:"observations,omitempty"`
 	CommentDispositions map[string]string      `json:"comment_dispositions,omitempty"`
 	Comments            *state.Verification    `json:"comments,omitempty"`
+	Detail              string                 `json:"detail,omitempty"`
+	Note                *Note                  `json:"note,omitempty"`
 }
+
+type Note struct {
+	Event  string `json:"event"`
+	Detail string `json:"detail"`
+}
+
+var DiscoveryNotes = []string{"discovery started", "discovery started again", "test noted", "commands recorded"}
 
 type Result struct {
 	Questions     []Question          `json:"questions,omitempty"`

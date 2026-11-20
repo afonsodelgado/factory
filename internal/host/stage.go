@@ -61,9 +61,10 @@ type QueuedType struct {
 }
 
 type StageView struct {
-	Run  state.StageRun
-	Pane *tmux.Pane
-	Hook *state.HookFile
+	Run      state.StageRun
+	Pane     *tmux.Pane
+	Hook     *state.HookFile
+	patience time.Duration
 }
 
 func StageLabel(run state.StageRun) string {
@@ -71,8 +72,11 @@ func StageLabel(run state.StageRun) string {
 }
 
 func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
-	if r.Action == "ci" {
+	switch r.Action {
+	case "ci":
 		return m.WaitForCI(r)
+	case "discover":
+		return m.Discover(r)
 	}
 	if !slices.Contains(state.AgentRoles, r.Role) {
 		return StageReply{}, fmt.Errorf("%q is not a role; roles are %s", r.Role, strings.Join(state.AgentRoles, ", "))
@@ -101,22 +105,11 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 	if active.ID != r.EffectID || active.Role != r.Role || (effect != nil && (effect.ID != r.EffectID || effect.Role != r.Role || effect.Kind != "stage")) {
 		return StageReply{}, errors.New("stage request does not match the committed effect")
 	}
-	lockPath := state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug) + ".lock"
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
-		return StageReply{}, err
-	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	runs, unlock, err := m.lockedRuns(it)
 	if err != nil {
 		return StageReply{}, err
 	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return StageReply{}, err
-	}
-	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
-	if err != nil {
-		return StageReply{}, err
-	}
+	defer unlock()
 	if r.Reask {
 		return m.Reask(it, runs, r)
 	}
@@ -144,6 +137,73 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 		return m.SendStage(it, runs, r)
 	}
 	return m.StartStage(it, runs, r)
+}
+
+func (m *Runtime) lockedRuns(it Item) (*state.StageRuns, func(), error) {
+	lockPath := state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug) + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return nil, nil, err
+	}
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		lock.Close()
+		return nil, nil, err
+	}
+	runs, err := state.LoadStageRuns(state.StageRunsPath(m.Config.StateDir, it.Factory.Repo, it.Factory.Slug))
+	if err != nil {
+		lock.Close()
+		return nil, nil, err
+	}
+	return runs, func() { lock.Close() }, nil
+}
+
+func (m *Runtime) Discover(r StageRequest) (StageReply, error) {
+	it, ok := m.stageItem(r)
+	switch {
+	case !ok || it.Factory.Dir == "" || it.Factory.Worktree == "" || it.Factory.State == nil:
+		return StageReply{}, errors.New("no factory owns this session; run factory stage discover from a factory's supervisor pane, or name it with --factory")
+	case strings.TrimSpace(r.Text) == "":
+		return StageReply{}, errors.New("give the discoverer its task")
+	}
+	if err := m.unverified(it.Factory.Key()); err != nil {
+		return StageReply{}, err
+	}
+	runs, unlock, err := m.lockedRuns(it)
+	if err != nil {
+		return StageReply{}, err
+	}
+	defer unlock()
+	profile, _ := state.ReadProfile(it.Factory.Repo)
+	if running := DiscoveryStage(it.Factory, runs, m.currentPanes(), m.snap.Hooks, m.Config.WithProfile(profile).Stalled()); running != nil && !running.Lost(m.Now()) {
+		return StageReply{Result: running.Run.Result}, nil
+	}
+	setting := it.Factory.Agent("engineer")
+	if !setting.OnClaude() {
+		setting = state.DefaultAgents["engineer"]
+	}
+	round := 1 + len(slices.DeleteFunc(slices.Clone(runs.Runs), func(run state.StageRun) bool { return run.Role != state.Discoverer }))
+	id := fmt.Sprintf("%s-discover-%d", it.Factory.Label(), round)
+	run := state.StageRun{ID: id, Role: state.Discoverer, Round: round, Setting: setting, Token: uuid.NewString(), Prompt: filepath.Join(it.Factory.Dir, "stages", id+".prompt.md"), Result: filepath.Join(it.Factory.Dir, "stages", id+".result.json"), StartedAt: m.Now()}
+	prompt, err := StagePrompt(state.Discoverer, r.Text, run.Result, m.Rules(), setting)
+	if err != nil {
+		return StageReply{}, err
+	}
+	if err := WriteFile(run.Prompt, prompt); err != nil {
+		return StageReply{}, err
+	}
+	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
+		return StageReply{}, err
+	}
+	if err := m.Engine.KillStages(it.Factory.Repo, it.Factory.Slug, state.Discoverer); err != nil {
+		return StageReply{}, err
+	}
+	if err := m.OpenStagePane(it, run, m.StageLaunch(it, run, "").Command()); err != nil {
+		return StageReply{}, err
+	}
+	return m.Record(it, runs, run, "started")
 }
 
 func (m *Runtime) WaitForCI(r StageRequest) (StageReply, error) {
@@ -339,10 +399,14 @@ func (m *Runtime) CloseFinishedStages() {
 }
 
 func (m *Runtime) runningStages(it Item) []string {
-	if it.Stage == nil {
-		return nil
+	var blockers []string
+	if it.Stage != nil {
+		blockers = append(blockers, "its "+it.Stage.Run.Role+" stage is still running; checkpoint between stages")
 	}
-	return []string{"its " + it.Stage.Run.Role + " stage is still running; checkpoint between stages"}
+	if it.Discovery != nil && !it.Discovery.Lost(m.Now()) {
+		blockers = append(blockers, "it is discovering its repo commands; checkpoint once discovery finishes")
+	}
+	return blockers
 }
 
 func HasStagePanes(panes []tmux.Pane, f factory.Factory) bool {

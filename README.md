@@ -37,6 +37,7 @@ requirements → design ↔ plan → implement ↔ review → qa → pr → hand
 ```
 
 - **You stay in control.** You answer the requirements questions, approve the design and the plan before any code is written, and confirm at the end. Merging is always yours.
+- **No commands to type.** While you answer the requirements questions, an agent works out how to build, lint, test and run the repo on that machine, runs each command there and saves the ones that work. It asks you only about what it could not get working.
 - **One agent per stage.** Each stage can run on Claude Code, Codex or OpenCode, with its own model and effort. Everything runs on your own subscriptions, with no API keys.
 - **Run as many as you like.** The hub shows every factory in one window, and `g` jumps to the one that needs you.
 - **Run them anywhere.** Each machine runs a **node**, an always-on service that owns its factories. Add a home server or a VPS as another node, and the hub and your phone show the factories of every node together.

@@ -18,11 +18,15 @@ const resultPoll = 2 * time.Second
 
 const stageUsage = `usage: factory stage start --role <role> --effect <id> --task <file> [--factory id] [--wait]
        factory stage send --role <role> --effect <id> --message <file> [--reask] [--factory id] [--wait]
+       factory stage discover --task <file> [--factory id]
        factory stage ci <pr number>...`
 
 func runStage(args []string) int {
 	if len(args) > 0 && args[0] == "ci" {
 		return runStageCI(args[1:])
+	}
+	if len(args) > 0 && args[0] == "discover" {
+		return runStageDiscover(args[1:])
 	}
 	if len(args) == 0 || (args[0] != "start" && args[0] != "send") {
 		fmt.Fprintln(os.Stderr, stageUsage)
@@ -55,6 +59,31 @@ func runStage(args []string) int {
 type stageCall struct {
 	Action, Role, TextFile, Factory, EffectID string
 	Reask                                     bool
+}
+
+func runStageDiscover(args []string) int {
+	flags := flag.NewFlagSet("stage discover", flag.ContinueOnError)
+	task := flags.String("task", "", "a file with the discoverer's task")
+	id := flags.String("factory", "", "the factory, when this is not its supervisor's pane")
+	if err := flags.Parse(args); err != nil || *task == "" {
+		fmt.Fprintln(os.Stderr, stageUsage)
+		return 2
+	}
+	result, err := discover(*task, *id)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory stage:", err)
+		return 1
+	}
+	fmt.Println(result)
+	return 0
+}
+
+func discover(task, id string) (string, error) {
+	text, err := os.ReadFile(task)
+	if err != nil {
+		return "", err
+	}
+	return ask(host.StageRequest{Action: "discover", Text: string(text), Factory: id})
 }
 
 func runStageCI(prs []string) int {

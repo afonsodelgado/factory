@@ -41,6 +41,8 @@ Before each commit, reread the layer's diff as its reviewer and delete what it d
 4. Keep a short log of what you verified by hand and what you only reasoned about.
 5. Invoke the `qa-brief-factory` skill and write the brief from that log, before you report. Put the browser checks the plan asked for under "Unsure about". Return its path in `data.brief`.
 
+When a recorded command fails for reasons outside the change, such as a missing tool, service or environment variable on this node, return `failed` with `data.failure: "setup"` and `data.field` naming the key, such as `commands.test`, plus what the command printed. The supervisor runs discovery again for that field.
+
 ## Brief-only mode
 
 When the prompt asks only for the QA brief, you are a fresh agent with no history: write it with `qa-brief-factory` from `plan.md` and the local diff, and put everything you did not exercise under "Unsure about".

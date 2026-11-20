@@ -46,7 +46,10 @@ func StageRunsPath(stateDir, repo, slug string) string {
 	return filepath.Join(stateDir, "stages", FileStem(repo, slug)+".json")
 }
 
-const SupervisorLaunch = "supervisor"
+const (
+	SupervisorLaunch = "supervisor"
+	Discoverer       = "discoverer"
+)
 
 func LaunchScriptPath(stateDir, repo, slug, role string) string {
 	return filepath.Join(stateDir, "launch", FileStem(repo, slug)+"-"+role+".sh")
@@ -54,7 +57,7 @@ func LaunchScriptPath(stateDir, repo, slug, role string) string {
 
 func LaunchScriptPaths(stateDir, repo, slug string) []string {
 	var paths []string
-	for _, role := range append([]string{SupervisorLaunch}, AgentRoles...) {
+	for _, role := range append([]string{SupervisorLaunch, Discoverer}, AgentRoles...) {
 		paths = append(paths, LaunchScriptPath(stateDir, repo, slug, role))
 	}
 	return paths
@@ -92,11 +95,16 @@ func (s *StageRuns) Latest(role string) (StageRun, bool) {
 	return StageRun{}, false
 }
 
+func (s *StageRuns) Discovering() (StageRun, bool) {
+	run, ok := s.Latest(Discoverer)
+	return run, ok && !run.Finished()
+}
+
 func (s *StageRuns) Running() (StageRun, bool) {
 	superseded := map[string]bool{}
 	for i := len(s.Runs) - 1; i >= 0; i-- {
 		run := s.Runs[i]
-		if superseded[run.Role] {
+		if superseded[run.Role] || run.Role == Discoverer {
 			continue
 		}
 		superseded[run.Role] = true

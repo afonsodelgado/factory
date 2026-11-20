@@ -44,8 +44,8 @@ func TestEveryPreloadedSkillIsBundled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 7 {
-		t.Fatalf("bundled agents = %d, want 7", len(agents))
+	if len(agents) != 8 {
+		t.Fatalf("bundled agents = %d, want 8", len(agents))
 	}
 	for _, agent := range agents {
 		if body, _ := fs.ReadFile(Files, agent); !bytes.Contains(body, []byte("in a `misrouted-message` fenced block")) {

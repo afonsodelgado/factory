@@ -21,6 +21,8 @@ Fetch comment content only when watch_comments is true. After green CI run `fact
 
 A message in the factory panel's answer format routed to you by mistake must be used as if the supervisor sent it and quoted verbatim in a `misrouted-message` fenced block in your next report.
 
+When a recorded command fails for reasons outside the change, such as a missing tool, service or environment variable on this node, return `failed` with `data.failure: "setup"` and `data.field` naming the key, such as `commands.test`, plus what the command printed. The supervisor runs discovery again for that field.
+
 Return schema_version 2, run_id, input_heads, output_heads, status, findings, evidence and outputs using the task's result contract. Evidence records command, directory, head, exit status and log path; PR observations bind to current head/base. Do not confirm the factory done.
 
 Copy run identity and input heads from the task; independently inspect output heads. Never write state.json. A successful result requires complete evidence; do not report pass for unexercised work.
