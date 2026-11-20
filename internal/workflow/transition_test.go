@@ -372,6 +372,32 @@ func TestStaleGateItemsCannotApproveAnotherStage(t *testing.T) {
 	}
 }
 
+func TestPlanDesignGapsWithoutADesignStageWaitOnThePlanGate(t *testing.T) {
+	s := workflowState()
+	s.PipelineStages = []string{"requirements", "plan", "implement", "review", "pr", "handoff"}
+	if err := dispatch(&s, eventFor(s, "start"), "plan"); err != nil {
+		t.Fatal(err)
+	}
+	gap := state.Finding{ID: "nav", Severity: "design", Disposition: "open", Description: "no frame shows the export"}
+	s = complete(t, s, gap)
+	plan := s.Attention[len(s.Attention)-1]
+	if plan.Kind != "gate" || !strings.Contains(plan.Body, "nav: no frame shows the export") {
+		t.Fatal("a plan in a pipeline without design did not open its gate with the design gaps", plan.Kind, plan.Body)
+	}
+	e := eventFor(s, "changes")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt = plan.ID, plan.Revision, "review/batch-1.md", "batch:1"
+	if s = step(t, s, e); s.Stage != "plan" {
+		t.Fatal("plan comments did not return to the architect", s.Stage)
+	}
+	s = complete(t, s, gap)
+	plan = s.Attention[len(s.Attention)-1]
+	e = eventFor(s, "approval")
+	e.ItemID, e.ArtifactRevision, e.Answer, e.Receipt, e.Approved = plan.ID, plan.Revision, "approved", "conversation:1", true
+	if s = step(t, s, e); s.Stage != "implement" || slices.ContainsFunc(s.Findings, Gating) {
+		t.Fatal("approving the plan left its design gaps blocking the handoff", s.Stage, s.Findings)
+	}
+}
+
 func TestRevisedDesignRejectsThePreviousApprovalAndChangedDoneHeadsRestartVerification(t *testing.T) {
 	s := workflowState()
 	s.Stage = "design"
