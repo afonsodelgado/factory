@@ -322,6 +322,9 @@ func detail(v View, it Item, ic theme.Icons, w, h int) ([]line, []line, []line, 
 		if middle == nil {
 			middle = []line{blank(), hints("type", TextPrompt(it.Kind)+", then ctrl+s sends it")}
 		}
+		if len(it.Artifacts) > 0 {
+			middle = append(pageRows(v, it, ic, w), middle...)
+		}
 		return top, middle, questionFooter(v, w), 0
 	case it.Kind == "question":
 		middle, focus := questionForm(v, it, w)
@@ -555,8 +558,13 @@ func warning(s string, w int) []line {
 	return lines
 }
 
-func gateForm(v View, it Item, ic theme.Icons, w int) []line {
-	lines := []line{blank()}
+func pageRows(v View, it Item, ic theme.Icons, w int) []line {
+	lines := append([]line{blank()}, artifactRows(v, it, ic)...)
+	return append(lines, localPagesNote(v, w)...)
+}
+
+func artifactRows(v View, it Item, ic theme.Icons) []line {
+	var lines []line
 	for i, a := range it.Artifacts {
 		cursor := "  "
 		if i == v.Draft.Artifact {
@@ -568,17 +576,28 @@ func gateForm(v View, it Item, ic theme.Icons, w int) []line {
 		}
 		lines = append(lines, l)
 	}
+	return lines
+}
+
+func localPagesNote(v View, w int) []line {
+	if !v.LocalPages {
+		return nil
+	}
+	lines := []line{blank()}
+	for _, l := range theme.Wrap("Pages open in this machine's browser, through a link from ctrl+o that works once.", w) {
+		lines = append(lines, line{{Text: l, Ink: theme.Muted}})
+	}
+	return lines
+}
+
+func gateForm(v View, it Item, ic theme.Icons, w int) []line {
+	lines := append([]line{blank()}, artifactRows(v, it, ic)...)
 	cursor := "  "
 	if v.Draft.Artifact == len(it.Artifacts) {
 		cursor = "❯ "
 	}
 	lines = append(lines, line{{Text: cursor, Ink: theme.Focused.B()}, {Text: "✓ Approve", Ink: theme.FgInk(theme.Green).B()}, {Text: "  sends /factory approve " + it.Stage + " with the notes", Ink: theme.Muted}})
-	if v.LocalPages {
-		lines = append(lines, blank())
-		for _, l := range theme.Wrap("Pages open in this machine's browser, through a link from ctrl+o that works once.", w) {
-			lines = append(lines, line{{Text: l, Ink: theme.Muted}})
-		}
-	}
+	lines = append(lines, localPagesNote(v, w)...)
 	checked := checkedAt(it.Artifacts)
 	if !checked.IsZero() {
 		lines = append(lines, blank(), line{{Text: "Open threads  ", Ink: theme.Bright}, {Text: "from state.json, checked " + ago(v.Now, checked) + " ago", Ink: theme.Muted}})

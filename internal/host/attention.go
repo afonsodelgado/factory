@@ -229,7 +229,7 @@ func fromAttention(st *state.State, a state.Attention, counter ThreadCounter) At
 		}
 		item.Questions = append(item.Questions, question)
 	}
-	if a.Kind == "gate" {
+	if a.Kind == "gate" || a.Kind == "design_return" {
 		for _, art := range st.Stages[item.Stage].Artifacts {
 			item.Artifacts = append(item.Artifacts, NewArtifactRow(art, counter))
 		}

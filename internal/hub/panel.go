@@ -214,6 +214,9 @@ func (m *Model) draft(f factory.Factory, item panel.Item) *panel.Draft {
 	if item.Kind == "gate" {
 		d.Artifact = max(0, min(d.Artifact, approveRow(item)))
 	}
+	if item.Kind == "design_return" {
+		d.Artifact = max(0, min(d.Artifact, len(item.Artifacts)-1))
+	}
 	return d
 }
 
@@ -709,7 +712,7 @@ func nothingTyped(kind string) string {
 	case "handoff":
 		return "Type what to do next first, or ctrl+k to mark it done"
 	case "design_return":
-		return "Type accept or decline first: ctrl+s sends it"
+		return "Type revise design or keep plan first: ctrl+s sends it"
 	}
 	return "Type an answer first: ctrl+s sends it"
 }
@@ -754,14 +757,19 @@ func typeInto(item panel.Item, d *panel.Draft, text string) {
 }
 
 func moveIn(item panel.Item, d *panel.Draft, key string) {
-	if item.Kind != "gate" {
+	last := approveRow(item)
+	switch item.Kind {
+	case "gate":
+	case "design_return":
+		last--
+	default:
 		return
 	}
 	switch key {
 	case "up":
 		d.Artifact = max(d.Artifact-1, 0)
 	case "down":
-		d.Artifact = min(d.Artifact+1, approveRow(item))
+		d.Artifact = max(min(d.Artifact+1, last), 0)
 	}
 }
 

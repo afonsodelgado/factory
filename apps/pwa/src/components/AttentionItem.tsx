@@ -157,7 +157,7 @@ type FormProps = {
 const forms: Record<string, (props: FormProps) => ReactNode> = {
   question: QuestionForm,
   commands: TextAnswer,
-  design_return: TextAnswer,
+  design_return: DesignReturnForm,
   gate: GateForm,
   comment: CommentForm,
   cap: CapForm,
@@ -463,13 +463,24 @@ function QuestionForm(props: FormProps) {
   );
 }
 
-function TextAnswer(props: FormProps) {
+function DesignReturnForm(props: FormProps) {
+  return (
+    <>
+      {props.factory.pages.length > 0 ? (
+        <PageList pages={props.factory.pages} />
+      ) : null}
+      <TextAnswer {...props} label="Revise the design or keep the plan" />
+    </>
+  );
+}
+
+function TextAnswer(props: FormProps & { label?: string }) {
   const text = props.draft.text ?? "";
   return (
     <>
       <Field
         legend="answer"
-        label="Your answer"
+        label={props.label ?? "Your answer"}
         value={text}
         readOnly={props.locked}
         onChange={(value) => props.setDraft({ ...props.draft, text: value })}
