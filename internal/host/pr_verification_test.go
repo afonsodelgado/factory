@@ -84,6 +84,27 @@ func TestApprovalOnlyBlocksAreNotesAndUncomputedMergeabilityKeepsWaiting(t *test
 	if o := unreachable.Observe("", 1, CheckWindow{}, now); o.Policy != "unknown" || o.Reason == "checks_passed" {
 		t.Fatal("a failed thread query still reported its checks as passed", o)
 	}
+	classic := func(required string) *GitHub {
+		g := gh(blocked, `[[]]`, "true")
+		answer := g.Run
+		g.Run = func(dir string, args ...string) ([]byte, error) {
+			command := strings.Join(args, " ")
+			switch {
+			case strings.Contains(command, "/protection"):
+				t.Fatal("the watcher asked for branch protection, which needs admin access")
+			case strings.Contains(command, "branches/main") && !strings.Contains(command, "rules/"):
+				return []byte(`{"protected":true,"commit":{"sha":"b"},"protection":{"enabled":true,"required_status_checks":{"contexts":["` + required + `"],"checks":[]}}}`), nil
+			}
+			return answer(dir, args...)
+		}
+		return g
+	}
+	if o := classic("ci").Observe("", 1, CheckWindow{}, now); o.CI != "pass" || o.Policy != "pass" || !o.ApprovalNeeded {
+		t.Fatal("a push-only token could not verify green CI on a protected base waiting for approval", o)
+	}
+	if o := classic("deploy").Observe("", 1, CheckWindow{}, now); o.CI == "pass" {
+		t.Fatal("a required check from the base branch's protection was ignored", o)
+	}
 	computing := gh(`"mergeable":null,"mergeable_state":"unknown"`, `[[]]`, "true")
 	dir := t.TempDir()
 	interrupted := errors.New("slept")
