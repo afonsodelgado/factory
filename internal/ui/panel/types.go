@@ -91,7 +91,7 @@ func TextAnswered(it Item) bool {
 func TextPrompt(kind string) string {
 	switch kind {
 	case "design_return":
-		return "accept or decline"
+		return "revise design or keep plan"
 	case "commands":
 		return "the missing commands"
 	}

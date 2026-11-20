@@ -370,7 +370,7 @@ func result(s *state.State, e Event, dir string) error {
 		return gate(s, e, "design")
 	case "plan":
 		if slices.ContainsFunc(s.Findings, gatingDesign) {
-			attention(s, e, "design_return", "Return findings to design?", withFindings("Accept to revise and approve the design again; decline to record these findings as accepted risks in the plan.", s.Findings, gatingDesign))
+			attention(s, e, "design_return", "Revise the design or keep the plan?", withFindings("The plan found gaps in the approved design. Revise the design: the designer reworks it for these findings, you approve it again, then the architect plans again. Keep the plan: the findings are recorded as accepted risks and the plan comes to you for approval.", s.Findings, gatingDesign))
 			return nil
 		}
 		return gate(s, e, "plan")

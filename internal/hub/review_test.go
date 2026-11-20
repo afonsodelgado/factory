@@ -233,6 +233,31 @@ func TestMalformedStageResultsDoNotWakeTheSupervisor(t *testing.T) {
 	}
 }
 
+func TestDesignReturnShowsAndOpensThePlanPage(t *testing.T) {
+	fx := newReviewFixture(t, false, idleHook(time.Now()))
+	plan := filepath.Join(fx.f.Dir, "plan", "review.html")
+	os.MkdirAll(filepath.Dir(plan), 0o755)
+	os.WriteFile(plan, []byte("<body>Plan</body>"), 0o644)
+	fx.f.State.Stages["plan"] = state.Stage{Artifacts: []state.Artifact{{URL: "file://" + plan, Title: "Plan review"}}}
+	fx.f.State.Attention = []state.Attention{{ID: "plan-design_return", Kind: "design_return", StageKey: "plan", Title: "Revise the design or keep the plan?"}}
+	fx.m.Config.Node.Hostname = "mac.tail.ts.net"
+	fx.n.show(fx.m, Snapshot{At: time.Now(), Panes: []tmux.Pane{fx.supervisor}, Items: []Item{{Factory: fx.f, Pane: &fx.supervisor}}})
+	var opened []string
+	fx.m.Open = func(url string) { opened = append(opened, url) }
+	fx.m.choose(fx.f.Key())
+	fx.m.panel.tab = panel.Attention
+	if view := escapes.ReplaceAllString(fx.m.PanelView(120, 20), ""); !strings.Contains(view, "Plan review") {
+		t.Errorf("design return item:\n%s\nwant the plan page listed so the plan can be read before answering", view)
+	}
+	if _, cmd := fx.m.Update(eventMsg(Event{Message: Message{T: "key", Pane: "panel", K: "ctrl+o"}})); cmd != nil {
+		cmd()
+	}
+	want := "https://mac.tail.ts.net/r/" + state.FileStem(fx.f.Repo, fx.f.Slug) + "/plan/review.html"
+	if !slices.Equal(opened, []string{want}) {
+		t.Errorf("ctrl+o on the design return item opened %q; want the plan page %s", opened, want)
+	}
+}
+
 func TestCtrlOOnADesignGateOpensTheNodesReviewPage(t *testing.T) {
 	fx := newReviewFixture(t, false, idleHook(time.Now()))
 	fx.f.State.Attention = []state.Attention{{ID: "gate-design", Kind: "gate", StageKey: "design", Title: "Approve the design"}}
