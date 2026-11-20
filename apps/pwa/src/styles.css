@@ -241,7 +241,7 @@ code {
   min-width: 0;
 }
 
-.body > .pad {
+.body > .pad:last-child {
   flex: 1;
 }
 

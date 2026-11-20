@@ -76,6 +76,13 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await expect(page.getByText(/^Supervisor replied/)).toBeVisible();
   await expect(page.getByText(/Waiting on CI\.$/)).toBeVisible();
 
+  await page.getByRole("link", { name: /Pages/ }).click();
+  const intro = await page.getByText("Design and plan pages.").boundingBox();
+  const firstPage = await page
+    .getByRole("link", { name: /plan\.html/ })
+    .boundingBox();
+  expect(firstPage!.y - intro!.y).toBeLessThan(200);
+
   const actions = (await server.state()).actions;
   expect(actions.map((a) => [a.action, a.answers ?? a.text])).toEqual([
     ["answer", ["Comma", "No"]],
