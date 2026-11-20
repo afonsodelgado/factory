@@ -139,7 +139,8 @@ func AttentionItems(it Item, now time.Time, counter ThreadCounter) []AttentionIt
 	}
 	items = append(items, permissionItems(it)...)
 	items = append(items, stuckItems(it)...)
-	if it.Status.Asleep() {
+	pausedOnPurpose := it.Status == factory.Gone && Paused(f)
+	if it.Status.Asleep() && !pausedOnPurpose {
 		items = append(items, asleepItem(it, now))
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Since.Before(items[j].Since) })

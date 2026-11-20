@@ -61,10 +61,11 @@ type QueuedType struct {
 }
 
 type StageView struct {
-	Run      state.StageRun
-	Pane     *tmux.Pane
-	Hook     *state.HookFile
-	patience time.Duration
+	Run       state.StageRun
+	Pane      *tmux.Pane
+	Hook      *state.HookFile
+	patience  time.Duration
+	heartbeat time.Time
 }
 
 func StageLabel(run state.StageRun) string {

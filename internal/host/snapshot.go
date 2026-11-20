@@ -146,7 +146,7 @@ func RunningStage(f factory.Factory, runs *state.StageRuns, panes []tmux.Pane, h
 	if !ok {
 		return nil
 	}
-	view := &StageView{Run: run, Hook: PaneHook(run.Token, hooks), patience: patience}
+	view := &StageView{Run: run, Hook: PaneHook(run.Token, hooks), patience: patience, heartbeat: f.Heartbeat}
 	if p, found := stagePaneOf(panes, f, run.Role, run.Token); found {
 		view.Pane = &p
 	}
@@ -189,10 +189,13 @@ func (v *StageView) Lost(now time.Time) bool {
 }
 
 func (v *StageView) lastActivity() time.Time {
-	if v.Hook.Last.At.After(v.Hook.Main.At) {
-		return v.Hook.Last.At
+	latest := v.Hook.Main.At
+	for _, at := range []time.Time{v.Hook.Last.At, v.heartbeat} {
+		if at.After(latest) {
+			latest = at
+		}
 	}
-	return v.Hook.Main.At
+	return latest
 }
 
 func (v *StageView) paneValue() (tmux.Pane, bool) {
