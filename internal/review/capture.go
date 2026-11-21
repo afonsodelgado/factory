@@ -68,6 +68,7 @@ type ElementTokens struct {
 }
 
 type ScreenTokens struct {
+	Source   string                   `json:"source"`
 	PNG      string                   `json:"png"`
 	Box      Box                      `json:"box"`
 	Elements map[string]ElementTokens `json:"elements"`
@@ -79,10 +80,18 @@ type TokenSource struct {
 	SHA256 string `json:"sha256"`
 }
 
+type SourceTokens struct {
+	Kind   string            `json:"kind"`
+	SHA256 string            `json:"sha256"`
+	Root   map[string]string `json:"root"`
+	Fonts  []string          `json:"fonts"`
+}
+
 type Tokens struct {
 	Source  TokenSource                        `json:"source"`
 	Root    map[string]string                  `json:"root"`
 	Fonts   []string                           `json:"fonts"`
+	Sources map[string]SourceTokens            `json:"sources"`
 	Screens map[string]map[string]ScreenTokens `json:"screens"`
 }
 
@@ -146,6 +155,7 @@ func Capture(ctx context.Context, chrome string, noSandbox bool, r CaptureReques
 			return CaptureResult{}, fmt.Errorf("rendering %s at %s: %w", r.Source, v, err)
 		}
 	}
+	tokens.Sources[tokens.Source.Ref] = SourceTokens{Kind: kind, SHA256: sum, Root: tokens.Root, Fonts: tokens.Fonts}
 	files, err := promote(staging, refDir)
 	if err != nil {
 		return CaptureResult{}, err
@@ -205,7 +215,7 @@ func (h *Headless) captureViewport(ctx context.Context, target string, v Viewpor
 		if tokens.Screens[id] == nil {
 			tokens.Screens[id] = map[string]ScreenTokens{}
 		}
-		tokens.Screens[id][v.String()] = ScreenTokens{PNG: name, Box: screen.Box, Elements: screen.Elements}
+		tokens.Screens[id][v.String()] = ScreenTokens{Source: tokens.Source.Ref, PNG: name, Box: screen.Box, Elements: screen.Elements}
 	}
 	return nil
 }
@@ -245,7 +255,7 @@ func measureScript(screens []string) string {
 }
 
 func readTokens(path string) (Tokens, error) {
-	t := Tokens{Screens: map[string]map[string]ScreenTokens{}}
+	t := Tokens{Sources: map[string]SourceTokens{}, Screens: map[string]map[string]ScreenTokens{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return t, nil
@@ -258,6 +268,9 @@ func readTokens(path string) (Tokens, error) {
 	}
 	if t.Screens == nil {
 		t.Screens = map[string]map[string]ScreenTokens{}
+	}
+	if t.Sources == nil {
+		t.Sources = map[string]SourceTokens{}
 	}
 	return t, nil
 }

@@ -169,6 +169,21 @@ func TestADesignIsCapturedHeadlessPerScreenAndViewportAndItsFrozenCopyIgnoresLat
 		t.Fatalf("tokens.json holds root %v and title sizes %q and %q; want the :root token and each viewport's computed size", tokens.Root, title(viewports[0]), title(viewports[1]))
 	}
 
+	other := filepath.Join(dir, "design", "figma-frames.html")
+	write(t, other, `<!doctype html><html><head><style>:root{--accent:#ff3b30} body{margin:0} section{height:200px}</style></head><body><section id="settings">Settings</section></body></html>`)
+	if _, err := Capture(context.Background(), "", goruntime.GOOS == "linux", CaptureRequest{Dir: dir, Source: "design/figma-frames.html", Screens: []string{"settings"}, Viewports: viewports[:1]}); err != nil {
+		t.Fatal(err)
+	}
+	var mixed Tokens
+	data, _ = os.ReadFile(filepath.Join(refDir, TokensFile))
+	json.Unmarshal(data, &mixed)
+	governing := func(screen string) string {
+		return mixed.Sources[mixed.Screens[screen][viewports[0].String()].Source].Root["--accent"]
+	}
+	if governing("list") != "#0a7cff" || governing("settings") != "#ff3b30" {
+		t.Fatalf("after capturing a second source, list compares with accent %q and settings with %q; want each screen's own source's tokens", governing("list"), governing("settings"))
+	}
+
 	write(t, design, `<!doctype html><section id="../../escaped">edited after approval</section>`)
 	if _, err := Capture(context.Background(), "", goruntime.GOOS == "linux", CaptureRequest{Dir: dir, Source: "design/variant-a.html", Screens: []string{"list"}, Viewports: viewports[:1]}); err == nil {
 		t.Fatal("capturing a page without #list succeeded")
