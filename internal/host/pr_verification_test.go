@@ -228,3 +228,71 @@ func TestRunGHKeepsStderrHintsOutOfTheJSON(t *testing.T) {
 		t.Fatalf("output %q is not the PR JSON: %v", out, err)
 	}
 }
+
+func TestAWatchNeverTimesOutFromAWindowStartedInAnEarlierRun(t *testing.T) {
+	began := time.Unix(100_000, 0)
+	checkRuns := `[{"id":1,"name":"ci","status":"completed","conclusion":"success","head_sha":"h"}]`
+	gh := &GitHub{Run: func(dir string, args ...string) ([]byte, error) {
+		command := strings.Join(args, " ")
+		switch {
+		case command == "repo view --json nameWithOwner":
+			return []byte(`{"nameWithOwner":"owner/repo"}`), nil
+		case strings.Contains(command, "pulls/1"):
+			return []byte(`{"number":1,"head":{"sha":"h","ref":"feature"},"base":{"sha":"b","ref":"main"},"state":"open","draft":false,"mergeable":true,"mergeable_state":"clean"}`), nil
+		case strings.Contains(command, "rules/branches"):
+			return []byte(`[[]]`), nil
+		case strings.Contains(command, "branches/main"):
+			return []byte(`{"protected":false}`), nil
+		case strings.Contains(command, "check-runs"):
+			return []byte(`[{"total_count":1,"check_runs":` + checkRuns + `}]`), nil
+		case strings.Contains(command, "statuses"):
+			return []byte(`[[]]`), nil
+		case strings.Contains(command, "reviewDecision"):
+			return []byte(`{"reviewDecision":"","headRefOid":"h","baseRefOid":"b"}`), nil
+		}
+		t.Fatalf("unexpected call: %s", command)
+		return nil, nil
+	}}
+	stored := func(draft bool) string {
+		dir := t.TempDir()
+		old := began.Add(-3 * time.Hour)
+		if err := SavePrivate(filepath.Join(dir, "verification", "pr-1.json"), PRObservation{Window: CheckWindow{Head: "h", Base: "b", Started: old, Discovery: old, Draft: draft}}); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	stop := errors.New("stopped")
+	firstObservation := func(dir string) PRObservation {
+		if _, err := WatchPRs(context.Background(), dir, dir, "run", []int{1}, gh, func() time.Time { return began }, func(context.Context, time.Duration) error { return stop }); !errors.Is(err, stop) {
+			t.Fatal("the watch handed back its first observation instead of waiting", err)
+		}
+		var saved PRObservation
+		data, _ := os.ReadFile(filepath.Join(dir, "verification", "pr-1.json"))
+		json.Unmarshal(data, &saved)
+		return saved
+	}
+
+	dir := stored(true)
+	if o := firstObservation(dir); o.CI != "pending" || o.Reason != "discovering_checks" {
+		t.Fatal("a PR marked ready since an old draft window did not wait for its ready checks", o)
+	}
+	settled, err := WatchPRs(context.Background(), dir, dir, "run", []int{1}, gh, func() time.Time { return began.Add(ReadyDiscovery) }, nil)
+	if err != nil || settled[0].CI != "pass" {
+		t.Fatal("green checks on a PR marked ready after an old draft window did not pass", settled, err)
+	}
+
+	checkRuns = `[{"id":1,"name":"ci","status":"in_progress","head_sha":"h"}]`
+	if o := firstObservation(stored(false)); o.CI != "pending" {
+		t.Fatal("a watch reported its first observation of an old window as", o.CI)
+	}
+
+	clock := began
+	tick := func(context.Context, time.Duration) error {
+		clock = clock.Add(GHEvery)
+		return nil
+	}
+	continuous, err := WatchPRs(context.Background(), t.TempDir(), "", "run", []int{1}, gh, func() time.Time { return clock }, tick)
+	if err != nil || continuous[0].CI != "timeout" || clock.Sub(began) < CheckDeadline {
+		t.Fatal("one continuous watch never timed out on checks that stayed pending", continuous, err)
+	}
+}

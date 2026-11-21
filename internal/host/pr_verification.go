@@ -30,6 +30,14 @@ type CheckWindow struct {
 	Started   time.Time `json:"started"`
 	Discovery time.Time `json:"discovery"`
 	Draft     bool      `json:"draft"`
+	ReadyAt   time.Time `json:"ready_at"`
+}
+
+func (w CheckWindow) deadlineStart() time.Time {
+	if w.ReadyAt.After(w.Started) {
+		return w.ReadyAt
+	}
+	return w.Started
 }
 
 type PRObservation struct {
@@ -133,6 +141,9 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 	}
 	if o.Window.Draft != pr.Draft {
 		o.Window.Discovery, o.Window.Draft = now, pr.Draft
+		if !pr.Draft {
+			o.Window.ReadyAt = now
+		}
 	}
 	if o.Window.Discovery.IsZero() {
 		o.Window.Discovery = o.Window.Started
@@ -222,7 +233,7 @@ func (g *GitHub) observe(dir string, o *PRObservation, now time.Time) error {
 		approvalOnly = unresolved == 0
 	}
 	o.Policy = "fail"
-	pastDeadline := now.Sub(o.Window.Started) >= CheckDeadline
+	pastDeadline := now.Sub(o.Window.deadlineStart()) >= CheckDeadline
 	switch {
 	case !o.Open:
 		o.Problem = "PR is not open"
@@ -392,8 +403,14 @@ func interpretChecks(checks []apiCheck, required []requiredCheck, elapsed time.D
 }
 
 func awaitingReadyChecks(w CheckWindow, now time.Time) bool {
-	markedReady := !w.Draft && w.Discovery.After(w.Started)
-	return markedReady && now.Sub(w.Discovery) < ReadyDiscovery
+	return !w.ReadyAt.IsZero() && now.Sub(w.ReadyAt) < ReadyDiscovery
+}
+
+func restartedIfStale(w CheckWindow, began time.Time) CheckWindow {
+	if w.Started.IsZero() || w.Started.After(began.Add(-CheckDeadline)) {
+		return w
+	}
+	return CheckWindow{Head: w.Head, Base: w.Base, Draft: w.Draft, Started: began, Discovery: began}
 }
 
 func QueueObservation(dir, kind, runID string, at time.Time, payload map[string]any, instruction string) (string, error) {
@@ -412,6 +429,7 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 		return nil, err
 	}
 	failingSince := map[int]time.Time{}
+	began := now()
 	for {
 		at := now()
 		if err := os.WriteFile(filepath.Join(dir, ".heartbeat"), []byte(at.UTC().Format(time.RFC3339)), 0600); err != nil {
@@ -430,7 +448,7 @@ func WatchPRs(ctx context.Context, dir, worktree, runID string, numbers []int, g
 			} else if !os.IsNotExist(err) {
 				return nil, err
 			}
-			observation := g.Observe(worktree, number, previous.Window, at)
+			observation := g.Observe(worktree, number, restartedIfStale(previous.Window, began), at)
 			if err := SavePrivate(path, observation); err != nil {
 				return nil, err
 			}
