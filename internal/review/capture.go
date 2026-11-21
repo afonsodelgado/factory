@@ -97,17 +97,35 @@ type reading struct {
 }
 
 func Capture(ctx context.Context, chrome string, noSandbox bool, r CaptureRequest) (CaptureResult, error) {
-	frozen, err := freeze(r)
+	for _, id := range r.Screens {
+		if filepath.Base(id) != id || !filepath.IsLocal(id) {
+			return CaptureResult{}, fmt.Errorf("screen %q is not a plain id; name each section's id, such as list or state-empty", id)
+		}
+	}
+	refDir := filepath.Join(r.Dir, filepath.FromSlash(ReferenceDir))
+	tokens, err := readTokens(filepath.Join(refDir, TokensFile))
 	if err != nil {
 		return CaptureResult{}, err
 	}
-	sum, err := fileSHA256(frozen)
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		return CaptureResult{}, err
+	}
+	staging, err := os.MkdirTemp(refDir, ".capture-")
+	if err != nil {
+		return CaptureResult{}, err
+	}
+	defer os.RemoveAll(staging)
+	staged, err := freeze(r, filepath.Join(staging, "source"))
+	if err != nil {
+		return CaptureResult{}, err
+	}
+	sum, err := fileSHA256(staged)
 	if err != nil {
 		return CaptureResult{}, err
 	}
 	target, kind := r.URL, Prototype
 	if r.Source != Prototype {
-		target, kind = (&url.URL{Scheme: "file", Path: frozen}).String(), "design"
+		target, kind = (&url.URL{Scheme: "file", Path: staged}).String(), "design"
 	}
 	profile, err := os.MkdirTemp("", "factory-capture-")
 	if err != nil {
@@ -119,66 +137,77 @@ func Capture(ctx context.Context, chrome string, noSandbox bool, r CaptureReques
 		return CaptureResult{}, err
 	}
 	defer h.Close()
-	refDir := filepath.Join(r.Dir, filepath.FromSlash(ReferenceDir))
-	tokens, err := readTokens(filepath.Join(refDir, TokensFile))
-	if err != nil {
-		return CaptureResult{}, err
-	}
+	inStaging, _ := filepath.Rel(staging, staged)
+	frozen := filepath.Join(refDir, inStaging)
 	rel, _ := filepath.Rel(r.Dir, frozen)
 	tokens.Source = TokenSource{Kind: kind, Ref: filepath.ToSlash(rel), SHA256: sum}
-	result := CaptureResult{SHA256: sum, Frozen: frozen}
 	for _, v := range r.Viewports {
-		files, err := h.captureViewport(ctx, target, v, r.Screens, refDir, &tokens)
-		if err != nil {
+		if err := h.captureViewport(ctx, target, v, r.Screens, staging, &tokens); err != nil {
 			return CaptureResult{}, fmt.Errorf("rendering %s at %s: %w", r.Source, v, err)
 		}
-		result.Files = append(result.Files, files...)
+	}
+	files, err := promote(staging, refDir)
+	if err != nil {
+		return CaptureResult{}, err
 	}
 	data, err := json.MarshalIndent(tokens, "", "  ")
 	if err != nil {
 		return CaptureResult{}, err
 	}
 	tokensPath := filepath.Join(refDir, TokensFile)
-	result.Files = append(result.Files, tokensPath)
-	return result, os.WriteFile(tokensPath, data, 0o644)
+	return CaptureResult{SHA256: sum, Frozen: frozen, Files: append(files, tokensPath)}, os.WriteFile(tokensPath, data, 0o644)
 }
 
-func (h *Headless) captureViewport(ctx context.Context, target string, v Viewport, screens []string, refDir string, tokens *Tokens) ([]string, error) {
+func promote(staging, refDir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(staging, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(staging, path)
+		to := filepath.Join(refDir, rel)
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return err
+		}
+		files = append(files, to)
+		return os.Rename(path, to)
+	})
+	return files, err
+}
+
+func (h *Headless) captureViewport(ctx context.Context, target string, v Viewport, screens []string, dir string, tokens *Tokens) error {
 	run, cancel := context.WithCancel(h.ctx)
 	defer cancel()
 	defer context.AfterFunc(ctx, cancel)()
 	if err := chromedp.Do(run, chromedp.EmulateViewport(int64(v.W), int64(v.H)), chromedp.Navigate(target)); err != nil {
-		return nil, err
+		return err
 	}
 	read, err := chromedp.Run(run, chromedp.Evaluate[reading](measureScript(screens), chromedp.EvalAwaitPromise))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(read.Missing) > 0 {
-		return nil, fmt.Errorf("no element with id %s", strings.Join(read.Missing, ", "))
+		return fmt.Errorf("no element with id %s", strings.Join(read.Missing, ", "))
 	}
 	tokens.Root, tokens.Fonts = read.Root, read.Fonts
-	var files []string
 	for _, id := range screens {
 		screen := read.Screens[id]
 		beyond := true
 		clip := &page.Viewport{X: screen.Box.X, Y: screen.Box.Y, Width: screen.Box.W, Height: screen.Box.H, Scale: 1}
 		shot, err := chromedp.Call(run, page.CaptureScreenshot, page.CaptureScreenshotParams{Format: page.CaptureScreenshotFormatPng, Clip: clip, CaptureBeyondViewport: &beyond})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		name := id + "@" + v.String() + ".png"
-		path := filepath.Join(refDir, name)
-		if err := os.WriteFile(path, shot.Data, 0o644); err != nil {
-			return nil, err
+		if err := os.WriteFile(filepath.Join(dir, name), shot.Data, 0o644); err != nil {
+			return err
 		}
 		if tokens.Screens[id] == nil {
 			tokens.Screens[id] = map[string]ScreenTokens{}
 		}
 		tokens.Screens[id][v.String()] = ScreenTokens{PNG: name, Box: screen.Box, Elements: screen.Elements}
-		files = append(files, path)
 	}
-	return files, nil
+	return nil
 }
 
 func measureScript(screens []string) string {
@@ -233,8 +262,7 @@ func readTokens(path string) (Tokens, error) {
 	return t, nil
 }
 
-func freeze(r CaptureRequest) (string, error) {
-	sourceDir := filepath.Join(r.Dir, filepath.FromSlash(ReferenceDir), "source")
+func freeze(r CaptureRequest, sourceDir string) (string, error) {
 	if r.Source != Prototype {
 		from, ok := inside(r.Dir, filepath.FromSlash(r.Source))
 		if !ok {

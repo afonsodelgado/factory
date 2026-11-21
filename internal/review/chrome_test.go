@@ -169,9 +169,16 @@ func TestADesignIsCapturedHeadlessPerScreenAndViewportAndItsFrozenCopyIgnoresLat
 		t.Fatalf("tokens.json holds root %v and title sizes %q and %q; want the :root token and each viewport's computed size", tokens.Root, title(viewports[0]), title(viewports[1]))
 	}
 
-	write(t, design, "<!doctype html><p>edited after approval</p>")
+	write(t, design, `<!doctype html><section id="../../escaped">edited after approval</section>`)
+	if _, err := Capture(context.Background(), "", goruntime.GOOS == "linux", CaptureRequest{Dir: dir, Source: "design/variant-a.html", Screens: []string{"list"}, Viewports: viewports[:1]}); err == nil {
+		t.Fatal("capturing a page without #list succeeded")
+	}
+	_, err = Capture(context.Background(), "", goruntime.GOOS == "linux", CaptureRequest{Dir: dir, Source: "design/variant-a.html", Screens: []string{"../../escaped"}, Viewports: viewports[:1]})
+	if escaped, _ := filepath.Glob(filepath.Join(dir, "escaped@*.png")); err == nil || len(escaped) > 0 {
+		t.Fatalf("a screen id with a path in it gave %v and wrote %v outside design/reference", err, escaped)
+	}
 	frozen, err := fileSHA256(filepath.Join(dir, filepath.FromSlash(tokens.Source.Ref)))
 	if err != nil || frozen != result.SHA256 || tokens.Source.SHA256 != result.SHA256 || tokens.Source.Ref != ReferenceDir+"/source/variant-a.html" {
-		t.Fatalf("after editing the approved variant the reference %s hashes to %s (%v), want the printed %s", tokens.Source.Ref, frozen, err, result.SHA256)
+		t.Fatalf("after editing the approved variant and a failed recapture, the reference %s hashes to %s (%v), want the printed %s", tokens.Source.Ref, frozen, err, result.SHA256)
 	}
 }
