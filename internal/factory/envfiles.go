@@ -54,17 +54,20 @@ func appendMissingKeys(from, to string, target os.FileInfo) (bool, error) {
 		return false, err
 	}
 	defined := map[string]bool{}
-	for _, line := range strings.Split(string(existing), "\n") {
-		if key, ok := envKey(line); ok {
-			defined[key] = true
+	for _, entry := range envEntries(string(existing)) {
+		defined[entry.key] = true
+	}
+	latest := map[string]string{}
+	var order []string
+	for _, entry := range envEntries(string(source)) {
+		if _, seen := latest[entry.key]; !seen && !defined[entry.key] {
+			order = append(order, entry.key)
 		}
+		latest[entry.key] = entry.text
 	}
 	var missing []string
-	for _, line := range strings.Split(string(source), "\n") {
-		if key, ok := envKey(line); ok && !defined[key] {
-			defined[key] = true
-			missing = append(missing, line)
-		}
+	for _, key := range order {
+		missing = append(missing, latest[key])
 	}
 	if len(missing) == 0 {
 		return false, nil
@@ -81,14 +84,47 @@ func appendMissingKeys(from, to string, target os.FileInfo) (bool, error) {
 	return true, errors.Join(err, file.Close())
 }
 
-func envKey(line string) (string, bool) {
+type envEntry struct{ key, text string }
+
+func envEntries(content string) []envEntry {
+	var entries []envEntry
+	lines := strings.Split(content, "\n")
+	for i := 0; i < len(lines); i++ {
+		key, value, ok := envAssignment(lines[i])
+		if !ok {
+			continue
+		}
+		block := []string{lines[i]}
+		if quote, open := openQuote(value); open {
+			for i+1 < len(lines) {
+				i++
+				block = append(block, lines[i])
+				if strings.Contains(lines[i], quote) {
+					break
+				}
+			}
+		}
+		entries = append(entries, envEntry{key: key, text: strings.Join(block, "\n")})
+	}
+	return entries
+}
+
+func envAssignment(line string) (string, string, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	key, value, found := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+	key = strings.TrimSpace(key)
+	return key, strings.TrimSpace(value), found && key != ""
+}
+
+func openQuote(value string) (string, bool) {
+	if value == "" || (value[0] != '"' && value[0] != '\'') {
 		return "", false
 	}
-	key, _, found := strings.Cut(strings.TrimPrefix(line, "export "), "=")
-	key = strings.TrimSpace(key)
-	return key, found && key != ""
+	quote := value[:1]
+	return quote, !strings.Contains(value[1:], quote)
 }
 
 func isEnvFile(rel string) bool {
