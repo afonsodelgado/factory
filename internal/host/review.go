@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
@@ -31,6 +33,7 @@ type ReviewRequest struct {
 	Resolve bool                   `json:"resolve,omitempty"`
 	Gate    string                 `json:"gate,omitempty"`
 	Capture *review.CaptureRequest `json:"capture,omitempty"`
+	Run     string                 `json:"run,omitempty"`
 }
 
 type ReviewReply struct {
@@ -52,6 +55,7 @@ const (
 
 type CaptureStatus struct {
 	Factory string               `json:"factory"`
+	Run     string               `json:"run"`
 	State   string               `json:"state"`
 	Result  review.CaptureResult `json:"result"`
 	Reason  string               `json:"reason,omitempty"`
@@ -114,7 +118,7 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 	case "capture":
 		return m.startCapture(it, r.Capture)
 	case "capture-status":
-		return m.captureStatus(it)
+		return m.captureStatus(it, r.Run)
 	}
 	return ReviewReply{}, fmt.Errorf("unknown review action %q", r.Action)
 }
@@ -306,6 +310,8 @@ func (m *Runtime) startCapture(it Item, r *review.CaptureRequest) (ReviewReply, 
 		return ReviewReply{}, errors.New("design capture runs only inside factory node run")
 	case r == nil || len(r.Screens) == 0 || len(r.Viewports) == 0:
 		return ReviewReply{}, errors.New("name the source, at least one --screen and a viewport")
+	case m.captures[it.Factory.Key()].State == CaptureRunning:
+		return ReviewReply{}, fmt.Errorf("a design capture is already running for %s; wait for it to finish, then capture again", it.Factory.Label())
 	}
 	req := *r
 	req.Dir = it.Factory.Dir
@@ -317,11 +323,11 @@ func (m *Runtime) startCapture(it Item, r *review.CaptureRequest) (ReviewReply, 
 		req.URL, req.Entry = page, filepath.Join(it.Factory.Worktree, filepath.FromSlash(req.Entry))
 	}
 	key := it.Factory.Key()
-	status := CaptureStatus{Factory: key, State: CaptureRunning}
+	status := CaptureStatus{Factory: key, Run: uuid.NewString(), State: CaptureRunning}
 	m.captures[key] = status
 	capture := m.Capture
 	m.Jobs.Start("capture "+key, func(ctx context.Context) Message {
-		done := CaptureStatus{Factory: key, State: CaptureDone}
+		done := CaptureStatus{Factory: key, Run: status.Run, State: CaptureDone}
 		result, err := capture(ctx, req)
 		if err != nil {
 			done.State, done.Reason = CaptureFailed, err.Error()
@@ -349,10 +355,16 @@ func (m *Runtime) prototypePage(it Item, route string) (string, error) {
 	return app.ResolveReference(page).String(), nil
 }
 
-func (m *Runtime) captureStatus(it Item) (ReviewReply, error) {
+func (m *Runtime) captureStatus(it Item, run string) (ReviewReply, error) {
 	status, ok := m.captures[it.Factory.Key()]
-	if !ok {
-		return ReviewReply{}, errors.New("no design capture ran for " + it.Factory.Label() + " since the node started")
+	if !ok || status.Run != run {
+		return ReviewReply{}, errors.New("this design capture is no longer known to the node, which restarted or ran a later one; capture again")
 	}
 	return ReviewReply{Capture: &status}, nil
+}
+
+func (m *Runtime) captureFinished(c CaptureStatus) {
+	if m.captures[c.Factory].Run == c.Run {
+		m.captures[c.Factory] = c
+	}
 }

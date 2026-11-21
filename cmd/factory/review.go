@@ -201,7 +201,7 @@ func runReviewCapture(args []string) int {
 	reply, err := askReview(host.ReviewRequest{Action: "capture", ID: *id, Capture: &request})
 	for err == nil && reply.Capture.State == host.CaptureRunning {
 		time.Sleep(stackPoll)
-		reply, err = askReview(host.ReviewRequest{Action: "capture-status", ID: *id})
+		reply, err = askReview(host.ReviewRequest{Action: "capture-status", ID: *id, Run: reply.Capture.Run})
 	}
 	if err == nil && reply.Capture.State == host.CaptureFailed {
 		err = errors.New(reply.Capture.Reason)

@@ -99,7 +99,7 @@ func (m *Runtime) handle(request Message) Message {
 	case "capture":
 		var c CaptureStatus
 		if err = json.Unmarshal(request.Data, &c); err == nil {
-			m.captures[c.Factory] = c
+			m.captureFinished(c)
 		}
 	case "review":
 		var r ReviewRequest

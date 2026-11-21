@@ -18,6 +18,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -1346,5 +1347,54 @@ func TestALostRunRetryStartsTheNextAttemptWhileTheStalledPaneStillRuns(t *testin
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
 	if !slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.ID == "engineer-1" && run.Attempt == 1 }) {
 		t.Fatalf("after lost_run the stage start recorded %+v; want attempt 1 started, not the stalled attempt's path handed back while nothing runs", runs.Runs)
+	}
+}
+
+type heldJobs struct{ work []func(context.Context) Message }
+
+func (j *heldJobs) Start(key string, work func(context.Context) Message) {
+	j.work = append(j.work, work)
+}
+func (j *heldJobs) Cancel(string) {}
+
+func TestADesignCaptureReportsOnlyItsOwnOutcome(t *testing.T) {
+	pages, err := review.New("tok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	jobs := &heldJobs{}
+	rendered := func(_ context.Context, r review.CaptureRequest) (review.CaptureResult, error) {
+		return review.CaptureResult{Files: r.Screens}, nil
+	}
+	f := factory.Factory{Repo: t.TempDir(), Slug: "csv", Dir: t.TempDir(), State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	r := New(Runtime{Config: &state.Config{StateDir: t.TempDir()}, Pages: pages, Jobs: jobs, Capture: rendered})
+	r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}})
+	capture := func(screen string) (ReviewReply, error) {
+		return r.Review(ReviewRequest{Action: "capture", ID: "csv", Capture: &review.CaptureRequest{Source: "design/variant-a.html", Screens: []string{screen}, Viewports: review.DefaultViewports}})
+	}
+	status := func(run string) (ReviewReply, error) {
+		return r.Review(ReviewRequest{Action: "capture-status", ID: "csv", Run: run})
+	}
+	finish := func() { r.Handle(jobs.work[len(jobs.work)-1](context.Background())) }
+
+	list, err := capture("list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capture("detail"); err == nil {
+		t.Fatal("a second capture started while the first ran, so one of them would report the other's files")
+	}
+	finish()
+	detail, err := capture("detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := status(list.Capture.Run); err == nil {
+		t.Fatalf("the first capture's command polled after a later capture started and got %+v; want it told to capture again, never another capture's status", stale.Capture)
+	}
+	finish()
+	if done, err := status(detail.Capture.Run); err != nil || done.Capture.State != CaptureDone || !slices.Equal(done.Capture.Result.Files, []string{"detail"}) {
+		t.Fatalf("the detail capture reported %+v, %v; want its own finished files", done.Capture, err)
 	}
 }
