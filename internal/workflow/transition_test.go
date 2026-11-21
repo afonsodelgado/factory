@@ -691,6 +691,20 @@ func TestWorkTheDeveloperAddsAfterHandoffGetsItsOwnCorrectionBudget(t *testing.T
 	}) {
 		t.Fatalf("history %+v does not show which budget the follow-up started from", s.History)
 	}
+
+	asking := workflowState()
+	asking.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
+	asking.Loops.Used[QALoop] = asking.Limits.QAFixRounds
+	asking.Attention = []state.Attention{{ID: "ci-question", Kind: "question", StageKey: "pr", Questions: []string{"Why are the PRs drafts?"}, CreatedAt: eventFor(asking, "answers").At}}
+	figmaPass := eventFor(asking, "answers")
+	figmaPass.ItemID, figmaPass.Answer, figmaPass.Receipt, figmaPass.NewRequest = "ci-question", "also run a Figma pass", "conversation:8", true
+	if answered := step(t, asking, figmaPass); answered.Loops.Request != 1 || answered.Loops.Used[QALoop] != 0 {
+		t.Fatalf("an answer that sends new work left request %d with qa_fix %d used; want a new request counting from zero", answered.Loops.Request, answered.Loops.Used[QALoop])
+	}
+	asking.Stages["implement"] = state.Stage{}
+	if _, err := Next("testdata", asking, figmaPass); err == nil {
+		t.Fatal("new_request was accepted before implementation started")
+	}
 }
 
 func TestTurningCommentsOnAtHandoffSendsThePRStageBackToHandleThem(t *testing.T) {
