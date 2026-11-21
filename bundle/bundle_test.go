@@ -185,7 +185,7 @@ func TestTheDesignFidelityContractStaysInTheBundledInstructions(t *testing.T) {
 		file    string
 		phrases []string
 	}{
-		{"skills/qa-factory/SKILL.md", []string{"Phase 3b — Design fidelity", "mcp__chrome-devtools__", "more than 2 px", "3 px is major, 2 px is not", "centred instead of full width", "F-fid-<screen>-<ref>-<viewport>", "\n## Design fidelity\n"}},
+		{"skills/qa-factory/SKILL.md", []string{"Phase 3b — Design fidelity", "mcp__chrome-devtools__", "more than 2 px", "3 px is major, 2 px is not", "centred instead of full width", "filled versus stroked marks", "F-fid-<screen>-<ref>-<viewport>", "\n## Design fidelity\n"}},
 		{"agents/factory-qa.md", []string{"Design fidelity", "design/reference/map.md"}},
 		{"agents/factory-architect.md", []string{"design/reference/map.md", "Figma tools are missing or unauthorized", "return `blocked`"}},
 		{"agents/factory-designer.md", []string{"factory review capture", "design/reference/map.md", "return `blocked`"}},
