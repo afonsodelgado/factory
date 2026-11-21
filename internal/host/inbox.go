@@ -1,8 +1,6 @@
 package host
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,7 +119,7 @@ func (m *Runtime) QueueInbox() {
 		if browserStarting {
 			checked.Stage = nil
 		}
-		for _, msg := range InboxMessages(m.Config.StateDir, checked, ReadDelivered(record), m.Now()) {
+		for _, msg := range InboxMessages(m.Config.StateDir, checked, deliveredFor(m.Config.StateDir, it, record), m.Now()) {
 			if m.inboxQueued[msg.Key] {
 				continue
 			}
@@ -140,10 +138,7 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 	var messages []InboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
 	for _, run := range latestAttempts(runs.Runs) {
-		if !run.Finished() || slices.Contains(delivered, run.Result) {
-			continue
-		}
-		if key, ok := doneKey(run); ok && !slices.Contains(delivered, key) {
+		if key := doneKey(run); run.Finished() && !slices.Contains(delivered, key) {
 			messages = append(messages, InboxMessage{Key: key, Text: "stage " + run.Role + " done: " + run.Result})
 		}
 	}
@@ -179,13 +174,32 @@ func latestAttempts(runs []state.StageRun) []state.StageRun {
 	return latest
 }
 
-func doneKey(run state.StageRun) (string, bool) {
-	data, err := os.ReadFile(run.Result)
-	if err != nil {
-		return "", false
+func doneKey(run state.StageRun) string {
+	return fmt.Sprintf("%s#attempt-%d", run.Result, run.Attempt)
+}
+
+func deliveredFor(stateDir string, it Item, record string) []string {
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
+	delivered := ReadDelivered(record)
+	upgraded := upgradeDelivered(delivered, latestAttempts(runs.Runs))
+	if !slices.Equal(upgraded, delivered) {
+		saveDelivered(record, upgraded)
 	}
-	sum := sha256.Sum256(data)
-	return run.Result + "#sha256:" + hex.EncodeToString(sum[:8]), true
+	return upgraded
+}
+
+func upgradeDelivered(delivered []string, latest []state.StageRun) []string {
+	var upgraded []string
+	for _, key := range delivered {
+		i := slices.IndexFunc(latest, func(run state.StageRun) bool { return run.Result == key })
+		switch {
+		case i < 0:
+			upgraded = append(upgraded, key)
+		case latest[i].Finished():
+			upgraded = append(upgraded, doneKey(latest[i]))
+		}
+	}
+	return upgraded
 }
 
 func lostKey(run state.StageRun) string {
@@ -209,7 +223,10 @@ func ReadDelivered(path string) []string {
 }
 
 func MarkDelivered(path, key string) {
-	keys := append(ReadDelivered(path), key)
+	saveDelivered(path, append(ReadDelivered(path), key))
+}
+
+func saveDelivered(path string, keys []string) {
 	data, err := json.Marshal(keys)
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o755) != nil {
 		return

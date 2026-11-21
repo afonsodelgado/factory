@@ -1284,41 +1284,61 @@ func TestEachResultARunWritesIsAnnouncedOnceWhateverItsAttempts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	done := func(stateDir string, delivered []string, attempts ...state.StageRun) []InboxMessage {
+	ledger := func(stateDir string, attempts ...state.StageRun) {
 		t.Helper()
 		runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
 		runs.Runs = attempts
 		if err := runs.Save(); err != nil {
 			t.Fatal(err)
 		}
-		return slices.DeleteFunc(InboxMessages(stateDir, Item{Factory: f}, delivered, time.Now()), func(m InboxMessage) bool { return !strings.HasPrefix(m.Text, "stage qa done:") })
 	}
-	keys := func(messages []InboxMessage) []string {
+	done := func(stateDir string, delivered []string) []string {
+		t.Helper()
 		var keys []string
-		for _, m := range messages {
-			keys = append(keys, m.Key)
+		for _, m := range InboxMessages(stateDir, Item{Factory: f}, delivered, time.Now()) {
+			if strings.HasPrefix(m.Text, "stage qa done:") {
+				keys = append(keys, m.Key)
+			}
 		}
 		return keys
 	}
 
 	stateDir := t.TempDir()
 	write("done")
-	rejected := done(stateDir, nil, attempt(0))
+	ledger(stateDir, attempt(0))
+	delivered := done(stateDir, nil)
+	write("blocked")
+	ledger(stateDir, attempt(0), attempt(1))
+	retried := done(stateDir, delivered)
+	if len(delivered) != 1 || len(retried) != 1 {
+		t.Fatalf("a lost-run retry that wrote a new result where attempt 0's was delivered sent %v; want exactly one done message, or the supervisor waits forever", retried)
+	}
+	delivered = append(delivered, retried...)
 	write("failed")
-	retried := done(stateDir, keys(rejected), attempt(0), attempt(1))
-	if len(rejected) != 1 || len(retried) != 1 {
-		t.Fatalf("a lost-run retry that wrote a new result where attempt 0's was delivered sent %+v; want exactly one done message, or the supervisor waits forever", retried)
+	if rewritten := done(stateDir, delivered); len(rewritten) != 0 {
+		t.Fatalf("attempt 1 rewrote its delivered result and it was announced again: %v", rewritten)
 	}
-	if again := done(stateDir, keys(append(rejected, retried...)), attempt(0), attempt(1)); len(again) != 0 {
-		t.Fatalf("a delivered result was announced again: %+v", again)
-	}
-
-	if stalled := done(t.TempDir(), nil, attempt(0), attempt(1)); len(stalled) != 1 {
-		t.Fatalf("attempt 0 wrote nothing and attempt 1 wrote one result, and the inbox sent %+v; want one done message for one result", stalled)
+	ledger(stateDir, attempt(0), attempt(1), attempt(2))
+	if identical := done(stateDir, delivered); len(identical) != 1 {
+		t.Fatalf("attempt 2 wrote the same bytes as attempt 1 and the inbox sent %v; want its completion announced once", identical)
 	}
 
-	if upgraded := done(t.TempDir(), []string{result}, attempt(0), attempt(1)); len(upgraded) != 0 {
-		t.Fatalf("a result an earlier release recorded as delivered by its path was announced again after the upgrade: %+v", upgraded)
+	stalled := t.TempDir()
+	ledger(stalled, attempt(0), attempt(1))
+	if announced := done(stalled, nil); len(announced) != 1 {
+		t.Fatalf("attempt 0 wrote nothing and attempt 1 wrote one result, and the inbox sent %v; want one done message for one result", announced)
+	}
+
+	upgraded := t.TempDir()
+	record := filepath.Join(upgraded, "delivered.json")
+	MarkDelivered(record, result)
+	ledger(upgraded, attempt(0), attempt(1))
+	if again := done(upgraded, deliveredFor(upgraded, Item{Factory: f}, record)); len(again) != 0 {
+		t.Fatalf("a result an earlier release recorded as delivered by its path was announced again after the upgrade: %v", again)
+	}
+	ledger(upgraded, attempt(0), attempt(1), attempt(2))
+	if later := done(upgraded, deliveredFor(upgraded, Item{Factory: f}, record)); len(later) != 1 {
+		t.Fatalf("a retry after the upgrade wrote to a path an earlier release recorded by path alone, and the inbox sent %v; want it announced once", later)
 	}
 }
 
