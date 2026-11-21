@@ -323,17 +323,22 @@ func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageRe
 	if !ok || latest.ID != r.EffectID {
 		return StageReply{}, fmt.Errorf("no %s run of %s to re-ask; start it with factory stage start", r.Role, r.EffectID)
 	}
-	if !latest.Finished() {
+	if _, err := os.Stat(latest.Result); err != nil {
 		if _, live := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, latest.Token)); live {
 			return StageReply{Result: latest.Result}, nil
 		}
 		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 	}
 	stem := strings.TrimSuffix(latest.Result, ".result.json")
-	if err := os.Rename(latest.Result, stem+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
+	rejected := stem + ".rejected-" + uuid.NewString()[:8] + ".json"
+	if err := os.Rename(latest.Result, rejected); err != nil {
 		return StageReply{}, err
 	}
-	return m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
+	reply, err := m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
+	if err != nil {
+		os.Rename(rejected, latest.Result)
+	}
+	return reply, err
 }
 
 func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {

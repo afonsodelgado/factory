@@ -1220,7 +1220,7 @@ func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReporte
 	f.State.Workflow.ActiveRun = "csv-qa-1"
 	f.State.Workflow.Runs = []state.WorkflowRun{{ID: "csv-qa-1", Stage: "qa", Role: "qa", Round: 1, Prompt: "stages/csv-qa-1.prompt.md", Result: "stages/csv-qa-1.result.json"}}
 	rejected := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
-	if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"done","evidence":{"checks":[1]}}`); err != nil {
+	if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"success"}`); err != nil {
 		t.Fatal(err)
 	}
 	token := uuid.NewString()
@@ -1240,11 +1240,11 @@ func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReporte
 	if moved, _ := filepath.Glob(filepath.Join(f.Dir, "stages", "csv-qa-1.rejected-*.json")); len(moved) != 1 {
 		t.Fatalf("the rejected result was not moved aside: %v", moved)
 	}
-	if started, err := r.Stage(StageRequest{Action: "start", Factory: "csv", EffectID: "csv-qa-1", Role: "qa", Text: "QA the stack."}); err == nil && started.Result == rejected {
-		t.Fatal("starting the stage again handed back the rejected result as finished, so nothing ran")
+	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	if latest, _ := after.Latest("qa"); latest.Result != reasked.Result {
+		t.Fatalf("the reask recorded %s; want its own run writing %s, so the rejected file is never read again", latest.Result, reasked.Result)
 	}
 
-	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
 	firstRunReportedLost := []string{token + "/csv-qa-1.result.json.lost"}
 	later := time.Now().Add(time.Hour)
 	messages := InboxMessages(stateDir, Item{Factory: f, Stage: RunningStage(f, after, nil, nil, 20*time.Minute)}, firstRunReportedLost, later)
