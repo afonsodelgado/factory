@@ -671,3 +671,24 @@ func TestResultShapeSlipsThatLoseNothingAreAcceptedAndRealGapsStillRejected(t *t
 		t.Fatalf("an implementation with check names instead of evidence got %v; want its exact rejection", err)
 	}
 }
+
+func TestWorkTheDeveloperAddsAfterHandoffGetsItsOwnCorrectionBudget(t *testing.T) {
+	s := offeredHandoff(t)
+	s.PipelineStages = state.StageKeys
+	s.Loops.Used[QALoop] = s.Limits.QAFixRounds
+	keepGoing := eventFor(s, "continue")
+	keepGoing.ItemID, keepGoing.ArtifactRevision, keepGoing.Answer, keepGoing.Receipt = s.Attention[0].ID, s.Attention[0].Revision, "also run a Figma pass", "conversation:7"
+	s = complete(t, complete(t, step(t, s, keepGoing)))
+	if s.Stage != "qa" {
+		t.Fatalf("the follow-up reached %s; want QA", s.Stage)
+	}
+	s = complete(t, s, state.Finding{ID: "fid-rail", Stage: "qa", Severity: "major", Disposition: "open", Description: "rail is 64 px wide, frame is 240 px"})
+	if s.Stage != "implement" || slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "cap" }) {
+		t.Fatalf("QA findings on the developer's follow-up gave stage %s and items %+v; want the engineer, not the earlier work's tripped qa_fix cap", s.Stage, s.OpenAttention())
+	}
+	if !slices.ContainsFunc(s.History, func(h state.HistoryEntry) bool {
+		return h.Event == "request" && strings.HasPrefix(h.Detail, "request 1:") && strings.Contains(h.Detail, "qa_fix 3/3")
+	}) {
+		t.Fatalf("history %+v does not show which budget the follow-up started from", s.History)
+	}
+}

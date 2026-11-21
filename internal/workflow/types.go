@@ -31,6 +31,7 @@ type Event struct {
 	Increment           int                    `json:"increment"`
 	EffectID            string                 `json:"effect_id"`
 	WatchComments       bool                   `json:"watch_comments"`
+	NewRequest          bool                   `json:"new_request,omitempty"`
 	Result              *Result                `json:"result,omitempty"`
 	Recipe              *state.Recipe          `json:"recipe,omitempty"`
 	Stack               []state.StackBranch    `json:"stack,omitempty"`

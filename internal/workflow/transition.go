@@ -53,6 +53,10 @@ func Next(dir string, snapshot state.State, event Event) (Proposal, error) {
 }
 
 func apply(s *state.State, e Event, dir string) error {
+	implemented := s.Stages["implement"].Rounds > 0
+	if e.NewRequest && (e.Kind != "answers" || !implemented) {
+		return errors.New("new_request applies only to an answer that sends new work after implementation has started")
+	}
 	switch e.Kind {
 	case "checkpoint":
 		if e.Checkpoint == nil || e.Checkpoint.Operation == "" || e.Receipt == "" || !slices.Contains([]string{state.CheckpointReady, state.CheckpointRefused}, e.Checkpoint.Status) {
@@ -652,6 +656,9 @@ func answer(s *state.State, e Event) error {
 		}
 		stage := a.StageKey
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		if e.NewRequest {
+			startRequest(s, e)
+		}
 		if e.Kind == "changes" {
 			s.Workflow.Gate = ""
 			invalidate(s, e.At)
@@ -733,6 +740,7 @@ func answer(s *state.State, e Event) error {
 			return nil
 		}
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		startRequest(s, e)
 		invalidate(s, e.At)
 		return dispatch(s, e, "implement")
 	}
@@ -761,6 +769,19 @@ func answer(s *state.State, e Event) error {
 		return dispatch(s, e, "implement")
 	}
 	return errors.New("unknown approval gate")
+}
+
+var requestLoops = []string{ReviewLoop, QALoop, CILoop}
+
+func startRequest(s *state.State, e Event) {
+	var used []string
+	for _, loop := range requestLoops {
+		used = append(used, fmt.Sprintf("%s %d/%d", loop, s.Loops.Used[loop], *allowance(s, loop)))
+		s.Loops.Used[loop] = 0
+	}
+	s.Loops.Request++
+	detail := fmt.Sprintf("request %d: review_fix, qa_fix and ci_fix count from zero (request %d used %s; receipt %s)", s.Loops.Request, s.Loops.Request-1, strings.Join(used, ", "), e.Receipt)
+	s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: "request", Detail: detail})
 }
 
 func invalidate(s *state.State, at state.Time) {

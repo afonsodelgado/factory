@@ -48,8 +48,9 @@ type Correction struct {
 }
 
 type Loops struct {
-	Active string         `json:"active"`
-	Used   map[string]int `json:"used"`
+	Active  string         `json:"active"`
+	Used    map[string]int `json:"used"`
+	Request int            `json:"request,omitempty"`
 }
 
 type Command struct {
