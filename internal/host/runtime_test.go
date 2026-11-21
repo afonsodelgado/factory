@@ -1320,3 +1320,31 @@ func TestEachResultARunWritesIsAnnouncedOnceWhateverItsAttempts(t *testing.T) {
 		t.Fatalf("a result an earlier release recorded as delivered by its path was announced again after the upgrade: %+v", upgraded)
 	}
 }
+
+func TestALostRunRetryStartsTheNextAttemptWhileTheStalledPaneStillRuns(t *testing.T) {
+	f := newFixture(t)
+	socket, stop := serve(t, f.runtime(t, recordingTypist{make(chan string, 8)}))
+	request(t, socket, f.startRequest(""))
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		panes, _ := f.tm.Panes()
+		if slices.ContainsFunc(panes, func(p tmux.Pane) bool { return p.Stage == "engineer" && p.Command == "sleep" }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the engineer pane never started its agent")
+		}
+	}
+	stop()
+
+	lostRunRetried := strings.Replace(f.pipeline, `"round":1,`, `"round":1,"retries":1,`, 1)
+	if err := WriteFile(filepath.Join(f.dir, "state.json"), lostRunRetried); err != nil {
+		t.Fatal(err)
+	}
+	restarted, stop := serve(t, f.runtime(t, recordingTypist{make(chan string, 8)}))
+	defer stop()
+	request(t, restarted, f.startRequest(""))
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
+	if !slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.ID == "engineer-1" && run.Attempt == 1 }) {
+		t.Fatalf("after lost_run the stage start recorded %+v; want attempt 1 started, not the stalled attempt's path handed back while nothing runs", runs.Runs)
+	}
+}
