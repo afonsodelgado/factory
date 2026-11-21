@@ -593,6 +593,8 @@ func (m *Model) selectorKey(key string) tea.Cmd {
 		return m.askMove()
 	case "p":
 		return m.askPause()
+	case "c":
+		return m.askComments()
 	case "a":
 		return m.askArchive()
 	case "d":
@@ -1148,6 +1150,8 @@ func dialogHints(kind string) []footer.Hint {
 		return hints("⏎", "select", "ctrl+j/k", "move", "ctrl+g", "next needing you", "esc", "close")
 	case "pause":
 		return hints("y", "pause", "n", "cancel", "esc", "cancel")
+	case "comments":
+		return hints("y", "confirm", "n", "cancel", "esc", "cancel")
 	case "archive":
 		return hints("a", "archive", "r", "archive and remove the worktree", "esc", "cancel")
 	case "delete":
@@ -1174,7 +1178,7 @@ func (m *Model) selectorHints() []footer.Hint {
 	case it.Status == factory.Done:
 		return hints("a", "archive "+it.Factory.Label(), "H", "archived", "⏎", "session", "z", "fold panel", "j/k", "move", "/", "find", "n", "new", "d", "delete")
 	}
-	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "m", "move to a node", "a", "archive", "d", "delete")
+	return hints("j/k", "move", "⏎", "session", "i", "answer", "N", "nodes", "g", "next needing you", "/", "find", "1-9", "jump", "n", "new", "w", "wake", "p", "pause", "c", "comments", "m", "move to a node", "a", "archive", "d", "delete")
 }
 
 func stuckHints(enter string) []footer.Hint {

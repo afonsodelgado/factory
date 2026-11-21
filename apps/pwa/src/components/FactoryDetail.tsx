@@ -73,6 +73,10 @@ function Head({ factory }: { factory: LocalFactory }) {
     setAsking(false);
     send({ action: "pause" });
   };
+  const toggleComments = () =>
+    send({ action: "comments", option: factory.watch_comments ? "off" : "on" });
+  const acts =
+    factory.can_pause || factory.can_wake || factory.can_toggle_comments;
   return (
     <div className="fhead">
       <p className="l1">
@@ -94,7 +98,7 @@ function Head({ factory }: { factory: LocalFactory }) {
           .join(" · ")}
       </p>
       <Blocked reason={factory.unverified} />
-      {factory.can_pause || factory.can_wake || multi ? (
+      {acts || multi ? (
         <div className="acts">
           {factory.can_wake ? (
             <button
@@ -117,12 +121,22 @@ function Head({ factory }: { factory: LocalFactory }) {
               <span aria-hidden="true">‖ </span>Pause
             </button>
           ) : null}
+          {factory.can_toggle_comments ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={!!blocked || sending}
+              onClick={toggleComments}
+            >
+              {factory.watch_comments
+                ? "Stop watching review comments"
+                : "Watch review comments"}
+            </button>
+          ) : null}
           {multi ? <MoveTo factory={factory} /> : null}
         </div>
       ) : null}
-      {blocked &&
-      !factory.unverified &&
-      (factory.can_pause || factory.can_wake) ? (
+      {blocked && !factory.unverified && acts ? (
         <p className="xs mute">{blocked}</p>
       ) : null}
       {receipt && failed(receipt) ? <ReceiptLine receipt={receipt} /> : null}

@@ -29,6 +29,7 @@ var popupSizes = map[string][2]int{
 	"settings": {88, 30},
 	"switch":   {112, 14},
 	"pause":    {68, 9},
+	"comments": {68, 9},
 	"archive":  {80, 12},
 	"delete":   {84, 14},
 	"keys":     {124, 17},
@@ -42,6 +43,7 @@ var popupTitles = map[string]string{
 	"settings": " " + dialog.SettingsTitle() + " ",
 	"switch":   " ⌕ Factories ",
 	"pause":    " ‖ Pause ",
+	"comments": " ✎ Review comments ",
 	"archive":  " ▭ Archive ",
 	"delete":   " ✕ Delete ",
 	"keys":     " Keys ",
@@ -186,6 +188,11 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		var r dialog.KeyResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			err = m.pause(r.Key)
+		}
+	case "comments":
+		var r dialog.CommentsResult
+		if err = json.Unmarshal(e.Data, &r); err == nil {
+			err = m.toggleComments(r)
 		}
 	case "archive":
 		var r dialog.ArchiveResult

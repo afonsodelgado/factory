@@ -692,3 +692,27 @@ func TestWorkTheDeveloperAddsAfterHandoffGetsItsOwnCorrectionBudget(t *testing.T
 		t.Fatalf("history %+v does not show which budget the follow-up started from", s.History)
 	}
 }
+
+func TestTurningCommentsOnAtHandoffSendsThePRStageBackToHandleThem(t *testing.T) {
+	s := offeredHandoff(t)
+	s.Workflow.CommentsAsked = true
+	turnOn := func(s state.State) Event {
+		on := eventFor(s, "comments_start")
+		on.Answer, on.Receipt = "on", "/factory comments on at 2026-11-21T10:00:00Z"
+		return on
+	}
+	done := confirmed(t, s)
+	if _, err := Next("testdata", done, turnOn(done)); err == nil || !strings.Contains(err.Error(), "done") {
+		t.Fatalf("turning comments on for a factory already marked done gave %v; want it refused", err)
+	}
+	watching := step(t, s, turnOn(s))
+	if !watching.WatchComments || watching.Stage != "pr" || watching.Workflow.ActiveRun == "" || slices.ContainsFunc(watching.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" }) {
+		t.Fatalf("turning comments on at handoff left watch %v, stage %s, items %+v; want the handoff withdrawn and the PR stage handling comments", watching.WatchComments, watching.Stage, watching.OpenAttention())
+	}
+	observed := eventFor(watching, "observe")
+	observed.Stack, observed.PRs, observed.Observations = watching.Stack, watching.PRs, watching.Evidence.PRs
+	observed.Comments = &state.Verification{Status: "pass", Heads: watching.Stack, RecipeDigest: watching.Recipe.Digest, At: observed.At}
+	if after := step(t, watching, observed); after.Evidence.Comments.Status != "pass" {
+		t.Fatal("the comment evidence of a factory that turned comments on was not recorded")
+	}
+}

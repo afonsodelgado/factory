@@ -28,7 +28,7 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
     factory("invoice-pdf", [gate()], {
       needs_since: new Date(Date.now() - 30 * 60_000).toISOString(),
     }),
-    factory("search-typos", []),
+    factory("search-typos", [], { can_toggle_comments: true }),
     factory("rate-limits", [
       {
         ...gate("k-busy-gate"),
@@ -85,6 +85,7 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await server.reply("Stage qa, round 2 of 3.\nWaiting on CI.");
   await expect(page.getByText(/^Supervisor replied/)).toBeVisible();
   await expect(page.getByText(/Waiting on CI\.$/)).toBeVisible();
+  await page.getByRole("button", { name: "Watch review comments" }).click();
 
   await page.getByRole("link", { name: /Pages/ }).click();
   const intro = await page.getByText("Design and plan pages.").boundingBox();
@@ -94,11 +95,14 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   expect(firstPage!.y - intro!.y).toBeLessThan(200);
 
   const actions = (await server.state()).actions;
-  expect(actions.map((a) => [a.action, a.answers ?? a.text])).toEqual([
+  expect(
+    actions.map((a) => [a.action, a.answers ?? a.text ?? a.option]),
+  ).toEqual([
     ["answer", ["Comma", "No"]],
     ["approve", "ship it"],
     ["dismiss", undefined],
     ["message", "/factory status"],
+    ["comments", "on"],
   ]);
 
   await context.setOffline(true);

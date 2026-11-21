@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"github.com/afonsodelgado/factory/internal/host"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
+	"github.com/afonsodelgado/factory/internal/ui/dialog"
 	"github.com/afonsodelgado/factory/internal/ui/footer"
 	"github.com/afonsodelgado/factory/internal/ui/panel"
 	"github.com/afonsodelgado/factory/internal/ui/selector"
@@ -476,5 +478,27 @@ func TestQuestionBatchPanel(t *testing.T) {
 			}
 			golden.RequireEqual(t, final.PanelView(109, 28))
 		})
+	}
+}
+
+func TestCThenYOnAFactoryAsksItsSupervisorToWatchReviewComments(t *testing.T) {
+	now := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	typist := &fakeTypist{}
+	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }}, host.Runtime{Typist: typist})
+	snap := questionFactory("Stop", now)
+	node.show(model, snap)
+	if model.selectorKey("c"); model.dialog != "comments" {
+		t.Fatalf("c on a running factory opened %q; want the review comments dialog", model.dialog)
+	}
+	asked, _ := dialog.New("comments", model.dialogs["comments"], 68, 9)
+	asked.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	result, chosen := asked.Result()
+	data, _ := json.Marshal(result)
+	response := make(chan Message, 1)
+	model.dialogResult(Event{Message: Message{T: "result", Pane: "dialog:comments", Data: data}, Reply: response})
+	<-response
+	node.present(snap)
+	if !chosen || strings.Join(typist.typed, "\n") != "%9: /factory comments on" {
+		t.Fatalf("c then y typed %q; want the supervisor sent /factory comments on, exactly as the phone sends it", typist.typed)
 	}
 }

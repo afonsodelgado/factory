@@ -347,35 +347,37 @@ type Local struct {
 }
 
 type LocalFactory struct {
-	Key           string       `json:"key"`
-	Route         string       `json:"route"`
-	Incarnation   string       `json:"incarnation"`
-	ID            string       `json:"id"`
-	Title         string       `json:"title,omitempty"`
-	Repo          string       `json:"repo"`
-	RepoName      string       `json:"repo_name"`
-	GitURL        string       `json:"git_url,omitempty"`
-	NoRemote      bool         `json:"no_remote,omitempty"`
-	RemoteProblem string       `json:"remote_problem,omitempty"`
-	Stage         string       `json:"stage,omitempty"`
-	Loop          string       `json:"loop,omitempty"`
-	Round         int          `json:"round,omitempty"`
-	Status        string       `json:"status"`
-	Paused        bool         `json:"paused"`
-	NeedsSince    time.Time    `json:"needs_since,omitzero"`
-	Items         []LocalItem  `json:"items"`
-	Resolved      []Resolution `json:"resolved,omitempty"`
-	Pages         []LocalPage  `json:"pages"`
-	ReviewStack   *StackStatus `json:"review_stack,omitempty"`
-	Message       Eligibility  `json:"message"`
-	CanPause      bool         `json:"can_pause"`
-	CanWake       bool         `json:"can_wake"`
-	Pane          string       `json:"pane,omitempty"`
-	StageRole     string       `json:"stage_role,omitempty"`
-	StageLabel    string       `json:"stage_label,omitempty"`
-	StagePane     string       `json:"stage_pane,omitempty"`
-	Generation    int64        `json:"generation,omitempty"`
-	Unverified    string       `json:"unverified,omitempty"`
+	Key               string       `json:"key"`
+	Route             string       `json:"route"`
+	Incarnation       string       `json:"incarnation"`
+	ID                string       `json:"id"`
+	Title             string       `json:"title,omitempty"`
+	Repo              string       `json:"repo"`
+	RepoName          string       `json:"repo_name"`
+	GitURL            string       `json:"git_url,omitempty"`
+	NoRemote          bool         `json:"no_remote,omitempty"`
+	RemoteProblem     string       `json:"remote_problem,omitempty"`
+	Stage             string       `json:"stage,omitempty"`
+	Loop              string       `json:"loop,omitempty"`
+	Round             int          `json:"round,omitempty"`
+	Status            string       `json:"status"`
+	Paused            bool         `json:"paused"`
+	NeedsSince        time.Time    `json:"needs_since,omitzero"`
+	Items             []LocalItem  `json:"items"`
+	Resolved          []Resolution `json:"resolved,omitempty"`
+	Pages             []LocalPage  `json:"pages"`
+	ReviewStack       *StackStatus `json:"review_stack,omitempty"`
+	Message           Eligibility  `json:"message"`
+	CanPause          bool         `json:"can_pause"`
+	CanWake           bool         `json:"can_wake"`
+	WatchComments     bool         `json:"watch_comments"`
+	CanToggleComments bool         `json:"can_toggle_comments"`
+	Pane              string       `json:"pane,omitempty"`
+	StageRole         string       `json:"stage_role,omitempty"`
+	StageLabel        string       `json:"stage_label,omitempty"`
+	StagePane         string       `json:"stage_pane,omitempty"`
+	Generation        int64        `json:"generation,omitempty"`
+	Unverified        string       `json:"unverified,omitempty"`
 }
 
 type LocalPage struct {
@@ -462,7 +464,9 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 		CanPause: it.Pane != nil && !it.Pane.Dead, CanWake: it.Status.Asleep() && it.Status != factory.Done,
 		Generation: m.holdings[f.Key()].Generation, Unverified: m.holdings[f.Key()].Unverified,
 	}
+	lf.CanToggleComments = CanToggleComments(it)
 	if f.State != nil {
+		lf.WatchComments = f.State.WatchComments
 		lf.Stage = f.State.Stage
 		lf.Loop, lf.Round = f.State.Loops.Active, f.State.Stages[f.State.Stage].Rounds
 		if lf.Loop != "" {

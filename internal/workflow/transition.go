@@ -146,6 +146,21 @@ func apply(s *state.State, e Event, dir string) error {
 		}
 		s.WatchComments, s.Workflow.CommentsAsked = e.WatchComments, true
 		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
+	case "comments_start":
+		switch {
+		case !s.Workflow.CommentsAsked || e.Receipt == "" || e.Answer == "":
+			return errors.New("turning comments on needs the developer's answer and receipt after the comments preference")
+		case s.Done():
+			return errors.New("this factory is done; continue it from the handoff first")
+		}
+		s.WatchComments, s.Evidence.CommentsStopped = true, false
+		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
+		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
+		idle := s.Workflow.ActiveRun == "" && s.Workflow.Pending == nil
+		if offered && idle {
+			withdrawHandoff(s, e.At)
+			return dispatch(s, e, "pr")
+		}
 	case "comments_stop":
 		if e.Receipt == "" || e.Answer == "" {
 			return errors.New("stopping comments needs a developer answer")
@@ -446,7 +461,11 @@ func result(s *state.State, e Event, dir string) error {
 			}
 			return dispatch(s, e, "review")
 		}
-		if reasons := Readiness(*s); len(reasons) > 0 {
+		reasons := Readiness(*s)
+		if slices.Equal(reasons, []string{commentsUnhandled}) {
+			return dispatch(s, e, "pr")
+		}
+		if len(reasons) > 0 {
 			return fmt.Errorf("handoff is not ready: %s", strings.Join(reasons, "; "))
 		}
 		offerHandoff(s, e)

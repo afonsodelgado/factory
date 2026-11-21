@@ -25,13 +25,14 @@ type Snapshot struct {
 }
 
 const (
-	CanStream        = "stream"
-	CanHome          = "home"
-	CanNeeds         = "needs"
-	CanWatchComments = "watch_comments"
+	CanStream         = "stream"
+	CanHome           = "home"
+	CanNeeds          = "needs"
+	CanWatchComments  = "watch_comments"
+	CanToggleComments = "toggle_comments"
 )
 
-var Capabilities = []string{CanStream, CanHome, CanNeeds, CanWatchComments}
+var Capabilities = []string{CanStream, CanHome, CanNeeds, CanWatchComments, CanToggleComments}
 
 func (s Snapshot) Supports(capability string) bool { return slices.Contains(s.Can, capability) }
 

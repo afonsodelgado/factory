@@ -436,6 +436,7 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
 		{"mark a handoff done", act(ActHandled, "handoff-csv-1", nil, ""), "%1: handoff-csv-1 done: the developer marked this factory done"},
 		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
+		{"turn comment watching on", func() ActionRequest { r := act(ActComments, "", nil, ""); r.Option = "on"; return r }(), "%1: /factory comments on"},
 		{"another incarnation is stale", func() ActionRequest { r := act(ActRetry, "fail-csv-qa", nil, ""); r.Incarnation = "old"; return r }(), ""},
 		{"a replaced item is stale", func() ActionRequest {
 			r := act(ActRetry, "fail-csv-qa", nil, "")

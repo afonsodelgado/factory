@@ -129,6 +129,8 @@ export type LocalFactory = {
   message: Eligibility;
   can_pause: boolean;
   can_wake: boolean;
+  watch_comments?: boolean;
+  can_toggle_comments?: boolean;
   node?: string;
   generation?: number;
   unverified?: string;
@@ -258,7 +260,8 @@ export type Action =
   | "wake"
   | "permission"
   | "prompt"
-  | "dismiss";
+  | "dismiss"
+  | "comments";
 
 export type ActionBody = {
   action: Action;

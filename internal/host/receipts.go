@@ -219,7 +219,7 @@ func (m *Runtime) unwanted(a Answer) string {
 		return "The factory was archived."
 	case Paused(it.Factory):
 		return "The factory was paused."
-	case a.Action == ActMessage:
+	case itemless(a.Action):
 		return ""
 	case !stillOpen(it.Factory.State, a.ItemID, a.ItemSince):
 		return closedFirst
@@ -359,7 +359,7 @@ func ClaimID(item AttentionItem) string {
 func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []Item, clock func(string) time.Time) (Settlement, bool) {
 	key := mark.Key()
 	since, stillOpen := open[key]
-	closed := mark.Action != ActMessage && (!stillOpen || !since.Equal(mark.ItemSince))
+	closed := !itemless(mark.Action) && (!stillOpen || !since.Equal(mark.ItemSince))
 	it, found := findItem(items, mark.Factory)
 	switch {
 	case closed && mark.At.IsZero():
@@ -385,7 +385,7 @@ func (m *Runtime) settleClaim(mark Answer, open map[string]time.Time, items []It
 	}
 	receipt, received := receiptIn(mark, submits)
 	switch {
-	case received && (mark.LeavesOpen || mark.Action == ActMessage):
+	case received && (mark.LeavesOpen || itemless(mark.Action)):
 		mark.Received = receipt
 		m.receipts.Claims[key] = mark
 		m.settle(key, StatusDelivered, "")
@@ -493,6 +493,8 @@ func (m *Runtime) Act(r ActionRequest) (Receipt, error) {
 		return lifecycle(r, m.Wake(r.Factory)), nil
 	case ActMessage:
 		return m.sendMessage(it, r)
+	case ActComments:
+		return m.toggleComments(it, r)
 	case ActPermission:
 		return m.answerPermission(it, r)
 	case ActPrompt:
@@ -657,6 +659,27 @@ func (m *Runtime) sendMessage(it Item, r ActionRequest) (Receipt, error) {
 	m.QueueAnswer(it, mark, r.Text)
 	m.note(it.Factory, "sent a message from a phone")
 	return m.receiptOf(mark), nil
+}
+
+func (m *Runtime) toggleComments(it Item, r ActionRequest) (Receipt, error) {
+	if r.Option != "on" && r.Option != "off" {
+		return Receipt{}, errors.New("comment watching is turned on or off")
+	}
+	if !CanToggleComments(it) {
+		return refused(r, "Not sent. Comment watching changes only on a running factory with its supervisor open."), nil
+	}
+	if reason := Unqueueable(supervisorTarget(it)); reason != "" {
+		return refused(r, "Not sent. "+reason), nil
+	}
+	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), CommentsCommand(r.Option))
+	mark := Answer{Factory: r.Factory, ItemID: "comments-" + r.Operation, Head: state.PromptHead(text), Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: ActComments}
+	m.QueueAnswer(it, mark, text)
+	m.note(it.Factory, "asked the supervisor to turn comment watching "+r.Option)
+	return m.receiptOf(mark), nil
+}
+
+func itemless(action string) bool {
+	return action == ActMessage || action == ActComments
 }
 
 func (m *Runtime) LookupReceipt(r ReceiptRequest) (Receipt, error) {

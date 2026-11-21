@@ -7,6 +7,8 @@ import (
 	"github.com/afonsodelgado/factory/internal/state"
 )
 
+const commentsUnhandled = "comments have not been handled"
+
 func SameHeads(a, b []state.StackBranch) bool {
 	return slices.EqualFunc(a, b, func(x, y state.StackBranch) bool {
 		return x.Branch == y.Branch && x.Parent == y.Parent && x.Head == y.Head && x.Base == y.Base
@@ -93,7 +95,7 @@ func Readiness(s state.State) []string {
 		}
 	}
 	if s.WatchComments && !s.Evidence.CommentsStopped && !Current(s, s.Evidence.Comments) {
-		reasons = append(reasons, "comments have not been handled")
+		reasons = append(reasons, commentsUnhandled)
 	}
 	return reasons
 }

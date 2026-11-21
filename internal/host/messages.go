@@ -82,7 +82,17 @@ const (
 	ActPermission = "permission"
 	ActPrompt     = "prompt"
 	ActDismiss    = "dismiss"
+	ActComments   = "comments"
 )
+
+func CommentsCommand(option string) string {
+	return "/factory comments " + option
+}
+
+func CanToggleComments(it Item) bool {
+	f := it.Factory
+	return f.State != nil && !f.Archived() && !f.State.Done() && it.Pane != nil && !it.Pane.Dead
+}
 
 const MaxMessageRunes = 4000
 
