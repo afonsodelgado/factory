@@ -448,7 +448,7 @@ func (m *Model) toggleComments(r dialog.CommentsResult) error {
 		return m.commentsOnNode(it, option)
 	}
 	var receipt host.Receipt
-	request := host.ActionRequest{Operation: uuid.NewString(), Factory: it.Factory.Key(), Incarnation: host.Incarnation(it.Factory), Action: host.ActComments, Option: option}
+	request := host.ActionRequest{Operation: uuid.NewString(), Device: host.SourceHub, Factory: it.Factory.Key(), Incarnation: host.Incarnation(it.Factory), Action: host.ActComments, Option: option}
 	if err := m.call("act", request.Operation, request, &receipt); err != nil {
 		return err
 	}

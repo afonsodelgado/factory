@@ -485,6 +485,12 @@ func TestCThenYOnAFactoryAsksItsSupervisorToWatchReviewComments(t *testing.T) {
 	now := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
 	typist := &fakeTypist{}
 	model, node := withNode(Model{Config: &state.Config{Repos: []string{"/r/cowork"}, StateDir: t.TempDir()}, Now: func() time.Time { return now }, Engine: &Engine{}, DialogCommand: func(kind string) string { return kind }}, host.Runtime{Typist: typist})
+	exited := questionFactory("Stop", now)
+	exited.Items[0].Pane.Command = "zsh"
+	node.show(model, exited)
+	if model.selectorKey("c"); model.dialog != "" || !strings.Contains(model.notice.text, "supervisor open") {
+		t.Fatalf("c on a factory whose supervisor exited opened %q with notice %q; want a plain notice and no confirm that can only fail", model.dialog, model.notice.text)
+	}
 	snap := questionFactory("Stop", now)
 	node.show(model, snap)
 	if model.selectorKey("c"); model.dialog != "comments" {

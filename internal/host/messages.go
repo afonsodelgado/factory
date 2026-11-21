@@ -91,7 +91,7 @@ func CommentsCommand(option string) string {
 
 func CanToggleComments(it Item) bool {
 	f := it.Factory
-	return f.State != nil && !f.Archived() && !f.State.Done() && it.Pane != nil && !it.Pane.Dead
+	return f.State != nil && !f.Archived() && !f.State.Done() && Unqueueable(supervisorTarget(it)) == ""
 }
 
 const MaxMessageRunes = 4000

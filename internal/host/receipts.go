@@ -665,14 +665,18 @@ func (m *Runtime) toggleComments(it Item, r ActionRequest) (Receipt, error) {
 	if r.Option != "on" && r.Option != "off" {
 		return Receipt{}, errors.New("comment watching is turned on or off")
 	}
-	if !CanToggleComments(it) {
-		return refused(r, "Not sent. Comment watching changes only on a running factory with its supervisor open."), nil
-	}
 	if reason := Unqueueable(supervisorTarget(it)); reason != "" {
 		return refused(r, "Not sent. "+reason), nil
 	}
+	if !CanToggleComments(it) {
+		return refused(r, "Not sent. Comment watching changes only on a running factory with its supervisor open."), nil
+	}
+	source := SourcePhone
+	if r.Device == SourceHub {
+		source = SourceHub
+	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), CommentsCommand(r.Option))
-	mark := Answer{Factory: r.Factory, ItemID: "comments-" + r.Operation, Head: state.PromptHead(text), Operation: r.Operation, Device: r.Device, Source: SourcePhone, Action: ActComments}
+	mark := Answer{Factory: r.Factory, ItemID: "comments-" + r.Operation, Head: state.PromptHead(text), Operation: r.Operation, Device: r.Device, Source: source, Action: ActComments}
 	m.QueueAnswer(it, mark, text)
 	m.note(it.Factory, "asked the supervisor to turn comment watching "+r.Option)
 	return m.receiptOf(mark), nil
