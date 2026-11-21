@@ -205,6 +205,8 @@ In a web repo, the design can instead be a working prototype built from the app'
 
 The panel shows each page's open threads. `factory review threads` lists them in a terminal. `factory review open <url>` prints the URL of any page, such as your app on its dev server, for you to open.
 
+When the design is approved, the designer captures it as the reference QA measures against: `factory review capture --source design/variant-b.html --screen list --screen detail` makes the node render that file in its own headless Chrome, with a temporary profile, at 1440×900, 1024×768 and 390×844 (add sizes with `--viewport 1280x800`). It copies the file to `design/reference/source/` first and prints that copy's SHA-256, so later edits to the variants never change the reference. For each `#<screen>` section and viewport it writes `design/reference/<screen>@<w>x<h>.png`, and it adds to `design/reference/tokens.json` the section's box, the box and computed type, colour, spacing, radius and size of every element marked `data-ref`, the page's `:root` custom properties and the fonts that loaded. For a prototype, `--source prototype --entry <module> --route <page path>` copies the entry module and the files it imports from its own folder, and renders the page on the running review stack (`factory review stack --for design` first). The copy records the prototype's own code; the shared components it imports are not frozen, so the screenshots and tokens are the reference. The command works from any agent tool, Codex included, because Chrome runs in the node.
+
 ### Reviewing the design stack
 
 Design review stacks remain available in repos with browser QA:

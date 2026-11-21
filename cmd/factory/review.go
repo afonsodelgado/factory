@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -21,7 +22,8 @@ const reviewUsage = `usage: factory review reply --thread <id> [--resolve] [--fa
        factory review threads [--page <path>] [--open] [--factory id]
        factory review open [--factory <id>] [--for design] <url>
        factory review stack [--for design]
-       factory review link <url>`
+       factory review link <url>
+       factory review capture [--factory id] --source <html in the factory directory | prototype> --screen <id>... [--viewport WxH]... [--entry <module> --route <path>]`
 
 func runReview(args []string) int {
 	if len(args) == 0 {
@@ -39,6 +41,8 @@ func runReview(args []string) int {
 		return runReviewStack(args[1:])
 	case "link":
 		return runReviewLink(args[1:])
+	case "capture":
+		return runReviewCapture(args[1:])
 	}
 	fmt.Fprintln(os.Stderr, reviewUsage)
 	return 2
@@ -167,6 +171,52 @@ func localReviewLink(path string) (string, bool) {
 
 const stackPoll = time.Second
 
+func runReviewCapture(args []string) int {
+	flags := flag.NewFlagSet("review capture", flag.ContinueOnError)
+	id := factoryFlag(flags)
+	source := flags.String("source", "", "the approved HTML file, relative to the factory directory, or prototype")
+	entry := flags.String("entry", "", "the prototype's entry module, relative to the worktree")
+	route := flags.String("route", "", "the prototype page's path on the app, such as /prototypes/<id>/variant-a.html")
+	var screens, sizes keys
+	flags.Var(&screens, "screen", "the id of a screen or state section; repeat for each")
+	flags.Var(&sizes, "viewport", "an extra viewport such as 1280x800, besides 1440x900, 1024x768 and 390x844; repeat for each")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	prototype := *source == review.Prototype
+	if *source == "" || len(screens) == 0 || flags.NArg() > 0 || prototype != (*entry != "" && *route != "") {
+		fmt.Fprintln(os.Stderr, reviewUsage)
+		return 2
+	}
+	viewports := slices.Clone(review.DefaultViewports)
+	for _, size := range sizes {
+		v, err := review.ParseViewport(size)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "factory review capture:", err)
+			return 2
+		}
+		viewports = append(viewports, v)
+	}
+	request := review.CaptureRequest{Source: *source, Entry: *entry, URL: *route, Screens: screens, Viewports: viewports}
+	reply, err := askReview(host.ReviewRequest{Action: "capture", ID: *id, Capture: &request})
+	for err == nil && reply.Capture.State == host.CaptureRunning {
+		time.Sleep(stackPoll)
+		reply, err = askReview(host.ReviewRequest{Action: "capture-status", ID: *id})
+	}
+	if err == nil && reply.Capture.State == host.CaptureFailed {
+		err = errors.New(reply.Capture.Reason)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "factory review capture:", err)
+		return 1
+	}
+	fmt.Printf("sha256 %s  %s\n", reply.Capture.Result.SHA256, reply.Capture.Result.Frozen)
+	for _, file := range reply.Capture.Result.Files {
+		fmt.Println(file)
+	}
+	return 0
+}
+
 func factoryFlag(flags *flag.FlagSet) *string {
 	return flags.String("factory", "", "the factory, when this is not one of its panes")
 }
@@ -183,7 +233,7 @@ func askReview(r host.ReviewRequest) (host.ReviewReply, error) {
 	r.Token = os.Getenv("FACTORY_PANE_TOKEN")
 	r.Cwd, _ = os.Getwd()
 	op := ""
-	if !slices.Contains([]string{"threads", "status", "stack-status"}, r.Action) {
+	if !slices.Contains([]string{"threads", "status", "stack-status", "capture-status"}, r.Action) {
 		op = uuid.NewString()
 	}
 	var answer host.ReviewReply

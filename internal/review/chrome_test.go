@@ -3,7 +3,9 @@ package review
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,5 +128,50 @@ func TestHeadlessChromeStartsWithoutAWindowExtensionsOrKeychainPromptsOnMacAndLi
 				}
 			}
 		})
+	}
+}
+
+func TestADesignIsCapturedHeadlessPerScreenAndViewportAndItsFrozenCopyIgnoresLaterEdits(t *testing.T) {
+	if _, ok := ChromeBinary(""); !ok {
+		if os.Getenv("CI") == "" {
+			t.Skip("no Chrome here")
+		}
+		t.Fatal("Chrome is missing on CI")
+	}
+	dir := t.TempDir()
+	design := filepath.Join(dir, "design", "variant-a.html")
+	os.MkdirAll(filepath.Dir(design), 0o755)
+	write(t, design, `<!doctype html><html><head><style>:root{--accent:#0a7cff} body{margin:0} section{height:300px} h2{margin:0;font-size:24px;color:var(--accent)} @media (max-width:500px){h2{font-size:18px}}</style></head><body><section id="list"><h2 data-ref="title">Checks</h2></section><section id="detail" style="height:120px">Detail</section></body></html>`)
+	viewports := []Viewport{{1440, 900}, {390, 844}}
+	result, err := Capture(context.Background(), "", goruntime.GOOS == "linux", CaptureRequest{Dir: dir, Source: "design/variant-a.html", Screens: []string{"list", "detail"}, Viewports: viewports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refDir := filepath.Join(dir, ReferenceDir)
+	for _, screen := range []string{"list", "detail"} {
+		for _, v := range viewports {
+			f, err := os.Open(filepath.Join(refDir, screen+"@"+v.String()+".png"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err := png.DecodeConfig(f)
+			f.Close()
+			if err != nil || config.Width != v.W {
+				t.Errorf("#%s at %s is %d px wide (%v); want the section's own %d px, rendered at that viewport", screen, v, config.Width, err, v.W)
+			}
+		}
+	}
+	var tokens Tokens
+	data, _ := os.ReadFile(filepath.Join(refDir, TokensFile))
+	json.Unmarshal(data, &tokens)
+	title := func(v Viewport) string { return tokens.Screens["list"][v.String()].Elements["title"].Style["fontSize"] }
+	if tokens.Root["--accent"] != "#0a7cff" || title(viewports[0]) != "24px" || title(viewports[1]) != "18px" {
+		t.Fatalf("tokens.json holds root %v and title sizes %q and %q; want the :root token and each viewport's computed size", tokens.Root, title(viewports[0]), title(viewports[1]))
+	}
+
+	write(t, design, "<!doctype html><p>edited after approval</p>")
+	frozen, err := fileSHA256(filepath.Join(dir, filepath.FromSlash(tokens.Source.Ref)))
+	if err != nil || frozen != result.SHA256 || tokens.Source.SHA256 != result.SHA256 || tokens.Source.Ref != ReferenceDir+"/source/variant-a.html" {
+		t.Fatalf("after editing the approved variant the reference %s hashes to %s (%v), want the printed %s", tokens.Source.Ref, frozen, err, result.SHA256)
 	}
 }

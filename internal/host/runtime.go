@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -56,6 +57,7 @@ type Runtime struct {
 	Stacks   Stacks
 	GitHub   *GitHub
 	Machine  string
+	Capture  func(context.Context, review.CaptureRequest) (review.CaptureResult, error)
 
 	welcomed    bool
 	snap        Snapshot
@@ -72,6 +74,7 @@ type Runtime struct {
 	holdings    map[string]Holding
 	readings    map[string]reading
 	promptsSeen map[string]time.Time
+	captures    map[string]CaptureStatus
 }
 
 const (
@@ -105,6 +108,7 @@ func New(r Runtime) *Runtime {
 	r.preparing = map[string]string{}
 	r.holdings = map[string]Holding{}
 	r.readings = map[string]reading{}
+	r.captures = map[string]CaptureStatus{}
 	return &r
 }
 

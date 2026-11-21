@@ -96,6 +96,11 @@ func (m *Runtime) handle(request Message) Message {
 		if err = json.Unmarshal(request.Data, &s); err == nil {
 			m.StackReady(s)
 		}
+	case "capture":
+		var c CaptureStatus
+		if err = json.Unmarshal(request.Data, &c); err == nil {
+			m.captures[c.Factory] = c
+		}
 	case "review":
 		var r ReviewRequest
 		if err = json.Unmarshal(request.Data, &r); err == nil {
