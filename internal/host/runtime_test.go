@@ -1271,3 +1271,28 @@ func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReporte
 		t.Fatalf("a reask that wrote nothing sent %+v; want it reported lost so the supervisor reconciles it", messages)
 	}
 }
+
+func TestARetriedAttemptWritingTheSameResultPathIsAnnouncedOnce(t *testing.T) {
+	repo, stateDir := t.TempDir(), t.TempDir()
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(repo, "wt", ".claude", "factory", "csv"), State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	result := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
+	if err := WriteFile(result, `{"schema_version":2,"run_id":"csv-qa-1","status":"done"}`); err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Attempt: 0, Role: "qa", Result: result}, state.StageRun{ID: "csv-qa-1", Attempt: 1, Role: "qa", Result: result})
+	if err := runs.Save(); err != nil {
+		t.Fatal(err)
+	}
+	done := func(delivered []string) []InboxMessage {
+		return slices.DeleteFunc(InboxMessages(stateDir, Item{Factory: f}, delivered, time.Now()), func(m InboxMessage) bool { return !strings.HasPrefix(m.Text, "stage qa done:") })
+	}
+	attemptZeroDelivered := []string{result}
+	retried := done(attemptZeroDelivered)
+	if len(retried) != 1 {
+		t.Fatalf("after a lost-run retry wrote its result where attempt 0 had, the inbox sent %+v; want one done message, or the supervisor waits forever", retried)
+	}
+	if again := done(append(attemptZeroDelivered, retried[0].Key)); len(again) != 0 {
+		t.Fatalf("the retried attempt was announced again after delivery: %+v", again)
+	}
+}

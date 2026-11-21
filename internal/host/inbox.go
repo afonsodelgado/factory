@@ -138,8 +138,8 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 	var messages []InboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
 	for _, run := range runs.Runs {
-		if run.Finished() && !slices.Contains(delivered, run.Result) {
-			messages = append(messages, InboxMessage{Key: run.Result, Text: "stage " + run.Role + " done: " + run.Result})
+		if key := doneKey(run); run.Finished() && !slices.Contains(delivered, key) {
+			messages = append(messages, InboxMessage{Key: key, Text: "stage " + run.Role + " done: " + run.Result})
 		}
 	}
 	if lost := it.Discovery; lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
@@ -161,6 +161,13 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 		messages = append(messages, InboxMessage{Key: file, Text: note.Text})
 	}
 	return messages
+}
+
+func doneKey(run state.StageRun) string {
+	if run.Attempt == 0 {
+		return run.Result
+	}
+	return fmt.Sprintf("%s#attempt-%d", run.Result, run.Attempt)
 }
 
 func lostKey(run state.StageRun) string {
