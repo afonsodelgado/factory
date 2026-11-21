@@ -1,6 +1,8 @@
 package host
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -137,8 +139,11 @@ const lostSuffix = ".lost"
 func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) []InboxMessage {
 	var messages []InboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
-	for _, run := range runs.Runs {
-		if key := doneKey(run); run.Finished() && !slices.Contains(delivered, key) {
+	for _, run := range latestAttempts(runs.Runs) {
+		if !run.Finished() || slices.Contains(delivered, run.Result) {
+			continue
+		}
+		if key, ok := doneKey(run); ok && !slices.Contains(delivered, key) {
 			messages = append(messages, InboxMessage{Key: key, Text: "stage " + run.Role + " done: " + run.Result})
 		}
 	}
@@ -163,11 +168,24 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 	return messages
 }
 
-func doneKey(run state.StageRun) string {
-	if run.Attempt == 0 {
-		return run.Result
+func latestAttempts(runs []state.StageRun) []state.StageRun {
+	var latest []state.StageRun
+	for _, run := range slices.Backward(runs) {
+		if !slices.ContainsFunc(latest, func(seen state.StageRun) bool { return seen.ID == run.ID && seen.Result == run.Result }) {
+			latest = append(latest, run)
+		}
 	}
-	return fmt.Sprintf("%s#attempt-%d", run.Result, run.Attempt)
+	slices.Reverse(latest)
+	return latest
+}
+
+func doneKey(run state.StageRun) (string, bool) {
+	data, err := os.ReadFile(run.Result)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(data)
+	return run.Result + "#sha256:" + hex.EncodeToString(sum[:8]), true
 }
 
 func lostKey(run state.StageRun) string {

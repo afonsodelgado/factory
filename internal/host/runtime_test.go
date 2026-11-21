@@ -1272,27 +1272,51 @@ func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReporte
 	}
 }
 
-func TestARetriedAttemptWritingTheSameResultPathIsAnnouncedOnce(t *testing.T) {
-	repo, stateDir := t.TempDir(), t.TempDir()
+func TestEachResultARunWritesIsAnnouncedOnceWhateverItsAttempts(t *testing.T) {
+	repo := t.TempDir()
 	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(repo, "wt", ".claude", "factory", "csv"), State: &state.State{SchemaVersion: 2, ID: "csv"}}
 	result := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
-	if err := WriteFile(result, `{"schema_version":2,"run_id":"csv-qa-1","status":"done"}`); err != nil {
-		t.Fatal(err)
+	attempt := func(n int) state.StageRun { return state.StageRun{ID: "csv-qa-1", Attempt: n, Role: "qa", Result: result} }
+	write := func(status string) {
+		t.Helper()
+		if err := WriteFile(result, `{"schema_version":2,"run_id":"csv-qa-1","status":"`+status+`"}`); err != nil {
+			t.Fatal(err)
+		}
 	}
-	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
-	runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Attempt: 0, Role: "qa", Result: result}, state.StageRun{ID: "csv-qa-1", Attempt: 1, Role: "qa", Result: result})
-	if err := runs.Save(); err != nil {
-		t.Fatal(err)
-	}
-	done := func(delivered []string) []InboxMessage {
+	done := func(stateDir string, delivered []string, attempts ...state.StageRun) []InboxMessage {
+		t.Helper()
+		runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+		runs.Runs = attempts
+		if err := runs.Save(); err != nil {
+			t.Fatal(err)
+		}
 		return slices.DeleteFunc(InboxMessages(stateDir, Item{Factory: f}, delivered, time.Now()), func(m InboxMessage) bool { return !strings.HasPrefix(m.Text, "stage qa done:") })
 	}
-	attemptZeroDelivered := []string{result}
-	retried := done(attemptZeroDelivered)
-	if len(retried) != 1 {
-		t.Fatalf("after a lost-run retry wrote its result where attempt 0 had, the inbox sent %+v; want one done message, or the supervisor waits forever", retried)
+	keys := func(messages []InboxMessage) []string {
+		var keys []string
+		for _, m := range messages {
+			keys = append(keys, m.Key)
+		}
+		return keys
 	}
-	if again := done(append(attemptZeroDelivered, retried[0].Key)); len(again) != 0 {
-		t.Fatalf("the retried attempt was announced again after delivery: %+v", again)
+
+	stateDir := t.TempDir()
+	write("done")
+	rejected := done(stateDir, nil, attempt(0))
+	write("failed")
+	retried := done(stateDir, keys(rejected), attempt(0), attempt(1))
+	if len(rejected) != 1 || len(retried) != 1 {
+		t.Fatalf("a lost-run retry that wrote a new result where attempt 0's was delivered sent %+v; want exactly one done message, or the supervisor waits forever", retried)
+	}
+	if again := done(stateDir, keys(append(rejected, retried...)), attempt(0), attempt(1)); len(again) != 0 {
+		t.Fatalf("a delivered result was announced again: %+v", again)
+	}
+
+	if stalled := done(t.TempDir(), nil, attempt(0), attempt(1)); len(stalled) != 1 {
+		t.Fatalf("attempt 0 wrote nothing and attempt 1 wrote one result, and the inbox sent %+v; want one done message for one result", stalled)
+	}
+
+	if upgraded := done(t.TempDir(), []string{result}, attempt(0), attempt(1)); len(upgraded) != 0 {
+		t.Fatalf("a result an earlier release recorded as delivered by its path was announced again after the upgrade: %+v", upgraded)
 	}
 }
