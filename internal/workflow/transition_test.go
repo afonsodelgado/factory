@@ -715,4 +715,22 @@ func TestTurningCommentsOnAtHandoffSendsThePRStageBackToHandleThem(t *testing.T)
 	if after := step(t, watching, observed); after.Evidence.Comments.Status != "pass" {
 		t.Fatal("the comment evidence of a factory that turned comments on was not recorded")
 	}
+
+	publishing := offeredHandoff(t)
+	publishing.Workflow.CommentsAsked = true
+	withdrawHandoff(&publishing, eventFor(publishing, "observe").At)
+	if err := dispatch(&publishing, eventFor(publishing, "observe"), "pr"); err != nil {
+		t.Fatal(err)
+	}
+	publishing = step(t, publishing, turnOn(publishing))
+	again := complete(t, publishing)
+	if again.Stage != "pr" || again.Workflow.ActiveRun == publishing.Workflow.ActiveRun || again.Workflow.ActiveRun == "" {
+		t.Fatalf("the pr run that was active when comments were turned on gave run %q; want one more pr run to handle them", again.Workflow.ActiveRun)
+	}
+	unhandled := eventFor(again, "result")
+	unhandled.Stack = again.Stack
+	unhandled.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "done", InputHeads: again.Stack, OutputHeads: again.Stack, Evidence: passed(again)}
+	if _, err := Next("testdata", again, unhandled); err == nil || !strings.Contains(err.Error(), "comments have not been handled") {
+		t.Fatalf("a pr run that started with comments on and left them unhandled gave %v; want it refused, not another free pr run", err)
+	}
 }

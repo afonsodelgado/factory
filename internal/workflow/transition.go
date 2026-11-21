@@ -462,7 +462,7 @@ func result(s *state.State, e Event, dir string) error {
 			return dispatch(s, e, "review")
 		}
 		reasons := Readiness(*s)
-		if slices.Equal(reasons, []string{commentsUnhandled}) {
+		if slices.Equal(reasons, []string{commentsUnhandled}) && commentsTurnedOnDuring(s, *run) {
 			return dispatch(s, e, "pr")
 		}
 		if len(reasons) > 0 {
@@ -471,6 +471,11 @@ func result(s *state.State, e Event, dir string) error {
 		offerHandoff(s, e)
 	}
 	return nil
+}
+
+func commentsTurnedOnDuring(s *state.State, run state.WorkflowRun) bool {
+	dispatched := slices.IndexFunc(s.History, func(h state.HistoryEntry) bool { return h.Event == "dispatch" && h.RunID == run.ID })
+	return dispatched >= 0 && slices.ContainsFunc(s.History[dispatched+1:], func(h state.HistoryEntry) bool { return h.Event == "comments_start" })
 }
 
 func resolveCommitHeads(s *state.State, run state.WorkflowRun, r *Result) error {
