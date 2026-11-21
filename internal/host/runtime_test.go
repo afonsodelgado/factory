@@ -1343,8 +1343,18 @@ func TestALostRunRetryStartsTheNextAttemptWhileTheStalledPaneStillRuns(t *testin
 	}
 	restarted, stop := serve(t, f.runtime(t, recordingTypist{make(chan string, 8)}))
 	defer stop()
+	late := filepath.Join(f.dir, "stages", "engineer-1.result.json")
+	if err := WriteFile(late, `{"schema_version":2,"run_id":"engineer-1","status":"done"}`); err != nil {
+		t.Fatal(err)
+	}
 	request(t, restarted, f.startRequest(""))
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
+	if slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.Attempt == 1 }) {
+		t.Fatal("the lost attempt wrote its result after lost_run, and the stage start launched attempt 1 over it")
+	}
+	os.Remove(late)
+	request(t, restarted, f.startRequest(""))
+	runs, _ = state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
 	if !slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.ID == "engineer-1" && run.Attempt == 1 }) {
 		t.Fatalf("after lost_run the stage start recorded %+v; want attempt 1 started, not the stalled attempt's path handed back while nothing runs", runs.Runs)
 	}

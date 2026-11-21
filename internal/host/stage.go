@@ -123,11 +123,14 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 		if _, ok := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, previous.Token)); ok {
 			live = true
 		}
+		if previous.Finished() {
+			return StageReply{Result: previous.Result}, nil
+		}
 		lostRunRetried := active.Retries > previous.Attempt
 		if lostRunRetried {
 			break
 		}
-		if previous.Finished() || live {
+		if live {
 			return StageReply{Result: previous.Result}, nil
 		}
 		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
