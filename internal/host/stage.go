@@ -329,7 +329,11 @@ func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageRe
 		}
 		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 	}
-	return m.sendStage(it, runs, r, strings.TrimSuffix(latest.Result, ".result.json")+".reask-"+uuid.NewString()[:8]+".result.json")
+	stem := strings.TrimSuffix(latest.Result, ".result.json")
+	if err := os.Rename(latest.Result, stem+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
+		return StageReply{}, err
+	}
+	return m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
 }
 
 func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
@@ -341,12 +345,13 @@ func (m *Runtime) sendStage(it Item, runs *state.StageRuns, r StageRequest, resu
 	if !ok {
 		return StageReply{}, fmt.Errorf("no %s stage has run in %s; start one with factory stage start", r.Role, it.Factory.Label())
 	}
-	if _, browses := m.browsesForQA(it, r.Role); browses && m.leases[it.Factory.Key()].Token != latest.Token {
+	reask := result != ""
+	if _, browses := m.browsesForQA(it, r.Role); browses && !reask && m.leases[it.Factory.Key()].Token != latest.Token {
 		return StageReply{}, errBrowserGone
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
-	if result != "" {
+	if reask {
 		run.Result = result
 		runs.Runs = slices.DeleteFunc(runs.Runs, func(old state.StageRun) bool { return old.ID == run.ID && old.Attempt == run.Attempt })
 	}

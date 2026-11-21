@@ -145,8 +145,8 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 	if lost := it.Discovery; lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
 		messages = append(messages, InboxMessage{Key: lost.Run.Result + lostSuffix, Text: "stage discoverer lost: it stopped or its pane closed without writing " + lost.Run.Result + "; run factory stage discover again"})
 	}
-	if lost := it.Stage; awaited(it, lost) && lost.Lost(now) && !slices.Contains(delivered, lost.Run.Token+lostSuffix) {
-		messages = append(messages, InboxMessage{Key: lost.Run.Token + lostSuffix, Text: "stage " + lost.Run.Role + " lost: it stopped or its pane closed without writing " + lost.Run.Result + "; reconcile it as a lost run"})
+	if lost := it.Stage; awaited(it, lost) && lost.Lost(now) && !slices.Contains(delivered, lostKey(lost.Run)) {
+		messages = append(messages, InboxMessage{Key: lostKey(lost.Run), Text: "stage " + lost.Run.Role + " lost: it stopped or its pane closed without writing " + lost.Run.Result + "; reconcile it as a lost run"})
 	}
 	files, _ := filepath.Glob(filepath.Join(it.Factory.Dir, "inbox", "*.json"))
 	sort.Strings(files)
@@ -161,6 +161,10 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 		messages = append(messages, InboxMessage{Key: file, Text: note.Text})
 	}
 	return messages
+}
+
+func lostKey(run state.StageRun) string {
+	return run.Token + "/" + filepath.Base(run.Result) + lostSuffix
 }
 
 func awaited(it Item, stage *StageView) bool {

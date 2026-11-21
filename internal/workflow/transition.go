@@ -308,6 +308,9 @@ func result(s *state.State, e Event, dir string) error {
 		return errors.New("result does not match active run")
 	}
 	run := &s.Workflow.Runs[len(s.Workflow.Runs)-1]
+	if err := resolveCommitHeads(s, *run, r); err != nil {
+		return err
+	}
 	if !SameHeads(r.InputHeads, run.InputHeads) || !SameHeads(e.Stack, r.OutputHeads) {
 		return errors.New("result input or observed output heads do not match")
 	}
@@ -441,6 +444,34 @@ func result(s *state.State, e Event, dir string) error {
 		offerHandoff(s, e)
 	}
 	return nil
+}
+
+func resolveCommitHeads(s *state.State, run state.WorkflowRun, r *Result) error {
+	fields := []struct {
+		name  string
+		shas  []string
+		heads *[]state.StackBranch
+	}{
+		{"input_heads", r.inputSHAs, &r.InputHeads},
+		{"output_heads", r.outputSHAs, &r.OutputHeads},
+		{"evidence.heads", r.evidenceSHAs, &r.Evidence.Heads},
+	}
+	noStackYet := len(s.Stack) == 0 && len(run.InputHeads) == 0
+	for _, field := range fields {
+		if field.shas == nil {
+			continue
+		}
+		if !noStackYet || slices.ContainsFunc(field.shas, func(sha string) bool { return !startCommit(s, sha) }) {
+			return fmt.Errorf("%s must list stack branches {branch,parent,head,base}; a commit SHA is accepted only before the stack exists, for the start commit", field.name)
+		}
+		*field.heads = []state.StackBranch{}
+		r.Evidence.Notes = append(r.Evidence.Notes, fmt.Sprintf("heads: %s named the start commit %s", field.name, s.StartCommit))
+	}
+	return nil
+}
+
+func startCommit(s *state.State, sha string) bool {
+	return len(sha) >= 7 && strings.HasPrefix(s.StartCommit, sha)
 }
 
 func reviewPages(dir, stage string, artifacts []state.Artifact) error {

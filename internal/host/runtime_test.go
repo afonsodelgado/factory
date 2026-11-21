@@ -1208,3 +1208,46 @@ func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
 		t.Fatal("a discoverer whose background work was still reporting 5 minutes ago counts as lost; want later hook activity respected")
 	}
 }
+
+func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReportedLost(t *testing.T) {
+	repo, stateDir := t.TempDir(), t.TempDir()
+	if err := WriteFile(state.RepoConfigPath(repo), "qa:\n  mode: browser\n"); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(repo, "wt")
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	f.State.Workflow.ActiveRun = "csv-qa-1"
+	f.State.Workflow.Runs = []state.WorkflowRun{{ID: "csv-qa-1", Stage: "qa", Role: "qa", Round: 1, Prompt: "stages/csv-qa-1.prompt.md", Result: "stages/csv-qa-1.result.json"}}
+	rejected := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
+	if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"done","evidence":{"checks":[1]}}`); err != nil {
+		t.Fatal(err)
+	}
+	token := uuid.NewString()
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Role: "qa", Token: token, Result: rejected, StartedAt: time.Now().Add(-time.Hour)})
+	if err := runs.Save(); err != nil {
+		t.Fatal(err)
+	}
+	r := New(Runtime{Config: &state.Config{StateDir: stateDir}, Engine: &wakingEngine{}, TM: tmux.Client{Socket: "host-test-" + uuid.NewString(), ConfigFile: "/dev/null"}})
+	r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}, Hooks: []*state.HookFile{{Token: token, SessionID: "qa-session"}}})
+
+	reask := StageRequest{Action: "send", Reask: true, Factory: "csv", EffectID: "csv-qa-1", Role: "qa", Text: "The engine rejected your result."}
+	reasked, err := r.Stage(reask)
+	if err != nil || reasked.Result == rejected {
+		t.Fatalf("re-asking QA after its browser closed answered %+v, %v; want the session resumed for a corrected result", reasked, err)
+	}
+	if moved, _ := filepath.Glob(filepath.Join(f.Dir, "stages", "csv-qa-1.rejected-*.json")); len(moved) != 1 {
+		t.Fatalf("the rejected result was not moved aside: %v", moved)
+	}
+	if started, err := r.Stage(StageRequest{Action: "start", Factory: "csv", EffectID: "csv-qa-1", Role: "qa", Text: "QA the stack."}); err == nil && started.Result == rejected {
+		t.Fatal("starting the stage again handed back the rejected result as finished, so nothing ran")
+	}
+
+	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	firstRunReportedLost := []string{token + "/csv-qa-1.result.json.lost"}
+	later := time.Now().Add(time.Hour)
+	messages := InboxMessages(stateDir, Item{Factory: f, Stage: RunningStage(f, after, nil, nil, 20*time.Minute)}, firstRunReportedLost, later)
+	if !slices.ContainsFunc(messages, func(m InboxMessage) bool { return strings.HasPrefix(m.Text, "stage qa lost:") }) {
+		t.Fatalf("a reask that wrote nothing sent %+v; want it reported lost so the supervisor reconciles it", messages)
+	}
+}

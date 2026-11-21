@@ -623,3 +623,40 @@ func TestDiscoverySettlesOnlyFailuresOfStagesThatRunCommandsAndKeepsTheRetryOnAn
 		t.Fatalf("after the developer set up what QA needed (same recipe), resolving the already open commands item left stage %s and run %q; want QA run again", rerun.Stage, rerun.Workflow.ActiveRun)
 	}
 }
+
+func TestResultShapeSlipsThatLoseNothingAreAcceptedAndRealGapsStillRejected(t *testing.T) {
+	submit := func(s state.State, stage, raw string) (state.State, error) {
+		t.Helper()
+		if err := dispatch(&s, eventFor(s, "start"), stage); err != nil {
+			t.Fatal(err)
+		}
+		e := eventFor(s, "result")
+		e.Stack = s.Stack
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(raw, "RUN", s.Workflow.ActiveRun)), &e.Result); err != nil {
+			t.Fatal(err)
+		}
+		p, err := Next("testdata", s, e)
+		return p.Snapshot, err
+	}
+	stack := `[{"branch":"feature","parent":"main","head":"a","base":"b"}]`
+
+	qa, err := submit(workflowState(), "qa", `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":`+stack+`,"output_heads":`+stack+`,"findings":[],"evidence":{"status":"pass","heads":`+stack+`,"recipe_digest":"recipe","at":"2026-11-20T19:00:00Z","checks":["flows: create and exclude pass"]}}`)
+	if err != nil || qa.Stage != "pr" || !slices.Contains(qa.Evidence.QA.Notes, "check: flows: create and exclude pass") {
+		t.Fatalf("QA's string checks were refused (%v) or lost; want them kept as notes and QA passed", err)
+	}
+
+	before := workflowState()
+	before.Stack, before.StartCommit, before.Workflow.CommentsAsked = nil, "ca0664f1becdebb7dd034aed08bf53c139617c7d", true
+	analyst := `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":["SHA"],"output_heads":["SHA"],"findings":[],"evidence":{"status":"pass","heads":["SHA"]}}`
+	if s, err := submit(before, "requirements", strings.ReplaceAll(analyst, "SHA", "ca0664f")); err != nil || s.Workflow.Gate != "requirements" {
+		t.Fatalf("the analyst's start-commit heads before any stack were refused: %v", err)
+	}
+	if _, err := submit(before, "requirements", strings.ReplaceAll(analyst, "SHA", "5ed087e")); err == nil || !strings.Contains(err.Error(), "must list stack branches") {
+		t.Fatalf("a commit other than the start commit was accepted as heads: %v", err)
+	}
+
+	engineer := `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":` + stack + `,"output_heads":` + stack + `,"findings":[],"evidence":{"status":"pass","heads":` + stack + `,"recipe_digest":"recipe","at":"2026-11-20T19:00:00Z","checks":["build","lint","test"]}}`
+	if _, err := submit(workflowState(), "implement", engineer); err == nil || err.Error() != "implementation needs current successful build, lint and test evidence" {
+		t.Fatalf("an implementation with check names instead of evidence got %v; want its exact rejection", err)
+	}
+}
