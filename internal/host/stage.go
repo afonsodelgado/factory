@@ -329,11 +329,7 @@ func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageRe
 		}
 		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 	}
-	stem := strings.TrimSuffix(latest.Result, ".result.json")
-	if err := os.Rename(latest.Result, stem+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
-		return StageReply{}, err
-	}
-	return m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
+	return m.sendStage(it, runs, r, strings.TrimSuffix(latest.Result, ".result.json")+".reask-"+uuid.NewString()[:8]+".result.json")
 }
 
 func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
@@ -360,6 +356,11 @@ func (m *Runtime) sendStage(it Item, runs *state.StageRuns, r StageRequest, resu
 	}
 	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
 		return StageReply{}, err
+	}
+	if reask {
+		if err := os.Rename(latest.Result, strings.TrimSuffix(latest.Result, ".result.json")+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
+			return StageReply{}, err
+		}
 	}
 	kickoff := KickoffFor(run)
 	if pane, alive := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, run.Token)); alive {
