@@ -448,7 +448,7 @@ func (m *Model) toggleComments(r dialog.CommentsResult) error {
 		return m.commentsOnNode(it, option)
 	}
 	var receipt host.Receipt
-	request := host.ActionRequest{Operation: uuid.NewString(), Device: host.SourceHub, Factory: it.Factory.Key(), Incarnation: host.Incarnation(it.Factory), Action: host.ActComments, Option: option}
+	request := host.ActionRequest{Operation: uuid.NewString(), Source: host.SourceHub, Factory: it.Factory.Key(), Incarnation: host.Incarnation(it.Factory), Action: host.ActComments, Option: option}
 	if err := m.call("act", request.Operation, request, &receipt); err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func (m *Model) commentsOnNode(it Item, option string) error {
 	m.later = append(m.later, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
 		defer cancel()
-		if err := actOn(ctx, client, lf, node.ActionBody{Action: host.ActComments, Option: option}); err != nil {
+		if err := actOn(ctx, client, lf, node.ActionBody{Action: host.ActComments, Option: option, Source: host.SourceHub}); err != nil {
 			return noticeMsg(problem(fmt.Sprintf("Comment watching on %s did not change on %s: %s", label, short, withFullStop(err.Error()))))
 		}
 		return noticeMsg(news(fmt.Sprintf("Asked %s's supervisor on %s to turn review comment watching %s.", label, short, option)))

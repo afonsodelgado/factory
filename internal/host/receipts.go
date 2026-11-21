@@ -73,6 +73,7 @@ type ActionRequest struct {
 	Option      string    `json:"option,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Generation  int64     `json:"generation,omitempty"`
+	Source      string    `json:"source,omitempty"`
 }
 
 type ReceiptRequest struct {
@@ -672,7 +673,7 @@ func (m *Runtime) toggleComments(it Item, r ActionRequest) (Receipt, error) {
 		return refused(r, "Not sent. Comment watching changes only on a running factory with its supervisor open."), nil
 	}
 	source := SourcePhone
-	if r.Device == SourceHub {
+	if r.Source == SourceHub {
 		source = SourceHub
 	}
 	text := factory.ForSupervisor(it.Factory.Supervisor().ToolName(), CommentsCommand(r.Option))

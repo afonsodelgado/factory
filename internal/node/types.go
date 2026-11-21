@@ -55,12 +55,13 @@ type ActionBody struct {
 	Option      string    `json:"option,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Generation  int64     `json:"generation,omitempty"`
+	Source      string    `json:"source,omitempty"`
 }
 
 func (b ActionBody) Request(caller, factory string) host.ActionRequest {
 	return host.ActionRequest{
 		Operation: b.Operation, Device: caller, Factory: factory, Incarnation: b.Incarnation, Action: b.Action,
-		Item: b.Item, Since: b.Since, Answers: b.Answers, Text: b.Text, Option: b.Option, Fingerprint: b.Fingerprint, Generation: b.Generation,
+		Item: b.Item, Since: b.Since, Answers: b.Answers, Text: b.Text, Option: b.Option, Fingerprint: b.Fingerprint, Generation: b.Generation, Source: b.Source,
 	}
 }
 

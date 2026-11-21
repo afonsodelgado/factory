@@ -462,6 +462,14 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 			}
 		})
 	}
+	fromHub := act(ActComments, "", nil, "")
+	fromHub.Option, fromHub.Source = "on", SourceHub
+	hubNode := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop", items...))
+	receipt, err := hubNode.Act(fromHub)
+	claimed, _ := hubNode.Claim(ClaimKey(fromHub.Factory, "comments-"+fromHub.Operation))
+	if err != nil || receipt.Source != SourceHub || claimed.Device != fromHub.Device {
+		t.Errorf("a hub's comments toggle was recorded with source %q and device %q; want source hub and the sender's device kept", receipt.Source, claimed.Device)
+	}
 	tooLong := act(ActMessage, "", nil, strings.Repeat("é", MaxMessageRunes+1))
 	if _, err := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop")).Act(tooLong); err == nil {
 		t.Error("a message over the limit was accepted")
