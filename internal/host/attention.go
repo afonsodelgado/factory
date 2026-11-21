@@ -372,6 +372,7 @@ type LocalFactory struct {
 	CanWake           bool         `json:"can_wake"`
 	WatchComments     bool         `json:"watch_comments"`
 	CanToggleComments bool         `json:"can_toggle_comments"`
+	CommentsBlocked   string       `json:"comments_blocked,omitempty"`
 	Pane              string       `json:"pane,omitempty"`
 	StageRole         string       `json:"stage_role,omitempty"`
 	StageLabel        string       `json:"stage_label,omitempty"`
@@ -464,7 +465,7 @@ func (m *Runtime) localFactory(it Item) LocalFactory {
 		CanPause: it.Pane != nil && !it.Pane.Dead, CanWake: it.Status.Asleep() && it.Status != factory.Done,
 		Generation: m.holdings[f.Key()].Generation, Unverified: m.holdings[f.Key()].Unverified,
 	}
-	lf.CanToggleComments = CanToggleComments(it)
+	lf.CanToggleComments, lf.CommentsBlocked = CanToggleComments(it), CommentsBlocked(it)
 	if f.State != nil {
 		lf.WatchComments = f.State.WatchComments
 		lf.Stage = f.State.Stage

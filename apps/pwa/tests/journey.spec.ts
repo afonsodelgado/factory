@@ -29,12 +29,19 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
       needs_since: new Date(Date.now() - 30 * 60_000).toISOString(),
     }),
     factory("search-typos", [], { can_toggle_comments: true }),
-    factory("rate-limits", [
+    factory(
+      "rate-limits",
+      [
+        {
+          ...gate("k-busy-gate"),
+          send: { ready: false, reason: "rate-limits is not at its prompt." },
+        },
+      ],
       {
-        ...gate("k-busy-gate"),
-        send: { ready: false, reason: "rate-limits is not at its prompt." },
+        comments_blocked:
+          "rate-limits is in copy mode. Press q in the session, then send again.",
       },
-    ]),
+    ),
   ]);
 
   await page.goto("/");
@@ -71,6 +78,11 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await page.goto("/f/shop-1a2b-rate-limits/i/k-busy-gate");
   await page.getByRole("button", { name: "Dismiss, send nothing" }).click();
   await expect(page.getByText("Dismissed.")).toBeVisible();
+  await page.goto("/f/shop-1a2b-rate-limits");
+  await expect(
+    page.getByRole("button", { name: "Watch review comments" }),
+  ).toBeDisabled();
+  await expect(page.getByText(/is in copy mode\. Press q/)).toBeVisible();
 
   await server.set({ nextStatus: "sending" });
   await page.goto("/f/shop-1a2b-search-typos/message");

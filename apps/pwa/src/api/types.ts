@@ -131,6 +131,7 @@ export type LocalFactory = {
   can_wake: boolean;
   watch_comments?: boolean;
   can_toggle_comments?: boolean;
+  comments_blocked?: string;
   node?: string;
   generation?: number;
   unverified?: string;

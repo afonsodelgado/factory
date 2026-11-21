@@ -488,7 +488,7 @@ func TestCThenYOnAFactoryAsksItsSupervisorToWatchReviewComments(t *testing.T) {
 	exited := questionFactory("Stop", now)
 	exited.Items[0].Pane.Command = "zsh"
 	node.show(model, exited)
-	if model.selectorKey("c"); model.dialog != "" || !strings.Contains(model.notice.text, "supervisor open") {
+	if model.selectorKey("c"); model.dialog != "" || !strings.Contains(model.notice.text, "is not running Claude") {
 		t.Fatalf("c on a factory whose supervisor exited opened %q with notice %q; want a plain notice and no confirm that can only fail", model.dialog, model.notice.text)
 	}
 	snap := questionFactory("Stop", now)

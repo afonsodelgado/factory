@@ -411,10 +411,13 @@ func (m *Model) askComments() tea.Cmd {
 			return nil
 		}
 	}
-	watching, can := m.commentsToggle(it)
+	watching, can, blocked := m.commentsToggle(it)
 	switch {
 	case m.unverified(it) != "":
 		m.notice = problem(heldUnchecked(it, m.unverified(it)))
+		return nil
+	case blocked != "":
+		m.notice = problem(blocked)
 		return nil
 	case !can:
 		m.notice = problem(it.Factory.Label() + " cannot change comment watching now: it needs a running factory, not done or archived, with its supervisor open.")
@@ -423,12 +426,12 @@ func (m *Model) askComments() tea.Cmd {
 	return m.openDialog("comments", dialog.CommentsContext{Key: it.Factory.Key(), Label: it.Factory.Label(), On: !watching})
 }
 
-func (m *Model) commentsToggle(it Item) (watching, can bool) {
+func (m *Model) commentsToggle(it Item) (watching, can bool, blocked string) {
 	if it.Factory.Remote == nil {
-		return it.Factory.State != nil && it.Factory.State.WatchComments, host.CanToggleComments(it)
+		return it.Factory.State != nil && it.Factory.State.WatchComments, host.CanToggleComments(it), host.CommentsBlocked(it)
 	}
 	lf := m.nodeFactories[it.Factory.Key()]
-	return lf.WatchComments, lf.CanToggleComments
+	return lf.WatchComments, lf.CanToggleComments, lf.CommentsBlocked
 }
 
 func commentsOption(on bool) string {
