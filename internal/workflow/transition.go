@@ -506,7 +506,7 @@ func startCommit(s *state.State, sha string) bool {
 	return len(sha) >= 7 && strings.HasPrefix(s.StartCommit, sha)
 }
 
-var opensItemAtOnce = []string{"setup", "stack_start", "stack_health", "recipe_missing", "seed", "sign_in", "interactive_challenge", "uncertain_outcome"}
+var opensItemAtOnce = []string{"setup", "npx_missing", "stack_start", "stack_health", "recipe_missing", "seed", "sign_in", "interactive_challenge", "uncertain_outcome"}
 
 func retriesAutomatically(s *state.State, run state.WorkflowRun, r *Result) bool {
 	return slices.Contains(recipeStages, run.Stage) && run.Retries < s.Limits.StageRetries && !slices.Contains(opensItemAtOnce, r.Data.Failure)
