@@ -178,7 +178,7 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	}
 	failed := eventFor(reviewing, "result")
 	failed.Stack = reviewing.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack, Data: ResultData{Failure: "setup"}}
 	retrying := step(t, reviewing, failed)
 	rerun := step(t, retrying, recipe(retrying, "new-recipe"))
 	if rerun.Stage != "implement" || rerun.Workflow.ActiveRun == "" || len(rerun.OpenAttention()) != 0 {
@@ -206,7 +206,7 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	}
 	failed = eventFor(implementing, "result")
 	failed.Stack = implementing.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack, Data: ResultData{Failure: "setup"}}
 	broken := step(t, implementing, failed)
 	corrected := step(t, broken, recipe(broken, "new-recipe"))
 	if run := corrected.Workflow.Runs[len(corrected.Workflow.Runs)-1]; run.Stage != "implement" || corrected.Loops.Used[RediscoveryLoop] != 1 || len(corrected.OpenAttention()) != 0 {
@@ -248,8 +248,11 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 	failed := eventFor(s, "result")
 	failed.Stack = s.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack, Data: ResultData{Failure: "interactive_challenge"}}
 	challenged := step(t, s, failed)
+	if challenged.Workflow.ActiveRun != "" || !slices.ContainsFunc(challenged.OpenAttention(), func(a state.Attention) bool { return a.Kind == "failure" }) {
+		t.Fatalf("QA's interactive_challenge was retried automatically (run %q); want a failure item at once, since a retry meets the same challenge", challenged.Workflow.ActiveRun)
+	}
 	unresolved := eventFor(challenged, "commands")
 	r := challenged.Recipe
 	r.Digest, r.Unresolved = "no-sign-in", []string{"qa.sign_in: billing emails a one-time code"}
@@ -272,7 +275,7 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 	failedAgain := eventFor(again, "result")
 	failedAgain.Stack = again.Stack
-	failedAgain.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "failed", InputHeads: again.Stack, OutputHeads: again.Stack}
+	failedAgain.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "failed", InputHeads: again.Stack, OutputHeads: again.Stack, Data: ResultData{Failure: "interactive_challenge"}}
 	spent := step(t, again, failedAgain)
 	rediscovered := eventFor(spent, "commands")
 	r.Digest = "another-sign-in-script"
@@ -297,19 +300,27 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 }
 
-func TestAFailedStageTellsTheDeveloperWhyOnItsItem(t *testing.T) {
+func TestAFirstStageFailureRetriesOnceByItselfAndTheNextTellsTheDeveloperWhy(t *testing.T) {
 	s := workflowState()
 	s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
 	if err := dispatch(&s, eventFor(s, "result"), "qa"); err != nil {
 		t.Fatal(err)
 	}
-	failed := eventFor(s, "result")
-	failed.Stack = s.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack,
-		Summary:  "Drafting stays blocked because OpenAI rejects this machine's IP.",
-		Evidence: state.Verification{Status: "fail", Notes: []string{"ANTHROPIC_API_KEY is invalid, so live missions cannot run."}},
-		Outputs:  []string{".claude/factory/f/qa-report.md"}}
-	waiting := step(t, s, failed)
+	failure := func(s state.State) Event {
+		failed := eventFor(s, "result")
+		failed.Stack = s.Stack
+		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack,
+			Summary:  "Drafting stays blocked because OpenAI rejects this machine's IP.",
+			Evidence: state.Verification{Status: "fail", Notes: []string{"ANTHROPIC_API_KEY is invalid, so live missions cannot run."}},
+			Outputs:  []string{".claude/factory/f/qa-report.md"}}
+		return failed
+	}
+	retrying := step(t, s, failure(s))
+	if run := retrying.Workflow.Runs[len(retrying.Workflow.Runs)-1]; run.Stage != "qa" || run.Retries != 1 || len(retrying.OpenAttention()) != 0 {
+		t.Fatalf("a first QA failure gave run %+v and items %+v; want QA dispatched again with retries 1 and no developer item", run, retrying.OpenAttention())
+	}
+	failed := failure(retrying)
+	waiting := step(t, retrying, failed)
 	open := waiting.OpenAttention()
 	if len(open) != 1 || open[0].Kind != "failure" {
 		t.Fatalf("a failed QA result opened %+v; want one failure item", open)
@@ -596,7 +607,7 @@ func TestDiscoverySettlesOnlyFailuresOfStagesThatRunCommandsAndKeepsTheRetryOnAn
 		}
 		failed := eventFor(s, "result")
 		failed.Stack = s.Stack
-		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack, Data: ResultData{Failure: "setup"}}
 		return step(t, s, failed)
 	}
 	unresolved := func(s state.State, digest string) Event {

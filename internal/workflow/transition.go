@@ -359,6 +359,10 @@ func result(s *state.State, e Event, dir string) error {
 		return nil
 	}
 	if r.Status != "done" {
+		if retriesAutomatically(s, *run, r) {
+			s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: stage, Event: "auto retry", RunID: run.ID, Role: run.Role, Round: run.Round, Detail: r.Summary})
+			return retry(s, e, stage)
+		}
 		attention(s, e, "failure", "Stage needs attention", failureBody(stage, r))
 		return nil
 	}
@@ -472,6 +476,12 @@ func resolveCommitHeads(s *state.State, run state.WorkflowRun, r *Result) error 
 
 func startCommit(s *state.State, sha string) bool {
 	return len(sha) >= 7 && strings.HasPrefix(s.StartCommit, sha)
+}
+
+var opensItemAtOnce = []string{"setup", "stack_start", "stack_health", "recipe_missing", "seed", "sign_in", "interactive_challenge", "uncertain_outcome"}
+
+func retriesAutomatically(s *state.State, run state.WorkflowRun, r *Result) bool {
+	return slices.Contains(recipeStages, run.Stage) && run.Retries < s.Limits.StageRetries && !slices.Contains(opensItemAtOnce, r.Data.Failure)
 }
 
 func reviewPages(dir, stage string, artifacts []state.Artifact) error {

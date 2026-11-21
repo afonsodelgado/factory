@@ -62,6 +62,7 @@ type Result struct {
 	Evidence      state.Verification  `json:"evidence"`
 	Outputs       []string            `json:"outputs"`
 	Summary       string              `json:"summary,omitempty"`
+	Data          ResultData          `json:"data"`
 
 	inputSHAs, outputSHAs, evidenceSHAs []string
 }
@@ -124,6 +125,10 @@ func decodeHeads(raw json.RawMessage) ([]state.StackBranch, []string, error) {
 		return nil, shas, nil
 	}
 	return nil, nil, err
+}
+
+type ResultData struct {
+	Failure string `json:"failure"`
 }
 
 type Question struct {
