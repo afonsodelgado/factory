@@ -178,7 +178,7 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	}
 	failed := eventFor(reviewing, "result")
 	failed.Stack = reviewing.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: reviewing.Workflow.ActiveRun, Status: "failed", InputHeads: reviewing.Stack, OutputHeads: reviewing.Stack, Data: ResultData{Failure: "setup"}}
 	retrying := step(t, reviewing, failed)
 	rerun := step(t, retrying, recipe(retrying, "new-recipe"))
 	if rerun.Stage != "implement" || rerun.Workflow.ActiveRun == "" || len(rerun.OpenAttention()) != 0 {
@@ -206,7 +206,7 @@ func TestRecipeChangesAndPartialObservationsNeverStrandAFactory(t *testing.T) {
 	}
 	failed = eventFor(implementing, "result")
 	failed.Stack = implementing.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: implementing.Workflow.ActiveRun, Status: "failed", InputHeads: implementing.Stack, OutputHeads: implementing.Stack, Data: ResultData{Failure: "setup"}}
 	broken := step(t, implementing, failed)
 	corrected := step(t, broken, recipe(broken, "new-recipe"))
 	if run := corrected.Workflow.Runs[len(corrected.Workflow.Runs)-1]; run.Stage != "implement" || corrected.Loops.Used[RediscoveryLoop] != 1 || len(corrected.OpenAttention()) != 0 {
@@ -248,8 +248,11 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 	failed := eventFor(s, "result")
 	failed.Stack = s.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack, Data: ResultData{Failure: "interactive_challenge"}}
 	challenged := step(t, s, failed)
+	if challenged.Workflow.ActiveRun != "" || !slices.ContainsFunc(challenged.OpenAttention(), func(a state.Attention) bool { return a.Kind == "failure" }) {
+		t.Fatalf("QA's interactive_challenge was retried automatically (run %q); want a failure item at once, since a retry meets the same challenge", challenged.Workflow.ActiveRun)
+	}
 	unresolved := eventFor(challenged, "commands")
 	r := challenged.Recipe
 	r.Digest, r.Unresolved = "no-sign-in", []string{"qa.sign_in: billing emails a one-time code"}
@@ -272,7 +275,7 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 	failedAgain := eventFor(again, "result")
 	failedAgain.Stack = again.Stack
-	failedAgain.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "failed", InputHeads: again.Stack, OutputHeads: again.Stack}
+	failedAgain.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "failed", InputHeads: again.Stack, OutputHeads: again.Stack, Data: ResultData{Failure: "interactive_challenge"}}
 	spent := step(t, again, failedAgain)
 	rediscovered := eventFor(spent, "commands")
 	r.Digest = "another-sign-in-script"
@@ -297,19 +300,27 @@ func TestAQASignInChallengeAsksOnceThroughCommandsAndRerunsQAUnderTheRetryCap(t 
 	}
 }
 
-func TestAFailedStageTellsTheDeveloperWhyOnItsItem(t *testing.T) {
+func TestAFirstStageFailureRetriesOnceByItselfAndTheNextTellsTheDeveloperWhy(t *testing.T) {
 	s := workflowState()
 	s.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
 	if err := dispatch(&s, eventFor(s, "result"), "qa"); err != nil {
 		t.Fatal(err)
 	}
-	failed := eventFor(s, "result")
-	failed.Stack = s.Stack
-	failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack,
-		Summary:  "Drafting stays blocked because OpenAI rejects this machine's IP.",
-		Evidence: state.Verification{Status: "fail", Notes: []string{"ANTHROPIC_API_KEY is invalid, so live missions cannot run."}},
-		Outputs:  []string{".claude/factory/f/qa-report.md"}}
-	waiting := step(t, s, failed)
+	failure := func(s state.State) Event {
+		failed := eventFor(s, "result")
+		failed.Stack = s.Stack
+		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack,
+			Summary:  "Drafting stays blocked because OpenAI rejects this machine's IP.",
+			Evidence: state.Verification{Status: "fail", Notes: []string{"ANTHROPIC_API_KEY is invalid, so live missions cannot run."}},
+			Outputs:  []string{".claude/factory/f/qa-report.md"}}
+		return failed
+	}
+	retrying := step(t, s, failure(s))
+	if run := retrying.Workflow.Runs[len(retrying.Workflow.Runs)-1]; run.Stage != "qa" || run.Retries != 1 || len(retrying.OpenAttention()) != 0 {
+		t.Fatalf("a first QA failure gave run %+v and items %+v; want QA dispatched again with retries 1 and no developer item", run, retrying.OpenAttention())
+	}
+	failed := failure(retrying)
+	waiting := step(t, retrying, failed)
 	open := waiting.OpenAttention()
 	if len(open) != 1 || open[0].Kind != "failure" {
 		t.Fatalf("a failed QA result opened %+v; want one failure item", open)
@@ -596,7 +607,7 @@ func TestDiscoverySettlesOnlyFailuresOfStagesThatRunCommandsAndKeepsTheRetryOnAn
 		}
 		failed := eventFor(s, "result")
 		failed.Stack = s.Stack
-		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack}
+		failed.Result = &Result{SchemaVersion: 2, RunID: s.Workflow.ActiveRun, Status: "failed", InputHeads: s.Stack, OutputHeads: s.Stack, Data: ResultData{Failure: "setup"}}
 		return step(t, s, failed)
 	}
 	unresolved := func(s state.State, digest string) Event {
@@ -621,5 +632,119 @@ func TestDiscoverySettlesOnlyFailuresOfStagesThatRunCommandsAndKeepsTheRetryOnAn
 	resolved.Recipe = &r
 	if rerun := step(t, asked, resolved); rerun.Workflow.ActiveRun == "" || rerun.Stage != "qa" {
 		t.Fatalf("after the developer set up what QA needed (same recipe), resolving the already open commands item left stage %s and run %q; want QA run again", rerun.Stage, rerun.Workflow.ActiveRun)
+	}
+}
+
+func TestResultShapeSlipsThatLoseNothingAreAcceptedAndRealGapsStillRejected(t *testing.T) {
+	submit := func(s state.State, stage, raw string) (state.State, error) {
+		t.Helper()
+		if err := dispatch(&s, eventFor(s, "start"), stage); err != nil {
+			t.Fatal(err)
+		}
+		e := eventFor(s, "result")
+		e.Stack = s.Stack
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(raw, "RUN", s.Workflow.ActiveRun)), &e.Result); err != nil {
+			t.Fatal(err)
+		}
+		p, err := Next("testdata", s, e)
+		return p.Snapshot, err
+	}
+	stack := `[{"branch":"feature","parent":"main","head":"a","base":"b"}]`
+
+	qa, err := submit(workflowState(), "qa", `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":`+stack+`,"output_heads":`+stack+`,"findings":[],"evidence":{"status":"pass","heads":`+stack+`,"recipe_digest":"recipe","at":"2026-11-20T19:00:00Z","checks":["flows: create and exclude pass"]}}`)
+	if err != nil || qa.Stage != "pr" || !slices.Contains(qa.Evidence.QA.Notes, "check: flows: create and exclude pass") {
+		t.Fatalf("QA's string checks were refused (%v) or lost; want them kept as notes and QA passed", err)
+	}
+
+	before := workflowState()
+	before.Stack, before.StartCommit, before.Workflow.CommentsAsked = nil, "ca0664f1becdebb7dd034aed08bf53c139617c7d", true
+	analyst := `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":["SHA"],"output_heads":["SHA"],"findings":[],"evidence":{"status":"pass","heads":["SHA"]}}`
+	if s, err := submit(before, "requirements", strings.ReplaceAll(analyst, "SHA", "ca0664f")); err != nil || s.Workflow.Gate != "requirements" {
+		t.Fatalf("the analyst's start-commit heads before any stack were refused: %v", err)
+	}
+	if _, err := submit(before, "requirements", strings.ReplaceAll(analyst, "SHA", "5ed087e")); err == nil || !strings.Contains(err.Error(), "must list stack branches") {
+		t.Fatalf("a commit other than the start commit was accepted as heads: %v", err)
+	}
+
+	engineer := `{"schema_version":2,"run_id":"RUN","status":"done","input_heads":` + stack + `,"output_heads":` + stack + `,"findings":[],"evidence":{"status":"pass","heads":` + stack + `,"recipe_digest":"recipe","at":"2026-11-20T19:00:00Z","checks":["build","lint","test"]}}`
+	if _, err := submit(workflowState(), "implement", engineer); err == nil || err.Error() != "implementation needs current successful build, lint and test evidence" {
+		t.Fatalf("an implementation with check names instead of evidence got %v; want its exact rejection", err)
+	}
+}
+
+func TestWorkTheDeveloperAddsAfterHandoffGetsItsOwnCorrectionBudget(t *testing.T) {
+	s := offeredHandoff(t)
+	s.PipelineStages = state.StageKeys
+	s.Loops.Used[QALoop] = s.Limits.QAFixRounds
+	keepGoing := eventFor(s, "continue")
+	keepGoing.ItemID, keepGoing.ArtifactRevision, keepGoing.Answer, keepGoing.Receipt = s.Attention[0].ID, s.Attention[0].Revision, "also run a Figma pass", "conversation:7"
+	s = complete(t, complete(t, step(t, s, keepGoing)))
+	if s.Stage != "qa" {
+		t.Fatalf("the follow-up reached %s; want QA", s.Stage)
+	}
+	s = complete(t, s, state.Finding{ID: "fid-rail", Stage: "qa", Severity: "major", Disposition: "open", Description: "rail is 64 px wide, frame is 240 px"})
+	if s.Stage != "implement" || slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "cap" }) {
+		t.Fatalf("QA findings on the developer's follow-up gave stage %s and items %+v; want the engineer, not the earlier work's tripped qa_fix cap", s.Stage, s.OpenAttention())
+	}
+	if !slices.ContainsFunc(s.History, func(h state.HistoryEntry) bool {
+		return h.Event == "request" && strings.HasPrefix(h.Detail, "request 1:") && strings.Contains(h.Detail, "qa_fix 3/3")
+	}) {
+		t.Fatalf("history %+v does not show which budget the follow-up started from", s.History)
+	}
+
+	asking := workflowState()
+	asking.Stages["implement"] = state.Stage{Status: "done", Rounds: 1}
+	asking.Loops.Used[QALoop] = asking.Limits.QAFixRounds
+	asking.Attention = []state.Attention{{ID: "ci-question", Kind: "question", StageKey: "pr", Questions: []string{"Why are the PRs drafts?"}, CreatedAt: eventFor(asking, "answers").At}}
+	figmaPass := eventFor(asking, "answers")
+	figmaPass.ItemID, figmaPass.Answer, figmaPass.Receipt, figmaPass.NewRequest = "ci-question", "also run a Figma pass", "conversation:8", true
+	if answered := step(t, asking, figmaPass); answered.Loops.Request != 1 || answered.Loops.Used[QALoop] != 0 {
+		t.Fatalf("an answer that sends new work left request %d with qa_fix %d used; want a new request counting from zero", answered.Loops.Request, answered.Loops.Used[QALoop])
+	}
+	asking.Stages["implement"] = state.Stage{}
+	if _, err := Next("testdata", asking, figmaPass); err == nil {
+		t.Fatal("new_request was accepted before implementation started")
+	}
+}
+
+func TestTurningCommentsOnAtHandoffSendsThePRStageBackToHandleThem(t *testing.T) {
+	s := offeredHandoff(t)
+	s.Workflow.CommentsAsked = true
+	turnOn := func(s state.State) Event {
+		on := eventFor(s, "comments_start")
+		on.Answer, on.Receipt = "on", "/factory comments on at 2026-11-21T10:00:00Z"
+		return on
+	}
+	done := confirmed(t, s)
+	if _, err := Next("testdata", done, turnOn(done)); err == nil || !strings.Contains(err.Error(), "done") {
+		t.Fatalf("turning comments on for a factory already marked done gave %v; want it refused", err)
+	}
+	watching := step(t, s, turnOn(s))
+	if !watching.WatchComments || watching.Stage != "pr" || watching.Workflow.ActiveRun == "" || slices.ContainsFunc(watching.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" }) {
+		t.Fatalf("turning comments on at handoff left watch %v, stage %s, items %+v; want the handoff withdrawn and the PR stage handling comments", watching.WatchComments, watching.Stage, watching.OpenAttention())
+	}
+	observed := eventFor(watching, "observe")
+	observed.Stack, observed.PRs, observed.Observations = watching.Stack, watching.PRs, watching.Evidence.PRs
+	observed.Comments = &state.Verification{Status: "pass", Heads: watching.Stack, RecipeDigest: watching.Recipe.Digest, At: observed.At}
+	if after := step(t, watching, observed); after.Evidence.Comments.Status != "pass" {
+		t.Fatal("the comment evidence of a factory that turned comments on was not recorded")
+	}
+
+	publishing := offeredHandoff(t)
+	publishing.Workflow.CommentsAsked = true
+	withdrawHandoff(&publishing, eventFor(publishing, "observe").At)
+	if err := dispatch(&publishing, eventFor(publishing, "observe"), "pr"); err != nil {
+		t.Fatal(err)
+	}
+	publishing = step(t, publishing, turnOn(publishing))
+	again := complete(t, publishing)
+	if again.Stage != "pr" || again.Workflow.ActiveRun == publishing.Workflow.ActiveRun || again.Workflow.ActiveRun == "" {
+		t.Fatalf("the pr run that was active when comments were turned on gave run %q; want one more pr run to handle them", again.Workflow.ActiveRun)
+	}
+	unhandled := eventFor(again, "result")
+	unhandled.Stack = again.Stack
+	unhandled.Result = &Result{SchemaVersion: 2, RunID: again.Workflow.ActiveRun, Status: "done", InputHeads: again.Stack, OutputHeads: again.Stack, Evidence: passed(again)}
+	if _, err := Next("testdata", again, unhandled); err == nil || !strings.Contains(err.Error(), "comments have not been handled") {
+		t.Fatalf("a pr run that started with comments on and left them unhandled gave %v; want it refused, not another free pr run", err)
 	}
 }

@@ -82,7 +82,28 @@ const (
 	ActPermission = "permission"
 	ActPrompt     = "prompt"
 	ActDismiss    = "dismiss"
+	ActComments   = "comments"
 )
+
+func CommentsCommand(option string) string {
+	return "/factory comments " + option
+}
+
+func CanToggleComments(it Item) bool {
+	return commentsApply(it) && CommentsBlocked(it) == ""
+}
+
+func CommentsBlocked(it Item) string {
+	if !commentsApply(it) {
+		return ""
+	}
+	return Unqueueable(supervisorTarget(it))
+}
+
+func commentsApply(it Item) bool {
+	f := it.Factory
+	return f.State != nil && !f.Archived() && !f.State.Done()
+}
 
 const MaxMessageRunes = 4000
 

@@ -179,3 +179,28 @@ func TestSupervisorCommitRejectsStaleProposalsAndPreservesMetadata(t *testing.T)
 		t.Fatalf("stale commit accepted: %s", out)
 	}
 }
+
+func TestTheDesignFidelityContractStaysInTheBundledInstructions(t *testing.T) {
+	cases := []struct {
+		file    string
+		phrases []string
+	}{
+		{"skills/qa-factory/SKILL.md", []string{"Phase 3b — Design fidelity", "mcp__chrome-devtools__", "more than 2 px", "3 px is major, 2 px is not", "centred instead of full width", "filled versus stroked marks", "F-fid-<screen>-<ref>-<viewport>", "\n## Design fidelity\n"}},
+		{"agents/factory-qa.md", []string{"Design fidelity", "design/reference/map.md"}},
+		{"agents/factory-architect.md", []string{"design/reference/map.md", "Figma tools are missing or unauthorized", "return `blocked`"}},
+		{"agents/factory-designer.md", []string{"factory review capture", "design/reference/map.md", "return `blocked`"}},
+		{"agents/factory-engineer.md", []string{"data.design_map"}},
+		{"skills/requirements-interview/SKILL.md", []string{"## Design references"}},
+	}
+	for _, c := range cases {
+		data, err := fs.ReadFile(Files, c.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, phrase := range c.phrases {
+			if !bytes.Contains(data, []byte(phrase)) {
+				t.Errorf("%s no longer says %q; without it, QA can pass a UI that drifted from the approved design", c.file, phrase)
+			}
+		}
+	}
+}

@@ -1,13 +1,17 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/afonsodelgado/factory/internal/factory"
 	"github.com/afonsodelgado/factory/internal/review"
@@ -17,17 +21,19 @@ import (
 const reviewWait = 10 * time.Second
 
 type ReviewRequest struct {
-	Action  string `json:"action"`
-	URL     string `json:"url,omitempty"`
-	ID      string `json:"id,omitempty"`
-	Token   string `json:"token,omitempty"`
-	Cwd     string `json:"cwd,omitempty"`
-	Factory string `json:"factory,omitempty"`
-	Page    string `json:"page,omitempty"`
-	Thread  string `json:"thread,omitempty"`
-	Text    string `json:"text,omitempty"`
-	Resolve bool   `json:"resolve,omitempty"`
-	Gate    string `json:"gate,omitempty"`
+	Action  string                 `json:"action"`
+	URL     string                 `json:"url,omitempty"`
+	ID      string                 `json:"id,omitempty"`
+	Token   string                 `json:"token,omitempty"`
+	Cwd     string                 `json:"cwd,omitempty"`
+	Factory string                 `json:"factory,omitempty"`
+	Page    string                 `json:"page,omitempty"`
+	Thread  string                 `json:"thread,omitempty"`
+	Text    string                 `json:"text,omitempty"`
+	Resolve bool                   `json:"resolve,omitempty"`
+	Gate    string                 `json:"gate,omitempty"`
+	Capture *review.CaptureRequest `json:"capture,omitempty"`
+	Run     string                 `json:"run,omitempty"`
 }
 
 type ReviewReply struct {
@@ -38,6 +44,21 @@ type ReviewReply struct {
 	Owner   string          `json:"owner,omitempty"`
 	Threads []review.Thread `json:"threads,omitempty"`
 	Stack   *StackStatus    `json:"stack,omitempty"`
+	Capture *CaptureStatus  `json:"capture,omitempty"`
+}
+
+const (
+	CaptureRunning = "running"
+	CaptureDone    = "done"
+	CaptureFailed  = "failed"
+)
+
+type CaptureStatus struct {
+	Factory string               `json:"factory"`
+	Run     string               `json:"run"`
+	State   string               `json:"state"`
+	Result  review.CaptureResult `json:"result"`
+	Reason  string               `json:"reason,omitempty"`
 }
 
 func ReviewActions(events chan<- Event) func(review.Action) (any, error) {
@@ -94,6 +115,10 @@ func (m *Runtime) Review(r ReviewRequest) (ReviewReply, error) {
 		return m.startStack(it, r.Page)
 	case "stack-status":
 		return m.stackStatus(it)
+	case "capture":
+		return m.startCapture(it, r.Capture)
+	case "capture-status":
+		return m.captureStatus(it, r.Run)
 	}
 	return ReviewReply{}, fmt.Errorf("unknown review action %q", r.Action)
 }
@@ -277,4 +302,69 @@ func (m *Runtime) SyncReview() {
 		factories = append(factories, ReviewFactory(it))
 	}
 	m.Pages.SetFactories(factories)
+}
+
+func (m *Runtime) startCapture(it Item, r *review.CaptureRequest) (ReviewReply, error) {
+	switch {
+	case m.Capture == nil || m.Jobs == nil:
+		return ReviewReply{}, errors.New("design capture runs only inside factory node run")
+	case r == nil || len(r.Screens) == 0 || len(r.Viewports) == 0:
+		return ReviewReply{}, errors.New("name the source, at least one --screen and a viewport")
+	case m.captures[it.Factory.Key()].State == CaptureRunning:
+		return ReviewReply{}, fmt.Errorf("a design capture is already running for %s; wait for it to finish, then capture again", it.Factory.Label())
+	}
+	req := *r
+	req.Dir = it.Factory.Dir
+	if req.Source == review.Prototype {
+		page, err := m.prototypePage(it, req.URL)
+		if err != nil {
+			return ReviewReply{}, err
+		}
+		req.URL, req.Entry = page, filepath.Join(it.Factory.Worktree, filepath.FromSlash(req.Entry))
+	}
+	key := it.Factory.Key()
+	status := CaptureStatus{Factory: key, Run: uuid.NewString(), State: CaptureRunning}
+	m.captures[key] = status
+	capture := m.Capture
+	m.Jobs.Start("capture "+key, func(ctx context.Context) Message {
+		done := CaptureStatus{Factory: key, Run: status.Run, State: CaptureDone}
+		result, err := capture(ctx, req)
+		if err != nil {
+			done.State, done.Reason = CaptureFailed, err.Error()
+		}
+		done.Result = result
+		data, _ := json.Marshal(done)
+		return Message{T: "capture", Data: data}
+	})
+	return ReviewReply{Capture: &status}, nil
+}
+
+func (m *Runtime) prototypePage(it Item, route string) (string, error) {
+	stack, ok := m.reviewStack(it.Factory.Key())
+	if !ok || stack.State != StackReady || stack.App == "" {
+		return "", fmt.Errorf("%s has no running prototype; start it with factory review stack --for design, then capture again", it.Factory.Label())
+	}
+	app, err := url.Parse(stack.App)
+	if err != nil {
+		return "", err
+	}
+	page, err := url.Parse(route)
+	if err != nil || route == "" || page.IsAbs() {
+		return "", fmt.Errorf("--route %q must be the prototype page's path on the app, such as /prototypes/%s/variant-a.html", route, it.Factory.Label())
+	}
+	return app.ResolveReference(page).String(), nil
+}
+
+func (m *Runtime) captureStatus(it Item, run string) (ReviewReply, error) {
+	status, ok := m.captures[it.Factory.Key()]
+	if !ok || status.Run != run {
+		return ReviewReply{}, errors.New("this design capture is no longer known to the node, which restarted or ran a later one; capture again")
+	}
+	return ReviewReply{Capture: &status}, nil
+}
+
+func (m *Runtime) captureFinished(c CaptureStatus) {
+	if m.captures[c.Factory].Run == c.Run {
+		m.captures[c.Factory] = c
+	}
 }

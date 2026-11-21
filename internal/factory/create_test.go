@@ -77,7 +77,7 @@ func TestStagesGetTheMainCheckoutsIgnoredEnvFilesWithoutOverwritingTheWorktrees(
 	gitRun(t, repo, "init", "-q")
 	writeFile(t, filepath.Join(repo, ".gitignore"), ".env*\nnode_modules/\n")
 	writeFile(t, filepath.Join(repo, "apps", "server", ".env"), "OPENROUTER_API_KEY=main\n")
-	writeFile(t, filepath.Join(repo, ".env.local"), "PORT=main\n")
+	writeFile(t, filepath.Join(repo, ".env.local"), "PORT=main\nOPENROUTER_API_KEY=stale\nexport OPENROUTER_API_KEY=main\nCERT=\"-----BEGIN\nab=cd\n-----END\"\n")
 	writeFile(t, filepath.Join(repo, "node_modules", "pkg", ".env"), "VENDORED=1\n")
 	worktree := filepath.Join(WorktreesDir(repo), "evals")
 	writeFile(t, filepath.Join(worktree, ".env.local"), "PORT=worktree\n")
@@ -88,8 +88,8 @@ func TestStagesGetTheMainCheckoutsIgnoredEnvFilesWithoutOverwritingTheWorktrees(
 	if got, _ := os.ReadFile(filepath.Join(worktree, "apps", "server", ".env")); string(got) != "OPENROUTER_API_KEY=main\n" {
 		t.Errorf("the worktree's apps/server/.env reads %q; QA cannot reach keys the main checkout has", got)
 	}
-	if got, _ := os.ReadFile(filepath.Join(worktree, ".env.local")); string(got) != "PORT=worktree\n" {
-		t.Errorf("copying overwrote the worktree's own env file with %q", got)
+	if got, _ := os.ReadFile(filepath.Join(worktree, ".env.local")); string(got) != "PORT=worktree\nexport OPENROUTER_API_KEY=main\nCERT=\"-----BEGIN\nab=cd\n-----END\"\n" {
+		t.Errorf("the worktree's stale .env.local reads %q; it must keep its own values and gain the keys only the main checkout has", got)
 	}
 	if nested, _ := filepath.Glob(filepath.Join(worktree, ".claude", "*")); len(nested) > 0 {
 		t.Errorf("copying reached into the worktrees directory and made %v", nested)

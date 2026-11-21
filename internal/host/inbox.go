@@ -119,7 +119,7 @@ func (m *Runtime) QueueInbox() {
 		if browserStarting {
 			checked.Stage = nil
 		}
-		for _, msg := range InboxMessages(m.Config.StateDir, checked, ReadDelivered(record), m.Now()) {
+		for _, msg := range InboxMessages(m.Config.StateDir, checked, deliveredFor(m.Config.StateDir, it, record), m.Now()) {
 			if m.inboxQueued[msg.Key] {
 				continue
 			}
@@ -137,16 +137,16 @@ const lostSuffix = ".lost"
 func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) []InboxMessage {
 	var messages []InboxMessage
 	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
-	for _, run := range runs.Runs {
-		if run.Finished() && !slices.Contains(delivered, run.Result) {
-			messages = append(messages, InboxMessage{Key: run.Result, Text: "stage " + run.Role + " done: " + run.Result})
+	for _, run := range latestAttempts(runs.Runs) {
+		if key := doneKey(run); run.Finished() && !slices.Contains(delivered, key) {
+			messages = append(messages, InboxMessage{Key: key, Text: "stage " + run.Role + " done: " + run.Result})
 		}
 	}
 	if lost := it.Discovery; lost.Lost(now) && !slices.Contains(delivered, lost.Run.Result+lostSuffix) {
 		messages = append(messages, InboxMessage{Key: lost.Run.Result + lostSuffix, Text: "stage discoverer lost: it stopped or its pane closed without writing " + lost.Run.Result + "; run factory stage discover again"})
 	}
-	if lost := it.Stage; awaited(it, lost) && lost.Lost(now) && !slices.Contains(delivered, lost.Run.Token+lostSuffix) {
-		messages = append(messages, InboxMessage{Key: lost.Run.Token + lostSuffix, Text: "stage " + lost.Run.Role + " lost: it stopped or its pane closed without writing " + lost.Run.Result + "; reconcile it as a lost run"})
+	if lost := it.Stage; awaited(it, lost) && lost.Lost(now) && !slices.Contains(delivered, lostKey(lost.Run)) {
+		messages = append(messages, InboxMessage{Key: lostKey(lost.Run), Text: "stage " + lost.Run.Role + " lost: it stopped or its pane closed without writing " + lost.Run.Result + "; reconcile it as a lost run"})
 	}
 	files, _ := filepath.Glob(filepath.Join(it.Factory.Dir, "inbox", "*.json"))
 	sort.Strings(files)
@@ -161,6 +161,49 @@ func InboxMessages(stateDir string, it Item, delivered []string, now time.Time) 
 		messages = append(messages, InboxMessage{Key: file, Text: note.Text})
 	}
 	return messages
+}
+
+func latestAttempts(runs []state.StageRun) []state.StageRun {
+	var latest []state.StageRun
+	for _, run := range slices.Backward(runs) {
+		if !slices.ContainsFunc(latest, func(seen state.StageRun) bool { return seen.ID == run.ID && seen.Result == run.Result }) {
+			latest = append(latest, run)
+		}
+	}
+	slices.Reverse(latest)
+	return latest
+}
+
+func doneKey(run state.StageRun) string {
+	return fmt.Sprintf("%s#attempt-%d", run.Result, run.Attempt)
+}
+
+func deliveredFor(stateDir string, it Item, record string) []string {
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, it.Factory.Repo, it.Factory.Slug))
+	delivered := ReadDelivered(record)
+	upgraded := upgradeDelivered(delivered, latestAttempts(runs.Runs))
+	if !slices.Equal(upgraded, delivered) {
+		saveDelivered(record, upgraded)
+	}
+	return upgraded
+}
+
+func upgradeDelivered(delivered []string, latest []state.StageRun) []string {
+	var upgraded []string
+	for _, key := range delivered {
+		i := slices.IndexFunc(latest, func(run state.StageRun) bool { return run.Result == key })
+		switch {
+		case i < 0:
+			upgraded = append(upgraded, key)
+		case latest[i].Finished():
+			upgraded = append(upgraded, doneKey(latest[i]))
+		}
+	}
+	return upgraded
+}
+
+func lostKey(run state.StageRun) string {
+	return run.Token + "/" + filepath.Base(run.Result) + lostSuffix
 }
 
 func awaited(it Item, stage *StageView) bool {
@@ -180,7 +223,10 @@ func ReadDelivered(path string) []string {
 }
 
 func MarkDelivered(path, key string) {
-	keys := append(ReadDelivered(path), key)
+	saveDelivered(path, append(ReadDelivered(path), key))
+}
+
+func saveDelivered(path string, keys []string) {
 	data, err := json.Marshal(keys)
 	if err != nil || os.MkdirAll(filepath.Dir(path), 0o755) != nil {
 		return

@@ -29,6 +29,7 @@ var popupSizes = map[string][2]int{
 	"settings": {88, 30},
 	"switch":   {112, 14},
 	"pause":    {68, 9},
+	"comments": {68, 9},
 	"archive":  {80, 12},
 	"delete":   {84, 14},
 	"keys":     {124, 17},
@@ -42,6 +43,7 @@ var popupTitles = map[string]string{
 	"settings": " " + dialog.SettingsTitle() + " ",
 	"switch":   " ⌕ Factories ",
 	"pause":    " ‖ Pause ",
+	"comments": " ✎ Review comments ",
 	"archive":  " ▭ Archive ",
 	"delete":   " ✕ Delete ",
 	"keys":     " Keys ",
@@ -106,8 +108,12 @@ func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
 	delete(m.dialogs, msg.kind)
 	next := m.dialogNext
 	m.dialogNext = nil
+	refusalShown := m.dialogRefused == msg.kind
+	m.dialogRefused = ""
 	if msg.err != nil {
-		m.notice = problem(msg.err.Error())
+		if !refusalShown {
+			m.notice = problem(msg.err.Error())
+		}
 		return nil
 	}
 	if next == nil {
@@ -187,6 +193,11 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 		if err = json.Unmarshal(e.Data, &r); err == nil {
 			err = m.pause(r.Key)
 		}
+	case "comments":
+		var r dialog.CommentsResult
+		if err = json.Unmarshal(e.Data, &r); err == nil {
+			err = m.toggleComments(r)
+		}
 	case "archive":
 		var r dialog.ArchiveResult
 		if err = json.Unmarshal(e.Data, &r); err == nil {
@@ -202,6 +213,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error()}
 		m.notice = problem(err.Error())
+		m.dialogRefused = kind
 	}
 	e.Respond(reply)
 	return tea.Batch(cmd, m.load())

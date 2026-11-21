@@ -123,13 +123,17 @@ func (m *Runtime) Stage(r StageRequest) (StageReply, error) {
 		if _, ok := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, previous.Token)); ok {
 			live = true
 		}
-		if previous.Finished() || live {
+		if previous.Finished() {
 			return StageReply{Result: previous.Result}, nil
 		}
-		if active.Retries <= previous.Attempt {
-			return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
+		lostRunRetried := active.Retries > previous.Attempt
+		if lostRunRetried {
+			break
 		}
-		break
+		if live {
+			return StageReply{Result: previous.Result}, nil
+		}
+		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 	}
 	if effect == nil {
 		return StageReply{}, errors.New("acknowledged dispatch has no receipt; reconcile before retrying")
@@ -323,7 +327,7 @@ func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageRe
 	if !ok || latest.ID != r.EffectID {
 		return StageReply{}, fmt.Errorf("no %s run of %s to re-ask; start it with factory stage start", r.Role, r.EffectID)
 	}
-	if !latest.Finished() {
+	if _, err := os.Stat(latest.Result); err != nil {
 		if _, live := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, latest.Token)); live {
 			return StageReply{Result: latest.Result}, nil
 		}
@@ -341,12 +345,13 @@ func (m *Runtime) sendStage(it Item, runs *state.StageRuns, r StageRequest, resu
 	if !ok {
 		return StageReply{}, fmt.Errorf("no %s stage has run in %s; start one with factory stage start", r.Role, it.Factory.Label())
 	}
-	if _, browses := m.browsesForQA(it, r.Role); browses && m.leases[it.Factory.Key()].Token != latest.Token {
+	reask := result != ""
+	if _, browses := m.browsesForQA(it, r.Role); browses && !reask && m.leases[it.Factory.Key()].Token != latest.Token {
 		return StageReply{}, errBrowserGone
 	}
 	run := m.NewRun(it, runs, r.Role, latest.Setting, latest.Token)
 	run.Prompt = strings.TrimSuffix(run.Prompt, ".prompt.md") + ".message.md"
-	if result != "" {
+	if reask {
 		run.Result = result
 		runs.Runs = slices.DeleteFunc(runs.Runs, func(old state.StageRun) bool { return old.ID == run.ID && old.Attempt == run.Attempt })
 	}
@@ -355,6 +360,11 @@ func (m *Runtime) sendStage(it Item, runs *state.StageRuns, r StageRequest, resu
 	}
 	if _, err := m.Record(it, runs, run, "recorded intent for"); err != nil {
 		return StageReply{}, err
+	}
+	if reask {
+		if err := os.Rename(latest.Result, strings.TrimSuffix(latest.Result, ".result.json")+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
+			return StageReply{}, err
+		}
 	}
 	kickoff := KickoffFor(run)
 	if pane, alive := LiveStagePane(stagePaneOf(m.currentPanes(), it.Factory, r.Role, run.Token)); alive {

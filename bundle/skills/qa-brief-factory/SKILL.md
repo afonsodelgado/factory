@@ -36,6 +36,11 @@ doors to the same action that may not share the gate.
 The QA mode from the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`), and what the environment needs: flags,
 migrations, seed data, principals, stub tools, terminal sizes, environment variables. With browser QA, the node starts the stack unattended from the repo config's `qa.start` and `qa.health`, plus `qa.seed` and `qa.sign_in` when they are set, and drives a headless Chrome nobody can type into, so name every untracked file or secret the stack needs and anything those commands do not cover. When `qa.sign_in` is blank, QA signs up or logs in through the app on the local stack: name the documented test credentials or environment variables it can use, and any step it cannot pass unattended, such as an emailed code.
 
+## Design map
+Only when the factory has `design/reference/map.md`: one row per screen and state
+built or changed, with its reference id, the viewports implemented and any deliberate
+difference with its reason. QA files a minor finding for a mapped screen missing here.
+
 ## Out of scope
 Known gaps deliberately left for later, so they aren't reported as bugs.
 ```

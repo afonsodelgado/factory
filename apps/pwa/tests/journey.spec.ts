@@ -28,13 +28,20 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
     factory("invoice-pdf", [gate()], {
       needs_since: new Date(Date.now() - 30 * 60_000).toISOString(),
     }),
-    factory("search-typos", []),
-    factory("rate-limits", [
+    factory("search-typos", [], { can_toggle_comments: true }),
+    factory(
+      "rate-limits",
+      [
+        {
+          ...gate("k-busy-gate"),
+          send: { ready: false, reason: "rate-limits is not at its prompt." },
+        },
+      ],
       {
-        ...gate("k-busy-gate"),
-        send: { ready: false, reason: "rate-limits is not at its prompt." },
+        comments_blocked:
+          "rate-limits is in copy mode. Press q in the session, then send again.",
       },
-    ]),
+    ),
   ]);
 
   await page.goto("/");
@@ -71,6 +78,11 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await page.goto("/f/shop-1a2b-rate-limits/i/k-busy-gate");
   await page.getByRole("button", { name: "Dismiss, send nothing" }).click();
   await expect(page.getByText("Dismissed.")).toBeVisible();
+  await page.goto("/f/shop-1a2b-rate-limits");
+  await expect(
+    page.getByRole("button", { name: "Watch review comments" }),
+  ).toBeDisabled();
+  await expect(page.getByText(/is in copy mode\. Press q/)).toBeVisible();
 
   await server.set({ nextStatus: "sending" });
   await page.goto("/f/shop-1a2b-search-typos/message");
@@ -85,6 +97,7 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   await server.reply("Stage qa, round 2 of 3.\nWaiting on CI.");
   await expect(page.getByText(/^Supervisor replied/)).toBeVisible();
   await expect(page.getByText(/Waiting on CI\.$/)).toBeVisible();
+  await page.getByRole("button", { name: "Watch review comments" }).click();
 
   await page.getByRole("link", { name: /Pages/ }).click();
   const intro = await page.getByText("Design and plan pages.").boundingBox();
@@ -94,11 +107,14 @@ test("the owner answers, approves and messages, goes read-only offline, then ano
   expect(firstPage!.y - intro!.y).toBeLessThan(200);
 
   const actions = (await server.state()).actions;
-  expect(actions.map((a) => [a.action, a.answers ?? a.text])).toEqual([
+  expect(
+    actions.map((a) => [a.action, a.answers ?? a.text ?? a.option]),
+  ).toEqual([
     ["answer", ["Comma", "No"]],
     ["approve", "ship it"],
     ["dismiss", undefined],
     ["message", "/factory status"],
+    ["comments", "on"],
   ]);
 
   await context.setOffline(true);

@@ -53,6 +53,10 @@ func Next(dir string, snapshot state.State, event Event) (Proposal, error) {
 }
 
 func apply(s *state.State, e Event, dir string) error {
+	implemented := s.Stages["implement"].Rounds > 0
+	if e.NewRequest && (e.Kind != "answers" || !implemented) {
+		return errors.New("new_request applies only to an answer that sends new work after implementation has started")
+	}
 	switch e.Kind {
 	case "checkpoint":
 		if e.Checkpoint == nil || e.Checkpoint.Operation == "" || e.Receipt == "" || !slices.Contains([]string{state.CheckpointReady, state.CheckpointRefused}, e.Checkpoint.Status) {
@@ -142,6 +146,21 @@ func apply(s *state.State, e Event, dir string) error {
 		}
 		s.WatchComments, s.Workflow.CommentsAsked = e.WatchComments, true
 		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
+	case "comments_start":
+		switch {
+		case !s.Workflow.CommentsAsked || e.Receipt == "" || e.Answer == "":
+			return errors.New("turning comments on needs the developer's answer and receipt after the comments preference")
+		case s.Done():
+			return errors.New("this factory is done; continue it from the handoff first")
+		}
+		s.WatchComments, s.Evidence.CommentsStopped = true, false
+		s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: e.Kind, Detail: e.Answer + " (receipt: " + e.Receipt + ")"})
+		offered := slices.ContainsFunc(s.OpenAttention(), func(a state.Attention) bool { return a.Kind == "handoff" })
+		idle := s.Workflow.ActiveRun == "" && s.Workflow.Pending == nil
+		if offered && idle {
+			withdrawHandoff(s, e.At)
+			return dispatch(s, e, "pr")
+		}
 	case "comments_stop":
 		if e.Receipt == "" || e.Answer == "" {
 			return errors.New("stopping comments needs a developer answer")
@@ -308,6 +327,9 @@ func result(s *state.State, e Event, dir string) error {
 		return errors.New("result does not match active run")
 	}
 	run := &s.Workflow.Runs[len(s.Workflow.Runs)-1]
+	if err := resolveCommitHeads(s, *run, r); err != nil {
+		return err
+	}
 	if !SameHeads(r.InputHeads, run.InputHeads) || !SameHeads(e.Stack, r.OutputHeads) {
 		return errors.New("result input or observed output heads do not match")
 	}
@@ -356,6 +378,10 @@ func result(s *state.State, e Event, dir string) error {
 		return nil
 	}
 	if r.Status != "done" {
+		if retriesAutomatically(s, *run, r) {
+			s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: stage, Event: "auto retry", RunID: run.ID, Role: run.Role, Round: run.Round, Detail: r.Summary})
+			return retry(s, e, stage)
+		}
 		attention(s, e, "failure", "Stage needs attention", failureBody(stage, r))
 		return nil
 	}
@@ -435,12 +461,55 @@ func result(s *state.State, e Event, dir string) error {
 			}
 			return dispatch(s, e, "review")
 		}
-		if reasons := Readiness(*s); len(reasons) > 0 {
+		reasons := Readiness(*s)
+		if slices.Equal(reasons, []string{commentsUnhandled}) && commentsTurnedOnDuring(s, *run) {
+			return dispatch(s, e, "pr")
+		}
+		if len(reasons) > 0 {
 			return fmt.Errorf("handoff is not ready: %s", strings.Join(reasons, "; "))
 		}
 		offerHandoff(s, e)
 	}
 	return nil
+}
+
+func commentsTurnedOnDuring(s *state.State, run state.WorkflowRun) bool {
+	dispatched := slices.IndexFunc(s.History, func(h state.HistoryEntry) bool { return h.Event == "dispatch" && h.RunID == run.ID })
+	return dispatched >= 0 && slices.ContainsFunc(s.History[dispatched+1:], func(h state.HistoryEntry) bool { return h.Event == "comments_start" })
+}
+
+func resolveCommitHeads(s *state.State, run state.WorkflowRun, r *Result) error {
+	fields := []struct {
+		name  string
+		shas  []string
+		heads *[]state.StackBranch
+	}{
+		{"input_heads", r.inputSHAs, &r.InputHeads},
+		{"output_heads", r.outputSHAs, &r.OutputHeads},
+		{"evidence.heads", r.evidenceSHAs, &r.Evidence.Heads},
+	}
+	noStackYet := len(s.Stack) == 0 && len(run.InputHeads) == 0
+	for _, field := range fields {
+		if field.shas == nil {
+			continue
+		}
+		if !noStackYet || slices.ContainsFunc(field.shas, func(sha string) bool { return !startCommit(s, sha) }) {
+			return fmt.Errorf("%s must list stack branches {branch,parent,head,base}; a commit SHA is accepted only before the stack exists, for the start commit", field.name)
+		}
+		*field.heads = []state.StackBranch{}
+		r.Evidence.Notes = append(r.Evidence.Notes, fmt.Sprintf("heads: %s named the start commit %s", field.name, s.StartCommit))
+	}
+	return nil
+}
+
+func startCommit(s *state.State, sha string) bool {
+	return len(sha) >= 7 && strings.HasPrefix(s.StartCommit, sha)
+}
+
+var opensItemAtOnce = []string{"setup", "npx_missing", "stack_start", "stack_health", "recipe_missing", "seed", "sign_in", "interactive_challenge", "uncertain_outcome"}
+
+func retriesAutomatically(s *state.State, run state.WorkflowRun, r *Result) bool {
+	return slices.Contains(recipeStages, run.Stage) && run.Retries < s.Limits.StageRetries && !slices.Contains(opensItemAtOnce, r.Data.Failure)
 }
 
 func reviewPages(dir, stage string, artifacts []state.Artifact) error {
@@ -611,6 +680,9 @@ func answer(s *state.State, e Event) error {
 		}
 		stage := a.StageKey
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		if e.NewRequest {
+			startRequest(s, e)
+		}
 		if e.Kind == "changes" {
 			s.Workflow.Gate = ""
 			invalidate(s, e.At)
@@ -692,6 +764,7 @@ func answer(s *state.State, e Event) error {
 			return nil
 		}
 		a.ResolvedAt, a.Answer, a.Receipt = e.At, e.Answer, e.Receipt
+		startRequest(s, e)
 		invalidate(s, e.At)
 		return dispatch(s, e, "implement")
 	}
@@ -720,6 +793,19 @@ func answer(s *state.State, e Event) error {
 		return dispatch(s, e, "implement")
 	}
 	return errors.New("unknown approval gate")
+}
+
+var requestLoops = []string{ReviewLoop, QALoop, CILoop}
+
+func startRequest(s *state.State, e Event) {
+	var used []string
+	for _, loop := range requestLoops {
+		used = append(used, fmt.Sprintf("%s %d/%d", loop, s.Loops.Used[loop], *allowance(s, loop)))
+		s.Loops.Used[loop] = 0
+	}
+	s.Loops.Request++
+	detail := fmt.Sprintf("request %d: review_fix, qa_fix and ci_fix count from zero (request %d used %s; receipt %s)", s.Loops.Request, s.Loops.Request-1, strings.Join(used, ", "), e.Receipt)
+	s.History = append(s.History, state.HistoryEntry{At: e.At, Stage: s.Stage, Event: "request", Detail: detail})
 }
 
 func invalidate(s *state.State, at state.Time) {

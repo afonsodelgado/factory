@@ -27,6 +27,10 @@ A comment remembers the element's CSS selector and its text. Help both survive y
 - Use real elements (`button`, `table`, `label`, `h2`) rather than nested `div`s, so the selector reads as what the developer clicked.
 - Do not rename or reorder sections between rounds unless a comment asks for it. A comment whose element disappears shows as detached.
 
+## Anchors for QA
+
+An approved design becomes the reference QA measures the shipped app against, screen by screen. Give each screen and each state its own section with a stable `id`, and mark every element QA should measure with `data-ref="<name>"`: the page container, navigation and rails, table headers and rows, dialogs and their footers, charts, cards and the main controls. `factory review capture` records the box and computed styles of each `data-ref` element, so an unmarked element is never compared.
+
 ## Answering comments
 
 A batch starts with `review-<id>-<n> comments: <page>` and lists each thread: its id, what it is (fix, change or question), the element and the developer's words.

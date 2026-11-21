@@ -133,6 +133,17 @@ type PauseContext struct {
 	FactoryDir string `json:"factory_dir"`
 }
 
+type CommentsContext struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	On    bool   `json:"on"`
+}
+
+type CommentsResult struct {
+	Key string `json:"key"`
+	On  bool   `json:"on"`
+}
+
 type ArchiveContext struct {
 	Key        string   `json:"key"`
 	Label      string   `json:"label"`
@@ -209,6 +220,10 @@ func New(kind string, context json.RawMessage, width, height int) (Dialog, bool)
 		var c PauseContext
 		json.Unmarshal(context, &c)
 		return &Pause{Context: c}, true
+	case "comments":
+		var c CommentsContext
+		json.Unmarshal(context, &c)
+		return &Comments{Context: c}, true
 	case "archive":
 		var c ArchiveContext
 		json.Unmarshal(context, &c)

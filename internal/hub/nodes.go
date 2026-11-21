@@ -385,14 +385,98 @@ func actionsOf(lf host.LocalFactory) string {
 }
 
 func lifecycleOn(ctx context.Context, client *node.Client, lf host.LocalFactory, action string) error {
+	return actOn(ctx, client, lf, node.ActionBody{Action: action})
+}
+
+func actOn(ctx context.Context, client *node.Client, lf host.LocalFactory, body node.ActionBody) error {
 	var receipt host.Receipt
-	body := node.ActionBody{Operation: uuid.NewString(), Incarnation: lf.Incarnation, Generation: lf.Generation, Action: action}
+	body.Operation, body.Incarnation, body.Generation = uuid.NewString(), lf.Incarnation, lf.Generation
 	if err := client.Do(ctx, http.MethodPost, actionsOf(lf), body, &receipt); err != nil {
 		return err
 	}
 	if receipt.Status == host.StatusRefused || receipt.Status == host.StatusStale {
 		return errors.New(receipt.Reason)
 	}
+	return nil
+}
+
+func (m *Model) askComments() tea.Cmd {
+	it, ok := m.selectedItem()
+	if !ok {
+		return nil
+	}
+	if it.Factory.Remote != nil {
+		if l, ok := m.nodeOf(it.Factory); ok && !l.snap.Supports(node.CanToggleComments) {
+			m.notice = problem(fmt.Sprintf("%s runs factory %s, which cannot change comment watching on a running factory. Nothing was sent.", l.short(), l.snap.Version))
+			return nil
+		}
+	}
+	watching, can, blocked := m.commentsToggle(it)
+	switch {
+	case m.unverified(it) != "":
+		m.notice = problem(heldUnchecked(it, m.unverified(it)))
+		return nil
+	case blocked != "":
+		m.notice = problem(blocked)
+		return nil
+	case !can:
+		m.notice = problem(it.Factory.Label() + " cannot change comment watching now: it needs a running factory, not done or archived, with its supervisor open.")
+		return nil
+	}
+	return m.openDialog("comments", dialog.CommentsContext{Key: it.Factory.Key(), Label: it.Factory.Label(), On: !watching})
+}
+
+func (m *Model) commentsToggle(it Item) (watching, can bool, blocked string) {
+	if it.Factory.Remote == nil {
+		return it.Factory.State != nil && it.Factory.State.WatchComments, host.CanToggleComments(it), host.CommentsBlocked(it)
+	}
+	lf := m.nodeFactories[it.Factory.Key()]
+	return lf.WatchComments, lf.CanToggleComments, lf.CommentsBlocked
+}
+
+func commentsOption(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
+func (m *Model) toggleComments(r dialog.CommentsResult) error {
+	it, ok := m.snap.Find(r.Key)
+	if !ok {
+		return fmt.Errorf("the hub does not list %s", r.Key)
+	}
+	option := commentsOption(r.On)
+	if it.Factory.Remote != nil {
+		return m.commentsOnNode(it, option)
+	}
+	var receipt host.Receipt
+	request := host.ActionRequest{Operation: uuid.NewString(), Source: host.SourceHub, Factory: it.Factory.Key(), Incarnation: host.Incarnation(it.Factory), Action: host.ActComments, Option: option}
+	if err := m.call("act", request.Operation, request, &receipt); err != nil {
+		return err
+	}
+	if receipt.Status == host.StatusRefused || receipt.Status == host.StatusStale {
+		return errors.New(receipt.Reason)
+	}
+	m.notice = news("Asked " + it.Factory.Label() + "'s supervisor to turn review comment watching " + option + ".")
+	return nil
+}
+
+func (m *Model) commentsOnNode(it Item, option string) error {
+	f := it.Factory
+	l, ok := m.nodeOf(f)
+	if !ok || l.state(m.Now()) != connected {
+		return fmt.Errorf("%s is unreachable, so comment watching on %s did not change. Nothing was sent.", f.Remote.Name, f.Label())
+	}
+	lf, client, short, label := m.nodeFactories[f.Key()], m.peer(l.member.Name), l.short(), f.Label()
+	m.later = append(m.later, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), remoteWait)
+		defer cancel()
+		if err := actOn(ctx, client, lf, node.ActionBody{Action: host.ActComments, Option: option, Source: host.SourceHub}); err != nil {
+			return noticeMsg(problem(fmt.Sprintf("Comment watching on %s did not change on %s: %s", label, short, withFullStop(err.Error()))))
+		}
+		return noticeMsg(news(fmt.Sprintf("Asked %s's supervisor on %s to turn review comment watching %s.", label, short, option)))
+	})
 	return nil
 }
 

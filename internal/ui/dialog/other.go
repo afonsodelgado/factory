@@ -176,6 +176,51 @@ func (p *Pause) View() tea.View {
 	return view(c)
 }
 
+type Comments struct {
+	Context CommentsContext
+	size
+	result *CommentsResult
+}
+
+func (c *Comments) Init() tea.Cmd { return nil }
+
+func (c *Comments) Result() (any, bool) {
+	if c.result == nil {
+		return nil, false
+	}
+	return *c.result, true
+}
+
+func (c *Comments) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	c.resize(msg)
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "y":
+			c.result = &CommentsResult{Key: c.Context.Key, On: c.Context.On}
+			return c, tea.Quit
+		case "n", "esc", "ctrl+c", "enter":
+			return c, tea.Quit
+		}
+	}
+	return c, nil
+}
+
+func (c *Comments) View() tea.View {
+	canvas := theme.NewCanvas(c.width, c.height)
+	question, effect, verb := "Stop watching review comments on "+c.Context.Label+"?", "Reviewer threads go back to you; the supervisor records what is left.", "stop watching"
+	if c.Context.On {
+		question, effect, verb = "Watch review comments on "+c.Context.Label+"?", "The PR stage fixes or answers CodeRabbit and reviewer threads without asking you per thread.", "watch"
+	}
+	y := 0
+	for _, l := range theme.Wrap(question+" "+effect, canvas.W-2) {
+		canvas.Put(1, y, l, theme.Text)
+		y++
+	}
+	line := []theme.Span{{Text: "y", Ink: theme.Key}, {Text: "  " + verb + "       ", Ink: theme.Text}, {Text: "n", Ink: theme.Key}, {Text: "  cancel, the default", Ink: theme.Text}}
+	canvas.Spans(max((canvas.W-theme.SpansWidth(line))/2, 1), canvas.H-1, line)
+	return view(canvas)
+}
+
 type Archive struct {
 	Context ArchiveContext
 	size
@@ -442,7 +487,7 @@ func (k *Keys) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 var keyColumns = [][][2]string{
 	{{"Factories", ""}, {"j/k", "move"}, {"1-9", "jump to row"}, {"/", "fuzzy find"}, {"g", "next needing you"}, {"⏎", "focus the session"}, {"i", "answer in the panel"}},
-	{{"Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"m", "move to a node"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
+	{{"Lifecycle", ""}, {"n", "new factory"}, {"w", "wake selected"}, {"W", "wake all asleep"}, {"p", "pause (asks first)"}, {"c", "review comments on/off"}, {"m", "move to a node"}, {"a", "archive (asks first)"}, {"d", "delete (asks first)"}, {"H", "show archived"}},
 	{{"Panel", ""}, {"tab", "next tab"}, {"[ ]", "item, without a form"}, {"ctrl+o", "open in browser"}, {"z", "fold or unfold"}, {"+/-", "taller or shorter"}, {"t", "Activity: all factories"}},
 	{{"Anywhere", ""}, {"M-0", "back to factories"}, {"esc", "back to factories"}, {"q", "quit the UI only"}, {"N", "nodes and the phone app"}, {"P", "phone app setup"}, {"?", "these keys"}},
 }

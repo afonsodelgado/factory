@@ -189,6 +189,9 @@ func startNode(ctx context.Context, cfg *state.Config, owner string, ts node.Tai
 		Config: cfg, Loader: &host.Loader{Config: cfg, Registry: registry, TM: &tm, Now: time.Now}, TM: tm, Session: cfg.Hub.Session,
 		Pages: pages, Engine: panes, Typist: panes,
 		Jobs: &node.Jobs{Queue: queue, Ctx: ctx}, Browsers: browsers, Stacks: stacks, GitHub: &host.GitHub{Run: host.RunGH}, Machine: cfg.NodeName(),
+		Capture: func(ctx context.Context, r review.CaptureRequest) (review.CaptureResult, error) {
+			return review.Capture(ctx, cfg.Review.Chrome, browsers.NoSandbox, r)
+		},
 	})
 	go func() { n.stopped <- runtime.Run(ctx, queue.Events()) }()
 	nodes, err := nodeRoster(ctx, cfg, id, owner, ts)

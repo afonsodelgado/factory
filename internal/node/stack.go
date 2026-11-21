@@ -232,6 +232,7 @@ func (s *Stacks) outcome(run *liveStack, err error) host.StackStatus {
 	app, _ := url.Parse(run.recipe.URL)
 	status.Origin = s.origin(run.record)
 	status.URL = status.Origin + app.RequestURI()
+	status.App = run.recipe.URL
 	status.Href = "/w/" + url.PathEscape(run.record.Route)
 	status.SignedIn = !state.Unused(run.recipe.SignIn)
 	return status

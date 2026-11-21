@@ -18,6 +18,7 @@ import (
 
 	"github.com/afonsodelgado/factory/internal/catalog"
 	"github.com/afonsodelgado/factory/internal/factory"
+	"github.com/afonsodelgado/factory/internal/review"
 	"github.com/afonsodelgado/factory/internal/state"
 	"github.com/afonsodelgado/factory/internal/tmux"
 )
@@ -436,6 +437,7 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 		{"handled", act(ActHandled, "c1", nil, ""), "%1: c1 handled: settled outside the panel"},
 		{"mark a handoff done", act(ActHandled, "handoff-csv-1", nil, ""), "%1: handoff-csv-1 done: the developer marked this factory done"},
 		{"a message is typed as written", act(ActMessage, "", nil, "/factory status\n  and why?"), "%1: /factory status\n  and why?"},
+		{"turn comment watching on", func() ActionRequest { r := act(ActComments, "", nil, ""); r.Option = "on"; return r }(), "%1: /factory comments on"},
 		{"another incarnation is stale", func() ActionRequest { r := act(ActRetry, "fail-csv-qa", nil, ""); r.Incarnation = "old"; return r }(), ""},
 		{"a replaced item is stale", func() ActionRequest {
 			r := act(ActRetry, "fail-csv-qa", nil, "")
@@ -459,6 +461,14 @@ func TestPhoneActionsTypeExactlyWhatTheHubTypes(t *testing.T) {
 				t.Errorf("typed %q with %+v, %v; want %q: the phone must send the hub's exact text or nothing", got, receipt, err, c.typed)
 			}
 		})
+	}
+	fromHub := act(ActComments, "", nil, "")
+	fromHub.Option, fromHub.Source = "on", SourceHub
+	hubNode := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop", items...))
+	receipt, err := hubNode.Act(fromHub)
+	claimed, _ := hubNode.Claim(ClaimKey(fromHub.Factory, "comments-"+fromHub.Operation))
+	if err != nil || receipt.Source != SourceHub || claimed.Device != fromHub.Device {
+		t.Errorf("a hub's comments toggle was recorded with source %q and device %q; want source hub and the sender's device kept", receipt.Source, claimed.Device)
 	}
 	tooLong := act(ActMessage, "", nil, strings.Repeat("é", MaxMessageRunes+1))
 	if _, err := phoneRuntime(t.TempDir(), &paneTypist{}, phoneSnapshot("Stop")).Act(tooLong); err == nil {
@@ -1206,5 +1216,227 @@ func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
 	busy := DiscoveryStage(f, after, []tmux.Pane{pane}, []*state.HookFile{{Token: run.Token, Main: &stop, Last: state.HookEvent{Event: "SubagentStop", At: run.StartedAt.Add(25 * time.Minute)}}}, quiet)
 	if busy.Lost(run.StartedAt.Add(30 * time.Minute)) {
 		t.Fatal("a discoverer whose background work was still reporting 5 minutes ago counts as lost; want later hook activity respected")
+	}
+}
+
+func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReportedLost(t *testing.T) {
+	repo := t.TempDir()
+	if err := WriteFile(state.RepoConfigPath(repo), "qa:\n  mode: browser\n"); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(repo, "wt")
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(worktree, ".claude", "factory", "csv"), Worktree: worktree, State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	f.State.Workflow.ActiveRun = "csv-qa-1"
+	f.State.Workflow.Runs = []state.WorkflowRun{{ID: "csv-qa-1", Stage: "qa", Role: "qa", Round: 1, Prompt: "stages/csv-qa-1.prompt.md", Result: "stages/csv-qa-1.result.json"}}
+	rejected := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
+	token := uuid.NewString()
+	reask := StageRequest{Action: "send", Reask: true, Factory: "csv", EffectID: "csv-qa-1", Role: "qa", Text: "The engine rejected your result."}
+	rejectedRun := func(sessions ...string) (*Runtime, string) {
+		t.Helper()
+		os.RemoveAll(f.Dir)
+		if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"success"}`); err != nil {
+			t.Fatal(err)
+		}
+		stateDir := t.TempDir()
+		runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+		runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Role: "qa", Token: token, Result: rejected, StartedAt: time.Now().Add(-time.Hour)})
+		if err := runs.Save(); err != nil {
+			t.Fatal(err)
+		}
+		var hooks []*state.HookFile
+		for _, session := range sessions {
+			hooks = append(hooks, &state.HookFile{Token: token, SessionID: session})
+		}
+		r := New(Runtime{Config: &state.Config{StateDir: stateDir}, Engine: &wakingEngine{}, TM: tmux.Client{Socket: "host-test-" + uuid.NewString(), ConfigFile: "/dev/null"}})
+		r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}, Hooks: hooks})
+		return r, stateDir
+	}
+
+	unreachable, _ := rejectedRun()
+	if _, err := unreachable.Stage(reask); err == nil {
+		t.Fatal("a reask whose session is unknown reported success")
+	}
+	if _, err := os.Stat(rejected); err == nil {
+		t.Fatal("a failed reask put the rejected result back at the run's result path, where the retried run reads it as finished")
+	}
+
+	r, stateDir := rejectedRun("qa-session")
+	reasked, err := r.Stage(reask)
+	if err != nil || reasked.Result == rejected {
+		t.Fatalf("re-asking QA after its browser closed answered %+v, %v; want the session resumed for a corrected result", reasked, err)
+	}
+	if moved, _ := filepath.Glob(filepath.Join(f.Dir, "stages", "csv-qa-1.rejected-*.json")); len(moved) != 1 {
+		t.Fatalf("the rejected result was not moved aside: %v", moved)
+	}
+	after, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+	if latest, _ := after.Latest("qa"); latest.Result != reasked.Result {
+		t.Fatalf("the reask recorded %s; want its own run writing %s, so the rejected file is never read again", latest.Result, reasked.Result)
+	}
+
+	firstRunReportedLost := []string{token + "/csv-qa-1.result.json.lost"}
+	later := time.Now().Add(time.Hour)
+	messages := InboxMessages(stateDir, Item{Factory: f, Stage: RunningStage(f, after, nil, nil, 20*time.Minute)}, firstRunReportedLost, later)
+	if !slices.ContainsFunc(messages, func(m InboxMessage) bool { return strings.HasPrefix(m.Text, "stage qa lost:") }) {
+		t.Fatalf("a reask that wrote nothing sent %+v; want it reported lost so the supervisor reconciles it", messages)
+	}
+}
+
+func TestEachResultARunWritesIsAnnouncedOnceWhateverItsAttempts(t *testing.T) {
+	repo := t.TempDir()
+	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(repo, "wt", ".claude", "factory", "csv"), State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	result := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
+	attempt := func(n int) state.StageRun {
+		return state.StageRun{ID: "csv-qa-1", Attempt: n, Role: "qa", Result: result}
+	}
+	write := func(status string) {
+		t.Helper()
+		if err := WriteFile(result, `{"schema_version":2,"run_id":"csv-qa-1","status":"`+status+`"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ledger := func(stateDir string, attempts ...state.StageRun) {
+		t.Helper()
+		runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+		runs.Runs = attempts
+		if err := runs.Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := func(stateDir string, delivered []string) []string {
+		t.Helper()
+		var keys []string
+		for _, m := range InboxMessages(stateDir, Item{Factory: f}, delivered, time.Now()) {
+			if strings.HasPrefix(m.Text, "stage qa done:") {
+				keys = append(keys, m.Key)
+			}
+		}
+		return keys
+	}
+
+	stateDir := t.TempDir()
+	write("done")
+	ledger(stateDir, attempt(0))
+	delivered := done(stateDir, nil)
+	write("blocked")
+	ledger(stateDir, attempt(0), attempt(1))
+	retried := done(stateDir, delivered)
+	if len(delivered) != 1 || len(retried) != 1 {
+		t.Fatalf("a lost-run retry that wrote a new result where attempt 0's was delivered sent %v; want exactly one done message, or the supervisor waits forever", retried)
+	}
+	delivered = append(delivered, retried...)
+	write("failed")
+	if rewritten := done(stateDir, delivered); len(rewritten) != 0 {
+		t.Fatalf("attempt 1 rewrote its delivered result and it was announced again: %v", rewritten)
+	}
+	ledger(stateDir, attempt(0), attempt(1), attempt(2))
+	if identical := done(stateDir, delivered); len(identical) != 1 {
+		t.Fatalf("attempt 2 wrote the same bytes as attempt 1 and the inbox sent %v; want its completion announced once", identical)
+	}
+
+	stalled := t.TempDir()
+	ledger(stalled, attempt(0), attempt(1))
+	if announced := done(stalled, nil); len(announced) != 1 {
+		t.Fatalf("attempt 0 wrote nothing and attempt 1 wrote one result, and the inbox sent %v; want one done message for one result", announced)
+	}
+
+	upgraded := t.TempDir()
+	record := filepath.Join(upgraded, "delivered.json")
+	MarkDelivered(record, result)
+	ledger(upgraded, attempt(0), attempt(1))
+	if again := done(upgraded, deliveredFor(upgraded, Item{Factory: f}, record)); len(again) != 0 {
+		t.Fatalf("a result an earlier release recorded as delivered by its path was announced again after the upgrade: %v", again)
+	}
+	ledger(upgraded, attempt(0), attempt(1), attempt(2))
+	if later := done(upgraded, deliveredFor(upgraded, Item{Factory: f}, record)); len(later) != 1 {
+		t.Fatalf("a retry after the upgrade wrote to a path an earlier release recorded by path alone, and the inbox sent %v; want it announced once", later)
+	}
+}
+
+func TestALostRunRetryStartsTheNextAttemptWhileTheStalledPaneStillRuns(t *testing.T) {
+	f := newFixture(t)
+	socket, stop := serve(t, f.runtime(t, recordingTypist{make(chan string, 8)}))
+	request(t, socket, f.startRequest(""))
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		panes, _ := f.tm.Panes()
+		if slices.ContainsFunc(panes, func(p tmux.Pane) bool { return p.Stage == "engineer" && p.Command == "sleep" }) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the engineer pane never started its agent")
+		}
+	}
+	stop()
+
+	lostRunRetried := strings.Replace(f.pipeline, `"round":1,`, `"round":1,"retries":1,`, 1)
+	if err := WriteFile(filepath.Join(f.dir, "state.json"), lostRunRetried); err != nil {
+		t.Fatal(err)
+	}
+	restarted, stop := serve(t, f.runtime(t, recordingTypist{make(chan string, 8)}))
+	defer stop()
+	late := filepath.Join(f.dir, "stages", "engineer-1.result.json")
+	if err := WriteFile(late, `{"schema_version":2,"run_id":"engineer-1","status":"done"}`); err != nil {
+		t.Fatal(err)
+	}
+	request(t, restarted, f.startRequest(""))
+	runs, _ := state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
+	if slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.Attempt == 1 }) {
+		t.Fatal("the lost attempt wrote its result after lost_run, and the stage start launched attempt 1 over it")
+	}
+	os.Remove(late)
+	request(t, restarted, f.startRequest(""))
+	runs, _ = state.LoadStageRuns(state.StageRunsPath(f.cfg.StateDir, f.cfg.Repos[0], "csv"))
+	if !slices.ContainsFunc(runs.Runs, func(run state.StageRun) bool { return run.ID == "engineer-1" && run.Attempt == 1 }) {
+		t.Fatalf("after lost_run the stage start recorded %+v; want attempt 1 started, not the stalled attempt's path handed back while nothing runs", runs.Runs)
+	}
+}
+
+type heldJobs struct {
+	work []func(context.Context) Message
+}
+
+func (j *heldJobs) Start(key string, work func(context.Context) Message) {
+	j.work = append(j.work, work)
+}
+func (j *heldJobs) Cancel(string) {}
+
+func TestADesignCaptureReportsOnlyItsOwnOutcome(t *testing.T) {
+	pages, err := review.New("tok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pages.Close() })
+	jobs := &heldJobs{}
+	rendered := func(_ context.Context, r review.CaptureRequest) (review.CaptureResult, error) {
+		return review.CaptureResult{Files: r.Screens}, nil
+	}
+	f := factory.Factory{Repo: t.TempDir(), Slug: "csv", Dir: t.TempDir(), State: &state.State{SchemaVersion: 2, ID: "csv"}}
+	r := New(Runtime{Config: &state.Config{StateDir: t.TempDir()}, Pages: pages, Jobs: jobs, Capture: rendered})
+	r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}})
+	capture := func(screen string) (ReviewReply, error) {
+		return r.Review(ReviewRequest{Action: "capture", ID: "csv", Capture: &review.CaptureRequest{Source: "design/variant-a.html", Screens: []string{screen}, Viewports: review.DefaultViewports}})
+	}
+	status := func(run string) (ReviewReply, error) {
+		return r.Review(ReviewRequest{Action: "capture-status", ID: "csv", Run: run})
+	}
+	finish := func() { r.Handle(jobs.work[len(jobs.work)-1](context.Background())) }
+
+	list, err := capture("list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capture("detail"); err == nil {
+		t.Fatal("a second capture started while the first ran, so one of them would report the other's files")
+	}
+	finish()
+	detail, err := capture("detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := status(list.Capture.Run); err == nil {
+		t.Fatalf("the first capture's command polled after a later capture started and got %+v; want it told to capture again, never another capture's status", stale.Capture)
+	}
+	finish()
+	if done, err := status(detail.Capture.Run); err != nil || done.Capture.State != CaptureDone || !slices.Equal(done.Capture.Result.Files, []string{"detail"}) {
+		t.Fatalf("the detail capture reported %+v, %v; want its own finished files", done.Capture, err)
 	}
 }

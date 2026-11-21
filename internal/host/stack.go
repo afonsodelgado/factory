@@ -45,6 +45,7 @@ type StackStatus struct {
 	SignedIn bool      `json:"signed_in,omitempty"`
 	Failure  string    `json:"failure,omitempty"`
 	Reason   string    `json:"reason,omitempty"`
+	App      string    `json:"-"`
 }
 
 type Stacks interface {

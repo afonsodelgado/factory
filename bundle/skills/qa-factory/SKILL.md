@@ -30,6 +30,7 @@ Applies when the `factory-qa` agent runs you, or the argument contains `--factor
 - **Spec:** the factory directory's `requirements.md` and `brief.md` are the whole spec, `requirements.md` first where they differ.
 - **Phase 1:** do not wait for confirmation. Write the charter as the first section of the report, then start testing.
 - **Phase 2:** the environment must run this worktree's code. In browser mode, the factory node already did it before starting you: it ran `qa.start` in this worktree, waited for `qa.health`, ran `qa.seed` and `qa.sign_in` when they are set, and opened the app in a headless Chrome on a temporary profile that only this stage uses, signed in only when `qa.sign_in` printed cookies. Both are optional: with `qa.sign_in` blank or `none`, sign up or log in through the app's UI with a throwaway account marked as QA's (`qa-<factory>-<round>@example.test`), or with test credentials from the node's environment that the repo documents; with `qa.seed` blank or `none`, create the data you need through the app. Only ever against the local stack at `qa.url` on localhost, never a deployed, staging or other remote URL, and list the accounts and notable data you created in the report. Do not start another stack or another browser. When the repo config declares `qa.url`, the node picked a free port for this stage's stack; take it from the URL of the page the browser has open. Check with `curl` that `qa.health` answers, then check that this worktree serves the web port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, then `lsof -a -p <pid> -d cwd`). If another checkout holds the port, the node's stack could not bind it and the browser shows the wrong build: return `failed` naming the port and the other checkout, and test nothing. In terminal mode, build the binary from this worktree into a temporary directory.
+- **Phase 3b:** in browser mode, run "Phase 3b — Design fidelity" in every round when `design/reference/map.md` exists in the factory directory. Without it, the report says the phase was skipped because the factory has no design references. In terminal mode, the report says the phase does not apply.
 - **Report:** do not offer to publish it. The supervisor reads it.
 - **Questions:** you cannot ask the user. Anything you would have asked goes under "Not tested", with what answer would unblock it.
 
@@ -94,6 +95,34 @@ Go through the charter's expected behaviours in order. For each one, check three
 
 **A success message is not a pass until the state it claims is actually there.** Record pass, fail or blocked against each item.
 
+## Phase 3b — Design fidelity
+
+Factory mode, browser mode, whenever `design/reference/map.md` exists. The map lists each screen and state with its governing source (Figma frame node id, approved-design `#id`, or prototype route), the product route and state, its viewports, its key `data-ref` names and its reference PNGs; `design/reference/tokens.json` holds the measured boxes and styles. Use only the `mcp__chrome-devtools__*` tools in the node's headless Chrome; never a visible browser. For each map row and viewport:
+
+1. Navigate to the product route and state, and `emulate` the viewport at device scale factor 1 (`resize_page` when the viewport is not a device).
+2. Save `app-<screen>@<w>x<h>.png` with `take_screenshot` in the evidence directory, beside a copy of the reference PNG.
+3. With `evaluate_script`, read the boxes and computed styles of the screen and its key elements and compare them with `tokens.json`: the row's entry under `screens.<screen>.<w>x<h>`, and the root tokens and fonts of `sources.<that entry's source>`, so each screen is compared only with its governing source (an older file without `sources` has one source, in its top-level `root` and `fonts`). For a static designer source you may also open the frozen copy under `design/reference/source/` by `file://` in the same browser and read it the same way. When the Figma tools are available you may read more sub-nodes; the captured set is the minimum. Read each key element with this checklist:
+   - **Layout:** the content container's box and whether it is centred or full width; rail and navigation widths; where the content starts.
+   - **Icons:** how many `svg` and `img` children it has, each one's box, and `naturalWidth > 0` for each image. A missing or broken icon is structural.
+   - **Tables:** each column's width, header and row heights, the header's type, and the wrapper's `scrollWidth` against its `clientWidth`.
+   - **Dialogs:** width and height, where the footer sits, and whether the primary actions are inside the viewport without scrolling.
+   - **Charts and controls:** the kind of mark (a filled `path` or a stroke), how many axis labels and grid lines, and the control's height.
+4. Check that each reference font is in `document.fonts` with status `loaded`. When a font cannot render on this node, mark typography Not tested for that screen with the reason, and run the other checks.
+5. When the reference has no phone frame, compare the phone layout and its dialogs with an existing page of the app at the same width.
+6. **Phone sweep.** At 390 px, and 1 px below each width breakpoint the app's CSS defines, check every changed screen and its dialogs for sideways scroll of the page or a table (`scrollWidth > clientWidth`) and for controls outside the viewport. Each one is `major`, compared with an existing page at that width that fits.
+7. **Side-by-side look.** Open the reference and app screenshots of the same viewport together and list every visible difference the numbers did not already cover, such as an icon's glyph, separators or decoration, each with both crops. A missing element, a different kind of component, or a chart drawn differently is `major`; anything else is `minor`.
+
+Tolerance:
+
+- **`major`:** a structural difference (an element missing, extra or moved; a different layout direction; a different width model, such as centred instead of full width; a different kind of component, including a chart drawn differently: filled versus stroked marks, other axes, or other grid lines); a box, position, gap or padding that differs by more than 2 px (3 px is major, 2 px is not); any difference in font family, size, weight or line height; a colour that differs from the token; a state the reference shows and the app lacks.
+- **Ignored:** anti-aliasing, data content and text length. A difference caused by data is an observation, reported with the evidence that it is data.
+
+Each fidelity finding has the id `F-fid-<screen>-<ref>-<viewport>`. Its description names the reference id, the viewport and the numbers ("row height 67 vs 41"), and its evidence lists both PNG paths. A fidelity finding without all four is not valid.
+
+Compare the engineer's design map (`data.design_map` in its result, copied into the QA brief) with `map.md`: a mapped screen the engineer left unmapped, or a changed UI screen the map does not cover, is a `minor` finding.
+
+The report gets a "Design fidelity" section: a table with one row per screen, state and viewport, saying match or mismatch, the reference id and both screenshot paths.
+
 ## Phase 4 — Adversarial
 
 Work through the categories the charter selected. The notes may add the categories that have actually broken in that repo.
@@ -149,6 +178,10 @@ Sort by severity: blocker → major → minor → nit. For each finding:
 
 ## Charter results
 Expected behaviours, numbered, with pass / fail / blocked.
+
+## Design fidelity
+Factory browser mode: one row per screen, state and viewport (match or mismatch,
+reference id, reference and app screenshots), or why the phase was skipped.
 
 ## Not tested
 What you skipped and why.

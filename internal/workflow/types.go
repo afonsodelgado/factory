@@ -1,7 +1,9 @@
 package workflow
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/afonsodelgado/factory/internal/state"
 )
@@ -29,6 +31,7 @@ type Event struct {
 	Increment           int                    `json:"increment"`
 	EffectID            string                 `json:"effect_id"`
 	WatchComments       bool                   `json:"watch_comments"`
+	NewRequest          bool                   `json:"new_request,omitempty"`
 	Result              *Result                `json:"result,omitempty"`
 	Recipe              *state.Recipe          `json:"recipe,omitempty"`
 	Stack               []state.StackBranch    `json:"stack,omitempty"`
@@ -60,6 +63,73 @@ type Result struct {
 	Evidence      state.Verification  `json:"evidence"`
 	Outputs       []string            `json:"outputs"`
 	Summary       string              `json:"summary,omitempty"`
+	Data          ResultData          `json:"data"`
+
+	inputSHAs, outputSHAs, evidenceSHAs []string
+}
+
+func (r *Result) UnmarshalJSON(data []byte) error {
+	type plain Result
+	type verification state.Verification
+	var raw struct {
+		*plain
+		InputHeads  json.RawMessage `json:"input_heads"`
+		OutputHeads json.RawMessage `json:"output_heads"`
+		Evidence    struct {
+			*verification
+			Heads  json.RawMessage   `json:"heads"`
+			Checks []json.RawMessage `json:"checks"`
+		} `json:"evidence"`
+	}
+	raw.plain = (*plain)(r)
+	raw.Evidence.verification = (*verification)(&r.Evidence)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var err error
+	if r.InputHeads, r.inputSHAs, err = decodeHeads(raw.InputHeads); err != nil {
+		return fmt.Errorf("input_heads: %w", err)
+	}
+	if r.OutputHeads, r.outputSHAs, err = decodeHeads(raw.OutputHeads); err != nil {
+		return fmt.Errorf("output_heads: %w", err)
+	}
+	if r.Evidence.Heads, r.evidenceSHAs, err = decodeHeads(raw.Evidence.Heads); err != nil {
+		return fmt.Errorf("evidence.heads: %w", err)
+	}
+	r.Evidence.Checks = nil
+	for i, check := range raw.Evidence.Checks {
+		var note string
+		var evidence state.CheckEvidence
+		switch trimmed := bytes.TrimSpace(check); {
+		case bytes.HasPrefix(trimmed, []byte(`"`)) && json.Unmarshal(trimmed, &note) == nil:
+			r.Evidence.Notes = append(r.Evidence.Notes, "check: "+note)
+		case bytes.HasPrefix(trimmed, []byte("{")) && json.Unmarshal(trimmed, &evidence) == nil:
+			r.Evidence.Checks = append(r.Evidence.Checks, evidence)
+		default:
+			return fmt.Errorf("evidence.checks[%d] must be an object {name, command, directory, head, exit_status, path} or a note string", i)
+		}
+	}
+	return nil
+}
+
+func decodeHeads(raw json.RawMessage) ([]state.StackBranch, []string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil, nil
+	}
+	var branches []state.StackBranch
+	err := json.Unmarshal(raw, &branches)
+	if err == nil {
+		return branches, nil, nil
+	}
+	var shas []string
+	if json.Unmarshal(raw, &shas) == nil {
+		return nil, shas, nil
+	}
+	return nil, nil, err
+}
+
+type ResultData struct {
+	Failure string `json:"failure"`
 }
 
 type Question struct {
