@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -506,5 +507,14 @@ func TestCThenYOnAFactoryAsksItsSupervisorToWatchReviewComments(t *testing.T) {
 	node.present(snap)
 	if !chosen || strings.Join(typist.typed, "\n") != "%9: /factory comments on" {
 		t.Fatalf("c then y typed %q; want the supervisor sent /factory comments on, exactly as the phone sends it", typist.typed)
+	}
+
+	model.dialog = "comments"
+	gone, _ := json.Marshal(dialog.CommentsResult{Key: "/r/gone:factory", On: true})
+	model.dialogResult(Event{Message: Message{T: "result", Pane: "dialog:comments", Data: gone}, Reply: make(chan Message, 1)})
+	refusal := model.notice.text
+	model.dialogClosed(dialogClosedMsg{kind: "comments", err: errors.New("tmux display-popup -c /dev/ttys001 factory dialog comments: exit status 1")})
+	if model.notice.text != refusal || strings.Contains(model.notice.text, "exit status") {
+		t.Fatalf("after the hub refused a dialog's answer the footer reads %q; want the refusal %q, not the popup's exit status", model.notice.text, refusal)
 	}
 }

@@ -108,8 +108,12 @@ func (m *Model) dialogClosed(msg dialogClosedMsg) tea.Cmd {
 	delete(m.dialogs, msg.kind)
 	next := m.dialogNext
 	m.dialogNext = nil
+	refusalShown := m.dialogRefused == msg.kind
+	m.dialogRefused = ""
 	if msg.err != nil {
-		m.notice = problem(msg.err.Error())
+		if !refusalShown {
+			m.notice = problem(msg.err.Error())
+		}
 		return nil
 	}
 	if next == nil {
@@ -209,6 +213,7 @@ func (m *Model) dialogResult(e Event) tea.Cmd {
 	if err != nil {
 		reply = Message{T: "error", Error: err.Error()}
 		m.notice = problem(err.Error())
+		m.dialogRefused = kind
 	}
 	e.Respond(reply)
 	return tea.Batch(cmd, m.load())

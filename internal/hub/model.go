@@ -72,6 +72,7 @@ type Model struct {
 	dialogs       map[string]json.RawMessage
 	dialog        string
 	dialogNext    *dialogTransition
+	dialogRefused string
 	notice        notice
 	wakes         map[string]Wake
 	pipelines     map[string]string
