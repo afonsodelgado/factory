@@ -61,6 +61,10 @@ Numbered, each one checkable. Include what must be refused.
 ## Doors in scope
 Each surface, and which roles reach it.
 
+## Design references
+Factory mode only: each Figma file key with the node ids the prompt names, any other
+design source it names, and whether the pipeline selects a design stage. Empty means none.
+
 ## Data and rollout
 Fields, migrations, flags, backfill.
 
@@ -75,6 +79,8 @@ Anything still unresolved. Empty means ready to design or plan.
 ## Acceptance
 How the user will judge it done.
 ```
+
+In factory mode, always write the "Design references" section: copy every Figma link from the prompt with its file key and node ids, never drop one because it looks optional. QA compares the shipped UI with these sources, and the stage that captures them before the plan gate reads this section.
 
 Then report the path. Do not start designing or planning.
 

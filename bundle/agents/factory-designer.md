@@ -37,7 +37,12 @@ When the repo config sets `design.prototype.dir` (only with `design.source: web`
 
 **Iteration** (the prompt says you own all variant files): end your first turn with `done` and the summary "ready for comments". Comments then arrive as `review-<id>-<n> comments:` batches. For each thread, edit the file it is about, or answer a question without changing anything, and answer the thread with `factory review reply` as `factory-artifact` says. Return the paths you changed. When the developer asks to combine variants, write `design/variant-final.html`.
 
-**Approval** (the prompt says the design is approved): write `design/approved.md` with the approved file, every decision the comments settled, and anything deliberately left for later. For a prototype, name its entry module too: the engineer starts from its code.
+**Approval** (the prompt says the design is approved): write `design/approved.md` with the approved file, every decision the comments settled, and anything deliberately left for later. For a prototype, name its entry module too: the engineer starts from its code. Then capture the approved design as QA's reference before you return:
+
+1. Run `factory review capture --source <approved file> --screen <id>…` with every screen and state section id, adding `--viewport WxH` for any width the design names. For a prototype, start it with `factory review stack --for design`, then run `factory review capture --source prototype --entry <entry module> --route <page path> --screen <id>…`. Write the printed SHA-256 and frozen path into `approved.md`.
+2. Write `design/reference/map.md`, one row per screen and state: governing source, source anchor (`#id`, Figma frame node id, or prototype route), the product route and state that implement it, viewports, key `data-ref` names and the PNG files.
+3. When `requirements.md` also lists Figma, capture the Figma frames the approved design does not cover the way the architect does (screenshots, variables and sub-node tokens into the same `design/reference/`). The approved design governs every screen it covers; list each Figma/design conflict in `approved.md` as a settled decision, and give each map row exactly one governing source.
+4. When a source cannot be captured (the command fails, or Figma tools are missing or unauthorized), return `blocked` with one question: fix access, export the frames, or drop that source. Never return `done` with a reference missing.
 
 Never edit product code.
 

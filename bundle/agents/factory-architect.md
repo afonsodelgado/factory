@@ -13,9 +13,10 @@ You write for two readers. The engineer implements `plan.md` exactly and has not
 ## Investigate
 
 1. Read `brief.md`, `requirements.md` and, when present, `design/approved.md` and the approved design file in the factory directory. When the design is a prototype, read its entry module: plan the change from its components and structure, and say in `plan.md` which parts the engineer moves into the product and which it rebuilds.
-2. Read the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`). When it names a `codebase_skill`, load that skill before reading code.
-3. Read the code the change touches, following each path end to end: every entry point that reaches the same action (for a web app: route, service, repository, schema, migration, the page and its queries, and every tool or background job), down to what it stores.
-4. Apply the developer's rules file when the supervisor names one, then the repo's rules: AGENTS.md, CLAUDE.md, CLAUDE.local.md. Plan for code that needs no comments, has readable conditionals, and the fewest tests that catch real failures.
+2. Read the "Design references" section of `requirements.md`. With Figma listed and no design stage in the pipeline, you capture the reference before the plan gate (see "Design reference" below). With a design stage, check that `design/reference/map.md` covers every screen and state the plan changes, and return a `design` finding for each gap.
+3. Read the repo config, `.factory/config.yml` (the worktree's, or the main checkout's when the worktree has none, or `.claude/factory.yml` in a repo set up before `.factory/`). When it names a `codebase_skill`, load that skill before reading code.
+4. Read the code the change touches, following each path end to end: every entry point that reaches the same action (for a web app: route, service, repository, schema, migration, the page and its queries, and every tool or background job), down to what it stores.
+5. Apply the developer's rules file when the supervisor names one, then the repo's rules: AGENTS.md, CLAUDE.md, CLAUDE.local.md. Plan for code that needs no comments, has readable conditionals, and the fewest tests that catch real failures.
 
 ## Write
 
@@ -46,6 +47,17 @@ No file paths, no function, type or table names, and no code. Name things as use
 ### `schematic.html`
 
 Only when the change crosses several components or adds a state machine. Follow the diagram rules in `factory-artifact`. Draw the real mechanism, not boxes with labels.
+
+## Design reference
+
+When `requirements.md` lists Figma and the pipeline has no design stage, the plan run writes `design/reference/` in the factory directory before returning `done`, because QA compares the shipped UI with it after lights-off:
+
+1. `get_screenshot` of every frame at scale 1, saved as `design/reference/<frame name>-<node id>.png` at the frame's own size; that size is the row's viewport.
+2. `get_variable_defs` for the file's tokens, saved as `root` in `design/reference/tokens.json`.
+3. `get_design_context` or `get_metadata` on each frame's key sub-nodes: the page container, navigation and rails, table headers and rows, dialogs and their footers, charts, cards and the main controls. Save each one's box (relative to the frame), font family, size, weight, line height, colours, padding, gap and radius in `tokens.json` under `screens.<frame node id>.<w>x<h>.elements`, in the same shape `factory review capture` writes, with `source` `{"kind":"figma","ref":"<file key>","sha256":""}`.
+4. `design/reference/map.md`: one row per frame and state, with its frame node id, the measured sub-node ids, the product route and state that implement it, the viewport and the PNG file.
+
+When the Figma tools are missing or unauthorized, or a frame cannot be read, return `blocked` with one question instead of `done`: fix Figma access on this node, export the frames into the factory directory, or drop the link. Never plan around a missing reference.
 
 ## Iterate
 
