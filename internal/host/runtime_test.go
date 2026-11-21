@@ -1285,7 +1285,9 @@ func TestEachResultARunWritesIsAnnouncedOnceWhateverItsAttempts(t *testing.T) {
 	repo := t.TempDir()
 	f := factory.Factory{Repo: repo, Slug: "csv", Dir: filepath.Join(repo, "wt", ".claude", "factory", "csv"), State: &state.State{SchemaVersion: 2, ID: "csv"}}
 	result := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
-	attempt := func(n int) state.StageRun { return state.StageRun{ID: "csv-qa-1", Attempt: n, Role: "qa", Result: result} }
+	attempt := func(n int) state.StageRun {
+		return state.StageRun{ID: "csv-qa-1", Attempt: n, Role: "qa", Result: result}
+	}
 	write := func(status string) {
 		t.Helper()
 		if err := WriteFile(result, `{"schema_version":2,"run_id":"csv-qa-1","status":"`+status+`"}`); err != nil {
@@ -1388,7 +1390,9 @@ func TestALostRunRetryStartsTheNextAttemptWhileTheStalledPaneStillRuns(t *testin
 	}
 }
 
-type heldJobs struct{ work []func(context.Context) Message }
+type heldJobs struct {
+	work []func(context.Context) Message
+}
 
 func (j *heldJobs) Start(key string, work func(context.Context) Message) {
 	j.work = append(j.work, work)
