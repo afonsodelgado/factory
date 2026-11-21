@@ -120,7 +120,10 @@ func Capture(ctx context.Context, chrome string, noSandbox bool, r CaptureReques
 	}
 	defer h.Close()
 	refDir := filepath.Join(r.Dir, filepath.FromSlash(ReferenceDir))
-	tokens := readTokens(filepath.Join(refDir, TokensFile))
+	tokens, err := readTokens(filepath.Join(refDir, TokensFile))
+	if err != nil {
+		return CaptureResult{}, err
+	}
 	rel, _ := filepath.Rel(r.Dir, frozen)
 	tokens.Source = TokenSource{Kind: kind, Ref: filepath.ToSlash(rel), SHA256: sum}
 	result := CaptureResult{SHA256: sum, Frozen: frozen}
@@ -212,15 +215,22 @@ func measureScript(screens []string) string {
 })()`
 }
 
-func readTokens(path string) Tokens {
-	var t Tokens
-	if data, err := os.ReadFile(path); err == nil {
-		json.Unmarshal(data, &t)
+func readTokens(path string) (Tokens, error) {
+	t := Tokens{Screens: map[string]map[string]ScreenTokens{}}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return t, nil
+	}
+	if err == nil {
+		err = json.Unmarshal(data, &t)
+	}
+	if err != nil {
+		return Tokens{}, fmt.Errorf("%s does not read as tokens, so capturing would drop its screens; fix or remove it: %w", path, err)
 	}
 	if t.Screens == nil {
 		t.Screens = map[string]map[string]ScreenTokens{}
 	}
-	return t
+	return t, nil
 }
 
 func freeze(r CaptureRequest) (string, error) {
