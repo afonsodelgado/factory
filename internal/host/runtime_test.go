@@ -1211,7 +1211,7 @@ func TestDiscoveryRunsBesideTheActiveStageWithoutTakingItsPlace(t *testing.T) {
 }
 
 func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReportedLost(t *testing.T) {
-	repo, stateDir := t.TempDir(), t.TempDir()
+	repo := t.TempDir()
 	if err := WriteFile(state.RepoConfigPath(repo), "qa:\n  mode: browser\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -1220,19 +1220,38 @@ func TestARejectedQAResultIsReaskedAfterItsBrowserClosedAndASilentReaskIsReporte
 	f.State.Workflow.ActiveRun = "csv-qa-1"
 	f.State.Workflow.Runs = []state.WorkflowRun{{ID: "csv-qa-1", Stage: "qa", Role: "qa", Round: 1, Prompt: "stages/csv-qa-1.prompt.md", Result: "stages/csv-qa-1.result.json"}}
 	rejected := filepath.Join(f.Dir, "stages", "csv-qa-1.result.json")
-	if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"success"}`); err != nil {
-		t.Fatal(err)
-	}
 	token := uuid.NewString()
-	runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
-	runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Role: "qa", Token: token, Result: rejected, StartedAt: time.Now().Add(-time.Hour)})
-	if err := runs.Save(); err != nil {
-		t.Fatal(err)
-	}
-	r := New(Runtime{Config: &state.Config{StateDir: stateDir}, Engine: &wakingEngine{}, TM: tmux.Client{Socket: "host-test-" + uuid.NewString(), ConfigFile: "/dev/null"}})
-	r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}, Hooks: []*state.HookFile{{Token: token, SessionID: "qa-session"}}})
-
 	reask := StageRequest{Action: "send", Reask: true, Factory: "csv", EffectID: "csv-qa-1", Role: "qa", Text: "The engine rejected your result."}
+	rejectedRun := func(sessions ...string) (*Runtime, string) {
+		t.Helper()
+		os.RemoveAll(f.Dir)
+		if err := WriteFile(rejected, `{"schema_version":2,"run_id":"csv-qa-1","status":"success"}`); err != nil {
+			t.Fatal(err)
+		}
+		stateDir := t.TempDir()
+		runs, _ := state.LoadStageRuns(state.StageRunsPath(stateDir, repo, "csv"))
+		runs.Runs = append(runs.Runs, state.StageRun{ID: "csv-qa-1", Role: "qa", Token: token, Result: rejected, StartedAt: time.Now().Add(-time.Hour)})
+		if err := runs.Save(); err != nil {
+			t.Fatal(err)
+		}
+		var hooks []*state.HookFile
+		for _, session := range sessions {
+			hooks = append(hooks, &state.HookFile{Token: token, SessionID: session})
+		}
+		r := New(Runtime{Config: &state.Config{StateDir: stateDir}, Engine: &wakingEngine{}, TM: tmux.Client{Socket: "host-test-" + uuid.NewString(), ConfigFile: "/dev/null"}})
+		r.SetSnapshot(Snapshot{At: time.Now(), Items: []Item{{Factory: f}}, Hooks: hooks})
+		return r, stateDir
+	}
+
+	unreachable, _ := rejectedRun()
+	if _, err := unreachable.Stage(reask); err == nil {
+		t.Fatal("a reask whose session is unknown reported success")
+	}
+	if _, err := os.Stat(rejected); err == nil {
+		t.Fatal("a failed reask put the rejected result back at the run's result path, where the retried run reads it as finished")
+	}
+
+	r, stateDir := rejectedRun("qa-session")
 	reasked, err := r.Stage(reask)
 	if err != nil || reasked.Result == rejected {
 		t.Fatalf("re-asking QA after its browser closed answered %+v, %v; want the session resumed for a corrected result", reasked, err)

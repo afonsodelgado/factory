@@ -330,15 +330,10 @@ func (m *Runtime) Reask(it Item, runs *state.StageRuns, r StageRequest) (StageRe
 		return StageReply{}, errors.New("stage dispatch outcome is uncertain; reconcile the saved pane intent before retrying")
 	}
 	stem := strings.TrimSuffix(latest.Result, ".result.json")
-	rejected := stem + ".rejected-" + uuid.NewString()[:8] + ".json"
-	if err := os.Rename(latest.Result, rejected); err != nil {
+	if err := os.Rename(latest.Result, stem+".rejected-"+uuid.NewString()[:8]+".json"); err != nil {
 		return StageReply{}, err
 	}
-	reply, err := m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
-	if err != nil {
-		os.Rename(rejected, latest.Result)
-	}
-	return reply, err
+	return m.sendStage(it, runs, r, stem+".reask-"+uuid.NewString()[:8]+".result.json")
 }
 
 func (m *Runtime) SendStage(it Item, runs *state.StageRuns, r StageRequest) (StageReply, error) {
